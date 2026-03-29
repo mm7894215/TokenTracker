@@ -104,7 +104,7 @@ export function MarketingLanding({
   return (
     <div className="min-h-screen bg-oai-gray-950 text-oai-white font-oai antialiased dark">
       <header className="sticky top-0 z-50 bg-oai-gray-950/80 backdrop-blur-md border-b border-oai-gray-900">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
+        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-5">
             <Link
               to={signUpUrl || "/"}

@@ -191,7 +191,7 @@ export function LeaderboardProfilePage({
   return (
     <div className="flex flex-col min-h-screen bg-oai-white dark:bg-oai-gray-950 text-oai-black dark:text-oai-white font-oai antialiased transition-colors duration-200">
       <header className="sticky top-0 z-50 bg-white/80 dark:bg-oai-gray-950/80 backdrop-blur-md border-b border-oai-gray-200 dark:border-oai-gray-900 transition-colors duration-200">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
+        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-5">
             <Link
               to="/"

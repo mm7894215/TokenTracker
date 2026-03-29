@@ -112,7 +112,7 @@ export function LeaderboardPage({
   const location = useLocation();
   const navigate = useNavigate();
   const { openLoginModal } = useLoginModal();
-  const { signedIn: cloudSignedIn } = useInsforgeAuth();
+  const { signedIn: cloudSignedIn, loading: authLoading } = useInsforgeAuth();
   const { resolvedTheme, toggleTheme } = useTheme();
   const leaderboardBaseUrl = useMemo(() => getLeaderboardBaseUrl(), []);
   const mockEnabled = isMockEnabled();
@@ -156,6 +156,14 @@ export function LeaderboardPage({
     setListPage(1);
     navigate(`${location?.pathname || "/leaderboard"}?${params.toString()}`, { replace: true });
   };
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (mockEnabled) return;
+    if (!cloudSignedIn) {
+      openLoginModal();
+    }
+  }, [cloudSignedIn, authLoading, mockEnabled, openLoginModal]);
 
   useEffect(() => {
     setListPage(1);
@@ -467,7 +475,7 @@ export function LeaderboardPage({
   return (
     <div className="flex flex-col min-h-screen bg-oai-white dark:bg-oai-gray-950 text-oai-black dark:text-oai-white font-oai antialiased transition-colors duration-200">
       <header className="sticky top-0 z-50 bg-white/80 dark:bg-oai-gray-950/80 backdrop-blur-md border-b border-oai-gray-200 dark:border-oai-gray-900 transition-colors duration-200">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
+        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-5">
             <Link
               to="/"
@@ -483,6 +491,7 @@ export function LeaderboardPage({
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
+            <ThemeToggle theme={resolvedTheme} onToggle={toggleTheme} />
             <Link
               to={getDashboardEntryPath()}
               className={cn(
@@ -494,7 +503,6 @@ export function LeaderboardPage({
             >
               {copy("landing.v2.cta.primary")}
             </Link>
-            <ThemeToggle theme={resolvedTheme} onToggle={toggleTheme} />
             <InsforgeUserHeaderControls />
           </div>
         </div>

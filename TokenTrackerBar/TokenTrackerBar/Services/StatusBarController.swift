@@ -329,7 +329,7 @@ final class StatusBarController: NSObject {
     }
 
     @objc private func openDashboard() {
-        DashboardBrowserOpener.openDashboard(from: "menubar")
+        DashboardWindowController.shared.showWindow()
     }
 
     @objc private func checkForUpdates() {

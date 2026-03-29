@@ -1,8 +1,23 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import { useLoginModal } from "../../../contexts/LoginModalContext.jsx";
+import { useInsforgeAuth } from "../../../contexts/InsforgeAuthContext.jsx";
 
 const DISMISS_KEY = "macAppBannerDismissed";
+const LOGIN_DISMISS_KEY = "leaderboardBannerDismissed";
 const RELEASE_URL = "https://github.com/mm7894215/tokentracker/releases/latest";
+
+/** True when loaded inside the native macOS app (WKWebView with ?app=1) */
+const NATIVE_APP_KEY = "tokentracker_native_app";
+const isNativeApp = (() => {
+  try {
+    if (new URLSearchParams(window.location.search).get("app") === "1") {
+      localStorage.setItem(NATIVE_APP_KEY, "1");
+      return true;
+    }
+    return localStorage.getItem(NATIVE_APP_KEY) === "1";
+  } catch { return false; }
+})();
 
 /**
  * Clawd pixel-art SVG component — the 15×16 character drawn as rects.
@@ -68,15 +83,20 @@ function ClawdPixel({ size = 48, className = "" }) {
 }
 
 /**
- * Banner prompting local-mode users to install the macOS Menu Bar App.
- * Shows animated Clawd character + download CTA. Dismissible.
+ * Context-aware banner:
+ * - Native app + signed in → Leaderboard entry
+ * - Native app + not signed in → Login CTA
+ * - Browser → Download App CTA
  */
 export function MacAppBanner() {
+  const { openLoginModal } = useLoginModal();
+  const { signedIn: cloudSignedIn } = useInsforgeAuth();
+  const dismissKey = isNativeApp ? LOGIN_DISMISS_KEY : DISMISS_KEY;
+
   const [dismissed, setDismissed] = useState(() => {
     try {
-      if (localStorage.getItem(DISMISS_KEY) === "1") return true;
-      // Auto-dismiss if opened from menu bar app
-      if (new URLSearchParams(window.location.search).get("from") === "menubar") {
+      if (localStorage.getItem(dismissKey) === "1") return true;
+      if (!isNativeApp && new URLSearchParams(window.location.search).get("from") === "menubar") {
         localStorage.setItem(DISMISS_KEY, "1");
         return true;
       }
@@ -86,10 +106,50 @@ export function MacAppBanner() {
 
   const handleDismiss = useCallback(() => {
     setDismissed(true);
-    try { localStorage.setItem(DISMISS_KEY, "1"); } catch {}
-  }, []);
+    try { localStorage.setItem(dismissKey, "1"); } catch {}
+  }, [dismissKey]);
 
   if (dismissed) return null;
+
+  // Determine banner content based on context
+  let title, subtitle, buttonLabel, buttonIcon, onButtonClick, buttonHref;
+
+  if (isNativeApp && cloudSignedIn) {
+    title = "View the Leaderboard";
+    subtitle = "Compare your usage globally";
+    buttonLabel = "Leaderboard";
+    buttonIcon = (
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="opacity-70">
+        <path d="M2 8.5V10h8V8.5M6 1.5v6m0 0L3.5 5M6 7.5l2.5-2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" transform="rotate(180 6 6)"/>
+      </svg>
+    );
+    onButtonClick = () => { window.location.pathname = "/leaderboard"; };
+  } else if (isNativeApp) {
+    title = "Join the Leaderboard";
+    subtitle = "Log in to compare your usage with others";
+    buttonLabel = "Log In";
+    buttonIcon = (
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="opacity-70">
+        <path d="M6.5 1.5h3a1 1 0 011 1v7a1 1 0 01-1 1h-3M5 8.5L7.5 6 5 3.5M7.5 6H1.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    );
+    onButtonClick = openLoginModal;
+  } else {
+    title = "Try the Menu Bar App";
+    subtitle = "Always-on stats with Clawd companion";
+    buttonLabel = "Download";
+    buttonIcon = (
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="opacity-70">
+        <path d="M6 2v6m0 0L3.5 5.5M6 8l2.5-2.5M2 10h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    );
+    buttonHref = RELEASE_URL;
+  }
+
+  const ButtonTag = buttonHref ? motion.a : motion.button;
+  const buttonProps = buttonHref
+    ? { href: buttonHref, target: "_blank", rel: "noopener noreferrer" }
+    : { onClick: onButtonClick };
 
   return (
     <AnimatePresence>
@@ -101,7 +161,6 @@ export function MacAppBanner() {
         className="rounded-xl border border-oai-gray-200 dark:border-oai-gray-800 bg-white dark:bg-oai-gray-900 p-4"
       >
         <div className="flex items-center gap-3">
-          {/* Clawd character with breathing animation */}
           <motion.div
             animate={{ y: [0, -2, 0] }}
             transition={{ duration: 3.2, repeat: Infinity, ease: "easeInOut" }}
@@ -110,31 +169,25 @@ export function MacAppBanner() {
             <ClawdPixel size={44} />
           </motion.div>
 
-          {/* Content */}
           <div className="flex-1 min-w-0">
             <div className="text-sm font-medium text-oai-gray-900 dark:text-oai-white">
-              Try the Menu Bar App
+              {title}
             </div>
             <div className="text-xs text-oai-gray-500 dark:text-oai-gray-400 mt-0.5">
-              Always-on stats with Clawd companion
+              {subtitle}
             </div>
           </div>
 
-          {/* Actions */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            <motion.a
-              href={RELEASE_URL}
-              target="_blank"
-              rel="noopener noreferrer"
+            <ButtonTag
+              {...buttonProps}
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.97 }}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-oai-gray-900 dark:bg-oai-white dark:text-oai-gray-900 rounded-md hover:opacity-90 transition-opacity"
             >
-              Download
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="opacity-70">
-                <path d="M6 2v6m0 0L3.5 5.5M6 8l2.5-2.5M2 10h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </motion.a>
+              {buttonLabel}
+              {buttonIcon}
+            </ButtonTag>
             <button
               onClick={handleDismiss}
               className="p-1 text-oai-gray-400 hover:text-oai-gray-600 dark:hover:text-oai-gray-300 transition-colors"
