@@ -11,6 +11,14 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     private var loadingOverlay: NSView?
     /// OAuth 流程进行中时放行所有导航，回到 localhost 后自动复位
     private var oauthInProgress = false
+    /// OAuth 超时保护（30s）
+    private var oauthTimeoutTask: DispatchWorkItem?
+    /// 加载失败重试计数
+    private var retryCount = 0
+    private let maxRetries = 5
+
+    /// Shared process pool — ensures cookies are consistent across webView recreations
+    private static let sharedProcessPool = WKProcessPool()
 
     private override init() {
         super.init()
@@ -32,11 +40,13 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
             return
         }
 
-        // Create WKWebView — transparent until loaded; register JS→Native bridge for OAuth
+        // Create WKWebView with persistent data store and shared process pool
         let contentController = WKUserContentController()
         contentController.add(self, name: "nativeOAuth")
         let webConfig = WKWebViewConfiguration()
         webConfig.userContentController = contentController
+        webConfig.processPool = Self.sharedProcessPool
+        webConfig.websiteDataStore = WKWebsiteDataStore.default()
         let webView = WKWebView(frame: .zero, configuration: webConfig)
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -101,6 +111,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         self.window = window
 
         // Load dashboard
+        retryCount = 0
         if let url = URL(string: Constants.serverBaseURL + "?app=1") {
             webView.load(URLRequest(url: url))
         }
@@ -112,6 +123,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     }
 
     func reload() {
+        retryCount = 0
         webView?.reload()
     }
 
@@ -152,7 +164,6 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         } completionHandler: { [weak self] in
             overlay.removeFromSuperview()
             self?.loadingOverlay = nil
-            // Restore webView background after content is ready
             self?.webView?.setValue(true, forKey: "drawsBackground")
         }
     }
@@ -160,17 +171,33 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     // MARK: - NSWindowDelegate
 
     func windowWillClose(_ notification: Notification) {
-        webView?.configuration.userContentController.removeScriptMessageHandler(forName: "nativeOAuth")
+        // Keep webView and window alive so cookies/login state persist.
+        // Only reset transient OAuth state.
+        cancelOAuthTimeout()
         oauthInProgress = false
-        loadingOverlay = nil
-        webView = nil
-        window = nil
         DispatchQueue.main.async {
             let hasVisibleWindows = NSApp.windows.contains { $0.isVisible && !$0.isKind(of: NSPanel.self) }
             if !hasVisibleWindows {
                 NSApp.setActivationPolicy(.accessory)
             }
         }
+    }
+
+    // MARK: - OAuth Timeout
+
+    private func startOAuthTimeout() {
+        cancelOAuthTimeout()
+        let task = DispatchWorkItem { [weak self] in
+            guard let self, self.oauthInProgress else { return }
+            self.oauthInProgress = false
+        }
+        oauthTimeoutTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: task)
+    }
+
+    private func cancelOAuthTimeout() {
+        oauthTimeoutTask?.cancel()
+        oauthTimeoutTask = nil
     }
 
     // MARK: - WKScriptMessageHandler
@@ -191,6 +218,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
               let urlString = body as? String,
               let url = URL(string: urlString) else { return }
         oauthInProgress = true
+        startOAuthTimeout()
         webView?.load(URLRequest(url: url))
     }
 
@@ -226,7 +254,10 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         }
         // Allow local dashboard navigation; OAuth 完成回到 localhost 时复位标记
         if url.host == "localhost" || url.host == "127.0.0.1" {
-            if oauthInProgress { oauthInProgress = false }
+            if oauthInProgress {
+                oauthInProgress = false
+                cancelOAuthTimeout()
+            }
             decisionHandler(.allow)
             return
         }
@@ -245,16 +276,20 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        retryCount = 0
         // 禁用文本选中 + 为透明标题栏留出顶部间距
         let css = """
-            * { -webkit-user-select: none !important; }
-            input, textarea { -webkit-user-select: text !important; }
-            .native-app header { padding-top: 36px !important; }
+            * { -webkit-user-select: none !important; } \
+            input, textarea { -webkit-user-select: text !important; } \
+            .native-app header { padding-top: 36px !important; } \
             ::-webkit-scrollbar { display: none !important; }
             """
-        let js = "document.documentElement.classList.add('native-app');var s=document.createElement('style');s.textContent='\(css.replacingOccurrences(of: "\n", with: " "))';document.head.appendChild(s);"
+        let escapedCSS = css
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\n", with: " ")
+        let js = "document.documentElement.classList.add('native-app');var s=document.createElement('style');s.textContent='\(escapedCSS)';document.head.appendChild(s);"
         webView.evaluateJavaScript(js)
-        // Page loaded — dismiss the loading overlay
         dismissLoadingOverlay()
     }
 
@@ -263,7 +298,10 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         didFailProvisionalNavigation navigation: WKNavigation!,
         withError error: Error
     ) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+        retryCount += 1
+        guard retryCount <= maxRetries else { return }
+        let delay = min(Double(retryCount) * 2, 10)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self, let url = URL(string: Constants.serverBaseURL + "?app=1") else { return }
             self.webView?.load(URLRequest(url: url))
         }
