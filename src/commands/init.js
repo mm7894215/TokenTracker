@@ -43,7 +43,7 @@ const {
   probeOpenclawSessionPluginState,
 } = require("../lib/openclaw-session-plugin");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
-const { resolveRuntimeConfig } = require("../lib/runtime-config");
+const { resolveRuntimeConfig, DEFAULT_BASE_URL } = require("../lib/runtime-config");
 const {
   BOLD,
   DIM,
@@ -257,6 +257,7 @@ async function runSetup({
 
   const config = {
     installedAt,
+    baseUrl: DEFAULT_BASE_URL,
   };
 
   await writeJson(configPath, config);
