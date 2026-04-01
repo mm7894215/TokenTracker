@@ -248,8 +248,8 @@ final class UpdateChecker {
         }
 
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 300
+        config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForResource = 900
         let session = URLSession(configuration: config)
 
         let (tempURL, response) = try await session.download(from: url)
