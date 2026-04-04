@@ -35,7 +35,7 @@ export function DataDetails({
   const [activeTab, setActiveTab] = useState("daily");
 
   return (
-    <Card>
+    <Card className="flex-1 flex flex-col min-h-0 overflow-hidden" bodyClassName="flex-1 flex flex-col min-h-0">
       {/* Tab Switcher + Controls */}
       <div className="flex items-center justify-between gap-3 mb-4">
         <div role="tablist" aria-label="Data view" className="flex gap-1">
@@ -111,7 +111,7 @@ export function DataDetails({
 
       {/* Daily Tab */}
       {activeTab === "daily" && (
-        <div>
+        <div className="flex-1 flex flex-col min-h-0">
           {dailyBreakdownRows?.length === 0 ? (
             <div className="oai-text-body-sm text-oai-gray-500 dark:text-oai-gray-300 mb-4">
               {dailyEmptyPrefix}
@@ -121,7 +121,7 @@ export function DataDetails({
               {dailyEmptySuffix}
             </div>
           ) : (
-          <div className="overflow-auto max-h-[384px] -mx-4 oai-scrollbar">
+          <div className="overflow-auto flex-1 min-h-0 -mx-4 oai-scrollbar">
             <table className="w-full border-collapse">
               <thead className="sticky top-0 z-10">
                 <tr className="border-b border-oai-gray-200 dark:border-oai-gray-700">

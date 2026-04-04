@@ -3,52 +3,81 @@ import AppKit
 
 struct UsageLimitsView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @ObservedObject private var settings = LimitsSettingsStore.shared
+    @State private var showSettings = false
     let limits: UsageLimitsResponse?
 
+    /// At least one provider is configured and error-free.
+    private func hasAnyAvailable(_ limits: UsageLimitsResponse) -> Bool {
+        let providers: [(Bool, String?)] = [
+            (limits.claude.configured, limits.claude.error),
+            (limits.codex.configured, limits.codex.error),
+            (limits.cursor.configured, limits.cursor.error),
+            (limits.gemini.configured, limits.gemini.error),
+            (limits.kiro.configured, limits.kiro.error),
+            (limits.antigravity.configured, limits.antigravity.error),
+        ]
+        return providers.contains { $0.0 && $0.1 == nil }
+    }
+
     var body: some View {
-        if let limits,
-           limits.claude.configured || limits.codex.configured || limits.cursor.configured || limits.gemini.configured || limits.kiro.configured || limits.antigravity.configured
-        {
+        if let limits, hasAnyAvailable(limits) {
+            let visibleGroups = buildVisibleGroups(limits)
+
             VStack(alignment: .leading, spacing: 8) {
-                SectionHeader(title: Strings.usageLimitsTitle)
-
-                if limits.claude.configured {
-                    toolSection(title: "Claude", assetName: "ClaudeLogo") {
-                        claudeContent(limits.claude)
+                SectionHeader(title: Strings.usageLimitsTitle) {
+                    SettingsGearButton(isPresented: $showSettings) {
+                        LimitsSettingsView(store: settings)
                     }
                 }
 
-                if limits.codex.configured {
-                    toolSection(title: "Codex", assetName: "CodexLogo") {
-                        codexContent(limits.codex)
-                    }
-                }
-
-                if limits.cursor.configured {
-                    toolSection(title: "Cursor", assetName: "CursorLogo") {
-                        cursorContent(limits.cursor)
-                    }
-                }
-
-                if limits.gemini.configured {
-                    toolSection(title: "Gemini", assetName: "GeminiLogo") {
-                        geminiContent(limits.gemini)
-                    }
-                }
-
-                if limits.kiro.configured {
-                    toolSection(title: "Kiro", assetName: nil) {
-                        kiroContent(limits.kiro)
-                    }
-                }
-
-                if limits.antigravity.configured {
-                    toolSection(title: "Antigravity", assetName: "AntigravityLogo") {
-                        antigravityContent(limits.antigravity)
+                if visibleGroups.isEmpty {
+                    // All hidden by user — show hint so they know gear exists
+                    Text("All providers hidden")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                } else {
+                    ForEach(Array(visibleGroups.enumerated()), id: \.offset) { index, group in
+                        if index > 0 {
+                            Divider()
+                                .opacity(0.4)
+                                .padding(.vertical, 2)
+                        }
+                        group
                     }
                 }
             }
+        } else if limits == nil {
+            LimitsSkeleton()
         }
+    }
+
+    // MARK: - Visible Groups (respect settings order + visibility, hide errors)
+
+    private func buildVisibleGroups(_ limits: UsageLimitsResponse) -> [AnyView] {
+        var groups: [AnyView] = []
+
+        for id in settings.providerOrder {
+            guard settings.isVisible(id) else { continue }
+
+            switch id {
+            case "claude" where limits.claude.configured && limits.claude.error == nil:
+                groups.append(AnyView(toolSection(title: "Claude", assetName: "ClaudeLogo") { claudeContent(limits.claude) }))
+            case "codex" where limits.codex.configured && limits.codex.error == nil:
+                groups.append(AnyView(toolSection(title: "Codex", assetName: "CodexLogo") { codexContent(limits.codex) }))
+            case "cursor" where limits.cursor.configured && limits.cursor.error == nil:
+                groups.append(AnyView(toolSection(title: "Cursor", assetName: "CursorLogo") { cursorContent(limits.cursor) }))
+            case "gemini" where limits.gemini.configured && limits.gemini.error == nil:
+                groups.append(AnyView(toolSection(title: "Gemini", assetName: "GeminiLogo") { geminiContent(limits.gemini) }))
+            case "kiro" where limits.kiro.configured && limits.kiro.error == nil:
+                groups.append(AnyView(toolSection(title: "Kiro", assetName: "KiroLogo") { kiroContent(limits.kiro) }))
+            case "antigravity" where limits.antigravity.configured && limits.antigravity.error == nil:
+                groups.append(AnyView(toolSection(title: "Antigravity", assetName: "AntigravityLogo") { antigravityContent(limits.antigravity) }))
+            default:
+                break
+            }
+        }
+        return groups
     }
 
     // MARK: - Tool Section
@@ -74,120 +103,90 @@ struct UsageLimitsView: View {
 
     // MARK: - Claude
 
-    @ViewBuilder
     private func claudeContent(_ claude: ClaudeLimits) -> some View {
-        if let error = claude.error {
-            errorRow(error)
-        } else {
-            VStack(spacing: 4) {
-                if let w = claude.fiveHour {
-                    limitRow(label: "5h", pct: w.utilization, reset: relativeReset(iso: w.resetsAt), toolName: "Claude")
-                }
-                if let w = claude.sevenDay {
-                    limitRow(label: "7d", pct: w.utilization, reset: relativeReset(iso: w.resetsAt), toolName: "Claude")
-                }
-                if let w = claude.sevenDayOpus {
-                    limitRow(label: "Opus", pct: w.utilization, reset: relativeReset(iso: w.resetsAt), toolName: "Claude")
-                }
+        VStack(spacing: 4) {
+            if let w = claude.fiveHour {
+                limitRow(label: "5h", pct: w.utilization, reset: relativeReset(iso: w.resetsAt), toolName: "Claude")
+            }
+            if let w = claude.sevenDay {
+                limitRow(label: "7d", pct: w.utilization, reset: relativeReset(iso: w.resetsAt), toolName: "Claude")
+            }
+            if let w = claude.sevenDayOpus {
+                limitRow(label: "Opus", pct: w.utilization, reset: relativeReset(iso: w.resetsAt), toolName: "Claude")
             }
         }
     }
 
     // MARK: - Codex
 
-    @ViewBuilder
     private func codexContent(_ codex: CodexLimits) -> some View {
-        if let error = codex.error {
-            errorRow(error)
-        } else {
-            VStack(spacing: 4) {
-                if let w = codex.primaryWindow {
-                    limitRow(label: "5h", pct: Double(w.usedPercent), reset: relativeReset(epoch: w.resetAt), toolName: "Codex")
-                }
-                if let w = codex.secondaryWindow {
-                    limitRow(label: "7d", pct: Double(w.usedPercent), reset: relativeReset(epoch: w.resetAt), toolName: "Codex")
-                }
+        VStack(spacing: 4) {
+            if let w = codex.primaryWindow {
+                limitRow(label: "5h", pct: Double(w.usedPercent), reset: relativeReset(epoch: w.resetAt), toolName: "Codex")
+            }
+            if let w = codex.secondaryWindow {
+                limitRow(label: "7d", pct: Double(w.usedPercent), reset: relativeReset(epoch: w.resetAt), toolName: "Codex")
             }
         }
     }
 
     // MARK: - Cursor
 
-    @ViewBuilder
     private func cursorContent(_ cursor: CursorLimits) -> some View {
-        if let error = cursor.error {
-            errorRow(error)
-        } else {
-            VStack(spacing: 4) {
-                if let w = cursor.primaryWindow {
-                    limitRow(label: "Plan", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Cursor")
-                }
-                if let w = cursor.secondaryWindow {
-                    limitRow(label: "Auto", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Cursor")
-                }
-                if let w = cursor.tertiaryWindow {
-                    limitRow(label: "API", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Cursor")
-                }
+        VStack(spacing: 4) {
+            if let w = cursor.primaryWindow {
+                limitRow(label: "Plan", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Cursor")
+            }
+            if let w = cursor.secondaryWindow {
+                limitRow(label: "Auto", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Cursor")
+            }
+            if let w = cursor.tertiaryWindow {
+                limitRow(label: "API", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Cursor")
             }
         }
     }
 
-    // MARK: - Kiro
+    // MARK: - Gemini
 
-    @ViewBuilder
     private func geminiContent(_ gemini: GeminiLimits) -> some View {
-        if let error = gemini.error {
-            errorRow(error)
-        } else {
-            VStack(spacing: 4) {
-                if let w = gemini.primaryWindow {
-                    limitRow(label: "Pro", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Gemini")
-                }
-                if let w = gemini.secondaryWindow {
-                    limitRow(label: "Flash", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Gemini")
-                }
-                if let w = gemini.tertiaryWindow {
-                    limitRow(label: "Lite", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Gemini")
-                }
+        VStack(spacing: 4) {
+            if let w = gemini.primaryWindow {
+                limitRow(label: "Pro", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Gemini")
+            }
+            if let w = gemini.secondaryWindow {
+                limitRow(label: "Flash", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Gemini")
+            }
+            if let w = gemini.tertiaryWindow {
+                limitRow(label: "Lite", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Gemini")
             }
         }
     }
 
     // MARK: - Kiro
 
-    @ViewBuilder
     private func kiroContent(_ kiro: KiroLimits) -> some View {
-        if let error = kiro.error {
-            errorRow(error)
-        } else {
-            VStack(spacing: 4) {
-                if let w = kiro.primaryWindow {
-                    limitRow(label: "Month", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Kiro")
-                }
-                if let w = kiro.secondaryWindow {
-                    limitRow(label: "Bonus", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Kiro")
-                }
+        VStack(spacing: 4) {
+            if let w = kiro.primaryWindow {
+                limitRow(label: "Month", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Kiro")
+            }
+            if let w = kiro.secondaryWindow {
+                limitRow(label: "Bonus", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Kiro")
             }
         }
     }
 
     // MARK: - Antigravity
 
-    @ViewBuilder
     private func antigravityContent(_ antigravity: AntigravityLimits) -> some View {
-        if let error = antigravity.error {
-            errorRow(error)
-        } else {
-            VStack(spacing: 4) {
-                if let w = antigravity.primaryWindow {
-                    limitRow(label: "Claude", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Antigravity")
-                }
-                if let w = antigravity.secondaryWindow {
-                    limitRow(label: "G Pro", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Antigravity")
-                }
-                if let w = antigravity.tertiaryWindow {
-                    limitRow(label: "Flash", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Antigravity")
-                }
+        VStack(spacing: 4) {
+            if let w = antigravity.primaryWindow {
+                limitRow(label: "Claude", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Antigravity")
+            }
+            if let w = antigravity.secondaryWindow {
+                limitRow(label: "G Pro", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Antigravity")
+            }
+            if let w = antigravity.tertiaryWindow {
+                limitRow(label: "Flash", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Antigravity")
             }
         }
     }
@@ -237,13 +236,6 @@ struct UsageLimitsView: View {
         .accessibilityLabel(a11yParts.joined(separator: ", "))
     }
 
-    private func errorRow(_ message: String) -> some View {
-        Text((message == "token_expired" || message == "session_expired") ? Strings.sessionExpired : message)
-            .font(.system(.caption2, design: .default))
-            .foregroundStyle(.tertiary)
-            .lineLimit(1)
-    }
-
     // MARK: - Helpers
 
     private func relativeReset(iso: String?) -> String? {
@@ -274,9 +266,10 @@ struct UsageLimitsView: View {
     @ViewBuilder
     private func brandIcon(_ name: String) -> some View {
         switch name {
-        case "CursorLogo":
+        case "CursorLogo", "KiroLogo":
+            let filename = name == "CursorLogo" ? "cursor.svg" : "kiro.svg"
             if let image = bundledSVGIcon(
-                named: "cursor.svg",
+                named: filename,
                 replacingCurrentColorWith: colorScheme == .dark ? "#FFFFFF" : "#111111"
             ) {
                 Image(nsImage: image)
@@ -352,5 +345,67 @@ struct UsageLimitsView: View {
         }
 
         return normalized
+    }
+}
+
+// MARK: - Settings Gear Button
+
+private struct SettingsGearButton<Popover: View>: View {
+    @Binding var isPresented: Bool
+    @State private var isHovered = false
+    @ViewBuilder let popover: () -> Popover
+
+    var body: some View {
+        Button(action: { isPresented.toggle() }) {
+            Image(systemName: "gearshape")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(isHovered || isPresented ? .secondary : .tertiary)
+                .frame(width: 20, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .popover(isPresented: $isPresented, arrowEdge: .trailing) {
+            popover()
+        }
+    }
+}
+
+// MARK: - Skeleton Loading
+
+private struct LimitsSkeleton: View {
+    @State private var phase: CGFloat = -1
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionHeader(title: Strings.usageLimitsTitle)
+
+            ForEach(0..<2, id: \.self) { _ in
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 5) {
+                        skeletonRect(width: 14, height: 14, radius: 3)
+                        skeletonRect(width: 50, height: 10, radius: 3)
+                    }
+                    ForEach(0..<2, id: \.self) { _ in
+                        HStack(spacing: 5) {
+                            skeletonRect(width: 42, height: 8, radius: 2)
+                            skeletonRect(height: 5, radius: 2)
+                            skeletonRect(width: 28, height: 8, radius: 2)
+                        }
+                    }
+                }
+            }
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                phase = 1
+            }
+        }
+    }
+
+    private func skeletonRect(width: CGFloat? = nil, height: CGFloat, radius: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: radius)
+            .fill(Color.gray.opacity(phase > 0 ? 0.14 : 0.06))
+            .frame(width: width, height: height)
     }
 }
