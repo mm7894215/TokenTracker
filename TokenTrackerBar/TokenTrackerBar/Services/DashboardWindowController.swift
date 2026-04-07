@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import WebKit
 
 @MainActor
@@ -22,6 +23,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     private var window: NSWindow?
     private var webView: WKWebView?
     private var loadingOverlay: NSView?
+    private var loadingHostingController: NSHostingController<AnyView>?
     /// 加载失败重试计数
     private var retryCount = 0
     private let maxRetries = 5
@@ -196,12 +198,19 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         overlay.wantsLayer = true
         overlay.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
 
-        let spinner = NSProgressIndicator()
-        spinner.style = .spinning
-        spinner.controlSize = .regular
-        spinner.translatesAutoresizingMaskIntoConstraints = false
-        spinner.startAnimation(nil)
-        overlay.addSubview(spinner)
+        // 基底约 60×64pt，1.2× 放大 ≈ 72×76.8
+        let hosting = NSHostingController(
+            rootView: AnyView(
+                ClawdCompanionView.LoadingMascotView()
+                    .scaleEffect(1.2)
+                    .frame(width: 72, height: 76.8)
+            )
+        )
+        self.loadingHostingController = hosting
+        hosting.view.translatesAutoresizingMaskIntoConstraints = false
+        hosting.view.wantsLayer = true
+        hosting.view.layer?.contentsScale = NSScreen.main?.backingScaleFactor ?? 2.0
+        overlay.addSubview(hosting.view)
 
         let label = NSTextField(labelWithString: "Loading Dashboard…")
         label.font = .systemFont(ofSize: 13)
@@ -210,10 +219,12 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         overlay.addSubview(label)
 
         NSLayoutConstraint.activate([
-            spinner.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
-            spinner.centerYAnchor.constraint(equalTo: overlay.centerYAnchor, constant: -12),
+            hosting.view.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
+            hosting.view.centerYAnchor.constraint(equalTo: overlay.centerYAnchor, constant: -12),
+            hosting.view.widthAnchor.constraint(equalToConstant: 72),
+            hosting.view.heightAnchor.constraint(equalToConstant: 76.8),
             label.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
-            label.topAnchor.constraint(equalTo: spinner.bottomAnchor, constant: 12),
+            label.topAnchor.constraint(equalTo: hosting.view.bottomAnchor, constant: 8),
         ])
         return overlay
     }
@@ -227,6 +238,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         } completionHandler: { [weak self] in
             overlay.removeFromSuperview()
             self?.loadingOverlay = nil
+            self?.loadingHostingController = nil
         }
     }
 

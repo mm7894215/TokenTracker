@@ -175,6 +175,36 @@ struct ClawdCompanionView: View {
         }
     }
 
+    /// 超级思考动画用于仪表盘 WebView 加载层（与 `workingUltrathink` 一致：震颤/火花等）。
+    struct LoadingMascotView: View {
+        private let px: CGFloat = 4.0
+
+        var body: some View {
+            TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { timeline in
+                Canvas { context, size in
+                    let s = px
+                    let yBase: CGFloat = 6
+                    let ctx = DrawCtx(
+                        t: timeline.date.timeIntervalSinceReferenceDate,
+                        s: s,
+                        yBase: yBase,
+                        yOff: (size.height - 10 * s) / 2,
+                        size: size,
+                        bodyColor: Color(red: 0.87, green: 0.53, blue: 0.43),
+                        eyeColor: Color.black,
+                        eyesClosed: false,
+                        hoverLeanX: 0,
+                        hoverEyeShift: 0,
+                        hoveringCharacter: false,
+                        hoverSide: .none
+                    )
+                    ClawdCompanionView.drawWorkingUltrathink(ctx: ctx, context: &context)
+                }
+            }
+            .frame(width: 15 * px, height: 16 * px)
+        }
+    }
+
     // MARK: - Per-State Drawing Functions
 
     private static func drawIdleLiving(ctx: DrawCtx, context: inout GraphicsContext) {
