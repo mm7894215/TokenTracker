@@ -26,7 +26,7 @@ targets:
         PRODUCT_NAME: TokenTrackerBar
         INFOPLIST_VALUES: |
           LSUIElement = YES
-        MARKETING_VERSION: "0.5.26"
+        MARKETING_VERSION: "0.5.27"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_EMIT_LOC_STRINGS: "YES"
         CODE_SIGN_STYLE: Automatic
