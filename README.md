@@ -32,21 +32,28 @@ Download `TokenTrackerBar.dmg` from the [latest release](https://github.com/mm78
   <img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/menubar.gif" alt="Menu Bar App" width="420" />
 </div>
 
-#### First launch: "TokenTrackerBar is damaged" or "cannot be opened"
+#### First launch: Gatekeeper may block the app
 
-TokenTrackerBar is distributed **ad-hoc signed** (not notarized with an Apple Developer ID — that requires a paid account). When macOS downloads an ad-hoc signed app from the web, Gatekeeper may block it with a message like:
+TokenTrackerBar is distributed **ad-hoc signed** (not notarized with an Apple Developer ID — that requires a paid account). macOS Gatekeeper may block the first launch with one of two messages. Pick the matching fix:
 
-> "TokenTrackerBar" is damaged and can't be opened. You should move it to the Trash.
+**Case 1 — "TokenTrackerBar can't be opened because Apple cannot check it for malicious software"** (or "unidentified developer")
 
-This is Gatekeeper's response to the `com.apple.quarantine` attribute macOS attaches to every downloaded file — not an actual problem with the app. Clear it once with:
+1. Open **System Settings → Privacy & Security**
+2. Scroll to the **Security** section — you'll see a line like *"TokenTrackerBar was blocked to protect your Mac."*
+3. Click **Open Anyway** next to it
+4. Confirm with **Open** in the follow-up dialog (you'll need to authenticate)
+
+You only need to do this once. Older macOS alternative: right-click the app in Finder → **Open** → **Open** in the confirmation dialog.
+
+**Case 2 — "TokenTrackerBar is damaged and can't be opened. You should move it to the Trash"**
+
+This is Gatekeeper reacting to the `com.apple.quarantine` attribute macOS attaches to every downloaded file, not an actual problem with the app. Clear it once with:
 
 ```bash
 xattr -cr /Applications/TokenTrackerBar.app
 ```
 
 After that the app opens normally. You only need to do this once per download.
-
-If you still see a "cannot verify developer" dialog, right-click the app in Finder → **Open** → **Open** in the confirmation dialog. You only need to do this the first time.
 
 ### Option B: CLI + Web Dashboard
 
