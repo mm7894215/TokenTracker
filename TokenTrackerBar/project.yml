@@ -20,6 +20,9 @@ targets:
         excludes:
           - "EmbeddedServer/**"
           - "AppIcon.icon"
+      - path: Shared
+    dependencies:
+      - target: TokenTrackerWidget
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tokentracker.bar
@@ -65,3 +68,42 @@ targets:
       path: TokenTrackerBar/TokenTrackerBar.entitlements
       properties:
         com.apple.security.network.client: true
+        com.apple.security.application-groups:
+          - group.com.tokentracker.bar
+
+  TokenTrackerWidget:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: TokenTrackerWidget
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tokentracker.bar.widget
+        PRODUCT_NAME: TokenTrackerWidget
+        MARKETING_VERSION: "0.5.34"
+        CURRENT_PROJECT_VERSION: "1"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_EMIT_LOC_STRINGS: "YES"
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_APP_SANDBOX: YES
+        SKIP_INSTALL: YES
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/../Frameworks"
+          - "@executable_path/../../../../Frameworks"
+    info:
+      path: TokenTrackerWidget/Info.plist
+      properties:
+        CFBundleDisplayName: TokenTracker Widgets
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: TokenTrackerWidget/TokenTrackerWidget.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.application-groups:
+          - group.com.tokentracker.bar
