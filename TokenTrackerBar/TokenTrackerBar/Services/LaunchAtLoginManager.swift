@@ -33,4 +33,10 @@ final class LaunchAtLoginManager: ObservableObject {
         }
         isEnabled = SMAppService.mainApp.status == .enabled
     }
+
+    /// Re-read the SMAppService status. Useful when an external code path
+    /// (e.g. NativeBridge) toggles registration directly.
+    func refresh() {
+        isEnabled = SMAppService.mainApp.status == .enabled
+    }
 }

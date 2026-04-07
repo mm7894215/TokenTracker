@@ -39,6 +39,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         // Create WKWebView with persistent data store and shared process pool
         let contentController = WKUserContentController()
         contentController.add(self, name: "nativeOAuth")
+        contentController.add(self, name: "nativeBridge")
         let webConfig = WKWebViewConfiguration()
         webConfig.userContentController = contentController
         webConfig.processPool = Self.sharedProcessPool
@@ -105,6 +106,9 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         // Match system appearance for loading background
         window.backgroundColor = NSColor.windowBackgroundColor
         self.window = window
+
+        // Wire bridge so SettingsPage can read/write menu-bar prefs
+        NativeBridge.shared.webView = webView
 
         // Load dashboard
         retryCount = 0
@@ -191,6 +195,10 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     }
 
     private func handleScriptMessage(name: String, body: Any) {
+        if name == "nativeBridge" {
+            NativeBridge.shared.handle(message: body)
+            return
+        }
         guard name == "nativeOAuth",
               let urlString = body as? String,
               let url = URL(string: urlString) else { return }

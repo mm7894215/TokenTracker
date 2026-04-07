@@ -7,6 +7,7 @@
 export { Button } from "./Button";
 export { Card } from "./Card";
 export { Shell } from "./Shell";
+export { Sidebar, AppLayout, useSidebarCollapsed } from "./Sidebar";
 export { Badge } from "./Badge";
 export { Input } from "./Input";
 export { default as Counter } from "./Counter";

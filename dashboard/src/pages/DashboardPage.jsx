@@ -1259,7 +1259,6 @@ export function DashboardPage({
       setDetailsPage={setDetailsPage}
       costModalOpen={costModalOpen}
       closeCostModal={closeCostModal}
-      usageLimits={usageLimits}
     />
   );
 }

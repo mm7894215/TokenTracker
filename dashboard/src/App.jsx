@@ -14,6 +14,7 @@ import { useCloudUsageSync } from "./hooks/use-cloud-usage-sync";
 import { LandingPage } from "./pages/LandingPage.jsx";
 import { LoginPage } from "./pages/LoginPage.jsx";
 import { NativeAuthCallbackPage } from "./pages/NativeAuthCallbackPage.jsx";
+import { AppLayout } from "./ui/openai/components/Sidebar.jsx";
 
 const DashboardPage = React.lazy(() =>
   import("./pages/DashboardPage.jsx").then((mod) => ({
@@ -30,6 +31,18 @@ const LeaderboardPage = React.lazy(() =>
 const LeaderboardProfilePage = React.lazy(() =>
   import("./pages/LeaderboardProfilePage.jsx").then((mod) => ({
     default: mod.LeaderboardProfilePage,
+  })),
+);
+
+const LimitsPage = React.lazy(() =>
+  import("./pages/LimitsPage.jsx").then((mod) => ({
+    default: mod.LimitsPage,
+  })),
+);
+
+const SettingsPage = React.lazy(() =>
+  import("./pages/SettingsPage.jsx").then((mod) => ({
+    default: mod.SettingsPage,
   })),
 );
 
@@ -86,12 +99,37 @@ export default function App() {
   if (isLeaderboardPath) {
     gate = "dashboard";
   }
+  const isLimitsPath = normalizedPath === "/limits";
+  if (isLimitsPath) {
+    gate = "dashboard";
+  }
+  const isSettingsPath = normalizedPath === "/settings";
+  if (isSettingsPath) {
+    gate = "dashboard";
+  }
 
   const PageComponent = leaderboardProfileUserId
     ? LeaderboardProfilePage
     : normalizedPath === "/leaderboard"
       ? LeaderboardPage
-      : DashboardPage;
+      : isLimitsPath
+        ? LimitsPage
+        : isSettingsPath
+          ? SettingsPage
+          : DashboardPage;
+
+  // /leaderboard/u/:id (LeaderboardProfilePage) still ships its own
+  // min-h-screen + sticky header/footer chrome, so it must NOT be wrapped
+  // in AppLayout — that would double-stack the nav and break scrolling.
+  // Only the index /leaderboard route is migrated to AppLayout for now.
+  const isLeaderboardIndexPath = normalizedPath === "/leaderboard";
+  const showSidebar =
+    !publicMode &&
+    (normalizedPath === "/dashboard" ||
+      normalizedPath === "/" ||
+      isLeaderboardIndexPath ||
+      isLimitsPath ||
+      isSettingsPath);
 
   const loadingShell = <div className="min-h-screen bg-oai-white dark:bg-[#050505]" />;
 
@@ -105,7 +143,7 @@ export default function App() {
       <LandingPage signInUrl="/login" signUpUrl="/login" />
     );
   } else {
-    content = (
+    const pageNode = (
       <Suspense fallback={loadingShell}>
         <PageComponent
           baseUrl={baseUrl}
@@ -121,6 +159,7 @@ export default function App() {
         />
       </Suspense>
     );
+    content = showSidebar ? <AppLayout>{pageNode}</AppLayout> : pageNode;
   }
 
   return (

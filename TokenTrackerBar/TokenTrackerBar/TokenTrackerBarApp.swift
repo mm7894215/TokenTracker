@@ -24,6 +24,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             launchAtLoginManager: launchAtLoginManager
         )
 
+        NativeBridge.shared.configure(
+            viewModel: viewModel,
+            launchAtLoginManager: launchAtLoginManager
+        )
+
         Task { @MainActor in
             await serverManager.ensureServerRunning()
             if serverManager.isServerRunning {

@@ -59,63 +59,71 @@ function ToolGroup({ name, icon, children }) {
   );
 }
 
-export function UsageLimitsPanel({ claude, codex, cursor, gemini, kiro, antigravity }) {
+const DEFAULT_ORDER = ["claude", "codex", "cursor", "gemini", "kiro", "antigravity"];
+
+function renderProviderGroup(id, data) {
   const ok = (p) => p?.configured && !p.error;
+  if (!ok(data)) return null;
+  switch (id) {
+    case "claude":
+      return (
+        <ToolGroup key="claude" name="Claude" icon="/brand-logos/claude-code.svg">
+          {data.five_hour ? <LimitBar label="5h" pct={data.five_hour.utilization} reset={formatReset(data.five_hour.resets_at)} /> : null}
+          {data.seven_day ? <LimitBar label="7d" pct={data.seven_day.utilization} reset={formatReset(data.seven_day.resets_at)} /> : null}
+          {data.seven_day_opus ? <LimitBar label="Opus" pct={data.seven_day_opus.utilization} reset={formatReset(data.seven_day_opus.resets_at)} /> : null}
+        </ToolGroup>
+      );
+    case "codex":
+      return (
+        <ToolGroup key="codex" name="Codex" icon="/brand-logos/codex.svg">
+          {data.primary_window ? <LimitBar label="5h" pct={data.primary_window.used_percent} reset={formatReset(data.primary_window.reset_at)} /> : null}
+          {data.secondary_window ? <LimitBar label="7d" pct={data.secondary_window.used_percent} reset={formatReset(data.secondary_window.reset_at)} /> : null}
+        </ToolGroup>
+      );
+    case "cursor":
+      return (
+        <ToolGroup key="cursor" name="Cursor" icon="/brand-logos/cursor.svg">
+          {data.primary_window ? <LimitBar label="Plan" pct={data.primary_window.used_percent} reset={formatReset(data.primary_window.reset_at)} /> : null}
+          {data.secondary_window ? <LimitBar label="Auto" pct={data.secondary_window.used_percent} reset={formatReset(data.secondary_window.reset_at)} /> : null}
+          {data.tertiary_window ? <LimitBar label="API" pct={data.tertiary_window.used_percent} reset={formatReset(data.tertiary_window.reset_at)} /> : null}
+        </ToolGroup>
+      );
+    case "gemini":
+      return (
+        <ToolGroup key="gemini" name="Gemini" icon="/brand-logos/gemini.svg">
+          {data.primary_window ? <LimitBar label="Pro" pct={data.primary_window.used_percent} reset={formatReset(data.primary_window.reset_at)} /> : null}
+          {data.secondary_window ? <LimitBar label="Flash" pct={data.secondary_window.used_percent} reset={formatReset(data.secondary_window.reset_at)} /> : null}
+          {data.tertiary_window ? <LimitBar label="Lite" pct={data.tertiary_window.used_percent} reset={formatReset(data.tertiary_window.reset_at)} /> : null}
+        </ToolGroup>
+      );
+    case "kiro":
+      return (
+        <ToolGroup key="kiro" name="Kiro" icon="/brand-logos/kiro.svg">
+          {data.primary_window ? <LimitBar label="Month" pct={data.primary_window.used_percent} reset={formatReset(data.primary_window.reset_at)} /> : null}
+          {data.secondary_window ? <LimitBar label="Bonus" pct={data.secondary_window.used_percent} reset={formatReset(data.secondary_window.reset_at)} /> : null}
+        </ToolGroup>
+      );
+    case "antigravity":
+      return (
+        <ToolGroup key="antigravity" name="Antigravity" icon="/brand-logos/antigravity.svg">
+          {data.primary_window ? <LimitBar label="Claude" pct={data.primary_window.used_percent} reset={formatReset(data.primary_window.reset_at)} /> : null}
+          {data.secondary_window ? <LimitBar label="G Pro" pct={data.secondary_window.used_percent} reset={formatReset(data.secondary_window.reset_at)} /> : null}
+          {data.tertiary_window ? <LimitBar label="Flash" pct={data.tertiary_window.used_percent} reset={formatReset(data.tertiary_window.reset_at)} /> : null}
+        </ToolGroup>
+      );
+    default:
+      return null;
+  }
+}
 
-  const groups = [];
+export function UsageLimitsPanel({ claude, codex, cursor, gemini, kiro, antigravity, order, visibility }) {
+  const dataById = { claude, codex, cursor, gemini, kiro, antigravity };
+  const effectiveOrder = Array.isArray(order) && order.length > 0 ? order : DEFAULT_ORDER;
 
-  if (ok(claude)) {
-    groups.push(
-      <ToolGroup key="claude" name="Claude" icon="/brand-logos/claude-code.svg">
-        {claude.five_hour ? <LimitBar label="5h" pct={claude.five_hour.utilization} reset={formatReset(claude.five_hour.resets_at)} /> : null}
-        {claude.seven_day ? <LimitBar label="7d" pct={claude.seven_day.utilization} reset={formatReset(claude.seven_day.resets_at)} /> : null}
-        {claude.seven_day_opus ? <LimitBar label="Opus" pct={claude.seven_day_opus.utilization} reset={formatReset(claude.seven_day_opus.resets_at)} /> : null}
-      </ToolGroup>
-    );
-  }
-  if (ok(codex)) {
-    groups.push(
-      <ToolGroup key="codex" name="Codex" icon="/brand-logos/codex.svg">
-        {codex.primary_window ? <LimitBar label="5h" pct={codex.primary_window.used_percent} reset={formatReset(codex.primary_window.reset_at)} /> : null}
-        {codex.secondary_window ? <LimitBar label="7d" pct={codex.secondary_window.used_percent} reset={formatReset(codex.secondary_window.reset_at)} /> : null}
-      </ToolGroup>
-    );
-  }
-  if (ok(cursor)) {
-    groups.push(
-      <ToolGroup key="cursor" name="Cursor" icon="/brand-logos/cursor.svg">
-        {cursor.primary_window ? <LimitBar label="Plan" pct={cursor.primary_window.used_percent} reset={formatReset(cursor.primary_window.reset_at)} /> : null}
-        {cursor.secondary_window ? <LimitBar label="Auto" pct={cursor.secondary_window.used_percent} reset={formatReset(cursor.secondary_window.reset_at)} /> : null}
-        {cursor.tertiary_window ? <LimitBar label="API" pct={cursor.tertiary_window.used_percent} reset={formatReset(cursor.tertiary_window.reset_at)} /> : null}
-      </ToolGroup>
-    );
-  }
-  if (ok(gemini)) {
-    groups.push(
-      <ToolGroup key="gemini" name="Gemini" icon="/brand-logos/gemini.svg">
-        {gemini.primary_window ? <LimitBar label="Pro" pct={gemini.primary_window.used_percent} reset={formatReset(gemini.primary_window.reset_at)} /> : null}
-        {gemini.secondary_window ? <LimitBar label="Flash" pct={gemini.secondary_window.used_percent} reset={formatReset(gemini.secondary_window.reset_at)} /> : null}
-        {gemini.tertiary_window ? <LimitBar label="Lite" pct={gemini.tertiary_window.used_percent} reset={formatReset(gemini.tertiary_window.reset_at)} /> : null}
-      </ToolGroup>
-    );
-  }
-  if (ok(kiro)) {
-    groups.push(
-      <ToolGroup key="kiro" name="Kiro" icon="/brand-logos/kiro.svg">
-        {kiro.primary_window ? <LimitBar label="Month" pct={kiro.primary_window.used_percent} reset={formatReset(kiro.primary_window.reset_at)} /> : null}
-        {kiro.secondary_window ? <LimitBar label="Bonus" pct={kiro.secondary_window.used_percent} reset={formatReset(kiro.secondary_window.reset_at)} /> : null}
-      </ToolGroup>
-    );
-  }
-  if (ok(antigravity)) {
-    groups.push(
-      <ToolGroup key="antigravity" name="Antigravity" icon="/brand-logos/antigravity.svg">
-        {antigravity.primary_window ? <LimitBar label="Claude" pct={antigravity.primary_window.used_percent} reset={formatReset(antigravity.primary_window.reset_at)} /> : null}
-        {antigravity.secondary_window ? <LimitBar label="G Pro" pct={antigravity.secondary_window.used_percent} reset={formatReset(antigravity.secondary_window.reset_at)} /> : null}
-        {antigravity.tertiary_window ? <LimitBar label="Flash" pct={antigravity.tertiary_window.used_percent} reset={formatReset(antigravity.tertiary_window.reset_at)} /> : null}
-      </ToolGroup>
-    );
-  }
+  const groups = effectiveOrder
+    .filter((id) => !visibility || visibility[id] !== false)
+    .map((id) => renderProviderGroup(id, dataById[id]))
+    .filter(Boolean);
 
   if (groups.length === 0) return null;
 

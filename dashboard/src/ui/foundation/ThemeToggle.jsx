@@ -45,7 +45,7 @@ function currentIcon(resolvedTheme) {
  * Theme dropdown: Light / Dark / System.
  * Stores preference in localStorage via ThemeProvider.
  */
-export function ThemeToggle({ theme, resolvedTheme, onSetTheme, className = "" }) {
+export function ThemeToggle({ theme, resolvedTheme, onSetTheme, className = "", direction = "down", align = "right" }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -84,7 +84,11 @@ export function ThemeToggle({ theme, resolvedTheme, onSetTheme, className = "" }
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-50 min-w-[140px] py-1 rounded-lg border border-oai-gray-200 dark:border-oai-gray-800 bg-white dark:bg-oai-gray-900 shadow-lg">
+        <div
+          className={`absolute z-50 min-w-[140px] py-1 rounded-lg border border-oai-gray-200 dark:border-oai-gray-800 bg-white dark:bg-oai-gray-900 shadow-lg ${
+            direction === "up" ? "bottom-full mb-1" : "top-full mt-1"
+          } ${align === "left" ? "left-0" : "right-0"}`}
+        >
           {OPTIONS.map(({ value, label, Icon }) => {
             const active = theme === value;
             return (

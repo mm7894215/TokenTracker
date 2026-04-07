@@ -38,6 +38,23 @@ final class StatusBarController: NSObject {
         setupStatusItem()
         setupPopover()
         observeSyncState()
+        observeNativeBridgeSettings()
+    }
+
+    /// React to setting changes pushed by the dashboard SettingsPage via NativeBridge.
+    /// Re-reads UserDefaults and refreshes the menu-bar visuals (stats badge + animation state).
+    private func observeNativeBridgeSettings() {
+        NotificationCenter.default.addObserver(
+            forName: .nativeSettingsChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.animator?.applyCurrentState()
+                self.updateStatsDisplay()
+            }
+        }
     }
 
     // MARK: - Status Item

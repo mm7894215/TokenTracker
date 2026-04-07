@@ -454,3 +454,62 @@ live_sniffer.event.sync,ui,LiveSniffer,LiveSniffer,event,"> SYNC: UPLOADING_TO_C
 live_sniffer.event.batch,ui,LiveSniffer,LiveSniffer,event,"[STATUS] BATCH_TRANSMISSION_COMPLETE",,active
 live_sniffer.event.hooking,ui,LiveSniffer,LiveSniffer,event,"> HOOKING: AI_CLI_PIPE_LINK",,active
 live_sniffer.event.capture,ui,LiveSniffer,LiveSniffer,event,"> CAPTURE: +128 NEURAL_TOKENS",,active
+nav.usage,shared,*,Sidebar,nav_usage,"Tokens",,active
+nav.limits,shared,*,Sidebar,nav_limits,"Limits",,active
+nav.leaderboard,shared,*,Sidebar,nav_leaderboard,"Leaderboard",,active
+nav.collapse,shared,*,Sidebar,nav_collapse,"Collapse sidebar",,active
+nav.expand,shared,*,Sidebar,nav_expand,"Expand sidebar",,active
+nav.menu,shared,*,Sidebar,nav_menu,"Open navigation menu",,active
+nav.close_menu,shared,*,Sidebar,nav_close_menu,"Close navigation menu",,active
+nav.aside_label,shared,*,Sidebar,aside_label,"Main navigation",,active
+nav.nav_label,shared,*,Sidebar,nav_label,"Primary",,active
+limits.page.subtitle,ui,LimitsPage,LimitsPage,subtitle,"Rate limits and quota usage across your AI tools.",,active
+limits.settings.title,ui,LimitsPage,LimitsSettingsPanel,title,"Display Settings",,active
+limits.settings.subtitle,ui,LimitsPage,LimitsSettingsPanel,subtitle,"Choose which providers to show and their order.",,active
+limits.settings.move_up,ui,LimitsPage,LimitsSettingsPanel,move_up,"Move up",,active
+limits.settings.move_down,ui,LimitsPage,LimitsSettingsPanel,move_down,"Move down",,active
+limits.settings.toggle_visible,ui,LimitsPage,LimitsSettingsPanel,toggle_visible,"Toggle visibility",,active
+limits.page.openSettings,ui,LimitsPage,LimitsPage,open_settings,"Display settings",,active
+nav.group.general,shared,*,Sidebar,group_general,"General",,active
+nav.group.account,shared,*,Sidebar,group_account,"Account",,active
+nav.settings,shared,*,Sidebar,nav_settings,"Settings",,active
+header.auth.open_settings,shared,*,InsforgeUserHeaderControls,open_settings,"Open settings",,active
+settings.page.title,ui,SettingsPage,SettingsPage,title,"Settings",,active
+settings.page.subtitle,ui,SettingsPage,SettingsPage,subtitle,"Manage your account, appearance, and display preferences.",,active
+settings.section.appearance,ui,SettingsPage,SettingsPage,sec_appearance,"Appearance",,active
+settings.section.account,ui,SettingsPage,SettingsPage,sec_account,"Account",,active
+settings.section.limits,ui,SettingsPage,SettingsPage,sec_limits,"Limits Display",,active
+settings.section.limitsSubtitle,ui,SettingsPage,SettingsPage,sec_limits_sub,"Reorder providers and choose which ones appear on the Limits page.",,active
+settings.appearance.theme.label,ui,SettingsPage,SettingsPage,theme_label,"Theme",,active
+settings.appearance.theme.hint,ui,SettingsPage,SettingsPage,theme_hint,"Choose how Token Tracker looks across the dashboard.",,active
+settings.appearance.theme.light,ui,SettingsPage,SettingsPage,theme_light,"Light",,active
+settings.appearance.theme.dark,ui,SettingsPage,SettingsPage,theme_dark,"Dark",,active
+settings.appearance.theme.system,ui,SettingsPage,SettingsPage,theme_system,"System",,active
+settings.account.displayName,ui,SettingsPage,SettingsPage,display_name,"Display name",,active
+settings.account.edit,ui,SettingsPage,SettingsPage,edit,"Edit",,active
+settings.account.save,ui,SettingsPage,SettingsPage,save,"Save",,active
+settings.account.saving,ui,SettingsPage,SettingsPage,saving,"Saving...",,active
+settings.account.cancel,ui,SettingsPage,SettingsPage,cancel,"Cancel",,active
+settings.account.cloudSync,ui,SettingsPage,SettingsPage,cloud_sync,"Cloud sync",,active
+settings.account.cloudSyncHint,ui,SettingsPage,SettingsPage,cloud_sync_hint,"Upload local usage to your Token Tracker cloud account.",,active
+settings.account.publicProfile,ui,SettingsPage,SettingsPage,public_profile,"Public profile",,active
+settings.account.publicProfileHint,ui,SettingsPage,SettingsPage,public_profile_hint,"Show your usage on the public leaderboard.",,active
+settings.account.anonymous,ui,SettingsPage,SettingsPage,anonymous,"Anonymous",,active
+settings.account.anonymousHint,ui,SettingsPage,SettingsPage,anonymous_hint,"Hide your name and avatar from the leaderboard.",,active
+settings.account.signOut,ui,SettingsPage,SettingsPage,sign_out,"Sign out",,active
+settings.account.signIn,ui,SettingsPage,SettingsPage,sign_in,"Sign in",,active
+settings.account.signedOutHint,ui,SettingsPage,SettingsPage,signed_out_hint,"Sign in to manage cloud sync and leaderboard preferences.",,active
+settings.section.menubar,ui,SettingsPage,SettingsPage,sec_menubar,"Menu Bar App",,active
+settings.section.menubarSubtitle,ui,SettingsPage,SettingsPage,sec_menubar_sub,"Preferences for the macOS menu bar app, mirroring the right-click menu.",,active
+settings.menubar.showStats,ui,SettingsPage,SettingsPage,mb_show_stats,"Show stats in menu bar",,active
+settings.menubar.showStatsHint,ui,SettingsPage,SettingsPage,mb_show_stats_hint,"Display today's token count and cost beside the menu bar icon.",,active
+settings.menubar.animatedIcon,ui,SettingsPage,SettingsPage,mb_anim,"Animated icon",,active
+settings.menubar.animatedIconHint,ui,SettingsPage,SettingsPage,mb_anim_hint,"Blink the Clawd character and play the syncing animation in the menu bar.",,active
+settings.menubar.launchAtLogin,ui,SettingsPage,SettingsPage,mb_login,"Launch at login",,active
+settings.menubar.launchAtLoginHint,ui,SettingsPage,SettingsPage,mb_login_hint,"Start TokenTrackerBar automatically when you sign in to macOS.",,active
+settings.menubar.syncNow,ui,SettingsPage,SettingsPage,mb_sync_now,"Sync now",,active
+settings.menubar.syncNowHint,ui,SettingsPage,SettingsPage,mb_sync_now_hint,"Trigger an immediate parse and upload of local AI tool logs.",,active
+settings.menubar.syncing,ui,SettingsPage,SettingsPage,mb_syncing,"Syncing…",,active
+settings.menubar.updates,ui,SettingsPage,SettingsPage,mb_updates,"Updates",,active
+settings.menubar.updatesHint,ui,SettingsPage,SettingsPage,mb_updates_hint,"Check GitHub for a newer release.",,active
+settings.menubar.checkUpdates,ui,SettingsPage,SettingsPage,mb_check_updates,"Check for updates",,active

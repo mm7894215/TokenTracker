@@ -21,13 +21,9 @@ import {
 } from "../lib/api";
 import { getCloudSyncEnabled, setCloudSyncEnabled } from "../lib/cloud-sync-prefs";
 import { runCloudUsageSyncNow } from "../lib/cloud-sync";
-import { InsforgeUserHeaderControls } from "../components/InsforgeUserHeaderControls.jsx";
-import { HeaderGithubStar } from "../ui/openai/components/HeaderGithubStar.jsx";
 import { LeaderboardAvatar } from "../components/LeaderboardAvatar.jsx";
 import { LeaderboardProviderColumnHeader } from "../components/LeaderboardProviderColumnHeader.jsx";
 import { LeaderboardSkeleton } from "../components/LeaderboardSkeleton.jsx";
-import { useTheme } from "../hooks/useTheme.js";
-import { ThemeToggle } from "../ui/foundation/ThemeToggle.jsx";
 import {
   LB_STICKY_TH_RANK,
   LB_STICKY_TH_USER,
@@ -132,7 +128,6 @@ export function LeaderboardPage({
   const navigate = useNavigate();
   const { openLoginModal } = useLoginModal();
   const { signedIn: cloudSignedIn, loading: authLoading } = useInsforgeAuth();
-  const { theme, resolvedTheme, setTheme } = useTheme();
   const leaderboardBaseUrl = useMemo(() => getLeaderboardBaseUrl(), []);
   const mockEnabled = isMockEnabled();
   const authTokenAllowed = signedIn && !sessionSoftExpired;
@@ -459,41 +454,7 @@ export function LeaderboardPage({
   }
 
   return (
-    <div className="flex flex-col min-h-screen bg-oai-white dark:bg-oai-gray-950 text-oai-black dark:text-oai-white font-oai antialiased transition-colors duration-200">
-      <header className="sticky top-0 z-50 bg-white/80 dark:bg-oai-gray-950/80 backdrop-blur-md border-b border-oai-gray-200 dark:border-oai-gray-900 transition-colors duration-200">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
-          <div className="flex items-center gap-5">
-            <Link
-              to="/"
-              className="flex items-center gap-3 no-underline outline-none rounded focus-visible:ring-2 focus-visible:ring-oai-brand-500 focus-visible:ring-offset-2 dark:ring-offset-oai-gray-950 transition-opacity hover:opacity-80"
-            >
-              <img src="/app-icon.png" alt="" width={24} height={24} className="rounded-md" />
-              <span className="text-sm font-semibold tracking-wide text-oai-black dark:text-white uppercase">
-                Token Tracker
-              </span>
-            </Link>
-            <div className="hidden sm:block">
-              <HeaderGithubStar />
-            </div>
-          </div>
-          <div className="flex items-center gap-2 sm:gap-3">
-            <ThemeToggle theme={theme} resolvedTheme={resolvedTheme} onSetTheme={setTheme} />
-            <Link
-              to={getDashboardEntryPath()}
-              className={cn(
-                "no-underline inline-flex items-center justify-center h-9 px-5 text-sm font-medium rounded-full transition-colors",
-                cloudSignedIn
-                  ? "shadow-sm ring-1 ring-oai-gray-200 dark:ring-white/10 bg-oai-gray-900 dark:bg-white text-white dark:text-oai-gray-900 hover:bg-oai-gray-800 dark:hover:bg-oai-gray-100"
-                  : "ring-1 ring-oai-gray-200 dark:ring-oai-gray-700 text-oai-gray-600 dark:text-oai-gray-400 hover:text-oai-gray-900 dark:hover:text-white hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800",
-              )}
-            >
-              {copy("landing.v2.cta.primary")}
-            </Link>
-            <InsforgeUserHeaderControls />
-          </div>
-        </div>
-      </header>
-
+    <div className="flex flex-col flex-1 text-oai-black dark:text-oai-white font-oai antialiased">
       <main className="flex-1 pt-8 sm:pt-10 pb-12 sm:pb-16">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-8">

@@ -170,29 +170,3 @@ Fallback: "unknown". Add all three to metadata dict when calling add-memory.
 **Existing:** Read openmemory.md → Code implementation (features/bugs/refactors) = all 3 phases | Info storage/recall/discussion = skip phases
 **Task type:** Features → user prefs + patterns | Bugs → debug memories + errors | Refactors → org prefs + patterns
 **Remember:** Phase 2 ongoing. Search at EVERY checkpoint.
-
-## OpenMemory Guide (openmemory.md)
-Living project index (shareable). Auto-created empty in workspace root.
-
-**Initial Deep Dive:** Phase 1 (2+ searches) → Phase 2 (analyze dirs/configs/frameworks/entry points, search as discovering, extract arch, document Overview/Architecture/User Namespaces/Components/Patterns) → Phase 3 (store with namespaces if fit)
-
-**User Defined Namespaces:** Read before ANY memory op
-- Format: "## User Defined Namespaces\n- [Leave blank - user populates]"
-- Examples: frontend, backend, database
-
-**Storing:** Review content → check namespaces → THINK "domain?" → fits one? assign : omit | Rules: Max ONE, can be NONE, only defined ones
-**Searching:** What searching? → read namespaces → THINK "which could contain?" → cast wide net → use multiple if needed
-
-**Guide Discipline:** Edit directly | Populate as you go | Keep in sync | Update before storing component/implementation/project_info
-**Update Workflow:** Open → update section → save → store via MCP
-**Integration:** Component → Components | Implementation → Patterns | Project info → Overview/Arch | Debug/pref → memory only
-
-**🚨 CRITICAL: Before storing ANY memory, review and update openmemory.md - after every edit verify the guide reflects current system architecture (most important project artifact)**
-
-## Security Guardrails
-**NEVER store:** API keys/tokens, passwords, hashes, private keys, certs, env secrets, OAuth/session tokens, connection strings with creds, AWS keys, webhook secrets, SSH/GPG keys
-**Detection:** Token/Bearer/key=/password= patterns → DO NOT STORE | Base64 in auth → DO NOT STORE | = + long alphanumeric → VERIFY | Doubt → DO NOT STORE, ask
-**Instead store:** Redacted versions ("<YOUR_TOKEN>"), patterns ("uses bearer token"), instructions ("Set TOKEN env")
-**Other:** No destructive ops without approval | User says "save/remember" → IMMEDIATE storage | Think deserves storage → ASK FIRST for prefs | User asks to store secrets → REFUSE
-
-**Remember:** Memory system = effectiveness over time. Rich reasoning > code. When doubt, store. Guide = shareable index.
