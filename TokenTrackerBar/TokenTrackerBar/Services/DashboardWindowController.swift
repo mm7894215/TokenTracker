@@ -78,26 +78,22 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         webView.setValue(false, forKey: "drawsBackground")
         self.webView = webView
 
-        // Container: native vibrancy under a transparent WKWebView (sidebar + chrome see through; HTML paints the main card only).
+        // Container: Liquid Glass (macOS 26+) or NSVisualEffectView under a transparent WKWebView (sidebar + chrome see through).
         let container = NSView()
         container.wantsLayer = true
         container.layer?.backgroundColor = NSColor.clear.cgColor
 
-        let visualEffectBackground = NSVisualEffectView()
-        visualEffectBackground.translatesAutoresizingMaskIntoConstraints = false
-        visualEffectBackground.material = .sidebar
-        visualEffectBackground.blendingMode = .withinWindow
-        visualEffectBackground.state = .active
-        container.addSubview(visualEffectBackground)
+        let dashboardBackground = DashboardBackgroundView.makeFullWindowBackground()
+        container.addSubview(dashboardBackground)
 
         webView.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(webView)
 
         NSLayoutConstraint.activate([
-            visualEffectBackground.topAnchor.constraint(equalTo: container.topAnchor),
-            visualEffectBackground.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            visualEffectBackground.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            visualEffectBackground.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            dashboardBackground.topAnchor.constraint(equalTo: container.topAnchor),
+            dashboardBackground.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            dashboardBackground.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            dashboardBackground.trailingAnchor.constraint(equalTo: container.trailingAnchor),
         ])
 
         // Titlebar drag area — transparent, sits above webView so window is draggable
@@ -146,7 +142,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         window.isReleasedWhenClosed = false
         window.setFrameAutosaveName("DashboardWindow")
         window.center()
-        // Clear window so NSVisualEffectView + transparent WKWebView show material (not an opaque gray sheet).
+        // Clear window so native glass / vibrancy + transparent WKWebView show material (not an opaque gray sheet).
         window.isOpaque = false
         window.backgroundColor = .clear
         self.window = window
@@ -171,7 +167,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         webView?.reload()
     }
 
-    /// Match dashboard light/dark so `NSVisualEffectView` + window chrome use dark materials when the web UI is dark.
+    /// Match dashboard light/dark so native glass / `NSVisualEffectView` + window chrome follow the web theme.
     func applyChromeAppearance(isDark: Bool) {
         window?.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
     }
@@ -221,7 +217,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
 
     private func dismissLoadingOverlay() {
         guard let overlay = loadingOverlay else { return }
-        // Keep drawsBackground false so NSVisualEffectView shows through non-painted areas (sidebar + window chrome).
+        // Keep drawsBackground false so native glass / vibrancy shows through non-painted areas (sidebar + window chrome).
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.3
             overlay.animator().alphaValue = 0
