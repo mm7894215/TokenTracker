@@ -17,6 +17,12 @@ public enum WidgetSharedConstants {
     /// entitlements (`com.apple.security.application-groups`).
     public static let appGroupIdentifier = "group.com.tokentracker.bar"
 
+    /// Bundle identifier of the widget extension. Used by the host app to
+    /// write snapshot files directly into the widget's sandbox container as
+    /// a fallback path for ad-hoc / dev signed builds where the App Group
+    /// container is not actually provisioned by the system.
+    public static let widgetBundleIdentifier = "com.tokentracker.bar.widget"
+
     /// Filename of the snapshot inside the App Group container.
     public static let snapshotFilename = "widget-snapshot.json"
 
@@ -83,6 +89,24 @@ public struct WidgetSnapshot: Codable, Equatable {
     }
 
     public static let empty = WidgetSnapshot()
+
+    // MARK: - Derived
+
+    /// Tokens used yesterday, derived from `dailyTrend`. The trend is sorted
+    /// oldest-first; the last entry represents today, so yesterday is the
+    /// second-to-last entry. Returns 0 when not enough data is available.
+    public var yesterdayTokens: Int {
+        guard dailyTrend.count >= 2 else { return 0 }
+        return dailyTrend[dailyTrend.count - 2].totalTokens
+    }
+
+    /// Delta (percent) between today and yesterday. Returns nil when there
+    /// is no usable baseline (yesterday was zero or no history).
+    public var todayDeltaPercent: Double? {
+        let y = yesterdayTokens
+        guard y > 0 else { return nil }
+        return Double(today.tokens - y) / Double(y) * 100.0
+    }
 
     /// Placeholder data used by widget previews and the gallery.
     public static let placeholder: WidgetSnapshot = {
@@ -235,9 +259,10 @@ public enum WidgetSnapshotStore {
         return dir.appendingPathComponent(WidgetSharedConstants.snapshotFilename)
     }
 
-    /// Fallback location used when the App Group container is unavailable.
-    /// Both targets resolve to the same path because Application Support is
-    /// per-user, not per-bundle, on macOS.
+    /// Per-target Application Support fallback used when the App Group
+    /// container is unavailable. The host (unsandboxed) resolves this to
+    /// `~/Library/Application Support/TokenTrackerBar/`; a sandboxed widget
+    /// extension resolves it inside its own container.
     public static func fallbackSnapshotURL() -> URL? {
         let fm = FileManager.default
         guard let support = try? fm.url(
@@ -247,6 +272,30 @@ public enum WidgetSnapshotStore {
             create: true
         ) else { return nil }
         let dir = support.appendingPathComponent("TokenTrackerBar", isDirectory: true)
+        if !fm.fileExists(atPath: dir.path) {
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir.appendingPathComponent(WidgetSharedConstants.snapshotFilename)
+    }
+
+    /// Absolute path of the snapshot inside the widget extension's sandbox
+    /// container. The host writes here as a third fallback so ad-hoc /
+    /// Developer-ID-less dev builds can still feed the widget without
+    /// relying on a provisioned App Group. The sandboxed widget extension
+    /// reads this same path via `fallbackSnapshotURL()` (resolves to its
+    /// own container).
+    ///
+    /// Returns `nil` when called from inside a sandbox — only the
+    /// unsandboxed host should ever write here.
+    public static func widgetContainerSnapshotURL() -> URL? {
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser
+        // Detect sandbox: a sandboxed process's home is inside ~/Library/Containers
+        if home.path.contains("/Library/Containers/") { return nil }
+        let dir = home
+            .appendingPathComponent("Library/Containers", isDirectory: true)
+            .appendingPathComponent(WidgetSharedConstants.widgetBundleIdentifier, isDirectory: true)
+            .appendingPathComponent("Data/Library/Application Support/TokenTrackerBar", isDirectory: true)
         if !fm.fileExists(atPath: dir.path) {
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }
@@ -272,7 +321,11 @@ public enum WidgetSnapshotStore {
     public static func write(_ snapshot: WidgetSnapshot) -> Bool {
         do {
             let data = try encoder().encode(snapshot)
-            let urls = [sharedSnapshotURL(), fallbackSnapshotURL()].compactMap { $0 }
+            let urls = [
+                sharedSnapshotURL(),
+                fallbackSnapshotURL(),
+                widgetContainerSnapshotURL()
+            ].compactMap { $0 }
             guard !urls.isEmpty else { return false }
             var anySuccess = false
             for url in urls {

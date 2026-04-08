@@ -15,8 +15,50 @@ enum WidgetSnapshotWriter {
 
     private static let logger = Logger(subsystem: "com.tokentracker.bar", category: "WidgetSnapshotWriter")
 
-    static func update(from vm: DashboardViewModel) {
-        let snapshot = buildSnapshot(from: vm)
+    /// Immutable snapshot of the fields we read off `DashboardViewModel`.
+    /// Captured synchronously on the main actor BEFORE we suspend on any
+    /// async work, so a concurrent `loadAll()` running while we're awaiting
+    /// the cost fetches can't smear two refreshes together in one widget
+    /// snapshot.
+    private struct VMInputs {
+        let serverOnline: Bool
+        let todaySummary: UsageSummaryResponse?
+        let summary: UsageSummaryResponse?
+        let rollingSummary: UsageSummaryResponse?
+        let daily: [DailyEntry]
+        let topModels: [TopModel]
+        let fleetData: [FleetEntry]
+        let heatmap: HeatmapResponse?
+        let usageLimits: UsageLimitsResponse?
+    }
+
+    static func update(from vm: DashboardViewModel) async {
+        // STEP 1 — synchronously freeze every VM field we will need. After
+        // this point we never touch `vm` again. This is the fix for the
+        // race where a second loadAll() could mutate the view model while
+        // we're awaiting the cost fetches below, producing a snapshot that
+        // mixed two different refreshes.
+        let inputs = VMInputs(
+            serverOnline: vm.serverOnline,
+            todaySummary: vm.todaySummary,
+            summary: vm.summary,
+            rollingSummary: vm.rollingSummary,
+            daily: vm.daily,
+            topModels: vm.topModels,
+            fleetData: vm.fleetData,
+            heatmap: vm.heatmap,
+            usageLimits: vm.usageLimits
+        )
+
+        // STEP 2 — the dashboard's `rollingSummary` does NOT include cost
+        // (the /tokentracker-usage-summary endpoint omits it from
+        // `rolling.*`). Fire two extra parallel summary calls scoped to
+        // 7-day and 30-day ranges so the widget can show real cost numbers.
+        async let last7dCost = fetchRangeCost(daysBack: 6)
+        async let last30dCost = fetchRangeCost(daysBack: 29)
+        let (cost7d, cost30d) = await (last7dCost, last30dCost)
+
+        let snapshot = buildSnapshot(from: inputs, cost7d: cost7d, cost30d: cost30d)
         let ok = WidgetSnapshotStore.write(snapshot)
         if ok {
             WidgetCenter.shared.reloadAllTimelines()
@@ -26,21 +68,45 @@ enum WidgetSnapshotWriter {
         }
     }
 
+    /// Fetches a `UsageSummaryResponse` for `[N days ago, today]` and pulls
+    /// out the top-level `total_cost_usd`. Returns 0 on any failure so the
+    /// widget keeps rendering rather than getting stuck on an error path.
+    private static func fetchRangeCost(daysBack: Int) async -> Double {
+        let from = DateHelpers.daysAgoString(daysBack)
+        let to = DateHelpers.todayString()
+        do {
+            let resp = try await APIClient.shared.fetchSummary(from: from, to: to)
+            return parseCost(resp.totals.totalCostUsd)
+        } catch {
+            logger.warning("widget cost fetch \(daysBack)d failed: \(error.localizedDescription)")
+            return 0
+        }
+    }
+
     // MARK: - Translation
 
-    private static func buildSnapshot(from vm: DashboardViewModel) -> WidgetSnapshot {
-        WidgetSnapshot(
+    private static func buildSnapshot(
+        from inputs: VMInputs,
+        cost7d: Double,
+        cost30d: Double
+    ) -> WidgetSnapshot {
+        var last7d = rollingTotals(from: inputs.rollingSummary?.rolling.last7d)
+        last7d.costUsd = cost7d
+        var last30d = rollingTotals(from: inputs.rollingSummary?.rolling.last30d)
+        last30d.costUsd = cost30d
+
+        return WidgetSnapshot(
             generatedAt: Date(),
-            serverOnline: vm.serverOnline,
-            today: periodTotals(from: vm.todaySummary),
-            last7d: rollingTotals(from: vm.rollingSummary?.rolling.last7d),
-            last30d: rollingTotals(from: vm.rollingSummary?.rolling.last30d),
-            selected: periodTotals(from: vm.summary),
-            dailyTrend: trendPoints(from: vm.daily),
-            topModels: topModelEntries(from: vm.topModels),
-            sources: sourceEntries(from: vm.fleetData),
-            heatmap: heatmapPayload(from: vm.heatmap),
-            limits: limitProviders(from: vm.usageLimits)
+            serverOnline: inputs.serverOnline,
+            today: periodTotals(from: inputs.todaySummary),
+            last7d: last7d,
+            last30d: last30d,
+            selected: periodTotals(from: inputs.summary),
+            dailyTrend: trendPoints(from: inputs.daily),
+            topModels: topModelEntries(from: inputs.topModels),
+            sources: sourceEntries(from: inputs.fleetData),
+            heatmap: heatmapPayload(from: inputs.heatmap),
+            limits: limitProviders(from: inputs.usageLimits)
         )
     }
 
@@ -139,19 +205,24 @@ enum WidgetSnapshotWriter {
         guard let limits else { return [] }
         var out: [LimitProvider] = []
 
-        // Claude
+        // Claude — `utilization` from /tokentracker-usage-limits is a 0–100
+        // percentage, not a 0–1 fraction. Divide by 100 to match the
+        // LimitProvider contract (and what every other provider here does).
         if limits.claude.configured {
             if let w = limits.claude.fiveHour {
                 out.append(LimitProvider(source: "claude", label: "Claude · 5h",
-                                         fraction: w.utilization, resetsAt: parseISO(w.resetsAt)))
+                                         fraction: w.utilization / 100.0,
+                                         resetsAt: parseISO(w.resetsAt)))
             }
             if let w = limits.claude.sevenDay {
                 out.append(LimitProvider(source: "claude", label: "Claude · 7d",
-                                         fraction: w.utilization, resetsAt: parseISO(w.resetsAt)))
+                                         fraction: w.utilization / 100.0,
+                                         resetsAt: parseISO(w.resetsAt)))
             }
             if let w = limits.claude.sevenDayOpus {
                 out.append(LimitProvider(source: "claude", label: "Claude · 7d Opus",
-                                         fraction: w.utilization, resetsAt: parseISO(w.resetsAt)))
+                                         fraction: w.utilization / 100.0,
+                                         resetsAt: parseISO(w.resetsAt)))
             }
         }
 

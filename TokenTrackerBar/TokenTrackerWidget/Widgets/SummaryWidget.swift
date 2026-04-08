@@ -1,248 +1,220 @@
 import SwiftUI
 import WidgetKit
-import AppIntents
+
+// Hero-number summary widget. No header chrome, no "updated" footer — the
+// widget gallery already labels the tile and the OS already shows reload
+// state. Each size promotes ONE primary number and lets the rest of the
+// information serve it. Static configuration: each widget kind has a
+// fixed, focused job (no period/metric switcher).
 
 struct SummaryWidget: Widget {
     let kind: String = "TokenTrackerSummaryWidget"
 
     var body: some WidgetConfiguration {
-        AppIntentConfiguration(
-            kind: kind,
-            intent: TokenTrackerWidgetIntent.self,
-            provider: TokenTrackerProvider()
-        ) { entry in
+        StaticConfiguration(kind: kind, provider: StaticSnapshotProvider()) { entry in
             SummaryWidgetView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
         }
-        .configurationDisplayName("Usage Summary")
-        .description("Tokens, cost, and trend at a glance. Pick which period to show.")
+        .configurationDisplayName("Usage")
+        .description("Today's tokens at a glance, with trend.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge])
     }
 }
 
 struct SummaryWidgetView: View {
     @Environment(\.widgetFamily) var family
-    let entry: TokenTrackerEntry
+    let entry: StaticEntry
 
     var body: some View {
         switch family {
-        case .systemSmall:      SmallView(entry: entry)
-        case .systemMedium:     MediumView(entry: entry)
-        case .systemLarge:      LargeView(entry: entry)
-        case .systemExtraLarge: ExtraLargeView(entry: entry)
-        default:                MediumView(entry: entry)
+        case .systemSmall:      SmallView(snap: entry.snapshot)
+        case .systemMedium:     MediumView(snap: entry.snapshot)
+        case .systemLarge:      LargeView(snap: entry.snapshot)
+        case .systemExtraLarge: LargeView(snap: entry.snapshot)
+        default:                MediumView(snap: entry.snapshot)
         }
     }
 }
 
-// MARK: - Small
+// MARK: - Small (2x2): Today only
 
 private struct SmallView: View {
-    let entry: TokenTrackerEntry
+    let snap: WidgetSnapshot
 
     var body: some View {
-        let totals = entry.snapshot.totals(for: entry.configuration.period)
-        VStack(alignment: .leading, spacing: 6) {
-            WidgetHeader(title: "TokenTracker", subtitle: entry.configuration.period.shortLabel)
+        let hasData = snap.today.tokens > 0
+
+        VStack(alignment: .leading, spacing: 0) {
+            Text("TODAY")
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(0.6)
+                .foregroundStyle(.secondary)
 
             Spacer(minLength: 0)
 
-            switch entry.configuration.metric {
-            case .tokens:
-                WidgetStat(label: "Tokens", value: WidgetFormat.compact(totals.tokens))
-            case .cost:
-                WidgetStat(label: "Cost", value: WidgetFormat.cost(totals.costUsd))
-            case .both:
-                WidgetStat(label: "Tokens", value: WidgetFormat.compact(totals.tokens),
-                           sub: WidgetFormat.cost(totals.costUsd))
-            }
+            Text(hasData ? WidgetFormat.compact(snap.today.tokens) : "—")
+                .font(.system(size: 38, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .padding(.bottom, 2)
+
+            Text(WidgetFormat.delta(snap.todayDeltaPercent))
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(WidgetFormat.deltaColor(snap.todayDeltaPercent))
 
             Spacer(minLength: 0)
 
-            SparklineView(points: entry.snapshot.trend(for: entry.configuration.period))
-                .frame(height: 22)
-
-            WidgetFooter(updated: entry.snapshot.generatedAt, serverOnline: entry.snapshot.serverOnline)
+            Text("vs. yesterday")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 }
 
-// MARK: - Medium
+// MARK: - Medium (4x2): Today + 7d, with sparkline
 
 private struct MediumView: View {
-    let entry: TokenTrackerEntry
+    let snap: WidgetSnapshot
 
     var body: some View {
-        let snap = entry.snapshot
-        let primary = snap.totals(for: entry.configuration.period)
-        VStack(alignment: .leading, spacing: 8) {
-            WidgetHeader(title: "TokenTracker",
-                         subtitle: entry.configuration.period.shortLabel)
-
-            HStack(alignment: .top, spacing: 14) {
-                WidgetStat(
-                    label: entry.configuration.period.shortLabel,
-                    value: WidgetFormat.compact(primary.tokens),
-                    sub: WidgetFormat.cost(primary.costUsd)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 0) {
+                HeroBlock(
+                    label: "TODAY",
+                    value: WidgetFormat.compact(snap.today.tokens),
+                    sub: WidgetFormat.delta(snap.todayDeltaPercent),
+                    subColor: WidgetFormat.deltaColor(snap.todayDeltaPercent)
                 )
-                Divider().frame(height: 36)
-                WidgetStat(label: "7d", value: WidgetFormat.compact(snap.last7d.tokens),
-                           sub: "\(snap.last7d.activeDays) active days")
-                Divider().frame(height: 36)
-                WidgetStat(label: "30d", value: WidgetFormat.compact(snap.last30d.tokens),
-                           sub: "\(snap.last30d.activeDays) active days")
+                Spacer(minLength: 12)
+                HeroBlock(
+                    label: "7 DAYS",
+                    value: WidgetFormat.compact(snap.last7d.tokens),
+                    sub: WidgetFormat.cost(snap.last7d.costUsd),
+                    subColor: .secondary,
+                    alignment: .trailing
+                )
             }
 
-            SparklineView(points: snap.trend(for: .last30d))
-                .frame(maxWidth: .infinity, minHeight: 28)
+            Spacer(minLength: 8)
 
-            WidgetFooter(updated: snap.generatedAt, serverOnline: snap.serverOnline)
+            SparklineView(points: Array(snap.dailyTrend.suffix(14)))
+                .frame(height: 32)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 }
 
-// MARK: - Large
+// MARK: - Large (4x4): Today + 7d + 30d + bar chart + top 3 models
 
 private struct LargeView: View {
-    let entry: TokenTrackerEntry
+    let snap: WidgetSnapshot
 
     var body: some View {
-        let snap = entry.snapshot
-        let primary = snap.totals(for: entry.configuration.period)
-
-        VStack(alignment: .leading, spacing: 10) {
-            WidgetHeader(title: "TokenTracker",
-                         subtitle: entry.configuration.period.shortLabel)
-
-            HStack(spacing: 12) {
-                WidgetStat(label: entry.configuration.period.shortLabel,
-                           value: WidgetFormat.compact(primary.tokens),
-                           sub: WidgetFormat.cost(primary.costUsd))
-                Divider().frame(height: 40)
-                WidgetStat(label: "7d", value: WidgetFormat.compact(snap.last7d.tokens),
-                           sub: "\(snap.last7d.activeDays) active")
-                Divider().frame(height: 40)
-                WidgetStat(label: "30d", value: WidgetFormat.compact(snap.last30d.tokens),
-                           sub: "\(snap.last30d.activeDays) active")
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 0) {
+                HeroBlock(
+                    label: "TODAY",
+                    value: WidgetFormat.compact(snap.today.tokens),
+                    sub: WidgetFormat.delta(snap.todayDeltaPercent),
+                    subColor: WidgetFormat.deltaColor(snap.todayDeltaPercent),
+                    size: .compact
+                )
+                Spacer(minLength: 12)
+                HeroBlock(
+                    label: "7 DAYS",
+                    value: WidgetFormat.compact(snap.last7d.tokens),
+                    sub: WidgetFormat.cost(snap.last7d.costUsd),
+                    subColor: .secondary,
+                    alignment: .center,
+                    size: .compact
+                )
+                Spacer(minLength: 12)
+                HeroBlock(
+                    label: "30 DAYS",
+                    value: WidgetFormat.compact(snap.last30d.tokens),
+                    sub: WidgetFormat.cost(snap.last30d.costUsd),
+                    subColor: .secondary,
+                    alignment: .trailing,
+                    size: .compact
+                )
             }
 
-            BarTrendChart(points: snap.trend(for: .last30d))
-                .frame(maxWidth: .infinity, minHeight: 60)
+            BarTrendChart(points: snap.dailyTrend)
+                .frame(maxWidth: .infinity, minHeight: 56)
 
-            // Top models
-            VStack(alignment: .leading, spacing: 4) {
-                Text("TOP MODELS")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .tracking(0.4)
-                ForEach(Array(snap.topModels.prefix(4).enumerated()), id: \.element.id) { idx, m in
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(WidgetTheme.modelDot(idx))
-                            .frame(width: 6, height: 6)
-                        Text(m.name)
-                            .font(.system(size: 11, weight: .medium))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Spacer(minLength: 4)
-                        Text(WidgetFormat.compact(m.tokens))
-                            .font(.system(size: 11, design: .rounded))
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                        Text(String(format: "%.0f%%", m.sharePercent))
-                            .font(.system(size: 10, design: .rounded))
-                            .foregroundStyle(.tertiary)
-                            .frame(width: 30, alignment: .trailing)
-                            .monospacedDigit()
-                    }
+            VStack(spacing: 6) {
+                ForEach(Array(snap.topModels.prefix(3).enumerated()), id: \.element.id) { idx, m in
+                    InlineModelRow(rank: idx, model: m)
                 }
             }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
 
-            Spacer(minLength: 0)
-            WidgetFooter(updated: snap.generatedAt, serverOnline: snap.serverOnline)
+// MARK: - Hero number block
+
+private struct HeroBlock: View {
+    let label: String
+    let value: String
+    let sub: String
+    let subColor: Color
+    var alignment: HorizontalAlignment = .leading
+    var size: HeroSize = .large
+
+    enum HeroSize {
+        case large   // medium widget: 2 blocks side by side
+        case compact // large widget: 3 blocks side by side
+
+        var valueFont: CGFloat { self == .large ? 28 : 24 }
+    }
+
+    var body: some View {
+        VStack(alignment: alignment, spacing: 3) {
+            Text(label)
+                .font(.system(size: 9, weight: .semibold))
+                .tracking(0.6)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: size.valueFont, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+            Text(sub)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(subColor)
+                .lineLimit(1)
         }
     }
 }
 
-// MARK: - Extra Large
-
-private struct ExtraLargeView: View {
-    let entry: TokenTrackerEntry
+// Simple inline row used by Large to surface top models without the
+// separate Top Models widget being installed.
+private struct InlineModelRow: View {
+    let rank: Int
+    let model: SnapshotModelEntry
 
     var body: some View {
-        let snap = entry.snapshot
-        let primary = snap.totals(for: entry.configuration.period)
-
-        VStack(alignment: .leading, spacing: 12) {
-            WidgetHeader(title: "TokenTracker",
-                         subtitle: entry.configuration.period.shortLabel)
-
-            HStack(alignment: .top, spacing: 16) {
-                // LEFT: stats + chart
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 14) {
-                        WidgetStat(label: entry.configuration.period.shortLabel,
-                                   value: WidgetFormat.compact(primary.tokens),
-                                   sub: WidgetFormat.cost(primary.costUsd))
-                        Divider().frame(height: 40)
-                        WidgetStat(label: "7d", value: WidgetFormat.compact(snap.last7d.tokens),
-                                   sub: "\(snap.last7d.activeDays) active")
-                        Divider().frame(height: 40)
-                        WidgetStat(label: "30d", value: WidgetFormat.compact(snap.last30d.tokens),
-                                   sub: "\(snap.last30d.activeDays) active")
-                    }
-
-                    BarTrendChart(points: snap.trend(for: .last30d))
-                        .frame(maxWidth: .infinity, minHeight: 70)
-
-                    // Heatmap snippet
-                    HeatmapGridView(payload: snap.heatmap, maxWeeks: 30)
-                        .frame(height: 60)
-                }
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-
-                Divider()
-
-                // RIGHT: top models + sources
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("TOP MODELS")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .tracking(0.4)
-                    ForEach(Array(snap.topModels.prefix(5).enumerated()), id: \.element.id) { idx, m in
-                        HStack(spacing: 6) {
-                            Circle().fill(WidgetTheme.modelDot(idx)).frame(width: 6, height: 6)
-                            Text(m.name)
-                                .font(.system(size: 11, weight: .medium))
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Spacer(minLength: 4)
-                            Text(WidgetFormat.compact(m.tokens))
-                                .font(.system(size: 11, design: .rounded))
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                        }
-                    }
-
-                    Divider()
-
-                    Text("SOURCES")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .tracking(0.4)
-                    ForEach(snap.sources.prefix(5)) { src in
-                        SourceDot(
-                            source: src.source,
-                            label: src.source.uppercased(),
-                            value: "\(WidgetFormat.compact(src.tokens)) · \(String(format: "%.0f%%", src.sharePercent))"
-                        )
-                    }
-                }
-                .frame(width: 240, alignment: .topLeading)
-            }
-
-            Spacer(minLength: 0)
-            WidgetFooter(updated: snap.generatedAt, serverOnline: snap.serverOnline)
+        HStack(spacing: 8) {
+            Circle()
+                .fill(WidgetTheme.modelDot(rank))
+                .frame(width: 6, height: 6)
+            Text(model.name)
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 6)
+            Text(WidgetFormat.compact(model.tokens))
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            Text(String(format: "%.0f%%", model.sharePercent))
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(.tertiary)
+                .monospacedDigit()
+                .frame(width: 30, alignment: .trailing)
         }
     }
 }

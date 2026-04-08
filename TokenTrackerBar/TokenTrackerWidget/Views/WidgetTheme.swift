@@ -87,4 +87,39 @@ enum WidgetFormat {
         if interval < 86400 { return "\(Int(interval / 3600))h ago" }
         return "\(Int(interval / 86400))d ago"
     }
+
+    /// "▲ 12%" / "▼ 5%" / "—" — short signed delta string for hero numbers.
+    static func delta(_ percent: Double?) -> String {
+        guard let p = percent else { return "—" }
+        let rounded = Int(p.rounded())
+        if rounded == 0 { return "±0%" }
+        let arrow = rounded > 0 ? "▲" : "▼"
+        return "\(arrow) \(abs(rounded))%"
+    }
+
+    /// Color for a delta arrow. Up = green (more usage isn't strictly bad,
+    /// but matches "going up"), down = neutral secondary, zero = secondary.
+    static func deltaColor(_ percent: Double?) -> Color {
+        guard let p = percent, Int(p.rounded()) != 0 else { return .secondary }
+        return p > 0
+            ? Color(.sRGB, red: 0.20, green: 0.72, blue: 0.40, opacity: 1)
+            : Color(.sRGB, red: 0.55, green: 0.55, blue: 0.55, opacity: 1)
+    }
+
+    /// "in 2h 14m" / "in 4d" — concise countdown to a future reset date.
+    /// Returns nil when no date is provided or it has already passed.
+    static func relativeReset(_ date: Date?) -> String? {
+        guard let date else { return nil }
+        let interval = date.timeIntervalSince(Date())
+        if interval <= 0 { return nil }
+        if interval < 3600 {
+            return "in \(Int(interval / 60))m"
+        }
+        if interval < 86400 {
+            let h = Int(interval / 3600)
+            let m = Int((interval.truncatingRemainder(dividingBy: 3600)) / 60)
+            return m > 0 ? "in \(h)h \(m)m" : "in \(h)h"
+        }
+        return "in \(Int(interval / 86400))d"
+    }
 }

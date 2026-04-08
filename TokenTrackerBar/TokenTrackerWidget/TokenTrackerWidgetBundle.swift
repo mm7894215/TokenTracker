@@ -5,10 +5,8 @@ import WidgetKit
 struct TokenTrackerWidgetBundle: WidgetBundle {
     var body: some Widget {
         SummaryWidget()
-        TrendWidget()
+        HeatmapWidget()
         TopModelsWidget()
         UsageLimitsWidget()
-        HeatmapWidget()
-        ClawdWidget()
     }
 }

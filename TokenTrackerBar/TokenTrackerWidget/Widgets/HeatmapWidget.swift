@@ -1,6 +1,10 @@
 import SwiftUI
 import WidgetKit
 
+// Hero-grid heatmap widget. The grid IS the widget — no title, no stat row,
+// just the calendar filling almost the whole tile with a tiny streak label
+// in the top corner and a one-line summary at the bottom.
+
 struct HeatmapWidget: Widget {
     let kind: String = "TokenTrackerHeatmapWidget"
 
@@ -19,36 +23,42 @@ struct HeatmapWidgetView: View {
     @Environment(\.widgetFamily) var family
     let entry: StaticEntry
 
+    private var weeks: Int {
+        switch family {
+        case .systemMedium: return 26
+        case .systemLarge: return 40
+        default: return 52
+        }
+    }
+
     var body: some View {
         let snap = entry.snapshot
-        let weeks: Int
-        switch family {
-        case .systemMedium: weeks = 26
-        case .systemLarge: weeks = 40
-        default: weeks = 52
-        }
+        let streak = snap.heatmap.streakDays
 
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                WidgetHeader(title: "Activity", icon: "square.grid.3x3.fill")
-                Spacer()
-                Text("\(snap.heatmap.streakDays)d streak")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.tint)
-            }
-
-            HStack(spacing: 14) {
-                WidgetStat(label: "Active", value: "\(snap.heatmap.activeDays)", sub: "days")
-                Divider().frame(height: 30)
-                WidgetStat(label: "30d", value: WidgetFormat.compact(snap.last30d.tokens))
-                Divider().frame(height: 30)
-                WidgetStat(label: "7d", value: WidgetFormat.compact(snap.last7d.tokens))
-            }
-
+        VStack(alignment: .leading, spacing: 12) {
             HeatmapGridView(payload: snap.heatmap, maxWeeks: weeks)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .topTrailing) {
+                    if streak > 0 {
+                        Text("\(streak)d streak")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.tint)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Color.accentColor.opacity(0.16), in: Capsule())
+                    }
+                }
 
-            WidgetFooter(updated: snap.generatedAt, serverOnline: snap.serverOnline)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(WidgetFormat.compact(snap.last30d.tokens))
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .monospacedDigit()
+                Text("tokens · \(snap.heatmap.activeDays) active days")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
         }
     }
 }

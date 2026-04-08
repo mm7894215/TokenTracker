@@ -82,22 +82,65 @@ jobs:
       # unsigned bundle. Ad-hoc signing ("-" identity) makes the error message
       # downgrade to "unidentified developer" which the user can right-click → Open.
       # For a fully trusted install you still need Developer ID + notarization.
+      #
+      # CRITICAL ORDERING — sign inner-to-outer, NOT with --deep:
+      #   1. Inner Mach-O binaries (node, dylibs)
+      #   2. The widget extension appex with its OWN entitlements
+      #      (must include com.apple.security.app-sandbox or pkd will refuse
+      #      to load it with "plug-ins must be sandboxed", and the widget
+      #      gallery will silently never list TokenTracker)
+      #   3. The outer .app bundle with the host's entitlements, WITHOUT
+      #      --deep (otherwise the host entitlements get recursively
+      #      re-applied to the appex, stripping its app-sandbox key — the
+      #      host is intentionally not sandboxed because it forks Node)
       - name: Ad-hoc sign app
         working-directory: TokenTrackerBar
         run: |
           APP_PATH="$(find build/DerivedData/Build/Products/Release -name 'TokenTrackerBar.app' -maxdepth 1)"
+          APPEX_PATH="$APP_PATH/Contents/PlugIns/TokenTrackerWidget.appex"
           echo "Signing: $APP_PATH"
-          # Sign nested Mach-O binaries first (inner-to-outer)
+
+          # 1. Sign nested Mach-O binaries (inner-to-outer)
           find "$APP_PATH/Contents/Resources/EmbeddedServer" -type f \
             \( -name 'node' -o -name '*.dylib' -o -name '*.so' -o -name '*.node' \) \
             -exec codesign --force --timestamp=none --sign - {} \;
-          # Sign the outer .app bundle with entitlements
-          codesign --force --deep --timestamp=none \
+
+          # 2. Sign the widget extension appex with the WIDGET entitlements
+          #    (app-sandbox + app-group). Must happen BEFORE signing the host
+          #    so the appex's seal references its own entitlements file.
+          if [ -d "$APPEX_PATH" ]; then
+            echo "Signing widget extension: $APPEX_PATH"
+            codesign --force --timestamp=none \
+              --entitlements TokenTrackerWidget/TokenTrackerWidget.entitlements \
+              --sign - "$APPEX_PATH"
+          else
+            echo "::warning::Widget extension not found at $APPEX_PATH"
+          fi
+
+          # 3. Sign the outer .app bundle with the host entitlements.
+          #    NO --deep here — that would recursively re-sign the appex
+          #    with the host's entitlements (which lack app-sandbox) and
+          #    pkd would reject the widget at runtime.
+          codesign --force --timestamp=none \
             --entitlements TokenTrackerBar/TokenTrackerBar.entitlements \
             --sign - "$APP_PATH"
+
           # Verify
           codesign --verify --verbose=2 "$APP_PATH"
           codesign -dv --verbose=2 "$APP_PATH" 2>&1 | head -8
+
+          # Sanity-check that the widget extension still has app-sandbox
+          # after the outer signing pass — this is the exact failure mode
+          # that silently breaks widget discovery, so fail loudly here.
+          if [ -d "$APPEX_PATH" ]; then
+            echo "Verifying widget extension entitlements:"
+            codesign -d --entitlements - "$APPEX_PATH" 2>&1 | tee /tmp/appex-ents.txt
+            if ! grep -q "com.apple.security.app-sandbox" /tmp/appex-ents.txt; then
+              echo "::error::Widget extension is missing com.apple.security.app-sandbox after signing — pkd will refuse to load it and the widget gallery will not list TokenTracker"
+              exit 1
+            fi
+            echo "✓ Widget extension still has app-sandbox entitlement"
+          fi
 
       # 5. Create DMG (uses Homebrew `create-dmg` for headless background + layout)
       - name: Install create-dmg

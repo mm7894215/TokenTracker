@@ -206,7 +206,7 @@ class DashboardViewModel: ObservableObject {
 
         // Push the latest data to the widget snapshot file so the desktop
         // widgets pick it up on their next timeline reload.
-        WidgetSnapshotWriter.update(from: self)
+        await WidgetSnapshotWriter.update(from: self)
     }
 
     // MARK: - Sync
