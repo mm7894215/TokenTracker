@@ -8,6 +8,7 @@ import { UsageOverview } from "../components/UsageOverview.jsx";
 import { TrendMonitor } from "../components/TrendMonitor.jsx";
 import { FadeIn } from "../../foundation/FadeIn.jsx";
 import { MacAppBanner } from "../components/MacAppBanner.jsx";
+import { WidgetOnboardingCard } from "../components/WidgetOnboardingCard.jsx";
 
 export function DashboardView(props) {
   const {
@@ -144,6 +145,8 @@ export function DashboardView(props) {
                   rolling={rollingUsage}
                   topModels={topModels}
                 />
+
+                {isLocalMode ? <WidgetOnboardingCard /> : null}
 
                 {shouldShowInstall ? (
                   <FadeIn delay={0.25}>

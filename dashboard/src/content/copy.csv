@@ -224,6 +224,9 @@ dashboard.upgrade_alert.install_command,ui,UpgradeAlertModal,UpgradeAlertModal,i
 dashboard.upgrade_alert.copy,ui,UpgradeAlertModal,UpgradeAlertModal,copy,"[ COPY ]",,active
 dashboard.upgrade_alert.copied,ui,UpgradeAlertModal,UpgradeAlertModal,copied,"[ COPIED ]",,active
 dashboard.upgrade_alert.ignore,ui,UpgradeAlertModal,UpgradeAlertModal,ignore,"Dismiss",,active
+dashboard.widgets.title,dashboard,DashboardPage,WidgetOnboardingCard,title,"Desktop Widgets",,active
+dashboard.widgets.hint,dashboard,DashboardPage,WidgetOnboardingCard,hint,"Right-click your desktop → Edit Widgets → search ""TokenTracker""",,active
+dashboard.widgets.dismiss_aria,dashboard,DashboardPage,WidgetOnboardingCard,dismiss_aria,"Dismiss widget intro",,active
 dashboard.cost_breakdown.title,ui,CostAnalysisModal,CostAnalysisModal,title,"Cost Breakdown",,active
 dashboard.cost_breakdown.total_label,ui,CostAnalysisModal,CostAnalysisModal,total_label,"Estimated Total Cost",,active
 dashboard.cost_breakdown.calc_prefix,ui,CostAnalysisModal,CostAnalysisModal,calc_prefix,"CALC:",,deprecated
