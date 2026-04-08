@@ -80,21 +80,19 @@ private struct MediumView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
                 HeroBlock(
                     label: "TODAY",
                     value: WidgetFormat.compact(snap.today.tokens),
-                    sub: WidgetFormat.delta(snap.todayDeltaPercent),
-                    subColor: WidgetFormat.deltaColor(snap.todayDeltaPercent)
+                    subText: todaySubText(snap: snap)
                 )
-                Spacer(minLength: 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 HeroBlock(
                     label: "7 DAYS",
                     value: WidgetFormat.compact(snap.last7d.tokens),
-                    sub: WidgetFormat.cost(snap.last7d.costUsd),
-                    subColor: .secondary,
-                    alignment: .trailing
+                    subText: costSubText(snap.last7d.costUsd)
                 )
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             Spacer(minLength: 8)
@@ -113,32 +111,28 @@ private struct LargeView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
                 HeroBlock(
                     label: "TODAY",
                     value: WidgetFormat.compact(snap.today.tokens),
-                    sub: WidgetFormat.delta(snap.todayDeltaPercent),
-                    subColor: WidgetFormat.deltaColor(snap.todayDeltaPercent),
+                    subText: todaySubText(snap: snap),
                     size: .compact
                 )
-                Spacer(minLength: 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 HeroBlock(
                     label: "7 DAYS",
                     value: WidgetFormat.compact(snap.last7d.tokens),
-                    sub: WidgetFormat.cost(snap.last7d.costUsd),
-                    subColor: .secondary,
-                    alignment: .center,
+                    subText: costSubText(snap.last7d.costUsd),
                     size: .compact
                 )
-                Spacer(minLength: 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 HeroBlock(
                     label: "30 DAYS",
                     value: WidgetFormat.compact(snap.last30d.tokens),
-                    sub: WidgetFormat.cost(snap.last30d.costUsd),
-                    subColor: .secondary,
-                    alignment: .trailing,
+                    subText: costSubText(snap.last30d.costUsd),
                     size: .compact
                 )
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             BarTrendChart(points: snap.dailyTrend)
@@ -159,9 +153,9 @@ private struct LargeView: View {
 private struct HeroBlock: View {
     let label: String
     let value: String
-    let sub: String
-    let subColor: Color
-    var alignment: HorizontalAlignment = .leading
+    /// Pre-built `Text` so callers can mix colors inline (e.g. `$12.34 ▼33%`
+    /// where the cost is gray and the delta is colored). Single-line.
+    let subText: Text
     var size: HeroSize = .large
 
     enum HeroSize {
@@ -172,7 +166,7 @@ private struct HeroBlock: View {
     }
 
     var body: some View {
-        VStack(alignment: alignment, spacing: 3) {
+        VStack(alignment: .leading, spacing: 3) {
             Text(label)
                 .font(.system(size: 9, weight: .semibold))
                 .tracking(0.6)
@@ -182,12 +176,29 @@ private struct HeroBlock: View {
                 .foregroundColor(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
-            Text(sub)
+            subText
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(subColor)
                 .lineLimit(1)
         }
     }
+}
+
+// MARK: - Sub-line builders
+
+/// Today's sub line: gray cost + colored delta side by side, e.g.
+/// `$12.34  ▼33%`. Concatenated as a single `Text` so it stays one line and
+/// shares the parent's font / size with the other hero blocks.
+private func todaySubText(snap: WidgetSnapshot) -> Text {
+    let cost = WidgetFormat.cost(snap.today.costUsd)
+    let delta = WidgetFormat.delta(snap.todayDeltaPercent)
+    let deltaColor = WidgetFormat.deltaColor(snap.todayDeltaPercent)
+    return Text("\(cost)  ").foregroundColor(.secondary)
+         + Text(delta).foregroundColor(deltaColor)
+}
+
+/// Plain gray cost line for the 7d / 30d hero blocks.
+private func costSubText(_ usd: Double) -> Text {
+    Text(WidgetFormat.cost(usd)).foregroundColor(.secondary)
 }
 
 // Simple inline row used by Large to surface top models without the
