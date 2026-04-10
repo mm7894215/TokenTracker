@@ -14,7 +14,7 @@ struct FooterView: View {
                     Text(Strings.openDashboard)
                 }
                     .font(.caption)
-                    .fontWeight(.medium)
+                    .modifier(FontWeightModifier(weight: .medium))
                     .foregroundStyle(hoveringDashboard ? .primary : Color.accentColor)
                     .scaleEffect(hoveringDashboard ? 1.03 : 1.0)
                     .animation(.easeOut(duration: 0.12), value: hoveringDashboard)

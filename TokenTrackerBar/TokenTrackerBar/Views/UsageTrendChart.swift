@@ -1,6 +1,7 @@
 import SwiftUI
 import Charts
 
+@available(macOS 13, *)
 struct UsageTrendChart: View {
 	let daily: [DailyEntry]
 	var monthly: [MonthlyEntry] = []
@@ -202,6 +203,34 @@ struct UsageTrendChart: View {
 				}
 				.frame(height: 140)
 				.accessibilityLabel("Token usage trend chart")
+			}
+		}
+	}
+}
+
+/// Fallback wrapper that shows the chart on macOS 13+ or a placeholder on older systems.
+struct UsageTrendChartWrapper: View {
+	let daily: [DailyEntry]
+	var monthly: [MonthlyEntry] = []
+	var hourly: [HourlyEntry] = []
+	@Binding var period: DateHelpers.Period
+	var onPeriodChange: (DateHelpers.Period) -> Void = { _ in }
+
+	var body: some View {
+		if #available(macOS 13, *) {
+			UsageTrendChart(
+				daily: daily,
+				monthly: monthly,
+				hourly: hourly,
+				period: $period,
+				onPeriodChange: onPeriodChange
+			)
+		} else {
+			VStack(alignment: .leading, spacing: 14) {
+				SectionHeader(title: Strings.trendTitle) {
+					PeriodPickerView(selection: $period, onChange: onPeriodChange)
+				}
+				PlaceholderBlock(height: 140, hint: "Charts require macOS 13+")
 			}
 		}
 	}

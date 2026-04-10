@@ -12,7 +12,7 @@ struct PeriodPickerView: View {
                 } label: {
                     Text(period.label)
                         .font(.caption2)
-                        .fontWeight(selection == period ? .semibold : .regular)
+                        .modifier(FontWeightModifier(weight: selection == period ? .semibold : .regular))
                         .foregroundStyle(selection == period ? .primary : .tertiary)
                 }
                 .buttonStyle(.plain)

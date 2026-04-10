@@ -1,5 +1,29 @@
 import SwiftUI
 
+/// Applies `.tracking()` on macOS 13+ and is a no-op on older versions.
+struct TrackingModifier: ViewModifier {
+    let value: CGFloat
+    func body(content: Content) -> some View {
+        if #available(macOS 13, *) {
+            content.tracking(value)
+        } else {
+            content
+        }
+    }
+}
+
+/// Applies `.fontWeight()` on macOS 13+ and is a no-op on older versions.
+struct FontWeightModifier: ViewModifier {
+    let weight: Font.Weight
+    func body(content: Content) -> some View {
+        if #available(macOS 13, *) {
+            content.fontWeight(weight)
+        } else {
+            content
+        }
+    }
+}
+
 /// Unified section header used across all dashboard sections.
 struct SectionHeader<Trailing: View>: View {
     let title: String
@@ -14,10 +38,10 @@ struct SectionHeader<Trailing: View>: View {
         HStack {
             Text(title)
                 .font(.caption)
-                .fontWeight(.semibold)
+                .modifier(FontWeightModifier(weight: .semibold))
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
-                .tracking(0.5)
+                .modifier(TrackingModifier(value: 0.5))
             Spacer()
             trailing()
         }

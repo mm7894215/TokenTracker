@@ -63,10 +63,20 @@ final class NativeBridge {
     // MARK: - State push
 
     func pushSettings() {
+        let launchAtLoginValue: Bool
+        let launchAtLoginSupported: Bool
+        if #available(macOS 13, *) {
+            launchAtLoginValue = SMAppService.mainApp.status == .enabled
+            launchAtLoginSupported = true
+        } else {
+            launchAtLoginValue = false
+            launchAtLoginSupported = false
+        }
         let payload: [String: Any] = [
             "showStats": UserDefaults.standard.object(forKey: "MenuBarShowStats") as? Bool ?? true,
             "animatedIcon": UserDefaults.standard.object(forKey: "MenuBarAnimationEnabled") as? Bool ?? true,
-            "launchAtLogin": SMAppService.mainApp.status == .enabled,
+            "launchAtLogin": launchAtLoginValue,
+            "launchAtLoginSupported": launchAtLoginSupported,
             "version": UpdateChecker.shared.currentVersion(),
             "updateStatus": UpdateChecker.shared.statusText ?? NSNull(),
             "updateBusy": UpdateChecker.shared.isBusy,
@@ -103,6 +113,7 @@ final class NativeBridge {
     }
 
     private func setLaunchAtLogin(_ enabled: Bool) {
+        guard #available(macOS 13, *) else { return }
         do {
             if enabled {
                 try SMAppService.mainApp.register()

@@ -32,7 +32,7 @@ struct DashboardView: View {
                             )
                             UsageLimitsView(limits: viewModel.usageLimits)
                             ActivityHeatmapView(heatmap: viewModel.heatmap)
-                            UsageTrendChart(
+                            UsageTrendChartWrapper(
                                 daily: viewModel.daily,
                                 monthly: viewModel.monthly,
                                 hourly: viewModel.hourly,

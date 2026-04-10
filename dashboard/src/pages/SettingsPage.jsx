@@ -408,6 +408,7 @@ function MenuBarSection() {
   const showStats = Boolean(settings?.showStats);
   const animatedIcon = settings?.animatedIcon !== false; // default on
   const launchAtLogin = Boolean(settings?.launchAtLogin);
+  const launchAtLoginSupported = settings?.launchAtLoginSupported !== false;
   const version = settings?.version || "—";
   const updateStatus = settings?.updateStatus || null;
   const updateBusy = Boolean(settings?.updateBusy);
@@ -437,17 +438,19 @@ function MenuBarSection() {
           />
         }
       />
-      <SettingsRow
-        label={copy("settings.menubar.launchAtLogin")}
-        hint={copy("settings.menubar.launchAtLoginHint")}
-        control={
-          <ToggleSwitch
-            checked={launchAtLogin}
-            onChange={() => setSetting("launchAtLogin", !launchAtLogin)}
-            ariaLabel={copy("settings.menubar.launchAtLogin")}
-          />
-        }
-      />
+      {launchAtLoginSupported && (
+        <SettingsRow
+          label={copy("settings.menubar.launchAtLogin")}
+          hint={copy("settings.menubar.launchAtLoginHint")}
+          control={
+            <ToggleSwitch
+              checked={launchAtLogin}
+              onChange={() => setSetting("launchAtLogin", !launchAtLogin)}
+              ariaLabel={copy("settings.menubar.launchAtLogin")}
+            />
+          }
+        />
+      )}
 
       <SettingsRow
         label={copy("settings.menubar.syncNow")}

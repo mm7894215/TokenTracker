@@ -23,19 +23,12 @@ struct ClawdCompanionView: View {
             characterView
                 .frame(width: 15 * px, height: 16 * px)
                 .modifier(ActionModifier(action: currentAction))
-                .onContinuousHover { phase in
-                    switch phase {
-                    case .active(let loc):
-                        if !hoveringCharacter { NSCursor.pointingHand.push() }
-                        hoveringCharacter = true
-                        let mid = 15 * px / 2
-                        hoverSide = loc.x < mid - 10 ? .left : (loc.x > mid + 10 ? .right : .center)
-                    case .ended:
-                        if hoveringCharacter { NSCursor.pop() }
-                        hoveringCharacter = false
-                        hoverSide = .none
-                    }
-                }
+                .modifier(ClawdHoverModifier(hoveringCharacter: $hoveringCharacter, onActive: { loc in
+                    let mid = 15 * px / 2
+                    hoverSide = loc.x < mid - 10 ? .left : (loc.x > mid + 10 ? .right : .center)
+                }, onEnded: {
+                    hoverSide = .none
+                }))
                 .onTapGesture { handleTap() }
 
             bubbleView
@@ -1000,5 +993,32 @@ private struct BubbleShape: Shape {
         p.addLine(to: CGPoint(x: tail, y: tailY + 4))
         p.closeSubpath()
         return p
+    }
+}
+
+// MARK: - Continuous Hover Modifier (macOS 14+)
+
+private struct ClawdHoverModifier: ViewModifier {
+    @Binding var hoveringCharacter: Bool
+    var onActive: (CGPoint) -> Void
+    var onEnded: () -> Void
+
+    func body(content: Content) -> some View {
+        if #available(macOS 14, *) {
+            content.onContinuousHover { phase in
+                switch phase {
+                case .active(let loc):
+                    if !hoveringCharacter { NSCursor.pointingHand.push() }
+                    hoveringCharacter = true
+                    onActive(loc)
+                case .ended:
+                    if hoveringCharacter { NSCursor.pop() }
+                    hoveringCharacter = false
+                    onEnded()
+                }
+            }
+        } else {
+            content
+        }
     }
 }

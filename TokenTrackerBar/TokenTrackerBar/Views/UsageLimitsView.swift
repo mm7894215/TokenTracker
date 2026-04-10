@@ -95,7 +95,7 @@ struct UsageLimitsView: View {
                 }
                 Text(title)
                     .font(.system(.caption, design: .default))
-                    .fontWeight(.medium)
+                    .modifier(FontWeightModifier(weight: .medium))
             }
             content()
         }

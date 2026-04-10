@@ -83,7 +83,7 @@ final class ServerManager: ObservableObject {
         }
         // Brief wait for the port to be released
         if !pids.isEmpty {
-            try? await Task.sleep(for: .milliseconds(500))
+            try? await Task.sleep(nanoseconds: 500 * 1_000_000)
         }
     }
 
@@ -243,7 +243,7 @@ final class ServerManager: ObservableObject {
         while Date() < deadline {
             let healthy = await APIClient.shared.checkServerHealth()
             if healthy { return true }
-            try? await Task.sleep(for: .milliseconds(delay))
+            try? await Task.sleep(nanoseconds: delay * 1_000_000)
             delay = min(delay * 2, maxDelay)
         }
         return false
@@ -255,7 +255,7 @@ final class ServerManager: ObservableObject {
         healthCheckTask?.cancel()
         healthCheckTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(30))
+                try? await Task.sleep(nanoseconds: 30 * 1_000_000_000)
                 guard !Task.isCancelled, let self else { break }
                 let healthy = await APIClient.shared.checkServerHealth()
                 if healthy {

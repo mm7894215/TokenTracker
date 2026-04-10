@@ -43,7 +43,7 @@ struct ServerStartingView: View {
                 .controlSize(.regular)
             Text(Strings.serverStarting)
                 .font(.subheadline)
-                .fontWeight(.medium)
+                .modifier(FontWeightModifier(weight: .medium))
             Text(Strings.serverPreparing)
                 .font(.caption)
                 .foregroundStyle(.tertiary)
