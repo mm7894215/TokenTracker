@@ -79,11 +79,22 @@ jobs:
             -configuration Release \
             -derivedDataPath build/DerivedData \
             ARCHS="arm64 x86_64" \
+            ONLY_ACTIVE_ARCH=NO \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             OTHER_SWIFT_FLAGS="\$(inherited) -Xfrontend -solver-expression-time-threshold=120" \
             clean build
+
+          # Verify universal binary — fail loudly if Intel slice is missing
+          APP_BIN="$(find build/DerivedData/Build/Products/Release -name 'TokenTrackerBar' -path '*/MacOS/*' -maxdepth 5)"
+          echo "Built binary: $APP_BIN"
+          lipo -info "$APP_BIN"
+          if ! lipo -info "$APP_BIN" 2>&1 | grep -q "x86_64"; then
+            echo "::error::Binary is NOT universal — missing x86_64 slice. Intel Macs will show a prohibited icon."
+            exit 1
+          fi
+          echo "✓ Universal binary confirmed (arm64 + x86_64)"
 
       # 4b. Ad-hoc sign — without this, Gatekeeper rejects the downloaded .app
       # as "damaged" because CODE_SIGNING_ALLOWED=NO above produced an entirely
