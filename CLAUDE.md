@@ -165,7 +165,7 @@ Query params: `from`, `to` (YYYY-MM-DD), `tz` (timezone), `tz_offset_minutes`, `
 
 ### macOS App Architecture
 
-- Swift 5.9, macOS 13.0+, XcodeGen project generation
+- Swift 5.9, macOS 12.0+, XcodeGen project generation
 - Menu bar app (LSUIElement: true), single-click → popover, double-click → full dashboard window
 - Embedded Node.js server (universal arm64+x64 binary) — self-contained, no external Node dependency
 - WKWebView hosts React dashboard with script messaging for OAuth
