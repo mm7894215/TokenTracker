@@ -55,20 +55,17 @@ tokentracker doctor       # Health check
 
 ### 🍺 Homebrew (macOS)
 
-Prefer `brew`? The official tap ships both the CLI formula and the menu bar app cask:
+Prefer `brew`? Install directly — no extra tap step needed:
 
 ```bash
-# One-time tap (fetches cask + formula metadata)
-brew tap mm7894215/tokentracker
-
 # macOS menu bar app (DMG)
-brew install --cask tokentracker
+brew install --cask mm7894215/tokentracker/tokentracker
 
 # CLI only
-brew install tokentracker
+brew install mm7894215/tokentracker/tokentracker
 ```
 
-Upgrade with `brew upgrade --cask tokentracker` / `brew upgrade tokentracker`. The tap auto-bumps within an hour of every new release.
+Upgrade with `brew upgrade --cask mm7894215/tokentracker/tokentracker`. The tap auto-bumps within an hour of every new release.
 
 ---
 
