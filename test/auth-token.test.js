@@ -68,3 +68,20 @@ test("isAccessTokenReady accepts token providers only", async () => {
   assert.equal(isAccessTokenReady({ getAccessToken: async () => "token" }), true);
   assert.equal(isAccessTokenReady({ accessToken: "token" }), false);
 });
+
+test("isValidJwtShape rejects malformed tokens and accepts real JWTs", async () => {
+  const { isValidJwtShape } = await loadAuthToken();
+  assert.equal(isValidJwtShape(null), false);
+  assert.equal(isValidJwtShape(""), false);
+  assert.equal(isValidJwtShape("abc"), false);
+  assert.equal(isValidJwtShape("null"), false);
+  assert.equal(isValidJwtShape("undefined"), false);
+  assert.equal(isValidJwtShape("invalid.token.here"), false);
+  assert.equal(isValidJwtShape("a.b"), false);
+  assert.equal(isValidJwtShape("a.b.c.d"), false);
+
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ sub: "u1", exp: 9999999999 })).toString("base64url");
+  const signature = "sigpart";
+  assert.equal(isValidJwtShape(`${header}.${payload}.${signature}`), true);
+});

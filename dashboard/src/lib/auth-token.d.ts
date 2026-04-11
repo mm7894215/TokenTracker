@@ -14,3 +14,4 @@ export function resolveAuthAccessTokenWithRetry(
   options?: { maxAttempts?: number; baseDelayMs?: number },
 ): Promise<string | null>;
 export function isAccessTokenReady(token: AuthTokenProvider | unknown): boolean;
+export function isValidJwtShape(token: unknown): boolean;

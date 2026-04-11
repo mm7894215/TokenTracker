@@ -11,6 +11,7 @@ import {
   isMockEnabled,
 } from "./mock-data";
 import { getInsforgeRemoteUrl, getInsforgeAnonKey } from "./insforge-config";
+import { isValidJwtShape } from "./auth-token";
 
 type AnyRecord = Record<string, any>;
 
@@ -133,7 +134,14 @@ async function fetchInsforgeFunction(slug: string, options: {
   };
   const anonKey = getInsforgeAnonKey();
   if (anonKey) headers.apikey = anonKey;
-  if (options.accessToken) headers.Authorization = `Bearer ${options.accessToken}`;
+  // Only attach Authorization if the token is a well-formed JWT. InsForge's
+  // platform gateway validates the JWT before user code runs and returns
+  // HTTP 500 (JWSError) for any malformed value — which would break
+  // public endpoints like leaderboard for users whose stored token got
+  // corrupted or truncated.
+  if (options.accessToken && isValidJwtShape(options.accessToken)) {
+    headers.Authorization = `Bearer ${options.accessToken}`;
+  }
 
   const res = await fetch(url.toString(), {
     method: options.method || "GET",

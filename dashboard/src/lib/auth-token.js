@@ -26,6 +26,29 @@ export function getAccessTokenExpiryMs(token) {
   }
 }
 
+export function isValidJwtShape(token) {
+  const normalized = normalizeAccessToken(token);
+  if (!normalized) return false;
+  const parts = normalized.split(".");
+  if (parts.length !== 3) return false;
+  try {
+    for (let i = 0; i < 2; i++) {
+      const part = parts[i];
+      if (!/^[A-Za-z0-9_-]+$/.test(part)) return false;
+      const padded = part
+        .replace(/-/g, "+")
+        .replace(/_/g, "/")
+        .padEnd(part.length + ((4 - (part.length % 4)) % 4), "=");
+      const decoded =
+        typeof atob === "function" ? atob(padded) : Buffer.from(padded, "base64").toString("utf8");
+      if (i === 1) JSON.parse(decoded);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function isLikelyExpiredAccessToken(token, skewMs = 30_000) {
   const expiryMs = getAccessTokenExpiryMs(token);
   if (!expiryMs) return false;
