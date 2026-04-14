@@ -15,7 +15,7 @@ const GRID = "rgba(70,55,180,0.10)";
 
 // Glass — heatmap card: subtle layered inset glow
 const GLASS = {
-  background: "rgba(255,255,255,0.01)",
+  background: "rgba(20,15,50,0.38)",
   backdropFilter: "blur(40px)",
   WebkitBackdropFilter: "blur(40px)",
   border: "1px solid rgba(255,255,255,0.05)",
@@ -31,7 +31,7 @@ const GLASS = {
 
 // Glass — small bars: subtle border + minimal glow
 const GLASS_SM = {
-  background: "rgba(255,255,255,0.02)",
+  background: "rgba(20,15,50,0.38)",
   backdropFilter: "blur(32px)",
   WebkitBackdropFilter: "blur(32px)",
   border: "1px solid rgba(255,255,255,0.06)",
@@ -41,7 +41,7 @@ const GLASS_SM = {
 const F = '"Space Grotesk", "Inter Tight", sans-serif';
 const F_NUM = '"Inter Tight", sans-serif';
 
-const EMPTY = "#1f1845";
+const EMPTY = "rgba(255,255,255,0.06)";
 const PAL = [EMPTY, "#4a3d8f", "#6b5cbe", "#9060e0", "#d946ef"];
 
 // Layout — cells sized to fill card width tightly.
@@ -148,25 +148,14 @@ export function AnnualReportCard({ data }) {
   const top = data.topModels[0];
   const rawUrl = data.avatarUrl || null;
   const url = useDataUrl(rawUrl); // same-origin data URL, safe for html-to-image
+  const bgUrl = useDataUrl("/neon_bg.png"); // inline bg for html-to-image capture
   const ini = (data.handle||"?")[0].toUpperCase();
   const GAP = 16;
 
   return (
     <div style={{width:"100%",height:"100%",background:BG,fontFamily:F,position:"relative",overflow:"hidden",boxSizing:"border-box"}}>
-      {/* ── Perspective grid background ── */}
-      {/* Flat grid overlay — subtle, full card */}
-      <div style={{position:"absolute",inset:0,backgroundImage:`linear-gradient(${GRID} 1px,transparent 1px),linear-gradient(90deg,${GRID} 1px,transparent 1px)`,backgroundSize:"64px 64px",opacity:0.5,pointerEvents:"none"}}/>
-      {/* Bottom perspective plane — receding grid */}
-      <div style={{position:"absolute",left:0,right:0,bottom:0,height:"55%",perspective:"600px",perspectiveOrigin:"50% 0%",overflow:"hidden",pointerEvents:"none"}}>
-        <div style={{width:"200%",height:"200%",marginLeft:"-50%",transform:"rotateX(55deg)",transformOrigin:"50% 0%",backgroundImage:`linear-gradient(rgba(90,70,240,0.12) 1px,transparent 1px),linear-gradient(90deg,rgba(90,70,240,0.12) 1px,transparent 1px)`,backgroundSize:"80px 80px"}}/>
-      </div>
-      {/* Diffuse ambient glow blobs — large, soft */}
-      <div style={{position:"absolute",left:"-30%",top:"-10%",width:"120%",height:"80%",background:"radial-gradient(ellipse at center,rgba(70,40,160,0.25) 0%,transparent 70%)",pointerEvents:"none"}}/>
-      <div style={{position:"absolute",right:"-30%",top:"15%",width:"110%",height:"70%",background:"radial-gradient(ellipse at center,rgba(100,50,200,0.20) 0%,transparent 70%)",pointerEvents:"none"}}/>
-      <div style={{position:"absolute",left:"-20%",bottom:"-15%",width:"130%",height:"65%",background:"radial-gradient(ellipse at center,rgba(50,30,150,0.25) 0%,transparent 70%)",pointerEvents:"none"}}/>
-      <div style={{position:"absolute",right:"-10%",bottom:"-5%",width:"80%",height:"50%",background:"radial-gradient(ellipse at center,rgba(150,80,240,0.12) 0%,transparent 70%)",pointerEvents:"none"}}/>
-      {/* Scan line accent */}
-      <div style={{position:"absolute",left:0,right:0,top:"62%",height:2,background:`linear-gradient(90deg,transparent 0%,${ACCENT}22 30%,${ACCENT}44 50%,${ACCENT}22 70%,transparent 100%)`,pointerEvents:"none"}}/>
+      {/* ── Background image ── */}
+      <img src={bgUrl||"/neon_bg.png"} alt="" style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover",pointerEvents:"none"}} crossOrigin="anonymous"/>
 
       <div style={{position:"relative",zIndex:1,display:"flex",flexDirection:"column",height:"100%",padding:PAD,boxSizing:"border-box"}}>
 

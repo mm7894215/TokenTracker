@@ -21,6 +21,10 @@ Auto-collect token counts from **8 AI coding tools**, aggregate them locally, an
 
 ⭐ **If TokenTracker saves you time, please [star it on GitHub](https://github.com/mm7894215/TokenTracker) — it helps other developers find it.**
 
+<br/>
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/M4M11XSNWD)
+
 </div>
 
 ---
