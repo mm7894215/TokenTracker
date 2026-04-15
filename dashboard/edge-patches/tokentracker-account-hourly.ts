@@ -42,7 +42,7 @@ interface HourlyRow {
   cached_input_tokens: number | null;
   cache_creation_input_tokens: number | null;
   reasoning_output_tokens: number | null;
-  conversations: number | null;
+  conversation_count: number | null;
 }
 
 interface TzCtx {
@@ -161,7 +161,7 @@ export default async function (req: Request): Promise<Response> {
     const { data, error } = await client.database
       .from("tokentracker_hourly")
       .select(
-        "hour_start, total_tokens, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, conversations",
+        "hour_start, total_tokens, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, conversation_count",
       )
       .eq("user_id", userId)
       .gte("hour_start", rangeStart)
@@ -215,7 +215,7 @@ export default async function (req: Request): Promise<Response> {
     bucket.cached_input_tokens += Number(row.cached_input_tokens) || 0;
     bucket.cache_creation_input_tokens += Number(row.cache_creation_input_tokens) || 0;
     bucket.reasoning_output_tokens += Number(row.reasoning_output_tokens) || 0;
-    bucket.conversation_count += Number(row.conversations) || 0;
+    bucket.conversation_count += Number(row.conversation_count) || 0;
   }
 
   const data = Array.from(byHour.values()).sort((a, b) => a.hour.localeCompare(b.hour));

@@ -150,7 +150,7 @@ interface HourlyRow {
   cached_input_tokens: number | null;
   cache_creation_input_tokens: number | null;
   reasoning_output_tokens: number | null;
-  conversations: number | null;
+  conversation_count: number | null;
 }
 
 function computeRowCost(row: HourlyRow): number {
@@ -212,7 +212,7 @@ function aggregateByDay(
     a.cached_input_tokens += Number(row.cached_input_tokens) || 0;
     a.cache_creation_input_tokens += Number(row.cache_creation_input_tokens) || 0;
     a.reasoning_output_tokens += Number(row.reasoning_output_tokens) || 0;
-    a.conversation_count += Number(row.conversations) || 0;
+    a.conversation_count += Number(row.conversation_count) || 0;
   }
   return Array.from(byDay.values()).sort((a, b) => a.day.localeCompare(b.day));
 }
@@ -222,7 +222,7 @@ async function fetchAllRows(
   userId: string,
   rangeStart: string,
   rangeEnd: string,
-  columns = "hour_start, source, model, total_tokens, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, conversations",
+  columns = "hour_start, source, model, total_tokens, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, conversation_count",
 ): Promise<HourlyRow[]> {
   const out: HourlyRow[] = [];
   let offset = 0;

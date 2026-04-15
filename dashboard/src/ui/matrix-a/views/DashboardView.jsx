@@ -217,6 +217,20 @@ export function DashboardView(props) {
                 className="lg:col-span-8 flex flex-col gap-4 min-w-0"
                 style={leftColHeight ? { maxHeight: leftColHeight } : undefined}
               >
+                {accountView && accountViewBadgeLabel ? (
+                  <div className="flex">
+                    <span
+                      className="inline-flex items-center gap-1.5 rounded-full border border-oai-brand-500/40 bg-oai-brand-500/10 px-2.5 py-1 text-[11px] font-medium text-oai-brand-500 dark:border-oai-brand-500/50 dark:bg-oai-brand-500/15"
+                      aria-label={accountViewBadgeLabel}
+                    >
+                      <span
+                        className="h-1.5 w-1.5 rounded-full bg-oai-brand-500"
+                        aria-hidden
+                      />
+                      {accountViewBadgeLabel}
+                    </span>
+                  </div>
+                ) : null}
                 <UsageOverview
                   period={period}
                   periods={periodsForDisplay}
