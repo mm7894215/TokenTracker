@@ -167,8 +167,7 @@ export function LeaderboardPage({
     () => LEADERBOARD_TOKEN_COLUMNS.map((c) => c.key),
     [],
   );
-  const { order: columnOrder, reorder: reorderColumns, reset: resetColumns } =
-    useColumnOrder(defaultColumnKeys);
+  const { order: columnOrder, reorder: reorderColumns } = useColumnOrder(defaultColumnKeys);
   const columnsByKey = useMemo(() => {
     const map = new Map();
     for (const c of LEADERBOARD_TOKEN_COLUMNS) map.set(c.key, c);
@@ -177,10 +176,6 @@ export function LeaderboardPage({
   const orderedColumns = useMemo(
     () => columnOrder.map((k) => columnsByKey.get(k)).filter(Boolean),
     [columnOrder, columnsByKey],
-  );
-  const isDefaultOrder = useMemo(
-    () => columnOrder.every((k, i) => k === defaultColumnKeys[i]),
-    [columnOrder, defaultColumnKeys],
   );
 
   const sensors = useSensors(
@@ -528,24 +523,32 @@ export function LeaderboardPage({
               </p>
             </div>
 
-            <div className="flex items-center gap-3">
-              {!isDefaultOrder && (
-                <button
-                  onClick={resetColumns}
-                  title={copy("leaderboard.columns.reset_hint")}
-                  className="text-xs text-oai-gray-500 dark:text-oai-gray-400 hover:text-oai-black dark:hover:text-white transition-colors"
-                >
-                  {copy("leaderboard.columns.reset")}
-                </button>
-              )}
+            <div className="flex items-center gap-2">
               {authTokenAllowed && authTokenReady && (
-                <button
-                  onClick={handleRefresh}
-                  disabled={refreshing || listState.loading}
-                  className="text-sm text-oai-gray-500 dark:text-oai-gray-400 hover:text-oai-black dark:hover:text-white transition-colors disabled:opacity-50"
-                >
-                  {refreshing ? "Refreshing..." : "\u21BB"}
-                </button>
+                <div className="inline-flex p-1 border border-oai-gray-200 dark:border-oai-gray-800 rounded-lg">
+                  <button
+                    onClick={handleRefresh}
+                    disabled={refreshing || listState.loading}
+                    className="px-3 py-1.5 text-sm font-medium rounded-md transition-colors text-oai-gray-600 dark:text-oai-gray-300 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-900 hover:text-oai-black dark:hover:text-white disabled:opacity-50 inline-flex items-center gap-1.5"
+                  >
+                    <svg
+                      className={cn("w-4 h-4", refreshing && "animate-spin")}
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M3 12a9 9 0 0 1 15.5-6.5L21 8" />
+                      <path d="M21 3v5h-5" />
+                      <path d="M21 12a9 9 0 0 1-15.5 6.5L3 16" />
+                      <path d="M3 21v-5h5" />
+                    </svg>
+                    {refreshing ? "Refreshing" : "Refresh"}
+                  </button>
+                </div>
               )}
               <div className="inline-flex p-1 border border-oai-gray-200 dark:border-oai-gray-800 rounded-lg">
                 {["week", "month", "total"].map((p) => (

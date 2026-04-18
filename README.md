@@ -4,7 +4,7 @@
 
 ### Know exactly what you're spending on AI — across every CLI
 
-Auto-collect token counts from **8 AI coding tools**, aggregate them locally, and see real cost trends in a beautiful dashboard. No cloud account, no API keys, no setup — just one command.
+Auto-collect token counts from **10 AI coding tools**, aggregate them locally, and see real cost trends in a beautiful dashboard. No cloud account, no API keys, no setup — just one command.
 
 [![npm version](https://img.shields.io/npm/v/tokentracker-cli.svg?color=blue)](https://www.npmjs.com/package/tokentracker-cli)
 [![npm downloads](https://img.shields.io/npm/dm/tokentracker-cli.svg?color=brightgreen)](https://www.npmjs.com/package/tokentracker-cli)
@@ -75,15 +75,15 @@ Upgrade with `brew upgrade --cask mm7894215/tokentracker/tokentracker`. The tap 
 
 ## ✨ Features
 
-- 🔌 **8 AI tools out of the box** — Claude Code, Codex CLI, Cursor, Gemini CLI, Kiro, OpenCode, OpenClaw, Every Code
+- 🔌 **10 AI tools out of the box** — Claude Code, Codex CLI, Cursor, Gemini CLI, Kiro, OpenCode, OpenClaw, Every Code, Hermes Agent, GitHub Copilot
 - 🏠 **100% local** — Token data never leaves your machine. No account, no API keys.
 - 🚀 **Zero config** — Hooks auto-install on first run. From zero to dashboard in 30 seconds.
 - 📊 **Beautiful dashboard** — Usage trends, cost breakdowns by model, GitHub-style activity heatmap, project attribution
 - 🖥️ **Native macOS app** — Menu bar status icon, embedded server, WKWebView dashboard
 - 🎨 **4 desktop widgets** — Pin Usage / Activity Heatmap / Top Models / Usage Limits to your desktop
-- 📈 **Real-time rate limit tracking** — Claude / Codex / Cursor / Gemini / Kiro / Antigravity quota windows with reset countdowns
+- 📈 **Real-time rate limit tracking** — Claude / Codex / Cursor / Gemini / Kiro / Copilot / Antigravity quota windows with reset countdowns
 - 💰 **Cost engine** — 70+ model pricing tables, accurate USD breakdowns
-- 🌐 **Optional leaderboard** — Compare with developers worldwide (opt-in, sign in to participate)
+- 🌐 **Optional leaderboard** — Compare with developers worldwide; drag-to-reorder columns to focus on the providers you care about (opt-in, sign in to participate)
 - 🔒 **Privacy-first** — Only token counts and timestamps. Never prompts, responses, or file contents.
 
 ---
@@ -139,6 +139,8 @@ Upgrade with `brew upgrade --cask mm7894215/tokentracker/tokentracker`. The tap 
 | **OpenCode** | ✅ Auto | Plugin system + SQLite |
 | **OpenClaw** | ✅ Auto | Session plugin |
 | **Every Code** | ✅ Auto | TOML notify hook |
+| **Hermes Agent** | ✅ Auto | SQLite sessions table (`~/.hermes/state.db`) |
+| **GitHub Copilot** | ✅ Auto | OpenTelemetry file exporter (`COPILOT_OTEL_FILE_EXPORTER_PATH`) |
 
 Missing your tool? [Open an issue](https://github.com/mm7894215/TokenTracker/issues/new) — adding new providers is usually one parser file away.
 
@@ -148,11 +150,11 @@ Missing your tool? [Open an issue](https://github.com/mm7894215/TokenTracker/iss
 
 |                          | **TokenTracker** | ccusage     | Cursor stats |
 |--------------------------|:---:|:---:|:---:|
-| **AI tools supported**   | **8**            | 1 (Claude)  | 1 (Cursor)   |
+| **AI tools supported**   | **10**           | 1 (Claude)  | 1 (Cursor)   |
 | **Local-first, no account** | ✅            | ✅           | ❌            |
 | **Native menu bar app**  | ✅                | ❌           | ❌            |
 | **Desktop widgets**      | ✅ 4 widgets      | ❌           | ❌            |
-| **Rate-limit tracking**  | ✅ 6 providers    | ❌           | Cursor only  |
+| **Rate-limit tracking**  | ✅ 7 providers    | ❌           | Cursor only  |
 
 ---
 
@@ -160,7 +162,7 @@ Missing your tool? [Open an issue](https://github.com/mm7894215/TokenTracker/iss
 
 ```mermaid
 flowchart LR
-    A["AI CLI Tools<br/>Claude · Codex · Cursor<br/>Gemini · Kiro · OpenCode · ..."]
+    A["AI CLI Tools<br/>Claude · Codex · Cursor · Gemini · Kiro<br/>OpenCode · OpenClaw · Every Code · Hermes · Copilot"]
     A -->|hooks trigger| B[Token Tracker]
     B -->|parse logs<br/>30-min UTC buckets| C[(Local SQLite)]
     C --> D[Web Dashboard]

@@ -90,3 +90,15 @@ dist/
 build/
 .tmp/
 *.tsbuildinfo
+
+# InsForge & AI agent skills
+.insforge
+.agents
+.augment
+.claude
+.kilocode
+.qoder
+.qwen
+.roo
+.trae
+.windsurf

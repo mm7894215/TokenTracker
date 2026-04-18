@@ -396,8 +396,6 @@ limits.copilot.otelHint.body,dashboard,LimitsPage,LimitsPage,otel_hint_body,"Lim
 limits.copilot.otelHint.copy,dashboard,LimitsPage,LimitsPage,otel_hint_copy,"Copy",,active
 limits.copilot.otelHint.copied,dashboard,LimitsPage,LimitsPage,otel_hint_copied,"Copied",,active
 leaderboard.column.supplemental,dashboard,LeaderboardPage,LeaderboardPage,column_supplemental,"Supplemental",,active
-leaderboard.columns.reset,dashboard,LeaderboardPage,LeaderboardPage,columns_reset,"Reset columns",,active
-leaderboard.columns.reset_hint,dashboard,LeaderboardPage,LeaderboardPage,columns_reset_hint,"Restore default column order",,active
 
 landing.oauth.google,landing,LandingPage,MarketingLanding,oauth_google,"Continue with Google",,active
 landing.oauth.github,landing,LandingPage,MarketingLanding,oauth_github,"Continue with GitHub",,active

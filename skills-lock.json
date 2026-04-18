@@ -4,17 +4,27 @@
     "find-skills": {
       "source": "vercel-labs/skills",
       "sourceType": "github",
-      "computedHash": "d31e234f0c90694a670222cdd1dafa853e051d7066beda389f1097c22dadd461"
+      "computedHash": "9e1c8b3103f92fa8092568a44fe64858de7c5c9dc65ce4bea8f168080e889cfd"
     },
     "insforge": {
       "source": "insforge/agent-skills",
       "sourceType": "github",
-      "computedHash": "06c2983818ce44f1a4b9c3c4da2e992047504a57b61b3a8cd17de163000b51c4"
+      "computedHash": "49ab9b9c520206022efc851c7dd4b81eed3d40428f123ed2c6213d5a127bde62"
     },
     "insforge-cli": {
       "source": "insforge/agent-skills",
       "sourceType": "github",
-      "computedHash": "31da132e3ccd87aeaf680d309c1373b7344e3198156fc586f1e622d2438920ae"
+      "computedHash": "9eefd32f8ed7195969d5fac788baa7ef99b452892e5ea9b00eb65e08a3ebece6"
+    },
+    "insforge-debug": {
+      "source": "insforge/agent-skills",
+      "sourceType": "github",
+      "computedHash": "f1f20f82cba657771767c563480f07efd3ab633566ccdcfccebce26039bbfce2"
+    },
+    "insforge-integrations": {
+      "source": "insforge/agent-skills",
+      "sourceType": "github",
+      "computedHash": "421b6eb1091930a437c223aae1d6547f3ee4d2e5cfef45e41a3e2b32a2c27f7e"
     }
   }
 }
