@@ -34,7 +34,7 @@ export function lbStickyTdRank(isMe) {
   return cn(
     "sticky left-0 z-30 w-[72px] min-w-[72px] max-w-[72px] border-r border-oai-gray-200 dark:border-oai-gray-800 px-4 py-4 whitespace-nowrap",
     isMe
-      ? "bg-oai-brand-50 dark:bg-oai-brand-900/10"
+      ? "bg-oai-brand-50 dark:bg-emerald-950"
       : "bg-white dark:bg-oai-gray-950 group-hover:bg-oai-gray-50 dark:group-hover:bg-oai-gray-900/60",
   );
 }
@@ -43,7 +43,7 @@ export function lbStickyTdUser(isMe) {
   return cn(
     "sticky left-[72px] z-30 min-w-[140px] max-w-[min(180px,35vw)] border-r border-oai-gray-200 dark:border-oai-gray-800 px-4 py-4 min-w-0",
     isMe
-      ? "bg-oai-brand-50 dark:bg-oai-brand-900/10"
+      ? "bg-oai-brand-50 dark:bg-emerald-950"
       : "bg-white dark:bg-oai-gray-950 group-hover:bg-oai-gray-50 dark:group-hover:bg-oai-gray-900/60",
   );
 }
@@ -53,7 +53,7 @@ export function lbStickyTdTotalOnly(isMe) {
   return cn(
     "sticky left-[72px] z-30 min-w-[6rem] border-r border-oai-gray-200 dark:border-oai-gray-800 px-4 py-4 whitespace-nowrap",
     isMe
-      ? "bg-oai-brand-50 dark:bg-oai-brand-900/10"
+      ? "bg-oai-brand-50 dark:bg-emerald-950"
       : "bg-white dark:bg-oai-gray-950",
   );
 }
