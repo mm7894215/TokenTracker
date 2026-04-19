@@ -504,7 +504,8 @@ export function getMockLeaderboard({
     const hermes = Math.floor(total * 0.03);
     const kiro = Math.floor(total * 0.02);
     const copilot = Math.floor(total * 0.04);
-    const openclaw = Math.max(0, total - gpt - claude - gemini - cursor - opencode - hermes - kiro - copilot);
+    const kimi = Math.floor(total * 0.03);
+    const openclaw = Math.max(0, total - gpt - claude - gemini - cursor - opencode - hermes - kiro - copilot - kimi);
     const isPublic = id % 7 !== 0;
     return {
       id,
@@ -522,6 +523,7 @@ export function getMockLeaderboard({
       hermes_tokens: hermes,
       kiro_tokens: kiro,
       copilot_tokens: copilot,
+      kimi_tokens: kimi,
       other_tokens: 0,
       total_tokens: total,
     };
@@ -549,7 +551,9 @@ export function getMockLeaderboard({
                     ? "kiro_tokens"
                     : safeMetric === "copilot"
                       ? "copilot_tokens"
-                      : "total_tokens";
+                      : safeMetric === "kimi"
+                        ? "kimi_tokens"
+                        : "total_tokens";
 
   const sorted = raw
     .slice()
@@ -569,6 +573,7 @@ export function getMockLeaderboard({
       hermes_tokens: String(entry.hermes_tokens ?? 0),
       kiro_tokens: String(entry.kiro_tokens ?? 0),
       copilot_tokens: String(entry.copilot_tokens ?? 0),
+      kimi_tokens: String(entry.kimi_tokens ?? 0),
       other_tokens: String(entry.other_tokens ?? 0),
       total_tokens: String(entry.total_tokens),
       is_public: Boolean(entry.is_public),
@@ -587,6 +592,7 @@ export function getMockLeaderboard({
         hermes_tokens: meRow.hermes_tokens,
         kiro_tokens: meRow.kiro_tokens,
         copilot_tokens: meRow.copilot_tokens,
+        kimi_tokens: meRow.kimi_tokens,
         other_tokens: meRow.other_tokens,
         total_tokens: meRow.total_tokens,
       }
@@ -601,6 +607,7 @@ export function getMockLeaderboard({
         hermes_tokens: "0",
         kiro_tokens: "0",
         copilot_tokens: "0",
+        kimi_tokens: "0",
         other_tokens: "0",
         total_tokens: "0",
       };

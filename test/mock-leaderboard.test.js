@@ -19,6 +19,7 @@ test("mock leaderboard returns entries and me", async () => {
   assert.equal(typeof res.me.hermes_tokens, "string");
   assert.equal(typeof res.me.kiro_tokens, "string");
   assert.equal(typeof res.me.copilot_tokens, "string");
+  assert.equal(typeof res.me.kimi_tokens, "string");
   assert.equal(typeof res.me.other_tokens, "string");
   assert.equal(typeof res.me.total_tokens, "string");
 

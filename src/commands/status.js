@@ -145,7 +145,7 @@ async function cmdStatus(argv = []) {
       `- OpenClaw session plugin: ${openclawSessionPluginState?.configured ? "set" : "unset"}`,
       `- OpenClaw hook (legacy): ${openclawHookState?.configured ? "set" : "unset"}`,
       kimiInstalled
-        ? `- Kimi: passive reader (${kimiWireFiles.length} wire.jsonl file${kimiWireFiles.length !== 1 ? "s" : ""} found)`
+        ? `- Kimi Code: passive reader (${kimiWireFiles.length} wire.jsonl file${kimiWireFiles.length !== 1 ? "s" : ""} found)`
         : null,
       ...copilotLines,
       ...subscriptionLines,

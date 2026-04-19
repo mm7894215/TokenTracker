@@ -411,7 +411,7 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
     const kimiSessions = path.join(kimiHome, "sessions");
     const fssync = require("node:fs");
     if (fssync.existsSync(kimiSessions)) {
-      summary.push({ label: "Kimi", status: "detected", detail: "Passive reader (no hook needed)" });
+      summary.push({ label: "Kimi Code", status: "detected", detail: "Passive reader (no hook needed)" });
     }
   }
 

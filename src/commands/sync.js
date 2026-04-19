@@ -361,7 +361,7 @@ async function cmdSync(argv) {
     const kimiWireFiles = resolveKimiWireFiles(process.env);
     if (kimiWireFiles.length > 0) {
       if (progress?.enabled) {
-        progress.start(`Parsing Kimi ${renderBar(0)} | buckets 0`);
+        progress.start(`Parsing Kimi Code ${renderBar(0)} | buckets 0`);
       }
       kimiResult = await parseKimiIncremental({
         wireFiles: kimiWireFiles,
@@ -372,7 +372,7 @@ async function cmdSync(argv) {
           if (!progress?.enabled) return;
           const pct = p.total > 0 ? p.index / p.total : 1;
           progress.update(
-            `Parsing Kimi ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} files | buckets ${formatNumber(p.bucketsQueued)}`,
+            `Parsing Kimi Code ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} files | buckets ${formatNumber(p.bucketsQueued)}`,
           );
         },
       });

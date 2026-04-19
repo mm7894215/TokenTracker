@@ -3002,6 +3002,31 @@ async function parseHermesIncremental({ dbPath, cursors, queuePath, onProgress }
 // ─────────────────────────────────────────────────────────────────────────────
 // Kimi — passive JSONL reader (~/.kimi/sessions/**/wire.jsonl)
 // No hook installation needed; Kimi writes wire.jsonl automatically.
+
+function resolveKimiDefaultModel(env = process.env) {
+  const fallback = "kimi-for-coding";
+  try {
+    const home = env.HOME || require("node:os").homedir();
+    const cfgPath = path.join(env.KIMI_HOME || path.join(home, ".kimi"), "config.toml");
+    const raw = fssync.readFileSync(cfgPath, "utf8");
+    const defaultMatch = raw.match(/^\s*default_model\s*=\s*"([^"]+)"/m);
+    if (!defaultMatch) return fallback;
+    const sectionKey = defaultMatch[1];
+    const escaped = sectionKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const sectionRe = new RegExp(
+      `\\[models\\."${escaped}"\\]([\\s\\S]*?)(?:\\n\\[|$)`,
+    );
+    const section = raw.match(sectionRe);
+    if (section) {
+      const modelMatch = section[1].match(/^\s*model\s*=\s*"([^"]+)"/m);
+      if (modelMatch && modelMatch[1]) return modelMatch[1];
+    }
+    if (sectionKey.includes("/")) return sectionKey.split("/").pop();
+    return sectionKey || fallback;
+  } catch {
+    return fallback;
+  }
+}
 // ─────────────────────────────────────────────────────────────────────────────
 
 function resolveKimiWireFiles(env = process.env) {
@@ -3025,7 +3050,7 @@ function resolveKimiWireFiles(env = process.env) {
   return files;
 }
 
-async function parseKimiIncremental({ wireFiles, cursors, queuePath, onProgress, env } = {}) {
+async function parseKimiIncremental({ wireFiles, cursors, queuePath, onProgress, env, model } = {}) {
   await ensureDir(path.dirname(queuePath));
   const kimiState = cursors.kimi && typeof cursors.kimi === "object" ? cursors.kimi : {};
   const seenIds = new Set(Array.isArray(kimiState.seenIds) ? kimiState.seenIds : []);
@@ -3037,6 +3062,7 @@ async function parseKimiIncremental({ wireFiles, cursors, queuePath, onProgress,
   const files = Array.isArray(wireFiles)
     ? wireFiles
     : resolveKimiWireFiles(env || process.env);
+  const kimiModel = model || resolveKimiDefaultModel(env || process.env);
   if (files.length === 0) {
     cursors.kimi = { ...kimiState, seenIds: Array.from(seenIds), fileOffsets, updatedAt: new Date().toISOString() };
     return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
@@ -3107,9 +3133,9 @@ async function parseKimiIncremental({ wireFiles, cursors, queuePath, onProgress,
         conversation_count: 1,
       };
 
-      const bucket = getHourlyBucket(hourlyState, "kimi", "kimi-k2", bucketStart);
+      const bucket = getHourlyBucket(hourlyState, "kimi", kimiModel, bucketStart);
       addTotals(bucket.totals, delta);
-      touchedBuckets.add(bucketKey("kimi", "kimi-k2", bucketStart));
+      touchedBuckets.add(bucketKey("kimi", kimiModel, bucketStart));
       seenIds.add(message_id);
       eventsAggregated++;
 
@@ -3353,5 +3379,6 @@ module.exports = {
   parseHermesIncremental,
   parseCopilotIncremental,
   resolveKimiWireFiles,
+  resolveKimiDefaultModel,
   parseKimiIncremental,
 };

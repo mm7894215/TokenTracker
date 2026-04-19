@@ -30,7 +30,8 @@ function getClient(_req: Request) {
   });
 }
 
-function windowBounds(period: string) {
+// deno-lint-ignore no-explicit-any
+async function windowBounds(client: any, period: string) {
   const now = new Date();
   let from_day: string;
   let to_day: string;
@@ -46,8 +47,16 @@ function windowBounds(period: string) {
       .toISOString()
       .slice(0, 10);
   } else {
-    from_day = "2024-01-01";
-    to_day = now.toISOString().slice(0, 10);
+    const { data: latest } = await client.database
+      .from("tokentracker_leaderboard_snapshots")
+      .select("from_day, to_day")
+      .eq("period", "total")
+      .order("to_day", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const row = latest as { from_day?: string; to_day?: string } | null;
+    from_day = (row?.from_day ?? "2024-01-01").slice(0, 10);
+    to_day = (row?.to_day ?? now.toISOString()).slice(0, 10);
   }
   return { from_day, to_day };
 }
@@ -62,7 +71,7 @@ export default async function (req: Request): Promise<Response> {
   if (!userId) return json({ error: "user_id is required" }, 400);
 
   const client = getClient(req);
-  const { from_day, to_day } = windowBounds(period);
+  const { from_day, to_day } = await windowBounds(client, period);
 
   const { data, error } = await client.database
     .from("tokentracker_leaderboard_snapshots")
