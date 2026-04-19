@@ -116,6 +116,30 @@ function resolveQueuePath() {
   return path.join(home, ".tokentracker", "tracker", "queue.jsonl");
 }
 
+function readProjectQueueData(projectQueuePath) {
+  let raw;
+  try {
+    raw = fs.readFileSync(projectQueuePath, "utf8");
+  } catch (e) {
+    if (e?.code !== "ENOENT") {
+      console.error("[LocalAPI] readProjectQueueData: failed to read:", e?.message || e);
+    }
+    return [];
+  }
+  const lines = raw.split("\n").filter((l) => l.trim());
+  const seen = new Map();
+  for (const line of lines) {
+    try {
+      const row = JSON.parse(line);
+      const key = `${row.project_key || ""}|${row.source || ""}|${row.hour_start || ""}`;
+      seen.set(key, row);
+    } catch {
+      // skip malformed
+    }
+  }
+  return Array.from(seen.values());
+}
+
 function readQueueData(queuePath) {
   let raw;
   try {
@@ -894,35 +918,71 @@ function createLocalApiHandler({ queuePath }) {
 
     // --- project-usage-summary ---
     if (p === "/functions/tokentracker-project-usage-summary") {
-      const projectMap = new Map();
-      scanCodexProjects(projectMap);
-      scanClaudeProjects(projectMap);
+      // Use the per-project bucket log that rollout.js emits — it already
+      // carries the actual tokens attributed to each (project_key, source,
+      // hour_start). Falling back to "session-file count × total tokens"
+      // (the old behavior) produced pure fiction: every short-and-hot
+      // project got the same weight as every long-and-cold one.
+      const projectQueuePath = path.join(
+        path.dirname(qp),
+        "project.queue.jsonl",
+      );
+      const projectRows = readProjectQueueData(projectQueuePath);
 
-      const rows = readQueueData(qp);
-      const totalTokens = rows.reduce((s, r) => s + (r.total_tokens || 0), 0);
-      const entries = [];
+      const byProject = new Map();
+      for (const row of projectRows) {
+        const key = row.project_key || "unknown";
+        if (!byProject.has(key)) {
+          byProject.set(key, {
+            project_key: key,
+            project_ref: row.project_ref || key,
+            total_tokens: 0,
+            billable_total_tokens: 0,
+          });
+        }
+        const agg = byProject.get(key);
+        agg.total_tokens += Number(row.total_tokens || 0);
+        agg.billable_total_tokens += Number(row.total_tokens || 0);
+        if (!agg.project_ref && row.project_ref) agg.project_ref = row.project_ref;
+      }
 
-      if (projectMap.size === 0) {
+      // If no project-attributed rows exist yet (user hasn't synced project
+      // attribution, or never used a project-capable CLI), fall back to
+      // per-source aggregation over the main queue so the panel isn't
+      // totally empty. This path used to also exist for the non-empty case
+      // and produce wrong numbers; keep it only as the empty fallback.
+      let entries;
+      if (byProject.size === 0) {
+        const rows = readQueueData(qp);
         const bySrc = new Map();
         for (const row of rows) {
           const src = row.source || "unknown";
-          if (!bySrc.has(src)) bySrc.set(src, { project_key: src, project_ref: `https://${src}.ai`, total_tokens: 0, billable_total_tokens: 0 });
+          if (!bySrc.has(src)) {
+            bySrc.set(src, {
+              project_key: src,
+              project_ref: `https://${src}.ai`,
+              total_tokens: 0,
+              billable_total_tokens: 0,
+            });
+          }
           bySrc.get(src).total_tokens += row.total_tokens || 0;
           bySrc.get(src).billable_total_tokens += row.total_tokens || 0;
         }
-        entries.push(
-          ...Array.from(bySrc.values())
-            .sort((a, b) => b.billable_total_tokens - a.billable_total_tokens)
-            .map((e) => ({ ...e, total_tokens: String(e.total_tokens), billable_total_tokens: String(e.billable_total_tokens) })),
-        );
+        entries = Array.from(bySrc.values())
+          .sort((a, b) => b.billable_total_tokens - a.billable_total_tokens)
+          .map((e) => ({
+            ...e,
+            total_tokens: String(e.total_tokens),
+            billable_total_tokens: String(e.billable_total_tokens),
+          }));
       } else {
-        const totalCount = Array.from(projectMap.values()).reduce((s, p) => s + p.count, 0);
-        for (const [, proj] of projectMap) {
-          const ratio = totalCount > 0 ? proj.count / totalCount : 1 / projectMap.size;
-          const tokens = Math.floor(totalTokens * ratio);
-          entries.push({ project_key: proj.project_key, project_ref: proj.project_ref, total_tokens: String(tokens), billable_total_tokens: String(tokens) });
-        }
-        entries.sort((a, b) => Number(b.billable_total_tokens) - Number(a.billable_total_tokens));
+        entries = Array.from(byProject.values())
+          .sort((a, b) => b.billable_total_tokens - a.billable_total_tokens)
+          .map((e) => ({
+            ...e,
+            total_tokens: String(e.total_tokens),
+            billable_total_tokens: String(e.billable_total_tokens),
+          }));
       }
 
       json(res, { generated_at: new Date().toISOString(), entries });
