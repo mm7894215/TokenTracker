@@ -676,12 +676,21 @@ async function parseOpenclawSessionFile({
 
     const model = normalizeModelInput(msg.model) || DEFAULT_MODEL;
 
+    // Per CLAUDE.md: cached_input_tokens = cache reads,
+    // cache_creation_input_tokens = cache writes. Also re-derive total_tokens
+    // as input + output + cache_creation + cache_read so cost math works
+    // even when the source's own totalTokens is stale or rounded.
+    const inputTok = Number(usage.input || 0);
+    const cacheReadTok = Number(usage.cacheRead || 0);
+    const cacheWriteTok = Number(usage.cacheWrite || 0);
+    const outputTok = Number(usage.output || 0);
     const delta = {
-      input_tokens: Number(usage.input || 0),
-      cached_input_tokens: Number((usage.cacheRead || 0) + (usage.cacheWrite || 0)),
-      output_tokens: Number(usage.output || 0),
+      input_tokens: inputTok,
+      cached_input_tokens: cacheReadTok,
+      cache_creation_input_tokens: cacheWriteTok,
+      output_tokens: outputTok,
       reasoning_output_tokens: 0,
-      total_tokens: Number(usage.totalTokens || 0),
+      total_tokens: inputTok + outputTok + cacheReadTok + cacheWriteTok,
       conversation_count: 1,
     };
 
@@ -2083,6 +2092,7 @@ function sameGeminiTotals(a, b) {
   return (
     a.input_tokens === b.input_tokens &&
     a.cached_input_tokens === b.cached_input_tokens &&
+    a.cache_creation_input_tokens === b.cache_creation_input_tokens &&
     a.output_tokens === b.output_tokens &&
     a.reasoning_output_tokens === b.reasoning_output_tokens &&
     a.total_tokens === b.total_tokens
@@ -2097,11 +2107,19 @@ function diffGeminiTotals(current, previous) {
   const totalReset = (current.total_tokens || 0) < (previous.total_tokens || 0);
   if (totalReset) return current;
 
+  // Must include cache_creation_input_tokens in both the equality check and
+  // the delta — OpenCode routes through this diff and its cache.write number
+  // would otherwise be permanently reported as zero. Gemini itself always
+  // emits cache_creation=0 so the extra field is a no-op for Gemini.
   const delta = {
     input_tokens: Math.max(0, (current.input_tokens || 0) - (previous.input_tokens || 0)),
     cached_input_tokens: Math.max(
       0,
       (current.cached_input_tokens || 0) - (previous.cached_input_tokens || 0),
+    ),
+    cache_creation_input_tokens: Math.max(
+      0,
+      (current.cache_creation_input_tokens || 0) - (previous.cache_creation_input_tokens || 0),
     ),
     output_tokens: Math.max(0, (current.output_tokens || 0) - (previous.output_tokens || 0)),
     reasoning_output_tokens: Math.max(
@@ -3399,4 +3417,9 @@ module.exports = {
   resolveKimiWireFiles,
   resolveKimiDefaultModel,
   parseKimiIncremental,
+  // Exposed for regression tests covering cache-token accounting.
+  normalizeGeminiTokens,
+  normalizeOpencodeTokens,
+  sameGeminiTotals,
+  diffGeminiTotals,
 };
