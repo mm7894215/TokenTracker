@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Kimi provider** — passive token tracking via `~/.kimi/sessions/**/wire.jsonl`. No hook or configuration required; TokenTracker reads Kimi's wire log directly on every sync.
+  - `parseKimiIncremental` in `rollout.js` follows the file-offset + `message_id` dedup pattern (same as Copilot OTEL) to avoid double-counting across incremental syncs.
+  - `tokentracker status` reports the number of `wire.jsonl` files found when `~/.kimi/sessions` exists.
+  - `tokentracker init` detects the Kimi sessions directory and surfaces it as a passive reader in the setup summary.
+  - Dashboard model-breakdown shows Kimi with brand logo (`kimi.svg`) and violet color (`#a78bfa`).
+  - Model reported as `kimi-k2` (wire.jsonl does not expose the model name).
+
 ## [0.5.17] - 2026-03-31
 
 ### Fixed
