@@ -55,7 +55,7 @@ function OpenCodeIcon({ size = 16, className = "" }) {
 }
 
 function KimiIcon({ size = 16, className = "" }) {
-  return <img src="/brand-logos/kimi.png" width={size} height={size} className={className} style={{ objectFit: "contain" }} alt="Kimi" />;
+  return <img src="/brand-logos/kimi.svg" width={size} height={size} className={className} style={{ objectFit: "contain" }} alt="Kimi" />;
 }
 
 const PROVIDER_ICON_MAP = {
