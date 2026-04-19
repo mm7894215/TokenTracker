@@ -25,6 +25,8 @@ const {
   parseKiroIncremental,
   parseHermesIncremental,
   parseCopilotIncremental,
+  resolveKimiWireFiles,
+  parseKimiIncremental,
 } = require("../lib/rollout");
 const { createProgress, renderBar, formatNumber, formatBytes } = require("../lib/progress");
 const {
@@ -354,6 +356,28 @@ async function cmdSync(argv) {
       });
     }
 
+    // ── Kimi (passive wire.jsonl reader) ──
+    let kimiResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    const kimiWireFiles = resolveKimiWireFiles(process.env);
+    if (kimiWireFiles.length > 0) {
+      if (progress?.enabled) {
+        progress.start(`Parsing Kimi ${renderBar(0)} | buckets 0`);
+      }
+      kimiResult = await parseKimiIncremental({
+        wireFiles: kimiWireFiles,
+        cursors,
+        queuePath,
+        env: process.env,
+        onProgress: (p) => {
+          if (!progress?.enabled) return;
+          const pct = p.total > 0 ? p.index / p.total : 1;
+          progress.update(
+            `Parsing Kimi ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} files | buckets ${formatNumber(p.bucketsQueued)}`,
+          );
+        },
+      });
+    }
+
     // ── GitHub Copilot CLI (OTEL JSONL files) ──
     let copilotResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     const copilotPaths = resolveCopilotOtelPaths(process.env);
@@ -453,6 +477,7 @@ async function cmdSync(argv) {
         cursorResult.recordsProcessed +
         kiroResult.recordsProcessed +
         hermesResult.recordsProcessed +
+        kimiResult.recordsProcessed +
         copilotResult.recordsProcessed;
       const totalBuckets =
         parseResult.bucketsQueued +
@@ -463,6 +488,7 @@ async function cmdSync(argv) {
         cursorResult.bucketsQueued +
         kiroResult.bucketsQueued +
         hermesResult.bucketsQueued +
+        kimiResult.bucketsQueued +
         copilotResult.bucketsQueued;
       process.stdout.write(
         [

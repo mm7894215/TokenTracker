@@ -404,6 +404,17 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
     summary.push({ label: "Cursor", status: "skipped", detail: "Not installed" });
   }
 
+  // Kimi: passive reader — no hook installation needed.
+  // TokenTracker reads ~/.kimi/sessions/**/wire.jsonl directly.
+  {
+    const kimiHome = process.env.KIMI_HOME || path.join(home, ".kimi");
+    const kimiSessions = path.join(kimiHome, "sessions");
+    const fssync = require("node:fs");
+    if (fssync.existsSync(kimiSessions)) {
+      summary.push({ label: "Kimi", status: "detected", detail: "Passive reader (no hook needed)" });
+    }
+  }
+
   const openclawBefore = await probeOpenclawSessionPluginState({
     home,
     trackerDir,

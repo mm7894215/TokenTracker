@@ -3000,6 +3000,149 @@ async function parseHermesIncremental({ dbPath, cursors, queuePath, onProgress }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Kimi — passive JSONL reader (~/.kimi/sessions/**/wire.jsonl)
+// No hook installation needed; Kimi writes wire.jsonl automatically.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function resolveKimiWireFiles(env = process.env) {
+  const home = require("node:os").homedir();
+  const kimiHome = env.KIMI_HOME || path.join(home, ".kimi");
+  const sessionsDir = path.join(kimiHome, "sessions");
+  if (!fssync.existsSync(sessionsDir)) return [];
+  const files = [];
+  try {
+    for (const ws of fssync.readdirSync(sessionsDir)) {
+      const wsDir = path.join(sessionsDir, ws);
+      let wsStat;
+      try { wsStat = fssync.statSync(wsDir); } catch { continue; }
+      if (!wsStat.isDirectory()) continue;
+      for (const sess of fssync.readdirSync(wsDir)) {
+        const wireFile = path.join(wsDir, sess, "wire.jsonl");
+        if (fssync.existsSync(wireFile)) files.push(wireFile);
+      }
+    }
+  } catch { /* ignore */ }
+  return files;
+}
+
+async function parseKimiIncremental({ wireFiles, cursors, queuePath, onProgress, env } = {}) {
+  await ensureDir(path.dirname(queuePath));
+  const kimiState = cursors.kimi && typeof cursors.kimi === "object" ? cursors.kimi : {};
+  const seenIds = new Set(Array.isArray(kimiState.seenIds) ? kimiState.seenIds : []);
+  const fileOffsets =
+    kimiState.fileOffsets && typeof kimiState.fileOffsets === "object"
+      ? { ...kimiState.fileOffsets }
+      : {};
+
+  const files = Array.isArray(wireFiles)
+    ? wireFiles
+    : resolveKimiWireFiles(env || process.env);
+  if (files.length === 0) {
+    cursors.kimi = { ...kimiState, seenIds: Array.from(seenIds), fileOffsets, updatedAt: new Date().toISOString() };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
+
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const touchedBuckets = new Set();
+  const cb = typeof onProgress === "function" ? onProgress : null;
+  let recordsProcessed = 0;
+  let eventsAggregated = 0;
+
+  for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+    const filePath = files[fileIdx];
+    let stat;
+    try { stat = fssync.statSync(filePath); } catch { continue; }
+
+    const prevEntry = fileOffsets[filePath] || {};
+    const prevSize = Number(prevEntry.size) || 0;
+    const prevIno = prevEntry.ino;
+    const inodeChanged = typeof prevIno === "number" && prevIno !== stat.ino;
+    const startOffset = stat.size < prevSize || inodeChanged ? 0 : prevSize;
+    if (stat.size <= startOffset) continue;
+
+    let stream;
+    try {
+      stream = fssync.createReadStream(filePath, { encoding: "utf8", start: startOffset });
+    } catch { continue; }
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+    for await (const line of rl) {
+      if (!line || !line.trim()) continue;
+      let entry;
+      try { entry = JSON.parse(line); } catch { continue; }
+
+      const msg = entry.message;
+      if (!msg || msg.type !== "StatusUpdate") continue;
+
+      const payload = msg.payload;
+      if (!payload) continue;
+      const { token_usage, message_id } = payload;
+      if (!token_usage || !message_id) continue;
+      if (seenIds.has(message_id)) continue;
+
+      recordsProcessed++;
+
+      const input = toNonNegativeInt(token_usage.input_other);
+      const output = toNonNegativeInt(token_usage.output);
+      const cacheRead = toNonNegativeInt(token_usage.input_cache_read);
+      const cacheCreation = toNonNegativeInt(token_usage.input_cache_creation);
+      if (input === 0 && output === 0 && cacheRead === 0 && cacheCreation === 0) {
+        seenIds.add(message_id);
+        continue;
+      }
+
+      const epochSec = entry.timestamp ?? payload.timestamp;
+      if (epochSec == null || !Number.isFinite(Number(epochSec))) continue;
+      const tsIso = new Date(Number(epochSec) * 1000).toISOString();
+      const bucketStart = toUtcHalfHourStart(tsIso);
+      if (!bucketStart) continue;
+
+      const delta = {
+        input_tokens: input,
+        cached_input_tokens: cacheRead,
+        cache_creation_input_tokens: cacheCreation,
+        output_tokens: output,
+        reasoning_output_tokens: 0,
+        total_tokens: input + output + cacheRead + cacheCreation,
+        conversation_count: 1,
+      };
+
+      const bucket = getHourlyBucket(hourlyState, "kimi", "kimi-k2", bucketStart);
+      addTotals(bucket.totals, delta);
+      touchedBuckets.add(bucketKey("kimi", "kimi-k2", bucketStart));
+      seenIds.add(message_id);
+      eventsAggregated++;
+
+      if (cb) {
+        cb({
+          index: fileIdx + 1,
+          total: files.length,
+          recordsProcessed,
+          eventsAggregated,
+          bucketsQueued: touchedBuckets.size,
+        });
+      }
+    }
+
+    let postStat = stat;
+    try { postStat = fssync.statSync(filePath); } catch {}
+    fileOffsets[filePath] = { size: postStat.size, mtimeMs: postStat.mtimeMs, ino: postStat.ino };
+  }
+
+  // Cap seenIds to last 10k to bound cursor state size
+  const seenArr = Array.from(seenIds);
+  const cappedSeen = seenArr.length > 10_000 ? seenArr.slice(seenArr.length - 10_000) : seenArr;
+
+  const bucketsQueued = await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets });
+  const updatedAt = new Date().toISOString();
+  hourlyState.updatedAt = updatedAt;
+  cursors.hourly = hourlyState;
+  cursors.kimi = { ...kimiState, seenIds: cappedSeen, fileOffsets, updatedAt };
+
+  return { recordsProcessed, eventsAggregated, bucketsQueued };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GitHub Copilot CLI — OpenTelemetry JSONL exporter
 // User must opt in by setting:
 //   COPILOT_OTEL_ENABLED=true
@@ -3209,4 +3352,6 @@ module.exports = {
   parseKiroIncremental,
   parseHermesIncremental,
   parseCopilotIncremental,
+  resolveKimiWireFiles,
+  parseKimiIncremental,
 };

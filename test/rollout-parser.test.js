@@ -13,6 +13,7 @@ const {
   parseKiroIncremental,
   parseHermesIncremental,
   parseCopilotIncremental,
+  parseKimiIncremental,
 } = require("../src/lib/rollout");
 
 test("parseRolloutIncremental skips duplicate token_count records (unchanged total_token_usage)", async () => {
@@ -2457,6 +2458,86 @@ test("parseCopilotIncremental returns zero when no OTEL files exist", async () =
     const cursors = { version: 1 };
 
     const result = await parseCopilotIncremental({ otelPaths: [], cursors, queuePath, env: {} });
+    assert.equal(result.recordsProcessed, 0);
+    assert.equal(result.eventsAggregated, 0);
+    assert.equal(result.bucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseKimiIncremental reads StatusUpdate events from wire.jsonl", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-kimi-"));
+  try {
+    const sessionDir = path.join(tmp, "sessions", "ws1", "sess1");
+    await fs.mkdir(sessionDir, { recursive: true });
+
+    const lines = [
+      JSON.stringify({ type: "metadata", protocol_version: "1.5" }),
+      JSON.stringify({
+        timestamp: 1775833108.22,
+        message: {
+          type: "StatusUpdate",
+          payload: {
+            message_id: "chatcmpl-TEST1",
+            token_usage: { input_other: 14218, output: 123, input_cache_read: 6144, input_cache_creation: 0 },
+          },
+        },
+      }),
+      // duplicate message_id — must be ignored
+      JSON.stringify({
+        timestamp: 1775833109.0,
+        message: {
+          type: "StatusUpdate",
+          payload: {
+            message_id: "chatcmpl-TEST1",
+            token_usage: { input_other: 14218, output: 123, input_cache_read: 6144, input_cache_creation: 0 },
+          },
+        },
+      }),
+      JSON.stringify({
+        timestamp: 1775833119.41,
+        message: {
+          type: "StatusUpdate",
+          payload: {
+            message_id: "chatcmpl-TEST2",
+            token_usage: { input_other: 553, output: 357, input_cache_read: 20224, input_cache_creation: 0 },
+          },
+        },
+      }),
+    ].join("\n");
+
+    const wireFile = path.join(sessionDir, "wire.jsonl");
+    await fs.writeFile(wireFile, lines);
+
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+    const result = await parseKimiIncremental({ wireFiles: [wireFile], cursors, queuePath });
+
+    assert.equal(result.eventsAggregated, 2);        // dedup removed the duplicate TEST1
+    assert.equal(result.recordsProcessed, 2);        // duplicate is skipped before counting
+    assert.ok(result.bucketsQueued > 0);
+
+    // Cursor state persisted
+    assert.ok(Array.isArray(cursors.kimi?.seenIds));
+    assert.equal(cursors.kimi.seenIds.length, 2);
+    assert.ok(cursors.kimi.seenIds.includes("chatcmpl-TEST1"));
+    assert.ok(cursors.kimi.seenIds.includes("chatcmpl-TEST2"));
+
+    // Second run — no new data
+    const result2 = await parseKimiIncremental({ wireFiles: [wireFile], cursors, queuePath });
+    assert.equal(result2.eventsAggregated, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseKimiIncremental returns zero when no wire files exist", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-kimi-"));
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+    const result = await parseKimiIncremental({ wireFiles: [], cursors, queuePath });
     assert.equal(result.recordsProcessed, 0);
     assert.equal(result.eventsAggregated, 0);
     assert.equal(result.bucketsQueued, 0);

@@ -47,6 +47,7 @@ const PROVIDER_COLORS = {
   CLAUDE: "#8b5cf6",    // violet-500
   OPENCODE: "#f59e0b",  // amber-500
   GEMINI: "#3b82f6",    // blue-500
+  KIMI: "#a78bfa",      // violet-400
 };
 
 function getProviderColor(label, index) {

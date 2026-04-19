@@ -54,11 +54,16 @@ function OpenCodeIcon({ size = 16, className = "" }) {
   );
 }
 
+function KimiIcon({ size = 16, className = "" }) {
+  return <img src="/brand-logos/kimi.png" width={size} height={size} className={className} style={{ objectFit: "contain" }} alt="Kimi" />;
+}
+
 const PROVIDER_ICON_MAP = {
   CLAUDE: ClaudeIcon,
   CODEX: CodexIcon,
   CURSOR: CursorIcon,
   GEMINI: GeminiIcon,
+  KIMI: KimiIcon,
   KIRO: KiroIcon,
   OPENCODE: OpenCodeIcon,
 };

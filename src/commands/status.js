@@ -1,6 +1,7 @@
 const os = require("node:os");
 const path = require("node:path");
 const fs = require("node:fs/promises");
+const fssync = require("node:fs");
 
 const { readJson } = require("../lib/fs");
 const { readCodexNotify, readEveryCodeNotify } = require("../lib/codex-config");
@@ -19,6 +20,7 @@ const { collectTrackerDiagnostics } = require("../lib/diagnostics");
 const { probeOpenclawHookState } = require("../lib/openclaw-hook");
 const { probeOpenclawSessionPluginState } = require("../lib/openclaw-session-plugin");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
+const { resolveKimiWireFiles } = require("../lib/rollout");
 
 async function cmdStatus(argv = []) {
   const opts = parseArgs(argv);
@@ -112,6 +114,10 @@ async function cmdStatus(argv = []) {
   const subscriptionLines =
     subscriptions.length > 0 ? subscriptions.map(formatSubscriptionLine) : [];
 
+  const kimiWireFiles = resolveKimiWireFiles(process.env);
+  const kimiHome = process.env.KIMI_HOME || path.join(home, ".kimi");
+  const kimiInstalled = fssync.existsSync(path.join(kimiHome, "sessions"));
+
   const copilotToken = readCopilotOauthToken({ home });
   const copilotOtel = describeCopilotOtelStatus({ home, env: process.env });
   const copilotLines = formatCopilotLines({ token: copilotToken, otel: copilotOtel });
@@ -138,6 +144,9 @@ async function cmdStatus(argv = []) {
       `- Opencode plugin: ${opencodePluginConfigured ? "set" : "unset"}`,
       `- OpenClaw session plugin: ${openclawSessionPluginState?.configured ? "set" : "unset"}`,
       `- OpenClaw hook (legacy): ${openclawHookState?.configured ? "set" : "unset"}`,
+      kimiInstalled
+        ? `- Kimi: passive reader (${kimiWireFiles.length} wire.jsonl file${kimiWireFiles.length !== 1 ? "s" : ""} found)`
+        : null,
       ...copilotLines,
       ...subscriptionLines,
       "",
