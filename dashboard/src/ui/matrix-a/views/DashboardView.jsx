@@ -3,6 +3,7 @@ import { motion } from "motion/react";
 import { Shell, Card, Button } from "../../openai/components";
 import { CostAnalysisModal } from "../components/CostAnalysisModal.jsx";
 import { DataDetails } from "../components/DataDetails.jsx";
+import { ProjectUsageDrilldownModal } from "../components/ProjectUsageDrilldownModal.jsx";
 import { StatsPanel } from "../components/StatsPanel.jsx";
 import { UsageOverview } from "../components/UsageOverview.jsx";
 import { TrendMonitor } from "../components/TrendMonitor.jsx";
@@ -27,6 +28,12 @@ export function DashboardView(props) {
     projectUsageEntries,
     projectUsageLimit,
     setProjectUsageLimit,
+    onSelectProjectEntry,
+    projectDrilldown,
+    projectDrilldownLoading,
+    projectDrilldownError,
+    projectDrilldownOpen,
+    closeProjectDrilldown,
     topModels,
     signedIn,
     publicMode,
@@ -250,6 +257,7 @@ export function DashboardView(props) {
                     projectEntries={projectUsageEntries}
                     projectLimit={projectUsageLimit}
                     onProjectLimitChange={setProjectUsageLimit}
+                    onSelectProjectEntry={onSelectProjectEntry}
                     copy={copy}
                     hasDetailsActual={hasDetailsActual}
                     dailyEmptyPrefix={dailyEmptyPrefix}
@@ -283,6 +291,13 @@ export function DashboardView(props) {
         )}
       </Shell>
       <CostAnalysisModal isOpen={costModalOpen} onClose={closeCostModal} fleetData={fleetData} />
+      <ProjectUsageDrilldownModal
+        open={projectDrilldownOpen}
+        onClose={closeProjectDrilldown}
+        data={projectDrilldown}
+        loading={projectDrilldownLoading}
+        error={projectDrilldownError}
+      />
     </>
   );
 }

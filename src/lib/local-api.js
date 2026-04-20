@@ -377,6 +377,81 @@ function aggregateHourlyByDay(rows, dayKey, timeZoneContext) {
   return Array.from(byHour.values()).sort((a, b) => a.hour.localeCompare(b.hour));
 }
 
+function filterRowsByRange(rows, { from, to, timeZoneContext } = {}) {
+  return rows.filter((row) => {
+    if (!row?.hour_start) return false;
+    const day = rowDayKey(row, timeZoneContext);
+    if (from && day < from) return false;
+    if (to && day > to) return false;
+    return true;
+  });
+}
+
+function aggregateProjectEntries(projectRows) {
+  const byProject = new Map();
+  for (const row of projectRows) {
+    const key = row.project_key || "unknown";
+    if (!byProject.has(key)) {
+      byProject.set(key, {
+        project_key: key,
+        project_ref: row.project_ref || key,
+        total_tokens: 0,
+        billable_total_tokens: 0,
+      });
+    }
+    const agg = byProject.get(key);
+    agg.total_tokens += Number(row.total_tokens || 0);
+    agg.billable_total_tokens += Number(row.total_tokens || row.billable_total_tokens || 0);
+    if (!agg.project_ref && row.project_ref) agg.project_ref = row.project_ref;
+  }
+  return Array.from(byProject.values())
+    .sort((a, b) => b.billable_total_tokens - a.billable_total_tokens)
+    .map((entry) => ({
+      ...entry,
+      total_tokens: String(entry.total_tokens),
+      billable_total_tokens: String(entry.billable_total_tokens),
+    }));
+}
+
+function aggregateProjectSources(projectRows) {
+  const bySource = new Map();
+  for (const row of projectRows) {
+    const source = row.source || "unknown";
+    if (!bySource.has(source)) {
+      bySource.set(source, {
+        source,
+        total_tokens: 0,
+        billable_total_tokens: 0,
+      });
+    }
+    const agg = bySource.get(source);
+    agg.total_tokens += Number(row.total_tokens || 0);
+    agg.billable_total_tokens += Number(row.total_tokens || row.billable_total_tokens || 0);
+  }
+  return Array.from(bySource.values())
+    .sort((a, b) => b.billable_total_tokens - a.billable_total_tokens)
+    .map((entry) => ({
+      ...entry,
+      total_tokens: String(entry.total_tokens),
+      billable_total_tokens: String(entry.billable_total_tokens),
+    }));
+}
+
+function sumProjectTotals(projectRows) {
+  const totals = projectRows.reduce(
+    (acc, row) => {
+      acc.total_tokens += Number(row.total_tokens || 0);
+      acc.billable_total_tokens += Number(row.total_tokens || row.billable_total_tokens || 0);
+      return acc;
+    },
+    { total_tokens: 0, billable_total_tokens: 0 },
+  );
+  return {
+    total_tokens: String(totals.total_tokens),
+    billable_total_tokens: String(totals.billable_total_tokens),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Sync helper
 // ---------------------------------------------------------------------------
@@ -1091,33 +1166,24 @@ function createLocalApiHandler({ queuePath }) {
         path.dirname(qp),
         "project.queue.jsonl",
       );
-      const projectRows = readProjectQueueData(projectQueuePath);
-
-      const byProject = new Map();
-      for (const row of projectRows) {
-        const key = row.project_key || "unknown";
-        if (!byProject.has(key)) {
-          byProject.set(key, {
-            project_key: key,
-            project_ref: row.project_ref || key,
-            total_tokens: 0,
-            billable_total_tokens: 0,
-          });
-        }
-        const agg = byProject.get(key);
-        agg.total_tokens += Number(row.total_tokens || 0);
-        agg.billable_total_tokens += Number(row.total_tokens || 0);
-        if (!agg.project_ref && row.project_ref) agg.project_ref = row.project_ref;
-      }
+      const timeZoneContext = getTimeZoneContext(url);
+      const from = url.searchParams.get("from") || "";
+      const to = url.searchParams.get("to") || "";
+      const projectRows = filterRowsByRange(readProjectQueueData(projectQueuePath), {
+        from,
+        to,
+        timeZoneContext,
+      });
+      const entries = aggregateProjectEntries(projectRows);
 
       // If no project-attributed rows exist yet (user hasn't synced project
       // attribution, or never used a project-capable CLI), fall back to
       // per-source aggregation over the main queue so the panel isn't
       // totally empty. This path used to also exist for the non-empty case
       // and produce wrong numbers; keep it only as the empty fallback.
-      let entries;
-      if (byProject.size === 0) {
-        const rows = readQueueData(qp);
+      let finalEntries = entries;
+      if (entries.length === 0) {
+        const rows = filterRowsByRange(readQueueData(qp), { from, to, timeZoneContext });
         const bySrc = new Map();
         for (const row of rows) {
           const src = row.source || "unknown";
@@ -1132,15 +1198,7 @@ function createLocalApiHandler({ queuePath }) {
           bySrc.get(src).total_tokens += row.total_tokens || 0;
           bySrc.get(src).billable_total_tokens += row.total_tokens || 0;
         }
-        entries = Array.from(bySrc.values())
-          .sort((a, b) => b.billable_total_tokens - a.billable_total_tokens)
-          .map((e) => ({
-            ...e,
-            total_tokens: String(e.total_tokens),
-            billable_total_tokens: String(e.billable_total_tokens),
-          }));
-      } else {
-        entries = Array.from(byProject.values())
+        finalEntries = Array.from(bySrc.values())
           .sort((a, b) => b.billable_total_tokens - a.billable_total_tokens)
           .map((e) => ({
             ...e,
@@ -1149,7 +1207,44 @@ function createLocalApiHandler({ queuePath }) {
           }));
       }
 
-      json(res, { generated_at: new Date().toISOString(), entries });
+      json(res, { generated_at: new Date().toISOString(), entries: finalEntries });
+      return true;
+    }
+
+    if (p === "/functions/tokentracker-project-usage-detail") {
+      const projectQueuePath = path.join(path.dirname(qp), "project.queue.jsonl");
+      const timeZoneContext = getTimeZoneContext(url);
+      const projectKey = url.searchParams.get("project_key") || "";
+      const from = url.searchParams.get("from") || "";
+      const to = url.searchParams.get("to") || "";
+      const compareFrom = url.searchParams.get("compare_from") || "";
+      const compareTo = url.searchParams.get("compare_to") || "";
+      const allRows = readProjectQueueData(projectQueuePath).filter(
+        (row) => String(row.project_key || "") === projectKey,
+      );
+      const currentRows = filterRowsByRange(allRows, { from, to, timeZoneContext });
+      const previousRows = filterRowsByRange(allRows, {
+        from: compareFrom,
+        to: compareTo,
+        timeZoneContext,
+      });
+      json(res, {
+        generated_at: new Date().toISOString(),
+        project_key: projectKey,
+        project_ref: currentRows[0]?.project_ref || previousRows[0]?.project_ref || null,
+        current: {
+          from,
+          to,
+          totals: sumProjectTotals(currentRows),
+          sources: aggregateProjectSources(currentRows),
+        },
+        previous: {
+          from: compareFrom,
+          to: compareTo,
+          totals: sumProjectTotals(previousRows),
+          sources: aggregateProjectSources(previousRows),
+        },
+      });
       return true;
     }
 

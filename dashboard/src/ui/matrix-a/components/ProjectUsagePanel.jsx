@@ -95,6 +95,7 @@ export function ProjectUsagePanel({
   entries = [],
   limit = 3,
   onLimitChange,
+  onSelectEntry,
   loading = false,
   error = null,
   className = "",
@@ -188,6 +189,7 @@ export function ProjectUsagePanel({
             <ProjectUsageCard
               key={`${entry?.project_key || "repo"}-${entry?.project_ref || ""}`}
               entry={entry}
+              onSelectEntry={onSelectEntry}
               placeholder={placeholder}
               tokensLabel={tokensLabel}
               starsLabel={starsLabel}
@@ -202,6 +204,7 @@ export function ProjectUsagePanel({
 
 function ProjectUsageCard({
   entry,
+  onSelectEntry,
   placeholder,
   tokensLabel,
   starsLabel,
@@ -232,11 +235,11 @@ function ProjectUsageCard({
       : formatCompactNumber(tokensRaw, tokenFormatOptions);
 
   return (
-    <a
-      href={projectRef || (repoId ? `https://github.com/${repoId}` : "#")}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="flex items-center gap-3 p-3 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700 hover:border-oai-gray-300 dark:hover:border-oai-gray-600 transition-colors"
+    <button
+      type="button"
+      data-project-card="true"
+      onClick={() => onSelectEntry?.(entry)}
+      className="w-full text-left flex items-center gap-3 p-3 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700 hover:border-oai-gray-300 dark:hover:border-oai-gray-600 transition-colors"
     >
       {avatarUrl ? (
         <img src={avatarUrl} alt="" className="w-10 h-10 rounded bg-oai-gray-100 dark:bg-oai-gray-800 object-cover" />
@@ -252,6 +255,6 @@ function ProjectUsageCard({
           <span>{tokensCompact}</span>
         </div>
       </div>
-    </a>
+    </button>
   );
 }

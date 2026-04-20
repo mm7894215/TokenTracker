@@ -24,6 +24,7 @@ const PATHS = {
   usageHeatmap: "tokentracker-usage-heatmap",
   usageModelBreakdown: "tokentracker-usage-model-breakdown",
   projectUsageSummary: "tokentracker-project-usage-summary",
+  projectUsageDetail: "tokentracker-project-usage-detail",
   userStatus: "tokentracker-user-status",
   localSync: "tokentracker-local-sync",
   usageLimits: "tokentracker-usage-limits",
@@ -112,6 +113,26 @@ export async function getProjectUsageSummary({
   if (to) params.to = to;
   if (limit != null) params.limit = String(limit);
   return fetchLocalJson(PATHS.projectUsageSummary, params);
+}
+
+export async function getProjectUsageDetail({
+  projectKey,
+  from,
+  to,
+  compareFrom,
+  compareTo,
+  timeZone,
+  tzOffsetMinutes,
+}: AnyRecord = {}) {
+  const tzParams = buildTimeZoneParams({ timeZone, tzOffsetMinutes });
+  return fetchLocalJson(PATHS.projectUsageDetail, {
+    project_key: projectKey,
+    from,
+    to,
+    compare_from: compareFrom,
+    compare_to: compareTo,
+    ...tzParams,
+  });
 }
 
 async function fetchInsforgeFunction(slug: string, options: {

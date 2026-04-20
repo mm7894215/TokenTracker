@@ -6,6 +6,7 @@ export function DataDetails({
   projectEntries = [],
   projectLimit = 3,
   onProjectLimitChange,
+  onSelectProjectEntry,
   // Daily breakdown props
   copy,
   hasDetailsActual,
@@ -84,11 +85,10 @@ export function DataDetails({
       {activeTab === "projects" && (
         <div className="space-y-1">
           {projectEntries.slice(0, projectLimit).map((entry) => (
-            <a
+            <button
+              type="button"
               key={entry?.project_key || entry?.project_ref}
-              href={entry?.project_ref || "#"}
-              target="_blank"
-              rel="noopener noreferrer"
+              onClick={() => onSelectProjectEntry?.(entry)}
               className="flex items-center gap-3 p-2 rounded-lg hover:oai-bg-elevated transition-colors"
             >
               <div className="w-8 h-8 rounded-md oai-bg-elevated flex items-center justify-center oai-text-caption font-medium text-oai-gray-500 dark:text-oai-gray-300">
@@ -104,7 +104,7 @@ export function DataDetails({
                   entry?.total_tokens?.toLocaleString?.() ||
                   "—"}
               </div>
-            </a>
+            </button>
           ))}
         </div>
       )}

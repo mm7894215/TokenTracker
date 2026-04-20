@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useActivityHeatmap } from "../hooks/use-activity-heatmap.js";
 import { useProjectUsageSummary } from "../hooks/use-project-usage-summary";
+import { useProjectUsageDetail } from "../hooks/use-project-usage-detail.js";
 import { useTrendData } from "../hooks/use-trend-data.js";
 import { useUsageData } from "../hooks/use-usage-data.js";
 import { useUsageLimits } from "../hooks/use-usage-limits.js";
@@ -44,6 +45,7 @@ import { ProjectUsagePanel } from "../ui/matrix-a/components/ProjectUsagePanel.j
 import { DashboardView } from "../ui/matrix-a/views/DashboardView.jsx";
 import { ShareModal } from "../ui/share/ShareModal";
 import { useShareCardData } from "../ui/share/use-share-card-data";
+import { getPreviousRange } from "../lib/project-drilldown.js";
 
 const PERIODS = ["day", "week", "month", "total", "custom"];
 const DETAILS_DATE_KEYS = new Set(["day", "hour", "month"]);
@@ -434,6 +436,7 @@ export function DashboardPage({
   });
 
   const [projectUsageLimit, setProjectUsageLimit] = useState(3);
+  const [selectedProjectEntry, setSelectedProjectEntry] = useState(null);
   const {
     entries: projectUsageEntries,
     loading: projectUsageLoading,
@@ -446,6 +449,21 @@ export function DashboardPage({
     to,
     timeZone,
     tzOffsetMinutes,
+  });
+  const previousRange = useMemo(() => getPreviousRange({ from, to }), [from, to]);
+  const {
+    data: projectDrilldown,
+    loading: projectDrilldownLoading,
+    error: projectDrilldownError,
+  } = useProjectUsageDetail({
+    projectKey: selectedProjectEntry?.project_key,
+    from,
+    to,
+    compareFrom: previousRange.from,
+    compareTo: previousRange.to,
+    timeZone,
+    tzOffsetMinutes,
+    open: Boolean(selectedProjectEntry),
   });
 
   const shareDailyToTrend = period === "week" || period === "month";
@@ -1208,6 +1226,12 @@ export function DashboardPage({
       projectUsageEntries={projectUsageEntries}
       projectUsageLimit={projectUsageLimit}
       setProjectUsageLimit={setProjectUsageLimit}
+      onSelectProjectEntry={setSelectedProjectEntry}
+      projectDrilldown={projectDrilldown}
+      projectDrilldownLoading={projectDrilldownLoading}
+      projectDrilldownError={projectDrilldownError}
+      projectDrilldownOpen={Boolean(selectedProjectEntry)}
+      closeProjectDrilldown={() => setSelectedProjectEntry(null)}
       topModels={topModels}
       signedIn={signedIn}
       publicMode={publicMode}
