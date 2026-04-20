@@ -199,6 +199,19 @@ dashboard.rolling.title,ui,RollingUsagePanel,RollingUsagePanel,title,"Recent Act
 dashboard.rolling.last_7d,ui,RollingUsagePanel,RollingUsagePanel,label_last_7d,"Last 7 days",,active
 dashboard.rolling.last_30d,ui,RollingUsagePanel,RollingUsagePanel,label_last_30d,"Last 30 days",,active
 dashboard.rolling.avg_active_day,ui,RollingUsagePanel,RollingUsagePanel,label_avg_active_day,"Daily average",,active
+dashboard.weekly_review.title,ui,WeeklyReviewCard,WeeklyReviewCard,title,"Weekly Review",,active
+dashboard.weekly_review.subtitle,ui,WeeklyReviewCard,WeeklyReviewCard,subtitle,"A quick read on the last 7 days",,active
+dashboard.weekly_review.total,ui,WeeklyReviewCard,WeeklyReviewCard,label_total,"This week",,active
+dashboard.weekly_review.previous,ui,WeeklyReviewCard,WeeklyReviewCard,label_previous,"Previous week",,active
+dashboard.weekly_review.top_project,ui,WeeklyReviewCard,WeeklyReviewCard,label_top_project,"Top project",,active
+dashboard.weekly_review.top_model,ui,WeeklyReviewCard,WeeklyReviewCard,label_top_model,"Top model",,active
+dashboard.weekly_review.spike_label,ui,WeeklyReviewCard,WeeklyReviewCard,label_spike,"Biggest spike",,active
+dashboard.weekly_review.spike_value,ui,WeeklyReviewCard,WeeklyReviewCard,spike_value,"{{day}} drove {{tokens}}",,active
+dashboard.weekly_review.spike_empty,ui,WeeklyReviewCard,WeeklyReviewCard,spike_empty,"No spike data yet",,active
+dashboard.weekly_review.recommendation.default,ui,WeeklyReviewCard,WeeklyReviewCard,recommendation_default,"Usage looks steady. Keep an eye on your heaviest project before next week ramps up.",,active
+dashboard.weekly_review.recommendation.project,ui,WeeklyReviewCard,WeeklyReviewCard,recommendation_project,"Most of this week came from {{project}}. If it was exploratory work, consider a cheaper model for first-pass runs.",,active
+dashboard.weekly_review.recommendation.model,ui,WeeklyReviewCard,WeeklyReviewCard,recommendation_model,"{{model}} dominated the week. If this was repetitive work, try a lower-cost model for the next pass.",,active
+dashboard.weekly_review.recommendation.spike,ui,WeeklyReviewCard,WeeklyReviewCard,recommendation_spike,"Review the sessions around {{day}}. That spike is the clearest place to reduce wasted spend.",,active
 
 dashboard.model_breakdown.title,ui,NeuralDivergenceMap,NeuralDivergenceMap,title,"Model Breakdown",,active
 dashboard.model_breakdown.footer,ui,NeuralDivergenceMap,NeuralDivergenceMap,footer,"Multi-Engine Load Balancing // Active Session",,active

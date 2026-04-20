@@ -6,6 +6,7 @@ import { DataDetails } from "../components/DataDetails.jsx";
 import { StatsPanel } from "../components/StatsPanel.jsx";
 import { UsageOverview } from "../components/UsageOverview.jsx";
 import { TrendMonitor } from "../components/TrendMonitor.jsx";
+import { WeeklyReviewCard } from "../components/WeeklyReviewCard.jsx";
 import { FadeIn } from "../../foundation/FadeIn.jsx";
 import { MacAppBanner } from "../components/MacAppBanner.jsx";
 import { WidgetOnboardingCard } from "../components/WidgetOnboardingCard.jsx";
@@ -59,6 +60,7 @@ export function DashboardView(props) {
     summaryCostValue,
     summaryConversationsValue,
     rollingUsage,
+    weeklyReviewRows,
     costInfoEnabled,
     openCostModal,
     costModalOpen,
@@ -158,6 +160,14 @@ export function DashboardView(props) {
                 />
 
                 {isLocalMode ? <WidgetOnboardingCard /> : null}
+
+                {!screenshotMode ? (
+                  <WeeklyReviewCard
+                    dailyRows={weeklyReviewRows}
+                    projectEntries={projectUsageEntries}
+                    topModels={topModels}
+                  />
+                ) : null}
 
                 {shouldShowInstall ? (
                   <FadeIn delay={0.25}>

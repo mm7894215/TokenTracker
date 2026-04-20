@@ -1241,6 +1241,7 @@ export function DashboardPage({
       summaryCostValue={summaryCostValue}
       summaryConversationsValue={summaryConversationsValue}
       rollingUsage={rolling}
+      weeklyReviewRows={dailyBreakdownRows}
       costInfoEnabled={costInfoEnabled}
       openCostModal={openCostModal}
       allowBreakdownToggle={allowBreakdownToggle}
