@@ -202,6 +202,21 @@ dashboard.rolling.title,ui,RollingUsagePanel,RollingUsagePanel,title,"Recent Act
 dashboard.rolling.last_7d,ui,RollingUsagePanel,RollingUsagePanel,label_last_7d,"Last 7 days",,active
 dashboard.rolling.last_30d,ui,RollingUsagePanel,RollingUsagePanel,label_last_30d,"Last 30 days",,active
 dashboard.rolling.avg_active_day,ui,RollingUsagePanel,RollingUsagePanel,label_avg_active_day,"Daily average",,active
+dashboard.timeline.title,ui,ChangeTimelineCard,ChangeTimelineCard,title,"What Changed",,active
+dashboard.timeline.subtitle,ui,ChangeTimelineCard,ChangeTimelineCard,subtitle,"A timeline of provider, model, and config shifts",,active
+dashboard.timeline.empty,ui,ChangeTimelineCard,ChangeTimelineCard,empty,"No notable changes yet",,active
+dashboard.timeline.loading,ui,ChangeTimelineCard,ChangeTimelineCard,loading,"Loading…",,active
+dashboard.timeline.error,ui,ChangeTimelineCard,ChangeTimelineCard,error,"Could not load the change timeline.",,active
+dashboard.timeline.event.source_first_seen.title,ui,ChangeTimelineCard,ChangeTimelineCard,event_source_title,"First saw {{source}}",,active
+dashboard.timeline.event.source_first_seen.detail,ui,ChangeTimelineCard,ChangeTimelineCard,event_source_detail,"New provider or CLI integration became active",,active
+dashboard.timeline.event.model_first_seen.title,ui,ChangeTimelineCard,ChangeTimelineCard,event_model_title,"Started using {{model}}",,active
+dashboard.timeline.event.model_first_seen.detail,ui,ChangeTimelineCard,ChangeTimelineCard,event_model_detail,"Model first appeared in tracked usage",,active
+dashboard.timeline.event.project_attribution_started.title,ui,ChangeTimelineCard,ChangeTimelineCard,event_project_title,"Project attribution active",,active
+dashboard.timeline.event.project_attribution_started.detail,ui,ChangeTimelineCard,ChangeTimelineCard,event_project_detail,"Per-project usage started appearing in the dashboard",,active
+dashboard.timeline.event.cloud_sync_configured.title,ui,ChangeTimelineCard,ChangeTimelineCard,event_cloud_title,"Cloud sync configured",,active
+dashboard.timeline.event.cloud_sync_configured.detail,ui,ChangeTimelineCard,ChangeTimelineCard,event_cloud_detail,"A device token/config was saved for uploading usage",,active
+dashboard.timeline.event.unknown.title,ui,ChangeTimelineCard,ChangeTimelineCard,event_unknown_title,"New change",,active
+dashboard.timeline.event.unknown.detail,ui,ChangeTimelineCard,ChangeTimelineCard,event_unknown_detail,"This event type is not yet recognized by the dashboard",,active
 
 dashboard.model_breakdown.title,ui,NeuralDivergenceMap,NeuralDivergenceMap,title,"Model Breakdown",,active
 dashboard.model_breakdown.footer,ui,NeuralDivergenceMap,NeuralDivergenceMap,footer,"Multi-Engine Load Balancing // Active Session",,active

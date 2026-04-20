@@ -377,6 +377,67 @@ function aggregateHourlyByDay(rows, dayKey, timeZoneContext) {
   return Array.from(byHour.values()).sort((a, b) => a.hour.localeCompare(b.hour));
 }
 
+function buildChangeTimeline({ rows, projectRows, configMtime }) {
+  const events = [];
+  const seenSources = new Map();
+  const seenModels = new Map();
+
+  for (const row of rows) {
+    const when = typeof row?.hour_start === "string" ? row.hour_start : null;
+    if (!when) continue;
+    const source = typeof row?.source === "string" ? row.source : null;
+    const model = typeof row?.model === "string" ? row.model : null;
+
+    if (source && !seenSources.has(source)) {
+      seenSources.set(source, when);
+    }
+    if (model && !seenModels.has(model)) {
+      seenModels.set(model, when);
+    }
+  }
+
+  for (const [source, when] of seenSources.entries()) {
+    events.push({
+      date: when.slice(0, 10),
+      event_type: "source_first_seen",
+      params: { source },
+    });
+  }
+
+  for (const [model, when] of Array.from(seenModels.entries()).slice(0, 8)) {
+    events.push({
+      date: when.slice(0, 10),
+      event_type: "model_first_seen",
+      params: { model },
+    });
+  }
+
+  if (projectRows.length > 0) {
+    const firstProjectRow = projectRows
+      .filter((row) => typeof row?.hour_start === "string")
+      .sort((a, b) => String(a.hour_start).localeCompare(String(b.hour_start)))[0];
+    if (firstProjectRow?.hour_start) {
+      events.push({
+        date: firstProjectRow.hour_start.slice(0, 10),
+        event_type: "project_attribution_started",
+        params: {},
+      });
+    }
+  }
+
+  if (configMtime) {
+    events.push({
+      date: configMtime.slice(0, 10),
+      event_type: "cloud_sync_configured",
+      params: {},
+    });
+  }
+
+  return events
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+    .slice(-12);
+}
+
 // ---------------------------------------------------------------------------
 // Sync helper
 // ---------------------------------------------------------------------------
@@ -1150,6 +1211,20 @@ function createLocalApiHandler({ queuePath }) {
       }
 
       json(res, { generated_at: new Date().toISOString(), entries });
+      return true;
+    }
+
+    if (p === "/functions/tokentracker-change-timeline") {
+      const rows = readQueueData(qp);
+      const projectQueuePath = path.join(path.dirname(qp), "project.queue.jsonl");
+      const projectRows = readProjectQueueData(projectQueuePath);
+      const configPath = path.join(os.homedir(), ".tokentracker", "tracker", "config.json");
+      const configStat = fs.statSync(configPath, { throwIfNoEntry: false });
+      const configMtime = configStat?.mtime ? new Date(configStat.mtime).toISOString() : null;
+      json(res, {
+        generated_at: new Date().toISOString(),
+        events: buildChangeTimeline({ rows, projectRows, configMtime }),
+      });
       return true;
     }
 

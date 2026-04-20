@@ -5,6 +5,7 @@ import { useTrendData } from "../hooks/use-trend-data.js";
 import { useUsageData } from "../hooks/use-usage-data.js";
 import { useUsageLimits } from "../hooks/use-usage-limits.js";
 import { useUsageModelBreakdown } from "../hooks/use-usage-model-breakdown.js";
+import { useChangeTimeline } from "../hooks/use-change-timeline.js";
 import {
   isAccessTokenReady,
   normalizeAccessToken,
@@ -447,6 +448,11 @@ export function DashboardPage({
     timeZone,
     tzOffsetMinutes,
   });
+  const {
+    events: changeTimelineEvents,
+    loading: changeTimelineLoading,
+    error: changeTimelineError,
+  } = useChangeTimeline();
 
   const shareDailyToTrend = period === "week" || period === "month";
   const useDailyTrend = period === "week" || period === "month";
@@ -1208,6 +1214,9 @@ export function DashboardPage({
       projectUsageEntries={projectUsageEntries}
       projectUsageLimit={projectUsageLimit}
       setProjectUsageLimit={setProjectUsageLimit}
+      changeTimelineEvents={changeTimelineEvents}
+      changeTimelineLoading={changeTimelineLoading}
+      changeTimelineError={changeTimelineError}
       topModels={topModels}
       signedIn={signedIn}
       publicMode={publicMode}

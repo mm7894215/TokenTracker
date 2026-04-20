@@ -6,6 +6,7 @@ import { DataDetails } from "../components/DataDetails.jsx";
 import { StatsPanel } from "../components/StatsPanel.jsx";
 import { UsageOverview } from "../components/UsageOverview.jsx";
 import { TrendMonitor } from "../components/TrendMonitor.jsx";
+import { ChangeTimelineCard } from "../components/ChangeTimelineCard.jsx";
 import { FadeIn } from "../../foundation/FadeIn.jsx";
 import { MacAppBanner } from "../components/MacAppBanner.jsx";
 import { WidgetOnboardingCard } from "../components/WidgetOnboardingCard.jsx";
@@ -27,6 +28,9 @@ export function DashboardView(props) {
     projectUsageEntries,
     projectUsageLimit,
     setProjectUsageLimit,
+    changeTimelineEvents,
+    changeTimelineLoading,
+    changeTimelineError,
     topModels,
     signedIn,
     publicMode,
@@ -158,6 +162,14 @@ export function DashboardView(props) {
                 />
 
                 {isLocalMode ? <WidgetOnboardingCard /> : null}
+
+                {!screenshotMode ? (
+                  <ChangeTimelineCard
+                    events={changeTimelineEvents}
+                    loading={changeTimelineLoading}
+                    error={changeTimelineError}
+                  />
+                ) : null}
 
                 {shouldShowInstall ? (
                   <FadeIn delay={0.25}>
