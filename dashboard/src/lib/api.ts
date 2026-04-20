@@ -22,6 +22,7 @@ const PATHS = {
   usageMonthly: "tokentracker-usage-monthly",
   usageHeatmap: "tokentracker-usage-heatmap",
   usageModelBreakdown: "tokentracker-usage-model-breakdown",
+  sessionBuckets: "tokentracker-session-buckets",
   projectUsageSummary: "tokentracker-project-usage-summary",
   userStatus: "tokentracker-user-status",
   localSync: "tokentracker-local-sync",
@@ -111,6 +112,10 @@ export async function getProjectUsageSummary({
   if (to) params.to = to;
   if (limit != null) params.limit = String(limit);
   return fetchLocalJson(PATHS.projectUsageSummary, params);
+}
+
+export async function getSessionBuckets({ limit = 20 }: AnyRecord = {}) {
+  return fetchLocalJson(PATHS.sessionBuckets, { limit });
 }
 
 async function fetchInsforgeFunction(slug: string, options: {
@@ -370,4 +375,3 @@ export async function getUsageHeatmap({
     ...tzParams,
   });
 }
-

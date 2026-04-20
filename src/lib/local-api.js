@@ -333,6 +333,23 @@ function aggregateHourlyByDay(rows, dayKey, timeZoneContext) {
   return Array.from(byHour.values()).sort((a, b) => a.hour.localeCompare(b.hour));
 }
 
+function listRecentSessionBuckets(rows, limit = 20) {
+  return rows
+    .filter((row) => row?.hour_start)
+    .slice()
+    .sort((a, b) => String(b.hour_start).localeCompare(String(a.hour_start)))
+    .slice(0, Math.max(1, limit))
+    .map((row) => ({
+      id: `${row.source || "unknown"}|${row.model || "unknown"}|${row.hour_start}`,
+      source: row.source || "unknown",
+      model: row.model || "unknown",
+      hour_start: row.hour_start,
+      total_tokens: String(row.total_tokens || 0),
+      billable_total_tokens: String(row.billable_total_tokens || row.total_tokens || 0),
+      conversation_count: Number(row.conversation_count || 0),
+    }));
+}
+
 // ---------------------------------------------------------------------------
 // Sync helper
 // ---------------------------------------------------------------------------
@@ -912,6 +929,16 @@ function createLocalApiHandler({ queuePath }) {
       json(res, {
         from, to, days: 0, sources,
         pricing: { model: "per-model", pricing_mode: "per_token_type", source: "litellm", effective_from: new Date().toISOString().slice(0, 10) },
+      });
+      return true;
+    }
+
+    if (p === "/functions/tokentracker-session-buckets") {
+      const limit = Number(url.searchParams.get("limit") || 20);
+      const rows = readQueueData(qp);
+      json(res, {
+        generated_at: new Date().toISOString(),
+        entries: listRecentSessionBuckets(rows, limit),
       });
       return true;
     }

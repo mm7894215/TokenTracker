@@ -5,6 +5,7 @@ import { useTrendData } from "../hooks/use-trend-data.js";
 import { useUsageData } from "../hooks/use-usage-data.js";
 import { useUsageLimits } from "../hooks/use-usage-limits.js";
 import { useUsageModelBreakdown } from "../hooks/use-usage-model-breakdown.js";
+import { useSessionBuckets } from "../hooks/use-session-buckets.js";
 import {
   isAccessTokenReady,
   normalizeAccessToken,
@@ -445,6 +446,7 @@ export function DashboardPage({
     timeZone,
     tzOffsetMinutes,
   });
+  const { entries: sessionEntries } = useSessionBuckets();
 
   const shareDailyToTrend = period === "week" || period === "month";
   const useDailyTrend = period === "week" || period === "month";
@@ -1203,6 +1205,7 @@ export function DashboardPage({
       projectUsageEntries={projectUsageEntries}
       projectUsageLimit={projectUsageLimit}
       setProjectUsageLimit={setProjectUsageLimit}
+      sessionEntries={sessionEntries}
       topModels={topModels}
       signedIn={signedIn}
       publicMode={publicMode}

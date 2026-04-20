@@ -215,6 +215,13 @@ dashboard.projects.limit_top_3,ui,ProjectUsagePanel,ProjectUsagePanel,limit_top_
 dashboard.projects.limit_top_6,ui,ProjectUsagePanel,ProjectUsagePanel,limit_top_6,"TOP 6",,active
 dashboard.projects.limit_top_10,ui,ProjectUsagePanel,ProjectUsagePanel,limit_top_10,"TOP 10",,active
 dashboard.projects.empty,ui,ProjectUsagePanel,ProjectUsagePanel,empty,"No public repositories",,active
+dashboard.sessions.title,ui,DataDetails,DataDetails,sessions_title,"Sessions",,active
+dashboard.sessions.filter.all,ui,DataDetails,DataDetails,filter_all,"All",,active
+dashboard.sessions.filter.productive,ui,DataDetails,DataDetails,filter_productive,"Productive",,active
+dashboard.sessions.filter.exploratory,ui,DataDetails,DataDetails,filter_exploratory,"Exploratory",,active
+dashboard.sessions.filter.blocked,ui,DataDetails,DataDetails,filter_blocked,"Blocked",,active
+dashboard.sessions.filter.wasted,ui,DataDetails,DataDetails,filter_wasted,"Wasted",,active
+dashboard.sessions.filter.unset,ui,DataDetails,DataDetails,filter_unset,"Set outcome…",,active
 dashboard.upgrade_alert.title,ui,UpgradeAlertModal,UpgradeAlertModal,title,"Update available",,active
 dashboard.upgrade_alert.subtitle,ui,UpgradeAlertModal,UpgradeAlertModal,subtitle,"TokenTracker v{{required}} is now available.",,active
 dashboard.upgrade_alert.subtitle_generic,ui,UpgradeAlertModal,UpgradeAlertModal,subtitle_generic,"A new version of TokenTracker is available.",,active

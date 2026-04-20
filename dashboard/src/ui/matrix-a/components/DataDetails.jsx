@@ -1,11 +1,18 @@
 import React, { useState } from "react";
 import { Card } from "../../openai/components";
+import {
+  buildOutcomeCounts,
+  getSessionOutcomes,
+  SESSION_OUTCOME_OPTIONS,
+  setSessionOutcome,
+} from "../../../lib/session-outcomes.js";
 
 export function DataDetails({
   // Project props
   projectEntries = [],
   projectLimit = 3,
   onProjectLimitChange,
+  sessionEntries = [],
   // Daily breakdown props
   copy,
   hasDetailsActual,
@@ -33,6 +40,13 @@ export function DataDetails({
   setDetailsPage,
 }) {
   const [activeTab, setActiveTab] = useState("daily");
+  const [outcomes, setOutcomes] = useState(() => getSessionOutcomes());
+  const [sessionFilter, setSessionFilter] = useState("all");
+  const outcomeCounts = buildOutcomeCounts(sessionEntries, outcomes);
+  const visibleSessions = sessionEntries.filter((entry) => {
+    if (sessionFilter === "all") return true;
+    return outcomes[entry.id] === sessionFilter;
+  });
 
   return (
     <Card className="flex-1 flex flex-col min-h-0 overflow-hidden" bodyClassName="flex-1 flex flex-col min-h-0">
@@ -64,6 +78,19 @@ export function DataDetails({
             }`}
           >
             {copy("dashboard.projects.title")}
+          </button>
+          <button
+            role="tab"
+            aria-selected={activeTab === "sessions"}
+            type="button"
+            onClick={() => setActiveTab("sessions")}
+            className={`text-xs font-medium px-3 py-1.5 rounded transition-colors ${
+              activeTab === "sessions"
+                ? "text-oai-black dark:text-oai-white bg-oai-gray-100 dark:bg-oai-gray-800"
+                : "text-oai-gray-500 dark:text-oai-gray-300 hover:text-oai-black dark:hover:text-oai-white hover:bg-oai-gray-50 dark:hover:bg-oai-gray-800/50"
+            }`}
+          >
+            {copy("dashboard.sessions.title")}
           </button>
         </div>
         {activeTab === "projects" && (
@@ -211,6 +238,77 @@ export function DataDetails({
           ) : null}
         </div>
       )}
+
+      {activeTab === "sessions" && (
+        <div className="flex-1 flex flex-col min-h-0">
+          <div className="mb-3 flex flex-wrap gap-2">
+            <OutcomeChip
+              label={copy("dashboard.sessions.filter.all")}
+              count={outcomeCounts.all}
+              active={sessionFilter === "all"}
+              onClick={() => setSessionFilter("all")}
+            />
+            {SESSION_OUTCOME_OPTIONS.map((option) => (
+              <OutcomeChip
+                key={option}
+                label={copy(`dashboard.sessions.filter.${option}`)}
+                count={outcomeCounts[option]}
+                active={sessionFilter === option}
+                onClick={() => setSessionFilter(option)}
+              />
+            ))}
+          </div>
+          <div className="space-y-2 overflow-auto">
+            {visibleSessions.map((entry) => (
+              <div key={entry.id} className="rounded-lg border border-oai-gray-100 dark:border-oai-gray-800 px-3 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-oai-black dark:text-oai-white truncate">
+                      {entry.source} · {entry.model}
+                    </div>
+                    <div className="text-xs text-oai-gray-500 dark:text-oai-gray-400">
+                      {String(entry.hour_start).replace("T", " ").slice(0, 16)}
+                    </div>
+                  </div>
+                  <div className="text-sm font-medium text-oai-black dark:text-oai-white tabular-nums">
+                    {entry.billable_total_tokens}
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <select
+                    value={outcomes[entry.id] || ""}
+                    onChange={(event) => setOutcomes(setSessionOutcome(entry.id, event.target.value))}
+                    className="text-xs text-oai-gray-600 dark:text-oai-gray-300 bg-white dark:bg-oai-gray-900 border border-oai-gray-200 dark:border-oai-gray-700 rounded px-2 py-1"
+                  >
+                    <option value="">{copy("dashboard.sessions.filter.unset")}</option>
+                    {SESSION_OUTCOME_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {copy(`dashboard.sessions.filter.${option}`)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </Card>
+  );
+}
+
+function OutcomeChip({ label, count, active, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-full px-3 py-1 text-xs transition-colors ${
+        active
+          ? "bg-oai-gray-900 text-white dark:bg-white dark:text-oai-gray-900"
+          : "bg-oai-gray-100 dark:bg-oai-gray-800 text-oai-gray-600 dark:text-oai-gray-300"
+      }`}
+    >
+      {label} {count}
+    </button>
   );
 }
