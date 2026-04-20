@@ -27,6 +27,9 @@ const {
   parseCopilotIncremental,
   resolveKimiWireFiles,
   parseKimiIncremental,
+  resolveKiroCliSessionFiles,
+  resolveKiroCliDbPath,
+  parseKiroCliIncremental,
 } = require("../lib/rollout");
 const { createProgress, renderBar, formatNumber, formatBytes } = require("../lib/progress");
 const {
@@ -359,6 +362,39 @@ async function cmdSync(argv) {
       });
     }
 
+    // ── Kiro CLI (reads ~/Library/Application Support/kiro-cli/data.sqlite3) ──
+    // Runs IN PARALLEL with the Kiro IDE branch above — NOT instead of it.
+    // Both emit source='kiro' so totals merge transparently; cursor state
+    // is isolated in cursors.kiroCli. Kiro CLI does not persist explicit
+    // token counts; we approximate from user_prompt_length / response_size
+    // at 4 chars/token and mark the model '<model>~approx' so the
+    // approximation is visible in model-breakdown.
+    let kiroCliResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    const kiroCliDb = resolveKiroCliDbPath(process.env);
+    if (fssync.existsSync(kiroCliDb)) {
+      if (progress?.enabled) {
+        progress.start(`Parsing Kiro CLI ${renderBar(0)} | buckets 0`);
+      }
+      try {
+        kiroCliResult = await parseKiroCliIncremental({
+          cursors,
+          queuePath,
+          env: process.env,
+          onProgress: (p) => {
+            if (!progress?.enabled) return;
+            const pct = p.total > 0 ? p.index / p.total : 1;
+            progress.update(
+              `Parsing Kiro CLI ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} convs | buckets ${formatNumber(p.bucketsQueued)}`,
+            );
+          },
+        });
+      } catch (err) {
+        if (!opts.auto) {
+          process.stderr.write(`Kiro CLI sync: ${err.message}\n`);
+        }
+      }
+    }
+
     // ── Kimi (passive wire.jsonl reader) ──
     let kimiResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     const kimiWireFiles = resolveKimiWireFiles(process.env);
@@ -496,6 +532,7 @@ async function cmdSync(argv) {
         opencodeResult.filesProcessed +
         cursorResult.recordsProcessed +
         kiroResult.recordsProcessed +
+        kiroCliResult.recordsProcessed +
         hermesResult.recordsProcessed +
         kimiResult.recordsProcessed +
         copilotResult.recordsProcessed;
@@ -507,6 +544,7 @@ async function cmdSync(argv) {
         opencodeResult.bucketsQueued +
         cursorResult.bucketsQueued +
         kiroResult.bucketsQueued +
+        kiroCliResult.bucketsQueued +
         hermesResult.bucketsQueued +
         kimiResult.bucketsQueued +
         copilotResult.bucketsQueued;

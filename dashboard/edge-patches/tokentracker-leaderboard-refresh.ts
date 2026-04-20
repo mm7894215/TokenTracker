@@ -74,6 +74,11 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   "kimi-for-coding": { input: 0.6, output: 2, cache_read: 0.15 },
   "kimi-k2.5": { input: 0.6, output: 2, cache_read: 0.15 },
   "kimi-k2.5-free": { input: 0, output: 0, cache_read: 0 },
+  // ── AWS Kiro (mirrored byte-for-byte from src/lib/local-api.js to
+  //    prevent cloud/local cost drift — Kiro routes through Bedrock,
+  //    most commonly claude-sonnet-4). ──
+  "kiro-agent": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
+  "kiro-cli-agent": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
   // ── Misc / Free ──
   "glm-4.7-free": { input: 0, output: 0, cache_read: 0 },
   "nemotron-3-super-free": { input: 0, output: 0, cache_read: 0 },
@@ -99,6 +104,7 @@ function getModelPricing(model: string) {
   if (lower.includes("gemini-3")) return MODEL_PRICING["gemini-3-flash-preview"];
   if (lower.includes("gemini-2.5")) return MODEL_PRICING["gemini-2.5-pro"];
   if (lower.includes("kimi")) return MODEL_PRICING["kimi-k2.5"];
+  if (lower.includes("kiro")) return MODEL_PRICING["kiro-cli-agent"];
   if (lower.includes("composer")) return MODEL_PRICING["composer-1"];
   if (lower === "auto") return MODEL_PRICING["composer-1"];
   return ZERO_PRICING;

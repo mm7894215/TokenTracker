@@ -20,7 +20,7 @@ const { collectTrackerDiagnostics } = require("../lib/diagnostics");
 const { probeOpenclawHookState } = require("../lib/openclaw-hook");
 const { probeOpenclawSessionPluginState } = require("../lib/openclaw-session-plugin");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
-const { resolveKimiWireFiles } = require("../lib/rollout");
+const { resolveKimiWireFiles, resolveKiroCliDbPath } = require("../lib/rollout");
 
 async function cmdStatus(argv = []) {
   const opts = parseArgs(argv);
@@ -118,6 +118,13 @@ async function cmdStatus(argv = []) {
   const kimiHome = process.env.KIMI_HOME || path.join(home, ".kimi");
   const kimiInstalled = fssync.existsSync(path.join(kimiHome, "sessions"));
 
+  // Kiro CLI — reads from SQLite at
+  // ~/Library/Application Support/kiro-cli/data.sqlite3. End-user dashboards
+  // show CLI and IDE merged under a single "Kiro" brand; this status line
+  // surfaces the CLI sub-path separately for operators.
+  const kiroCliDbPath = resolveKiroCliDbPath(process.env);
+  const kiroCliInstalled = fssync.existsSync(kiroCliDbPath);
+
   const copilotToken = readCopilotOauthToken({ home });
   const copilotOtel = describeCopilotOtelStatus({ home, env: process.env });
   const copilotLines = formatCopilotLines({ token: copilotToken, otel: copilotOtel });
@@ -146,6 +153,9 @@ async function cmdStatus(argv = []) {
       `- OpenClaw hook (legacy): ${openclawHookState?.configured ? "set" : "unset"}`,
       kimiInstalled
         ? `- Kimi Code: passive reader (${kimiWireFiles.length} wire.jsonl file${kimiWireFiles.length !== 1 ? "s" : ""} found)`
+        : null,
+      kiroCliInstalled
+        ? `- Kiro CLI: SQLite data.sqlite3 found (tokens approximated from char lengths, merged under 'kiro' source)`
         : null,
       ...copilotLines,
       ...subscriptionLines,

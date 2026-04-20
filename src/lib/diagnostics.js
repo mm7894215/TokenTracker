@@ -16,6 +16,7 @@ const { normalizeState: normalizeUploadState } = require("./upload-throttle");
 const { probeOpenclawHookState } = require("./openclaw-hook");
 const { probeOpenclawSessionPluginState } = require("./openclaw-session-plugin");
 const { resolveTrackerPaths } = require("./tracker-paths");
+const { resolveKiroCliDbPath } = require("./rollout");
 
 async function collectTrackerDiagnostics({
   home = os.homedir(),
@@ -81,6 +82,25 @@ async function collectTrackerDiagnostics({
   });
   const openclawHookState = await probeOpenclawHookState({ home, trackerDir, env: process.env });
 
+  // Kiro IDE and Kiro CLI sub-path presence — merged under one "kiro" source
+  // at token/cost aggregation level; operators need visibility of both
+  // sub-paths here for debugging.
+  const kiroIdeDevDataDir = path.join(
+    home,
+    "Library",
+    "Application Support",
+    "Kiro",
+    "User",
+    "globalStorage",
+    "kiro.kiroagent",
+    "dev_data",
+  );
+  const kiroIdePresent =
+    (await safeStatSize(path.join(kiroIdeDevDataDir, "devdata.sqlite"))) > 0 ||
+    (await safeStatSize(path.join(kiroIdeDevDataDir, "tokens_generated.jsonl"))) > 0;
+  const kiroCliDbPath = resolveKiroCliDbPath(process.env);
+  const kiroCliPresent = require("node:fs").existsSync(kiroCliDbPath);
+
   const lastSuccessAt = uploadThrottle.lastSuccessMs
     ? new Date(uploadThrottle.lastSuccessMs).toISOString()
     : null;
@@ -104,6 +124,16 @@ async function collectTrackerDiagnostics({
       claude_config: redactValue(claudeConfigPath, home),
       gemini_config: redactValue(geminiSettingsPath, home),
       opencode_config: redactValue(opencodeConfigDir, home),
+      kiro_ide_dev_data: redactValue(kiroIdeDevDataDir, home),
+      kiro_cli_db: redactValue(kiroCliDbPath, home),
+    },
+    kiro: {
+      ide_present: kiroIdePresent,
+      cli_present: kiroCliPresent,
+      cli_approximation:
+        "Kiro CLI does not persist explicit token counts; tokens are approximated at 4 chars/token from user_prompt_length and response_size in the conversations_v2 SQLite table. Model names are suffixed '~approx' in model-breakdown.",
+      merge_policy:
+        "Kiro IDE and Kiro CLI both emit source='kiro' in queue.jsonl so token, cost, heatmap, and leaderboard aggregations merge transparently. Use this block to distinguish sub-path contributions.",
     },
     config: {
       base_url: typeof config?.baseUrl === "string" ? config.baseUrl : null,

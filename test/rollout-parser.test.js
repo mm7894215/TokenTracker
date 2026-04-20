@@ -2545,3 +2545,275 @@ test("parseKimiIncremental returns zero when no wire files exist", async () => {
     await fs.rm(tmp, { recursive: true, force: true });
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Kiro CLI — ~/.kiro/sessions/cli/{uuid}.json session-state files (TASK-001)
+// Fixture provenance is PENDING LIVE VALIDATION — see
+// test/fixtures/kiro-cli/active-source.json header for the spec-derivation note.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const rolloutModule = require("../src/lib/rollout");
+
+test("parseKiroCliIncremental aggregates user_turn_metadatas into half-hour kiro buckets (currently fails until TASK-003)", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-kirocli-"));
+  try {
+    const sessionsDir = path.join(tmp, "sessions", "cli");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const sessionId = "fixture-active-0000-0000-0000-000000000001";
+    const activeFixture = await fs.readFile(
+      path.join(__dirname, "fixtures", "kiro-cli", "active-source.json"),
+      "utf8",
+    );
+    await fs.writeFile(path.join(sessionsDir, `${sessionId}.json`), activeFixture);
+    await fs.writeFile(path.join(sessionsDir, `${sessionId}.jsonl`), "");
+
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+
+    // Fail LOUDLY if the parser hasn't been implemented yet. This is the
+    // red state the plan's TASK-001 requires; it flips to green in TASK-003.
+    assert.ok(
+      typeof rolloutModule.parseKiroCliIncremental === "function",
+      "parseKiroCliIncremental must be exported from src/lib/rollout (TASK-003)",
+    );
+    assert.ok(
+      typeof rolloutModule.resolveKiroCliSessionFiles === "function",
+      "resolveKiroCliSessionFiles must be exported from src/lib/rollout (TASK-002)",
+    );
+
+    const files = rolloutModule.resolveKiroCliSessionFiles({ KIRO_HOME: tmp });
+    assert.equal(files.length, 1, "resolver should discover exactly one session file");
+
+    const result = await rolloutModule.parseKiroCliIncremental({
+      sessionFiles: files,
+      cursors,
+      queuePath,
+      env: { KIRO_HOME: tmp },
+    });
+
+    assert.equal(result.recordsProcessed, 2);
+    assert.ok(result.bucketsQueued >= 2, "two turns span two half-hour buckets");
+
+    const queueContent = await fs.readFile(queuePath, "utf8");
+    const rows = queueContent
+      .split("\n")
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l));
+    assert.ok(rows.length >= 2, "queue must have at least two bucket rows");
+    for (const row of rows) {
+      assert.equal(row.source, "kiro", "CLI MUST emit source='kiro' for merge with IDE");
+    }
+    const totalInput = rows.reduce((s, r) => s + (r.input_tokens || 0), 0);
+    assert.equal(totalInput, 1500, "1200 + 300 from fixture turns");
+
+    // Cursor state isolated in kiroCli slot
+    assert.ok(cursors.kiroCli, "cursors.kiroCli must be set after parse");
+    assert.equal(
+      cursors.kiro,
+      undefined,
+      "CLI parser must NOT touch cursors.kiro (IDE cursor)",
+    );
+
+    // Idempotent re-run
+    const result2 = await rolloutModule.parseKiroCliIncremental({
+      sessionFiles: files,
+      cursors,
+      queuePath,
+      env: { KIRO_HOME: tmp },
+    });
+    assert.equal(result2.eventsAggregated, 0, "second run must not double-count");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseKiroCliIncremental produces zero buckets for empty user_turn_metadatas", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-kirocli-"));
+  try {
+    const sessionsDir = path.join(tmp, "sessions", "cli");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const sessionId = "fixture-empty-0000-0000-0000-000000000002";
+    const emptyFixture = await fs.readFile(
+      path.join(__dirname, "fixtures", "kiro-cli", "empty-source.json"),
+      "utf8",
+    );
+    await fs.writeFile(path.join(sessionsDir, `${sessionId}.json`), emptyFixture);
+
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+
+    assert.ok(
+      typeof rolloutModule.parseKiroCliIncremental === "function",
+      "parseKiroCliIncremental must be exported from src/lib/rollout (TASK-003)",
+    );
+
+    const files = rolloutModule.resolveKiroCliSessionFiles({ KIRO_HOME: tmp });
+    const queueSizeBefore = await safeFileSize(queuePath);
+
+    const result = await rolloutModule.parseKiroCliIncremental({
+      sessionFiles: files,
+      cursors,
+      queuePath,
+      env: { KIRO_HOME: tmp },
+    });
+
+    assert.equal(result.recordsProcessed, 0);
+    assert.equal(result.eventsAggregated, 0);
+    assert.equal(result.bucketsQueued, 0);
+    const queueSizeAfter = await safeFileSize(queuePath);
+    assert.equal(queueSizeAfter, queueSizeBefore, "empty session must not grow the queue");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveKiroCliSessionFiles skips files with an active .lock sibling", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-kirocli-"));
+  try {
+    const sessionsDir = path.join(tmp, "sessions", "cli");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    // Completed session: .json only, no .lock
+    await fs.writeFile(path.join(sessionsDir, "done-0000.json"), "{}");
+    // Live session: .json + .lock
+    await fs.writeFile(path.join(sessionsDir, "live-0000.json"), "{}");
+    await fs.writeFile(path.join(sessionsDir, "live-0000.lock"), '{"pid":1}');
+
+    assert.ok(
+      typeof rolloutModule.resolveKiroCliSessionFiles === "function",
+      "resolveKiroCliSessionFiles must be exported from src/lib/rollout (TASK-002)",
+    );
+
+    const files = rolloutModule.resolveKiroCliSessionFiles({ KIRO_HOME: tmp });
+    assert.equal(files.length, 1, "only the unlocked session must be returned");
+    assert.ok(files[0].endsWith("done-0000.json"));
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+async function safeFileSize(p) {
+  try {
+    const st = await fs.stat(p);
+    return st.size;
+  } catch {
+    return 0;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Kiro CLI — mutable-request delta + Bedrock-ID canonicalization.
+// Exercises the SQLite-backed path via a synthetic DB written in-process.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("parseKiroCliIncremental canonicalizes Bedrock model IDs and re-buckets on fingerprint change", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-kirocli-mutable-"));
+  try {
+    const dbPath = path.join(tmp, "data.sqlite3");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const env = { KIRO_CLI_DB_PATH: dbPath };
+
+    // One conversation with one request: Bedrock ARN-style model id, small
+    // prompt/response.
+    function convValue(promptLen, responseLen) {
+      return {
+        model_info: { model_id: "auto" },
+        user_turn_metadata: {
+          continuation_id: "conv-1",
+          requests: [
+            {
+              request_id: "req-1",
+              message_id: "msg-1",
+              request_start_timestamp_ms: Date.parse("2026-04-20T10:05:00.000Z"),
+              user_prompt_length: promptLen,
+              response_size: responseLen,
+              model_id: "anthropic.claude-sonnet-4-20250514-v1:0",
+            },
+          ],
+        },
+      };
+    }
+
+    cp.execFileSync("sqlite3", [
+      dbPath,
+      "CREATE TABLE conversations_v2 (key TEXT, conversation_id TEXT, value TEXT, created_at INTEGER, updated_at INTEGER, PRIMARY KEY (key, conversation_id));",
+    ]);
+    cp.execFileSync("sqlite3", [
+      dbPath,
+      `INSERT INTO conversations_v2 VALUES ('project-a', 'conv-1', '${JSON.stringify(convValue(400, 80)).replace(/'/g, "''")}', 1771667600000, 1771667700000);`,
+    ]);
+
+    const cursors = { version: 1 };
+
+    // First run: 400 chars prompt -> 100 input tokens; 80 chars response -> 20 output tokens
+    const r1 = await rolloutModule.parseKiroCliIncremental({ cursors, queuePath, env });
+    assert.equal(r1.recordsProcessed, 1);
+    assert.equal(r1.eventsAggregated, 1);
+
+    const rowsA = (await fs.readFile(queuePath, "utf8"))
+      .split("\n")
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l));
+    assert.equal(rowsA.length, 1);
+    assert.equal(rowsA[0].source, "kiro", "source must merge under 'kiro'");
+    assert.equal(
+      rowsA[0].model,
+      "claude-sonnet-4",
+      "Bedrock ARN 'anthropic.claude-sonnet-4-20250514-v1:0' must canonicalize to 'claude-sonnet-4'",
+    );
+    assert.equal(rowsA[0].input_tokens, 100);
+    assert.equal(rowsA[0].output_tokens, 20);
+
+    // Second run with the SAME request data: idempotent — no new queue row.
+    const r2 = await rolloutModule.parseKiroCliIncremental({ cursors, queuePath, env });
+    assert.equal(r2.eventsAggregated, 0, "idempotent re-run must not re-add");
+    const rowsB = (await fs.readFile(queuePath, "utf8"))
+      .split("\n")
+      .filter((l) => l.trim());
+    assert.equal(rowsB.length, 1, "queue must not grow on idempotent re-run");
+
+    // Mutate the request: Kiro rewrites the same request_id with larger
+    // prompt/response. The parser must subtract the prior contribution and
+    // add the new one — not skip forever.
+    cp.execFileSync("sqlite3", [
+      dbPath,
+      `UPDATE conversations_v2 SET value = '${JSON.stringify(convValue(800, 160)).replace(/'/g, "''")}' WHERE conversation_id = 'conv-1';`,
+    ]);
+    const r3 = await rolloutModule.parseKiroCliIncremental({ cursors, queuePath, env });
+    assert.equal(r3.eventsAggregated, 1, "fingerprint-changed request must be re-bucketed");
+
+    const rowsC = (await fs.readFile(queuePath, "utf8"))
+      .split("\n")
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l));
+    // The queue appends cumulative snapshots; consumers (readQueueData in
+    // src/lib/local-api.js) dedupe by (source, model, hour_start) and keep
+    // the LATEST row. So the mutation is correctly reflected iff the last
+    // row for this bucket shows the new 200 / 40 approx counts.
+    const lastForBucket = rowsC
+      .filter(
+        (row) =>
+          row.source === "kiro" &&
+          row.model === "claude-sonnet-4" &&
+          row.hour_start === "2026-04-20T10:00:00.000Z",
+      )
+      .pop();
+    assert.ok(lastForBucket, "mutated bucket must have at least one queue row");
+    assert.equal(
+      lastForBucket.input_tokens,
+      200,
+      "latest row for the bucket must reflect the post-mutation prompt tokens (800 chars / 4)",
+    );
+    assert.equal(
+      lastForBucket.output_tokens,
+      40,
+      "latest row for the bucket must reflect the post-mutation response tokens (160 chars / 4)",
+    );
+
+    // Cursor state records the per-request fingerprint + contribution so a
+    // third identical run is again idempotent.
+    const r4 = await rolloutModule.parseKiroCliIncremental({ cursors, queuePath, env });
+    assert.equal(r4.eventsAggregated, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});

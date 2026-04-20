@@ -63,6 +63,14 @@ const MODEL_PRICING = {
   "kimi-for-coding": { input: 0.6, output: 2, cache_read: 0.15 },
   "kimi-k2.5": { input: 0.6, output: 2, cache_read: 0.15 },
   "kimi-k2.5-free": { input: 0, output: 0, cache_read: 0 },
+  // ── AWS Kiro (Kiro IDE + Kiro CLI — both route through Bedrock, most
+  //    commonly claude-sonnet-4; rates mirror the sonnet-4 table below so
+  //    costs stay consistent with the real underlying model when a Bedrock
+  //    model_id isn't exposed). Mirrored byte-for-byte in
+  //    dashboard/edge-patches/tokentracker-leaderboard-refresh.ts for
+  //    leaderboard estimated_cost_usd. ──
+  "kiro-agent": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
+  "kiro-cli-agent": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
   // ── Misc / Free ──
   "glm-4.7-free": { input: 0, output: 0, cache_read: 0 },
   "nemotron-3-super-free": { input: 0, output: 0, cache_read: 0 },
@@ -90,6 +98,7 @@ function getModelPricing(model) {
   if (lower.includes("gemini-3")) return MODEL_PRICING["gemini-3-flash-preview"];
   if (lower.includes("gemini-2.5")) return MODEL_PRICING["gemini-2.5-pro"];
   if (lower.includes("kimi")) return MODEL_PRICING["kimi-k2.5"];
+  if (lower.includes("kiro")) return MODEL_PRICING["kiro-cli-agent"];
   if (lower.includes("composer")) return MODEL_PRICING["composer-1"];
   if (lower === "auto") return MODEL_PRICING["composer-1"];
   return ZERO_PRICING;
@@ -1061,4 +1070,11 @@ function createLocalApiHandler({ queuePath }) {
   };
 }
 
-module.exports = { createLocalApiHandler, resolveQueuePath };
+module.exports = {
+  createLocalApiHandler,
+  resolveQueuePath,
+  // Exported for cross-consumer tests (pricing + native contract lock).
+  MODEL_PRICING,
+  getModelPricing,
+  computeRowCost,
+};

@@ -1,0 +1,28 @@
+{
+  "_fixture_provenance": "PENDING LIVE VALIDATION — spec-derived. Mirrors the exact shape observed in ~/.kiro/sessions/cli/4257d4b9-f763-42a7-ac48-5a5e5dca5660.json on 2026-04-20, where user_turn_metadatas is empty because no turns have completed yet. Parser must treat this as 'session exists but no billable tokens' and emit zero queue entries without throwing.",
+  "session_id": "fixture-empty-0000-0000-0000-000000000002",
+  "cwd": "/tmp/fake-cwd-empty",
+  "created_at": "2026-04-20T11:26:24.797Z",
+  "updated_at": "2026-04-20T11:26:24.797Z",
+  "title": null,
+  "session_state": {
+    "version": "v1",
+    "conversation_metadata": {
+      "user_turn_metadatas": [],
+      "user_turn_start_request": null,
+      "last_request": null
+    },
+    "rts_model_state": {
+      "conversation_id": "fixture-empty-0000-0000-0000-000000000002",
+      "model_info": null,
+      "context_usage_percentage": null
+    },
+    "permissions": {
+      "filesystem": { "allowed_read_paths": [], "allowed_write_paths": [], "denied_read_paths": [], "denied_write_paths": [] },
+      "trusted_tools": [],
+      "denied_tools": [],
+      "allowed_commands": []
+    },
+    "agent_name": null
+  }
+}
