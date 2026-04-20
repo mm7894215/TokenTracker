@@ -3,6 +3,7 @@ import { getOrCreateInsforgeClient, isCloudInsforgeConfigured } from "../lib/ins
 import { clearCloudDeviceSession } from "../lib/cloud-sync-prefs";
 import { isLikelyExpiredAccessToken } from "../lib/auth-token";
 import { getPublicVisibility } from "../lib/api";
+import { clearLocalApiAuthToken, getLocalApiAuthHeaders } from "../lib/local-api-auth";
 
 const InsforgeAuthContext = createContext(null);
 
@@ -146,9 +147,10 @@ export function InsforgeAuthProvider({ children }) {
           // Tell the local server that the next /auth/callback is a native app flow.
           // The callback page (in system browser) checks this flag to relay code back to app.
           try {
+            const authHeaders = await getLocalApiAuthHeaders();
             await fetch("/api/auth-bridge/verifier", {
               method: "PUT",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", ...authHeaders },
               body: JSON.stringify({ native: true }),
             });
           } catch {}
@@ -200,6 +202,7 @@ export function InsforgeAuthProvider({ children }) {
     if (!client) return;
     await client.auth.signOut();
     clearCloudDeviceSession();
+    clearLocalApiAuthToken();
     setUser(null);
   }, [client]);
 

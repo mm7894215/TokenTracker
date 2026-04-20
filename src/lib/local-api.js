@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
+const crypto = require("node:crypto");
 const { DEFAULT_BASE_URL, resolveRuntimeConfig } = require("./runtime-config");
 
 const SYNC_TIMEOUT_MS = 120_000;
@@ -392,6 +393,37 @@ function resolveAllowedInsforgeBaseUrl(value) {
   return allowed.has(requested) ? requested : null;
 }
 
+function parseCookieHeader(value) {
+  const out = new Map();
+  if (typeof value !== "string" || !value.trim()) return out;
+  for (const part of value.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx < 1) continue;
+    const key = part.slice(0, idx).trim();
+    const rawValue = part.slice(idx + 1).trim();
+    if (key) out.set(key, rawValue);
+  }
+  return out;
+}
+
+function isLoopbackHostname(hostname) {
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1" || hostname === "[::1]";
+}
+
+function hasAllowedLoopbackOrigin(headers = {}) {
+  const candidates = [headers.origin, headers.referer];
+  for (const raw of candidates) {
+    if (raw == null || raw === "") continue;
+    try {
+      const url = new URL(String(raw));
+      if (url.protocol !== "http:" || !isLoopbackHostname(url.hostname)) return false;
+    } catch (_e) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -572,6 +604,7 @@ function createLocalApiHandler({ queuePath }) {
   // so that both browser and WKWebView share the same login session via the proxy.
   // Persisted to disk so cookies survive server restarts.
   let relayCookies = new Map();
+  const localAuthToken = crypto.randomBytes(24).toString("hex");
   const trackerDataDir = path.join(os.homedir(), ".tokentracker", "tracker");
   const cookiePath = path.join(trackerDataDir, "relay-cookies.json");
 
@@ -684,13 +717,40 @@ function createLocalApiHandler({ queuePath }) {
   let _nativeAuthPending = false;
   let _nativeAuthExpiry = 0;
 
+  function isAuthorizedLocalMutation(req) {
+    const headerToken = req?.headers?.["x-tokentracker-local-auth"];
+    const cookieToken = parseCookieHeader(req?.headers?.cookie).get("tokentracker_local_auth");
+    const token = typeof headerToken === "string" && headerToken.trim()
+      ? headerToken.trim()
+      : cookieToken || "";
+    if (!token || token !== localAuthToken) return false;
+    return hasAllowedLoopbackOrigin(req?.headers || {});
+  }
+
   return async function handleLocalApi(req, res, url) {
     const p = url.pathname;
+
+    if (p === "/api/local-auth") {
+      if (String(req.method || "GET").toUpperCase() !== "GET") {
+        json(res, { error: "Method Not Allowed" }, 405);
+        return true;
+      }
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+      });
+      res.end(JSON.stringify({ token: localAuthToken }));
+      return true;
+    }
 
     // --- Auth bridge: native OAuth flag (WebView ↔ system browser) ---
     if (p === "/api/auth-bridge/verifier") {
       const method = String(req.method || "GET").toUpperCase();
       if (method === "PUT" || method === "POST") {
+        if (!isAuthorizedLocalMutation(req)) {
+          json(res, { error: "Unauthorized" }, 401);
+          return true;
+        }
         const body = await readJsonBody(req);
         _nativeAuthPending = Boolean(body?.native);
         _nativeAuthExpiry = Date.now() + 5 * 60 * 1000; // 5 min TTL
@@ -775,6 +835,10 @@ function createLocalApiHandler({ queuePath }) {
     if (p === "/functions/tokentracker-local-sync") {
       if (String(req.method || "GET").toUpperCase() !== "POST") {
         json(res, { ok: false, error: "Method Not Allowed" }, 405);
+        return true;
+      }
+      if (!isAuthorizedLocalMutation(req)) {
+        json(res, { ok: false, error: "Unauthorized" }, 401);
         return true;
       }
       try {

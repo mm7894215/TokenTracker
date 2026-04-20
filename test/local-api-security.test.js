@@ -31,6 +31,19 @@ function createResponse() {
   };
 }
 
+async function getLocalAuthToken(handler) {
+  const req = createRequest({ method: "GET" });
+  const res = createResponse();
+  const handled = await handler(req, res, new URL("http://127.0.0.1/api/local-auth"));
+  assert.equal(handled, true);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.headers["Cache-Control"], "no-store");
+  const body = JSON.parse(res.body.toString("utf8"));
+  assert.equal(typeof body.token, "string");
+  assert.ok(body.token.length > 0);
+  return body.token;
+}
+
 function loadLocalApiWithSpawn(fakeSpawn) {
   const childProcess = require("node:child_process");
   const originalSpawn = childProcess.spawn;
@@ -69,8 +82,10 @@ test("local sync rejects arbitrary insforgeBaseUrl overrides", async () => {
 
   try {
     const handler = mod.createLocalApiHandler({ queuePath: path.join(process.cwd(), "tmp-queue.jsonl") });
+    const localAuthToken = await getLocalAuthToken(handler);
     const req = createRequest({
       method: "POST",
+      headers: { "x-tokentracker-local-auth": localAuthToken },
       body: JSON.stringify({
         deviceToken: "device-token",
         insforgeBaseUrl: "https://evil.example",
@@ -107,8 +122,10 @@ test("local sync accepts the configured insforgeBaseUrl override", async () => {
 
   try {
     const handler = mod.createLocalApiHandler({ queuePath: path.join(process.cwd(), "tmp-queue.jsonl") });
+    const localAuthToken = await getLocalAuthToken(handler);
     const req = createRequest({
       method: "POST",
+      headers: { "x-tokentracker-local-auth": localAuthToken },
       body: JSON.stringify({
         deviceToken: "device-token",
         insforgeBaseUrl: "https://allowed.example/",
@@ -133,5 +150,60 @@ test("local sync accepts the configured insforgeBaseUrl override", async () => {
     restore();
     if (prevBaseUrl === undefined) delete process.env.TOKENTRACKER_INSFORGE_BASE_URL;
     else process.env.TOKENTRACKER_INSFORGE_BASE_URL = prevBaseUrl;
+  }
+});
+
+test("local sync rejects requests without the local auth token", async () => {
+  const calls = [];
+  const { mod, restore } = loadLocalApiWithSpawn(createSuccessfulSpawn(calls));
+
+  try {
+    const handler = mod.createLocalApiHandler({ queuePath: path.join(process.cwd(), "tmp-queue.jsonl") });
+    const req = createRequest({
+      method: "POST",
+      body: JSON.stringify({ deviceToken: "device-token" }),
+    });
+    const res = createResponse();
+
+    const handled = await handler(
+      req,
+      res,
+      new URL("http://127.0.0.1/functions/tokentracker-local-sync"),
+    );
+
+    assert.equal(handled, true);
+    assert.equal(res.statusCode, 401);
+    assert.deepEqual(JSON.parse(res.body.toString("utf8")), {
+      ok: false,
+      error: "Unauthorized",
+    });
+    assert.equal(calls.length, 0);
+  } finally {
+    restore();
+  }
+});
+
+test("auth bridge mutation requires the local auth token", async () => {
+  const { mod, restore } = loadLocalApiWithSpawn(createSuccessfulSpawn([]));
+
+  try {
+    const handler = mod.createLocalApiHandler({ queuePath: path.join(process.cwd(), "tmp-queue.jsonl") });
+    const req = createRequest({
+      method: "PUT",
+      body: JSON.stringify({ native: true }),
+    });
+    const res = createResponse();
+
+    const handled = await handler(
+      req,
+      res,
+      new URL("http://127.0.0.1/api/auth-bridge/verifier"),
+    );
+
+    assert.equal(handled, true);
+    assert.equal(res.statusCode, 401);
+    assert.deepEqual(JSON.parse(res.body.toString("utf8")), { error: "Unauthorized" });
+  } finally {
+    restore();
   }
 });

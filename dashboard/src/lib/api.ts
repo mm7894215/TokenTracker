@@ -12,6 +12,7 @@ import {
 } from "./mock-data";
 import { getInsforgeRemoteUrl, getInsforgeAnonKey } from "./insforge-config";
 import { isValidJwtShape } from "./auth-token";
+import { getLocalApiAuthHeaders } from "./local-api-auth";
 
 type AnyRecord = Record<string, any>;
 
@@ -261,9 +262,10 @@ export async function getUserStatus(_opts: AnyRecord = {}) {
 }
 
 export async function triggerLocalSync({ signal }: AnyRecord = {}) {
+  const authHeaders = await getLocalApiAuthHeaders();
   const response = await fetch(`/functions/${PATHS.localSync}`, {
     method: "POST",
-    headers: { Accept: "application/json" },
+    headers: { Accept: "application/json", ...authHeaders },
     cache: "no-store",
     signal,
   });
@@ -380,4 +382,3 @@ export async function getUsageHeatmap({
     ...tzParams,
   });
 }
-
