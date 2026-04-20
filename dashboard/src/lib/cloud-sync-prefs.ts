@@ -1,12 +1,21 @@
 const KEY_ENABLED = "tokentracker_cloud_sync_enabled";
 const KEY_DEVICE = "tokentracker_cloud_device_session_v1";
 const KEY_LAST_SYNC = "tokentracker_cloud_last_sync_ts";
+let memoryDeviceSession: CloudDeviceSession | null = null;
 
 export type CloudDeviceSession = {
   token: string;
   deviceId: string;
   issuedAt: string;
 };
+
+function clearLegacyStoredDeviceSession(): void {
+  try {
+    localStorage.removeItem(KEY_DEVICE);
+  } catch {
+    /* ignore */
+  }
+}
 
 export function isLocalDashboardHost(): boolean {
   if (typeof window === "undefined") return false;
@@ -34,32 +43,23 @@ export function setCloudSyncEnabled(enabled: boolean): void {
 }
 
 export function getStoredDeviceSession(): CloudDeviceSession | null {
-  try {
-    const raw = localStorage.getItem(KEY_DEVICE);
-    if (!raw) return null;
-    const o = JSON.parse(raw) as CloudDeviceSession;
-    if (typeof o?.token === "string" && o.token && typeof o.deviceId === "string") return o;
-  } catch {
-    /* ignore */
-  }
-  return null;
+  clearLegacyStoredDeviceSession();
+  return memoryDeviceSession;
 }
 
 export function setStoredDeviceSession(session: CloudDeviceSession): void {
-  try {
-    localStorage.setItem(KEY_DEVICE, JSON.stringify(session));
-  } catch {
-    /* ignore */
-  }
+  memoryDeviceSession = session;
+  clearLegacyStoredDeviceSession();
 }
 
 export function clearCloudDeviceSession(): void {
+  memoryDeviceSession = null;
   try {
-    localStorage.removeItem(KEY_DEVICE);
     localStorage.removeItem(KEY_LAST_SYNC);
   } catch {
     /* ignore */
   }
+  clearLegacyStoredDeviceSession();
 }
 
 export function getLastCloudSyncTs(): number {

@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
+const { DEFAULT_BASE_URL, resolveRuntimeConfig } = require("./runtime-config");
 
 const SYNC_TIMEOUT_MS = 120_000;
 const TRACKER_BIN = path.resolve(__dirname, "../../bin/tracker.js");
@@ -361,6 +362,36 @@ function trimOutput(value, max = 4000) {
   return t.length <= max ? t : t.slice(t.length - max);
 }
 
+function normalizeRemoteHttpBaseUrl(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    url.username = "";
+    url.password = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch (_e) {
+    return null;
+  }
+}
+
+function resolveAllowedInsforgeBaseUrl(value) {
+  const requested = normalizeRemoteHttpBaseUrl(value);
+  if (!requested) return null;
+
+  const runtime = resolveRuntimeConfig();
+  const allowed = new Set(
+    [runtime.baseUrl, DEFAULT_BASE_URL]
+      .map((entry) => normalizeRemoteHttpBaseUrl(entry))
+      .filter(Boolean),
+  );
+
+  return allowed.has(requested) ? requested : null;
+}
+
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -526,7 +557,7 @@ function scanClaudeProjects(projectMap) {
 // ---------------------------------------------------------------------------
 
 function json(res, data, status) {
-  res.writeHead(status || 200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+  res.writeHead(status || 200, { "Content-Type": "application/json" });
   res.end(JSON.stringify(data));
 }
 
@@ -679,20 +710,8 @@ function createLocalApiHandler({ queuePath }) {
 
     // --- auth proxy: forward /api/auth/* to InsForge cloud ---
     if (p.startsWith("/api/auth/")) {
-      const { DEFAULT_BASE_URL } = require("./runtime-config.js");
-      let insforgeBase = process.env.TOKENTRACKER_INSFORGE_BASE_URL
-        || process.env.INSFORGE_BASE_URL
-        || "";
-      if (!insforgeBase) {
-        try {
-          const cfgPath = path.join(os.homedir(), ".tokentracker", "tracker", "config.json");
-          const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
-          insforgeBase = cfg?.baseUrl || "";
-        } catch { /* ignore */ }
-      }
-      if (!insforgeBase) {
-        insforgeBase = DEFAULT_BASE_URL;
-      }
+      const runtime = resolveRuntimeConfig();
+      const insforgeBase = runtime.baseUrl || DEFAULT_BASE_URL;
       try {
         const targetUrl = `${insforgeBase.replace(/\/$/, "")}${p}${url.search || ""}`;
         const proxyHeaders = {};
@@ -769,8 +788,13 @@ function createLocalApiHandler({ queuePath }) {
         if (typeof body.deviceToken === "string" && body.deviceToken.trim()) {
           extraEnv.TOKENTRACKER_DEVICE_TOKEN = body.deviceToken.trim();
         }
-        if (typeof body.insforgeBaseUrl === "string" && /^https?:\/\//i.test(body.insforgeBaseUrl.trim())) {
-          extraEnv.TOKENTRACKER_INSFORGE_BASE_URL = body.insforgeBaseUrl.trim();
+        if (body.insforgeBaseUrl != null) {
+          const allowedBaseUrl = resolveAllowedInsforgeBaseUrl(body.insforgeBaseUrl);
+          if (!allowedBaseUrl) {
+            json(res, { ok: false, error: "Unsupported insforgeBaseUrl override" }, 400);
+            return true;
+          }
+          extraEnv.TOKENTRACKER_INSFORGE_BASE_URL = allowedBaseUrl;
         }
         const result = await runSyncCommand(extraEnv);
         try {
@@ -1119,6 +1143,7 @@ function createLocalApiHandler({ queuePath }) {
 
 module.exports = {
   createLocalApiHandler,
+  resolveAllowedInsforgeBaseUrl,
   resolveQueuePath,
   // Exported for cross-consumer tests (pricing + native contract lock).
   MODEL_PRICING,
