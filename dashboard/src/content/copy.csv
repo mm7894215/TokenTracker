@@ -218,6 +218,11 @@ dashboard.projects.limit_top_3,ui,ProjectUsagePanel,ProjectUsagePanel,limit_top_
 dashboard.projects.limit_top_6,ui,ProjectUsagePanel,ProjectUsagePanel,limit_top_6,"TOP 6",,active
 dashboard.projects.limit_top_10,ui,ProjectUsagePanel,ProjectUsagePanel,limit_top_10,"TOP 10",,active
 dashboard.projects.empty,ui,ProjectUsagePanel,ProjectUsagePanel,empty,"No public repositories",,active
+dashboard.budget.title,ui,BudgetAlertCard,BudgetAlertCard,title,"Budget Alert",,active
+dashboard.budget.alert.over,ui,BudgetAlertCard,BudgetAlertCard,message_over,"Current spend is {{total}} against a budget of {{budget}} ({{percent}}% over).",,active
+dashboard.budget.alert.forecast,ui,BudgetAlertCard,BudgetAlertCard,message_forecast,"You are on pace for {{projected}} against a budget of {{budget}} ({{percent}}% over).",,active
+dashboard.budget.top_project,ui,BudgetAlertCard,BudgetAlertCard,top_project,"Top project: {{project}}",,active
+dashboard.budget.cta,ui,BudgetAlertCard,BudgetAlertCard,cta,"Open project usage",,active
 dashboard.upgrade_alert.title,ui,UpgradeAlertModal,UpgradeAlertModal,title,"Update available",,active
 dashboard.upgrade_alert.subtitle,ui,UpgradeAlertModal,UpgradeAlertModal,subtitle,"TokenTracker v{{required}} is now available.",,active
 dashboard.upgrade_alert.subtitle_generic,ui,UpgradeAlertModal,UpgradeAlertModal,subtitle_generic,"A new version of TokenTracker is available.",,active
@@ -508,6 +513,8 @@ settings.page.title,ui,SettingsPage,SettingsPage,title,"Settings",,active
 settings.page.subtitle,ui,SettingsPage,SettingsPage,subtitle,"Manage your account, appearance, and display preferences.",,active
 settings.section.appearance,ui,SettingsPage,SettingsPage,sec_appearance,"Appearance",,active
 settings.section.account,ui,SettingsPage,SettingsPage,sec_account,"Account",,active
+settings.section.budgets,ui,SettingsPage,SettingsPage,sec_budgets,"Budget Alerts",,active
+settings.section.budgetsSubtitle,ui,SettingsPage,SettingsPage,sec_budgets_sub,"Set local daily, weekly, and monthly spend thresholds for dashboard alerts.",,active
 settings.section.limits,ui,SettingsPage,SettingsPage,sec_limits,"Limits Display",,active
 settings.section.limitsSubtitle,ui,SettingsPage,SettingsPage,sec_limits_sub,"Reorder providers and choose which ones appear on the Limits page.",,active
 settings.appearance.theme.label,ui,SettingsPage,SettingsPage,theme_label,"Theme",,active
@@ -557,6 +564,12 @@ leaderboard.github.tooltipSuffix,ui,LeaderboardPage,LeaderboardPage,github_toolt
 settings.account.signOut,ui,SettingsPage,SettingsPage,sign_out,"Sign out",,active
 settings.account.signIn,ui,SettingsPage,SettingsPage,sign_in,"Sign in",,active
 settings.account.signedOutHint,ui,SettingsPage,SettingsPage,signed_out_hint,"Sign in to manage cloud sync and leaderboard preferences.",,active
+settings.budget.daily,ui,SettingsPage,SettingsPage,budget_daily,"Daily budget (USD)",,active
+settings.budget.dailyHint,ui,SettingsPage,SettingsPage,budget_daily_hint,"Alert when a day exceeds or is on pace to exceed this amount.",,active
+settings.budget.weekly,ui,SettingsPage,SettingsPage,budget_weekly,"Weekly budget (USD)",,active
+settings.budget.weeklyHint,ui,SettingsPage,SettingsPage,budget_weekly_hint,"Compare the current week against a local weekly budget.",,active
+settings.budget.monthly,ui,SettingsPage,SettingsPage,budget_monthly,"Monthly budget (USD)",,active
+settings.budget.monthlyHint,ui,SettingsPage,SettingsPage,budget_monthly_hint,"Forecast month-end spend from the current pace.",,active
 settings.section.menubar,ui,SettingsPage,SettingsPage,sec_menubar,"Menu Bar App",,active
 settings.section.menubarSubtitle,ui,SettingsPage,SettingsPage,sec_menubar_sub,"Preferences for the macOS menu bar app, mirroring the right-click menu.",,active
 settings.menubar.showStats,ui,SettingsPage,SettingsPage,mb_show_stats,"Show stats in menu bar",,active

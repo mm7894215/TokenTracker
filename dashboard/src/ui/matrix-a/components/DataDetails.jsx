@@ -31,8 +31,12 @@ export function DataDetails({
   detailsPageCount,
   detailsPage,
   setDetailsPage,
+  activeTab,
+  onActiveTabChange,
 }) {
-  const [activeTab, setActiveTab] = useState("daily");
+  const [internalActiveTab, setInternalActiveTab] = useState("daily");
+  const resolvedActiveTab = activeTab || internalActiveTab;
+  const setResolvedActiveTab = onActiveTabChange || setInternalActiveTab;
 
   return (
     <Card className="flex-1 flex flex-col min-h-0 overflow-hidden" bodyClassName="flex-1 flex flex-col min-h-0">
@@ -41,11 +45,11 @@ export function DataDetails({
         <div role="tablist" aria-label="Data view" className="flex gap-1">
           <button
             role="tab"
-            aria-selected={activeTab === "daily"}
+            aria-selected={resolvedActiveTab === "daily"}
             type="button"
-            onClick={() => setActiveTab("daily")}
+            onClick={() => setResolvedActiveTab("daily")}
             className={`text-xs font-medium px-3 py-1.5 rounded transition-colors ${
-              activeTab === "daily"
+              resolvedActiveTab === "daily"
                 ? "text-oai-black dark:text-oai-white bg-oai-gray-100 dark:bg-oai-gray-800"
                 : "text-oai-gray-500 dark:text-oai-gray-300 hover:text-oai-black dark:hover:text-oai-white hover:bg-oai-gray-50 dark:hover:bg-oai-gray-800/50"
             }`}
@@ -54,11 +58,11 @@ export function DataDetails({
           </button>
           <button
             role="tab"
-            aria-selected={activeTab === "projects"}
+            aria-selected={resolvedActiveTab === "projects"}
             type="button"
-            onClick={() => setActiveTab("projects")}
+            onClick={() => setResolvedActiveTab("projects")}
             className={`text-xs font-medium px-3 py-1.5 rounded transition-colors ${
-              activeTab === "projects"
+              resolvedActiveTab === "projects"
                 ? "text-oai-black dark:text-oai-white bg-oai-gray-100 dark:bg-oai-gray-800"
                 : "text-oai-gray-500 dark:text-oai-gray-300 hover:text-oai-black dark:hover:text-oai-white hover:bg-oai-gray-50 dark:hover:bg-oai-gray-800/50"
             }`}
@@ -66,7 +70,7 @@ export function DataDetails({
             {copy("dashboard.projects.title")}
           </button>
         </div>
-        {activeTab === "projects" && (
+        {resolvedActiveTab === "projects" && (
           <select
             aria-label="Number of projects to display"
             value={projectLimit}
@@ -110,7 +114,7 @@ export function DataDetails({
       )}
 
       {/* Daily Tab */}
-      {activeTab === "daily" && (
+      {resolvedActiveTab === "daily" && (
         <div className="flex-1 flex flex-col min-h-0">
           {dailyBreakdownRows?.length === 0 ? (
             <div className="oai-text-body-sm text-oai-gray-500 dark:text-oai-gray-300 mb-4">
@@ -186,7 +190,7 @@ export function DataDetails({
           )}
 
           {/* Pagination - 使用 design system typography，Daily Breakdown 不需要分页 */}
-          {activeTab !== "daily" && DETAILS_PAGED_PERIODS.has(period) && detailsPageCount > 1 ? (
+          {resolvedActiveTab !== "daily" && DETAILS_PAGED_PERIODS.has(period) && detailsPageCount > 1 ? (
             <div className="mt-3 flex items-center justify-between oai-text-caption">
               <button
                 type="button"

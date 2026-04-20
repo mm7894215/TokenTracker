@@ -6,6 +6,7 @@ import { DataDetails } from "../components/DataDetails.jsx";
 import { StatsPanel } from "../components/StatsPanel.jsx";
 import { UsageOverview } from "../components/UsageOverview.jsx";
 import { TrendMonitor } from "../components/TrendMonitor.jsx";
+import { BudgetAlertCard } from "../components/BudgetAlertCard.jsx";
 import { FadeIn } from "../../foundation/FadeIn.jsx";
 import { MacAppBanner } from "../components/MacAppBanner.jsx";
 import { WidgetOnboardingCard } from "../components/WidgetOnboardingCard.jsx";
@@ -59,6 +60,10 @@ export function DashboardView(props) {
     summaryCostValue,
     summaryConversationsValue,
     rollingUsage,
+    budgetAlert,
+    onViewBudgetProject,
+    detailsActiveTab,
+    setDetailsActiveTab,
     costInfoEnabled,
     openCostModal,
     costModalOpen,
@@ -245,37 +250,48 @@ export function DashboardView(props) {
                 />
 
                 {!screenshotMode ? (
-                  <FadeIn delay={0.5} className="flex-1 flex flex-col min-h-0">
-                    <DataDetails
-                    projectEntries={projectUsageEntries}
-                    projectLimit={projectUsageLimit}
-                    onProjectLimitChange={setProjectUsageLimit}
-                    copy={copy}
-                    hasDetailsActual={hasDetailsActual}
-                    dailyEmptyPrefix={dailyEmptyPrefix}
-                    installSyncCmd={installSyncCmd}
-                    dailyEmptySuffix={dailyEmptySuffix}
-                    detailsColumns={detailsColumns}
-                    ariaSortFor={ariaSortFor}
-                    toggleSort={toggleSort}
-                    sortIconFor={sortIconFor}
-                    pagedDetails={pagedDetails}
-                    dailyBreakdownRows={dailyBreakdownRows}
-                    dailyBreakdownColumns={dailyBreakdownColumns}
-                    dailyBreakdownAriaSortFor={dailyBreakdownAriaSortFor}
-                    dailyBreakdownSortIconFor={dailyBreakdownSortIconFor}
-                    dailyBreakdownDateKey={dailyBreakdownDateKey}
-                    detailsDateKey={detailsDateKey}
-                    renderDetailDate={renderDetailDate}
-                    renderDailyBreakdownDate={renderDailyBreakdownDate}
-                    renderDetailCell={renderDetailCell}
-                    DETAILS_PAGED_PERIODS={DETAILS_PAGED_PERIODS}
-                    period={period}
-                    detailsPageCount={detailsPageCount}
-                    detailsPage={detailsPage}
-                    setDetailsPage={setDetailsPage}
+                  <BudgetAlertCard
+                    alert={budgetAlert}
+                    onViewProject={onViewBudgetProject}
                   />
-                  </FadeIn>
+                ) : null}
+
+                {!screenshotMode ? (
+                  <div id="details-section" className="flex-1 flex flex-col min-h-0">
+                    <FadeIn delay={0.5} className="flex-1 flex flex-col min-h-0">
+                      <DataDetails
+                        projectEntries={projectUsageEntries}
+                        projectLimit={projectUsageLimit}
+                        onProjectLimitChange={setProjectUsageLimit}
+                        copy={copy}
+                        hasDetailsActual={hasDetailsActual}
+                        dailyEmptyPrefix={dailyEmptyPrefix}
+                        installSyncCmd={installSyncCmd}
+                        dailyEmptySuffix={dailyEmptySuffix}
+                        detailsColumns={detailsColumns}
+                        ariaSortFor={ariaSortFor}
+                        toggleSort={toggleSort}
+                        sortIconFor={sortIconFor}
+                        pagedDetails={pagedDetails}
+                        dailyBreakdownRows={dailyBreakdownRows}
+                        dailyBreakdownColumns={dailyBreakdownColumns}
+                        dailyBreakdownAriaSortFor={dailyBreakdownAriaSortFor}
+                        dailyBreakdownSortIconFor={dailyBreakdownSortIconFor}
+                        dailyBreakdownDateKey={dailyBreakdownDateKey}
+                        detailsDateKey={detailsDateKey}
+                        renderDetailDate={renderDetailDate}
+                        renderDailyBreakdownDate={renderDailyBreakdownDate}
+                        renderDetailCell={renderDetailCell}
+                        DETAILS_PAGED_PERIODS={DETAILS_PAGED_PERIODS}
+                        period={period}
+                        detailsPageCount={detailsPageCount}
+                        detailsPage={detailsPage}
+                        setDetailsPage={setDetailsPage}
+                        activeTab={detailsActiveTab}
+                        onActiveTabChange={setDetailsActiveTab}
+                      />
+                    </FadeIn>
+                  </div>
                 ) : null}
               </div>
             </div>

@@ -21,6 +21,7 @@ import {
   toDisplayNumber,
   toFiniteNumber,
 } from "../lib/format";
+import { buildBudgetAlert, getBudgetAlertPrefs } from "../lib/budget-alerts.js";
 import { shouldShowInstallCard } from "../lib/install-status";
 import { getMockNow, isMockEnabled } from "../lib/mock-data";
 import { buildFleetData, buildTopModels } from "../lib/model-breakdown";
@@ -144,6 +145,7 @@ export function DashboardPage({
   const [installCopied, setInstallCopied] = useState(false);
   const [sessionExpiredCopied, setSessionExpiredCopied] = useState(false);
   const [manualSyncLoading, setManualSyncLoading] = useState(false);
+  const [detailsActiveTab, setDetailsActiveTab] = useState("daily");
   const mockEnabled = isMockEnabled();
   const authTokenAllowed = signedIn && !sessionSoftExpired;
   const authAccessToken = useMemo(() => {
@@ -598,6 +600,21 @@ export function DashboardPage({
     }
     return trendRows;
   }, [daily, period, trendRows, useDailyTrend]);
+  const topProjectEntry = useMemo(() => {
+    return Array.isArray(projectUsageEntries) && projectUsageEntries.length > 0
+      ? projectUsageEntries[0]
+      : null;
+  }, [projectUsageEntries]);
+  const budgetAlert = useMemo(() => {
+    return buildBudgetAlert({
+      period,
+      from,
+      to,
+      totalCostUsd: summary?.total_cost_usd,
+      budgets: typeof window === "undefined" ? {} : getBudgetAlertPrefs(),
+      topProject: topProjectEntry,
+    });
+  }, [from, period, summary?.total_cost_usd, to, topProjectEntry]);
   const trendFromForDisplay = useDailyTrend ? from : trendFrom;
   const trendToForDisplay = useDailyTrend ? to : trendTo;
 
@@ -609,6 +626,13 @@ export function DashboardPage({
     }
     return toDisplayNumber(row?.[key]);
   }
+
+  const handleViewBudgetProject = useCallback(() => {
+    setDetailsActiveTab("projects");
+    if (typeof document !== "undefined") {
+      document.getElementById("details-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, []);
 
   function renderDetailDate(row) {
     const raw = row?.[detailsDateKey];
@@ -1246,6 +1270,10 @@ export function DashboardPage({
       summaryCostValue={summaryCostValue}
       summaryConversationsValue={summaryConversationsValue}
       rollingUsage={rolling}
+      budgetAlert={budgetAlert}
+      onViewBudgetProject={handleViewBudgetProject}
+      detailsActiveTab={detailsActiveTab}
+      setDetailsActiveTab={setDetailsActiveTab}
       costInfoEnabled={costInfoEnabled}
       openCostModal={openCostModal}
       allowBreakdownToggle={allowBreakdownToggle}
