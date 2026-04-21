@@ -2,6 +2,8 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
+const crypto = require("node:crypto");
+const { DEFAULT_BASE_URL, resolveRuntimeConfig } = require("./runtime-config");
 
 const SYNC_TIMEOUT_MS = 120_000;
 const TRACKER_BIN = path.resolve(__dirname, "../../bin/tracker.js");
@@ -361,6 +363,67 @@ function trimOutput(value, max = 4000) {
   return t.length <= max ? t : t.slice(t.length - max);
 }
 
+function normalizeRemoteHttpBaseUrl(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    url.username = "";
+    url.password = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch (_e) {
+    return null;
+  }
+}
+
+function resolveAllowedInsforgeBaseUrl(value) {
+  const requested = normalizeRemoteHttpBaseUrl(value);
+  if (!requested) return null;
+
+  const runtime = resolveRuntimeConfig();
+  const allowed = new Set(
+    [runtime.baseUrl, DEFAULT_BASE_URL]
+      .map((entry) => normalizeRemoteHttpBaseUrl(entry))
+      .filter(Boolean),
+  );
+
+  return allowed.has(requested) ? requested : null;
+}
+
+function parseCookieHeader(value) {
+  const out = new Map();
+  if (typeof value !== "string" || !value.trim()) return out;
+  for (const part of value.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx < 1) continue;
+    const key = part.slice(0, idx).trim();
+    const rawValue = part.slice(idx + 1).trim();
+    if (key) out.set(key, rawValue);
+  }
+  return out;
+}
+
+function isLoopbackHostname(hostname) {
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1" || hostname === "[::1]";
+}
+
+function hasAllowedLoopbackOrigin(headers = {}) {
+  const candidates = [headers.origin, headers.referer];
+  for (const raw of candidates) {
+    if (raw == null || raw === "") continue;
+    try {
+      const url = new URL(String(raw));
+      if (url.protocol !== "http:" || !isLoopbackHostname(url.hostname)) return false;
+    } catch (_e) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -526,7 +589,7 @@ function scanClaudeProjects(projectMap) {
 // ---------------------------------------------------------------------------
 
 function json(res, data, status) {
-  res.writeHead(status || 200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+  res.writeHead(status || 200, { "Content-Type": "application/json" });
   res.end(JSON.stringify(data));
 }
 
@@ -541,6 +604,7 @@ function createLocalApiHandler({ queuePath }) {
   // so that both browser and WKWebView share the same login session via the proxy.
   // Persisted to disk so cookies survive server restarts.
   let relayCookies = new Map();
+  const localAuthToken = crypto.randomBytes(24).toString("hex");
   const trackerDataDir = path.join(os.homedir(), ".tokentracker", "tracker");
   const cookiePath = path.join(trackerDataDir, "relay-cookies.json");
 
@@ -653,13 +717,40 @@ function createLocalApiHandler({ queuePath }) {
   let _nativeAuthPending = false;
   let _nativeAuthExpiry = 0;
 
+  function isAuthorizedLocalMutation(req) {
+    const headerToken = req?.headers?.["x-tokentracker-local-auth"];
+    const cookieToken = parseCookieHeader(req?.headers?.cookie).get("tokentracker_local_auth");
+    const token = typeof headerToken === "string" && headerToken.trim()
+      ? headerToken.trim()
+      : cookieToken || "";
+    if (!token || token !== localAuthToken) return false;
+    return hasAllowedLoopbackOrigin(req?.headers || {});
+  }
+
   return async function handleLocalApi(req, res, url) {
     const p = url.pathname;
+
+    if (p === "/api/local-auth") {
+      if (String(req.method || "GET").toUpperCase() !== "GET") {
+        json(res, { error: "Method Not Allowed" }, 405);
+        return true;
+      }
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+      });
+      res.end(JSON.stringify({ token: localAuthToken }));
+      return true;
+    }
 
     // --- Auth bridge: native OAuth flag (WebView ↔ system browser) ---
     if (p === "/api/auth-bridge/verifier") {
       const method = String(req.method || "GET").toUpperCase();
       if (method === "PUT" || method === "POST") {
+        if (!isAuthorizedLocalMutation(req)) {
+          json(res, { error: "Unauthorized" }, 401);
+          return true;
+        }
         const body = await readJsonBody(req);
         _nativeAuthPending = Boolean(body?.native);
         _nativeAuthExpiry = Date.now() + 5 * 60 * 1000; // 5 min TTL
@@ -679,20 +770,8 @@ function createLocalApiHandler({ queuePath }) {
 
     // --- auth proxy: forward /api/auth/* to InsForge cloud ---
     if (p.startsWith("/api/auth/")) {
-      const { DEFAULT_BASE_URL } = require("./runtime-config.js");
-      let insforgeBase = process.env.TOKENTRACKER_INSFORGE_BASE_URL
-        || process.env.INSFORGE_BASE_URL
-        || "";
-      if (!insforgeBase) {
-        try {
-          const cfgPath = path.join(os.homedir(), ".tokentracker", "tracker", "config.json");
-          const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
-          insforgeBase = cfg?.baseUrl || "";
-        } catch { /* ignore */ }
-      }
-      if (!insforgeBase) {
-        insforgeBase = DEFAULT_BASE_URL;
-      }
+      const runtime = resolveRuntimeConfig();
+      const insforgeBase = runtime.baseUrl || DEFAULT_BASE_URL;
       try {
         const targetUrl = `${insforgeBase.replace(/\/$/, "")}${p}${url.search || ""}`;
         const proxyHeaders = {};
@@ -758,6 +837,10 @@ function createLocalApiHandler({ queuePath }) {
         json(res, { ok: false, error: "Method Not Allowed" }, 405);
         return true;
       }
+      if (!isAuthorizedLocalMutation(req)) {
+        json(res, { ok: false, error: "Unauthorized" }, 401);
+        return true;
+      }
       try {
         let body = {};
         try {
@@ -769,8 +852,13 @@ function createLocalApiHandler({ queuePath }) {
         if (typeof body.deviceToken === "string" && body.deviceToken.trim()) {
           extraEnv.TOKENTRACKER_DEVICE_TOKEN = body.deviceToken.trim();
         }
-        if (typeof body.insforgeBaseUrl === "string" && /^https?:\/\//i.test(body.insforgeBaseUrl.trim())) {
-          extraEnv.TOKENTRACKER_INSFORGE_BASE_URL = body.insforgeBaseUrl.trim();
+        if (body.insforgeBaseUrl != null) {
+          const allowedBaseUrl = resolveAllowedInsforgeBaseUrl(body.insforgeBaseUrl);
+          if (!allowedBaseUrl) {
+            json(res, { ok: false, error: "Unsupported insforgeBaseUrl override" }, 400);
+            return true;
+          }
+          extraEnv.TOKENTRACKER_INSFORGE_BASE_URL = allowedBaseUrl;
         }
         const result = await runSyncCommand(extraEnv);
         try {
@@ -1119,6 +1207,7 @@ function createLocalApiHandler({ queuePath }) {
 
 module.exports = {
   createLocalApiHandler,
+  resolveAllowedInsforgeBaseUrl,
   resolveQueuePath,
   // Exported for cross-consumer tests (pricing + native contract lock).
   MODEL_PRICING,

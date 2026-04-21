@@ -11,9 +11,14 @@ const { openInBrowser } = require("../lib/browser-auth");
 
 const DEFAULT_PORT = 7680;
 const NPM_PACKAGE_NAME = "tokentracker-cli";
+const LOCAL_BIND_HOST = "127.0.0.1";
 
 function buildPortInUseHint(port) {
   return `Port ${port} is still in use after cleanup. Try: npx ${NPM_PACKAGE_NAME} serve --port ${port + 1}\n`;
+}
+
+function getLocalServerUrl(port) {
+  return `http://${LOCAL_BIND_HOST}:${port}`;
 }
 
 async function cmdServe(argv) {
@@ -85,7 +90,6 @@ async function cmdServe(argv) {
       // CORS preflight
       if (req.method === "OPTIONS") {
         res.writeHead(204, {
-          "Access-Control-Allow-Origin": "*",
           "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
           "Access-Control-Allow-Headers": "Content-Type, Authorization",
         });
@@ -116,8 +120,8 @@ async function cmdServe(argv) {
   // 4. Listen (kill stale process on same port if needed)
   const port = opts.port;
   await ensurePortFree(port);
-  server.listen(port, () => {
-    const url = `http://localhost:${port}`;
+  server.listen(port, LOCAL_BIND_HOST, () => {
+    const url = getLocalServerUrl(port);
     process.stdout.write(
       [
         "",
@@ -226,4 +230,10 @@ function parseArgs(argv) {
   return opts;
 }
 
-module.exports = { cmdServe, buildPortInUseHint, NPM_PACKAGE_NAME };
+module.exports = {
+  cmdServe,
+  buildPortInUseHint,
+  NPM_PACKAGE_NAME,
+  LOCAL_BIND_HOST,
+  getLocalServerUrl,
+};
