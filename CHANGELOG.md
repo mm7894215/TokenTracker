@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- `tokentracker serve` now suggests `npx tokentracker-cli serve --port ...` when the requested port is still occupied, matching the published npm package name and avoiding the `E404` path reported in issue #30.
+
 ### Added
 
 - **Kimi provider** — passive token tracking via `~/.kimi/sessions/**/wire.jsonl`. No hook or configuration required; TokenTracker reads Kimi's wire log directly on every sync.

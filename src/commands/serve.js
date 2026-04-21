@@ -10,6 +10,11 @@ const { serveStaticFile } = require("../lib/static-server");
 const { openInBrowser } = require("../lib/browser-auth");
 
 const DEFAULT_PORT = 7680;
+const NPM_PACKAGE_NAME = "tokentracker-cli";
+
+function buildPortInUseHint(port) {
+  return `Port ${port} is still in use after cleanup. Try: npx ${NPM_PACKAGE_NAME} serve --port ${port + 1}\n`;
+}
 
 async function cmdServe(argv) {
   const opts = parseArgs(argv);
@@ -133,7 +138,7 @@ async function cmdServe(argv) {
 
   server.on("error", (e) => {
     if (e.code === "EADDRINUSE") {
-      process.stderr.write(`Port ${port} is still in use after cleanup. Try: npx tokentracker serve --port ${port + 1}\n`);
+      process.stderr.write(buildPortInUseHint(port));
     } else {
       process.stderr.write(`Server error: ${e.message}\n`);
     }
@@ -221,4 +226,4 @@ function parseArgs(argv) {
   return opts;
 }
 
-module.exports = { cmdServe };
+module.exports = { cmdServe, buildPortInUseHint, NPM_PACKAGE_NAME };
