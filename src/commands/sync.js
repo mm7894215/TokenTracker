@@ -385,7 +385,7 @@ async function cmdSync(argv) {
             if (!progress?.enabled) return;
             const pct = p.total > 0 ? p.index / p.total : 1;
             progress.update(
-              `Parsing Kiro CLI ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} convs | buckets ${formatNumber(p.bucketsQueued)}`,
+              `Parsing Kiro CLI ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} sessions | buckets ${formatNumber(p.bucketsQueued)}`,
             );
           },
         });

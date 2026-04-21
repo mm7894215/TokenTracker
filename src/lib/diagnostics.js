@@ -16,7 +16,20 @@ const { normalizeState: normalizeUploadState } = require("./upload-throttle");
 const { probeOpenclawHookState } = require("./openclaw-hook");
 const { probeOpenclawSessionPluginState } = require("./openclaw-session-plugin");
 const { resolveTrackerPaths } = require("./tracker-paths");
-const { resolveKiroCliDbPath } = require("./rollout");
+// TASK-011: Kiro CLI DB path inlined here to avoid pulling the ~4000-line
+// rollout module on every `tokentracker status` / `diagnostics` call.
+// rollout.js still exports resolveKiroCliDbPath for external callers.
+function resolveKiroCliDbPathInline(env, home) {
+  if (env.KIRO_CLI_DB_PATH) return env.KIRO_CLI_DB_PATH;
+  const effectiveHome = env.HOME || home;
+  return path.join(
+    effectiveHome,
+    "Library",
+    "Application Support",
+    "kiro-cli",
+    "data.sqlite3",
+  );
+}
 
 async function collectTrackerDiagnostics({
   home = os.homedir(),
@@ -98,7 +111,7 @@ async function collectTrackerDiagnostics({
   const kiroIdePresent =
     (await safeStatSize(path.join(kiroIdeDevDataDir, "devdata.sqlite"))) > 0 ||
     (await safeStatSize(path.join(kiroIdeDevDataDir, "tokens_generated.jsonl"))) > 0;
-  const kiroCliDbPath = resolveKiroCliDbPath(process.env);
+  const kiroCliDbPath = resolveKiroCliDbPathInline(process.env, home);
   const kiroCliPresent = require("node:fs").existsSync(kiroCliDbPath);
 
   const lastSuccessAt = uploadThrottle.lastSuccessMs

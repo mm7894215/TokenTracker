@@ -3085,20 +3085,31 @@ function resolveKiroCliDbPath(env = process.env) {
   return path.join(home, "Library", "Application Support", "kiro-cli", "data.sqlite3");
 }
 
+// Bug-4: canonical UUID shape — 8-4-4-4-12 hex groups. The looser
+// /^[0-9a-f-]{36}\.json$/ form accepted `36 hyphens`.json or 36 hex with
+// no hyphens. kiro-cli writes proper UUIDs; lock to the canonical shape.
+const KIRO_CLI_SESSION_FILE_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$/i;
+
 // Lists ~/.kiro/sessions/cli/{uuid}.json files. Includes files whose sibling
 // .lock is present — we read those as tail-only snapshots so a running
 // session's completed turns still land in the queue on the next sync. The
 // .json files are rewritten atomically by kiro-cli on each turn flush, so
 // a stale read just means we'll pick up the rest next time.
+//
+// TASK-014: env.HOME is honored (symmetric with resolveKiroCliDbPath) so
+// callers can redirect to a tmp home for hermetic tests/CI.
 function resolveKiroCliSessionFiles(env = process.env) {
-  const home = require("node:os").homedir();
+  const home = env.HOME || require("node:os").homedir();
   const kiroHome = env.KIRO_HOME || path.join(home, ".kiro");
   const sessionsDir = path.join(kiroHome, "sessions", "cli");
   if (!fssync.existsSync(sessionsDir)) return [];
   const files = [];
   try {
     for (const entry of fssync.readdirSync(sessionsDir)) {
-      if (!entry.endsWith(".json")) continue;
+      // TASK-003: only canonical {uuid}.json files; backups, scratch,
+      // typos are skipped so they don't feed JSON.parse garbage.
+      if (!KIRO_CLI_SESSION_FILE_RE.test(entry)) continue;
       files.push(path.join(sessionsDir, entry));
     }
   } catch {
@@ -3126,63 +3137,73 @@ function resolveKiroCliSessionFiles(env = process.env) {
 // "claims" the buffered Prompt chars for its turn, and the buffer resets.
 // Later cycles within the same turn (Assistant → ToolResults → Assistant)
 // do not re-attribute.
-function readKiroCliMessageChars(jsonlPath, turnMessageIds) {
+async function readKiroCliMessageChars(jsonlPath, turnMessageIds) {
   const result = {
     byMessage: new Map(),
     messageKind: new Map(),
     turnPromptChars: new Map(),
   };
   if (!jsonlPath || !fssync.existsSync(jsonlPath)) return result;
-  let raw;
+  // TASK-005: stream via readline so multi-MB .jsonl files (heavy tool-use
+  // sessions) don't block the sync event loop by buffering whole-file.
+  let stream;
   try {
-    raw = fssync.readFileSync(jsonlPath, "utf8");
+    stream = fssync.createReadStream(jsonlPath, { encoding: "utf8" });
   } catch {
     return result;
   }
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
   const midToTurn =
     turnMessageIds instanceof Map ? turnMessageIds : new Map();
   const attributedTurns = new Set();
   let pendingPromptChars = 0;
-  for (const line of raw.split("\n")) {
-    if (!line.trim()) continue;
-    let evt;
-    try {
-      evt = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const data = evt?.data;
-    if (!data || typeof data !== "object") continue;
-    const mid = data.message_id;
-    if (!mid) continue;
-    const content = Array.isArray(data.content) ? data.content : [];
-    let chars = 0;
-    for (const c of content) {
-      if (!c || typeof c !== "object") continue;
-      if (c.kind === "text" && typeof c.data === "string") {
-        chars += c.data.length;
-      } else if (c.kind === "toolUse" && c.data && typeof c.data === "object") {
-        // tool-use invocations count toward output; stringify the input payload
-        try {
-          chars += JSON.stringify(c.data.input || {}).length;
-        } catch {
-          // ignore
+  // Bug-5: wrap the streamed iteration. Mid-read errors (file deleted or
+  // truncated while kiro-cli is writing) would otherwise propagate up and
+  // crash the whole sync pass. On error we return the partial result and
+  // let the next sync re-read fresh.
+  try {
+    for await (const line of rl) {
+      if (!line || !line.trim()) continue;
+      let evt;
+      try {
+        evt = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const data = evt && evt.data;
+      if (!data || typeof data !== "object") continue;
+      const mid = data.message_id;
+      if (!mid) continue;
+      const content = Array.isArray(data.content) ? data.content : [];
+      let chars = 0;
+      for (const c of content) {
+        if (!c || typeof c !== "object") continue;
+        if (c.kind === "text" && typeof c.data === "string") {
+          chars += c.data.length;
+        } else if (c.kind === "toolUse" && c.data && typeof c.data === "object") {
+          try {
+            chars += JSON.stringify(c.data.input || {}).length;
+          } catch {
+            // ignore
+          }
+        }
+      }
+      result.byMessage.set(mid, (result.byMessage.get(mid) || 0) + chars);
+      if (!result.messageKind.has(mid)) result.messageKind.set(mid, evt.kind);
+
+      if (evt.kind === "Prompt") {
+        pendingPromptChars += chars;
+      } else if (evt.kind === "AssistantMessage" && midToTurn.has(mid)) {
+        const turnIdx = midToTurn.get(mid);
+        if (!attributedTurns.has(turnIdx)) {
+          result.turnPromptChars.set(turnIdx, pendingPromptChars);
+          attributedTurns.add(turnIdx);
+          pendingPromptChars = 0;
         }
       }
     }
-    result.byMessage.set(mid, (result.byMessage.get(mid) || 0) + chars);
-    if (!result.messageKind.has(mid)) result.messageKind.set(mid, evt.kind);
-
-    if (evt.kind === "Prompt") {
-      pendingPromptChars += chars;
-    } else if (evt.kind === "AssistantMessage" && midToTurn.has(mid)) {
-      const turnIdx = midToTurn.get(mid);
-      if (!attributedTurns.has(turnIdx)) {
-        result.turnPromptChars.set(turnIdx, pendingPromptChars);
-        attributedTurns.add(turnIdx);
-        pendingPromptChars = 0;
-      }
-    }
+  } catch {
+    // partial data — return what we have.
   }
   return result;
 }
@@ -3192,7 +3213,7 @@ function readKiroCliMessageChars(jsonlPath, turnMessageIds) {
 // input_tokens, output_tokens }]. We use the same request_id dedup slot as
 // the SQLite path so mutations (turn rewritten on next flush) go through
 // the subtract-old/add-new path in parseKiroCliIncremental.
-function readKiroCliSessionTurns(jsonPath) {
+async function readKiroCliSessionTurns(jsonPath) {
   if (!jsonPath || !fssync.existsSync(jsonPath)) return [];
   let parsed;
   try {
@@ -3229,14 +3250,19 @@ function readKiroCliSessionTurns(jsonPath) {
 
   // Load sibling .jsonl for char-count fallback.
   const jsonlPath = jsonPath.replace(/\.json$/, ".jsonl");
-  const charMap = readKiroCliMessageChars(jsonlPath, turnMessageIds);
+  const charMap = await readKiroCliMessageChars(jsonlPath, turnMessageIds);
 
   const flat = [];
   for (let turnIdx = 0; turnIdx < turns.length; turnIdx++) {
     const turn = turns[turnIdx];
     if (!turn || typeof turn !== "object") continue;
+    // TASK-001: preserve the integer 0. `|| null` would coerce a valid
+    // loop_id.rand=0 into a message_id fallback, splitting the dedup
+    // namespace across runs that see 0 vs runs that don't.
     const loopRand =
-      (turn.loop_id && (turn.loop_id.rand ?? turn.loop_id.seed)) || null;
+      turn.loop_id && typeof turn.loop_id === "object"
+        ? turn.loop_id.rand ?? turn.loop_id.seed ?? null
+        : null;
     const messageIds = Array.isArray(turn.message_ids) ? turn.message_ids : [];
     const requestId = loopRand != null ? `${sessionId}:${loopRand}` : (messageIds[0] || null);
     if (!requestId) continue;
@@ -3261,9 +3287,22 @@ function readKiroCliSessionTurns(jsonPath) {
       outputTokens = Math.floor(assistantChars / KIRO_CLI_CHARS_PER_TOKEN);
     }
 
-    // Timestamp: end_timestamp is an ISO string; coerce to ms.
-    const tsRaw = turn.end_timestamp || turn.start_timestamp;
-    const tsMs = tsRaw ? Date.parse(tsRaw) : NaN;
+    // TASK-006: timestamp precedence matches SQLite's
+    // request_start_timestamp_ms so a turn that migrates SQLite ↔
+    // session-file buckets identically across tiers (previously a turn
+    // straddling a half-hour boundary bucketed differently per source
+    // because session files use end_timestamp while SQLite uses start).
+    //   1. turn.request_start_timestamp_ms   (numeric ms, SQLite shape)
+    //   2. turn.start_timestamp              (ISO string)
+    //   3. turn.end_timestamp                (ISO string, legacy fallback)
+    let tsMs = NaN;
+    if (Number.isFinite(Number(turn.request_start_timestamp_ms))) {
+      tsMs = Number(turn.request_start_timestamp_ms);
+    } else if (turn.start_timestamp) {
+      tsMs = Date.parse(turn.start_timestamp);
+    } else if (turn.end_timestamp) {
+      tsMs = Date.parse(turn.end_timestamp);
+    }
     if (!Number.isFinite(tsMs) || tsMs <= 0) continue;
 
     flat.push({
@@ -3272,6 +3311,11 @@ function readKiroCliSessionTurns(jsonPath) {
       message_id: messageIds[0] || null,
       model_id: turn.model_id || sessionModelId,
       request_start_timestamp_ms: tsMs,
+      // D-1 / Bug-2: tag with session_id so the retraction pass can match
+      // session-origin entries even when the requestId format has no
+      // colon (no-loop_id fallback uses a bare message_id UUID that would
+      // otherwise be indistinguishable from SQLite's UUID keys).
+      session_id: sessionId,
       // For the parser, we feed the ALREADY-approximated tokens directly via
       // a special sentinel field. The parser will divide chars by
       // KIRO_CLI_CHARS_PER_TOKEN; bypass that by pre-multiplying here.
@@ -3319,7 +3363,14 @@ function canonicalizeKiroCliModelId(raw) {
 
 // Read Kiro CLI requests using SQL-side json_extract so we don't pull the
 // full (93 MB-ish) conversations_v2 blob back through sqlite3 -json.
-function readKiroCliRequests(dbPath) {
+//
+// D-1: also surfaces `user_turn_metadata.continuation_id` so the cross-
+// source retraction pass (parseKiroCliIncremental) can match whichever
+// UUID kiro-cli used as the session link. The SQL column
+// `conversation_id` and the inner JSON `continuation_id` are different
+// UUIDs on observed data; covering both means retraction fires whichever
+// side matches the live session's `session_id`.
+function readKiroCliRequests(dbPath, env = process.env) {
   if (!dbPath || !fssync.existsSync(dbPath)) return [];
   let raw;
   try {
@@ -3330,13 +3381,23 @@ function readKiroCliRequests(dbPath) {
         dbPath,
         "SELECT conversation_id, " +
           "json_extract(value, '$.model_info.model_id') AS session_model_id, " +
+          "json_extract(value, '$.user_turn_metadata.continuation_id') AS continuation_id, " +
           "json_extract(value, '$.user_turn_metadata.requests') AS requests_json " +
           "FROM conversations_v2 " +
           "WHERE json_extract(value, '$.user_turn_metadata.requests') IS NOT NULL",
       ],
       { encoding: "utf8", maxBuffer: 128 * 1024 * 1024, timeout: 120_000 },
     );
-  } catch {
+  } catch (err) {
+    // TASK-012 / D-8: debug-gated stderr log so a missing sqlite3 binary
+    // is distinguishable from an empty DB. Silent by default. env is
+    // threaded so tests can toggle debug hermetically.
+    const dbg = String((env && env.TOKENTRACKER_DEBUG) || "").toLowerCase();
+    if (dbg === "1" || dbg === "true") {
+      process.stderr.write(
+        `[kiro-cli] sqlite3 read failed: ${err?.message || err}\n`,
+      );
+    }
     return [];
   }
   if (!raw || !raw.trim()) return [];
@@ -3360,6 +3421,7 @@ function readKiroCliRequests(dbPath) {
       if (!r || typeof r !== "object") continue;
       flat.push({
         conversation_id: row.conversation_id,
+        continuation_id: row.continuation_id || null,
         session_model_id: row.session_model_id || null,
         request_id: r.request_id || null,
         message_id: r.message_id || null,
@@ -3400,18 +3462,22 @@ async function parseKiroCliIncremental({ sessionFiles, cursors, queuePath, onPro
   // Combine two sources under the same (source='kiro', cursors.kiroCli)
   // namespace: historical rows from the SQLite DB plus live session state
   // from ~/.kiro/sessions/cli/{uuid}.json (covers turns from a running
-  // session that hasn't flushed to SQLite yet). Request IDs are disjoint
-  // (SQLite uses request_id UUID; sessions use {sessionId}:{loop_id.rand}),
-  // so no cross-source dedup is needed.
-  const flatDb = fssync.existsSync(dbPath) ? readKiroCliRequests(dbPath) : [];
+  // session that hasn't flushed to SQLite yet). Request ID shapes differ:
+  // SQLite carries a persisted request_id UUID; session files synthesize
+  // `${sessionId}:${loop_id.rand}`. When kiro-cli migrates a live session
+  // into SQLite the same turn lands under a new request_id — the cross-
+  // source retraction pass below (D-1 + TASK-007) matches session_id ↔
+  // SQLite conversation_id OR continuation_id to subtract the orphan
+  // session-file cursor entry before the new SQLite row is processed.
+  const flatDb = fssync.existsSync(dbPath)
+    ? readKiroCliRequests(dbPath, resolvedEnv)
+    : [];
   const sessionFilesList = resolveKiroCliSessionFiles(resolvedEnv);
-  const flatSessions = [];
+  let flatSessions = [];
   for (const jsonPath of sessionFilesList) {
-    for (const turn of readKiroCliSessionTurns(jsonPath)) {
-      flatSessions.push(turn);
-    }
+    const turns = await readKiroCliSessionTurns(jsonPath);
+    for (const turn of turns) flatSessions.push(turn);
   }
-  const flat = flatDb.concat(flatSessions);
   // Per-request state replaces the old seenIds set. Each entry captures
   // what we contributed for that request_id last time, so a later mutation
   // (same request_id, different fingerprint) can subtract-old/add-new
@@ -3421,17 +3487,116 @@ async function parseKiroCliIncremental({ sessionFiles, cursors, queuePath, onPro
       ? { ...kiroCliState.requests }
       : {};
 
-  if (flat.length === 0) {
-    cursors.kiroCli = {
-      ...kiroCliState,
-      requests: requestState,
-      updatedAt: new Date().toISOString(),
-    };
-    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-  }
-
   const hourlyState = normalizeHourlyState(cursors?.hourly);
   const touchedBuckets = new Set();
+  const debugEnabled = ["1", "true"].includes(
+    String(resolvedEnv.TOKENTRACKER_DEBUG || "").toLowerCase(),
+  );
+
+  // ── TASK-007 + D-1: cross-source retraction. When a conversation has
+  //    migrated from the session-file tier into SQLite, the cursor's
+  //    prior session-file entry (keyed `${sessionId}:${loopRand}` OR a
+  //    bare message_id UUID when loop_id is absent) never matches the
+  //    new SQLite request_id. Without retraction the old contribution
+  //    stays in the bucket absolute and the new SQLite row is added on
+  //    top — permanent double-count. D-6: typed non-empty check so a
+  //    corrupt NULL/empty conv_id can't poison the match set.
+  const migratedConvIds = new Set();
+  for (const row of flatDb) {
+    if (!row) continue;
+    if (typeof row.conversation_id === "string" && row.conversation_id)
+      migratedConvIds.add(row.conversation_id);
+    if (typeof row.continuation_id === "string" && row.continuation_id)
+      migratedConvIds.add(row.continuation_id);
+  }
+  if (migratedConvIds.size > 0) {
+    // Pre-collect to retract so mutation during iteration is safe.
+    const toRetract = [];
+    for (const [reqId, prev] of Object.entries(requestState)) {
+      if (!prev || typeof prev !== "object") continue;
+      // Bug-2: prefer the stored session_id tag (new schema); fall back
+      // to colon-split for legacy cursors pre-dating this change.
+      let sid = null;
+      if (typeof prev.session_id === "string" && prev.session_id) {
+        sid = prev.session_id;
+      } else {
+        const colon = reqId.indexOf(":");
+        if (colon > 0) sid = reqId.slice(0, colon);
+      }
+      if (!sid || !migratedConvIds.has(sid)) continue;
+      toRetract.push([reqId, prev, sid]);
+    }
+    for (const [reqId, prev, sid] of toRetract) {
+      if (prev.input_tokens || prev.output_tokens) {
+        const prevBucket = getHourlyBucket(
+          hourlyState,
+          "kiro",
+          prev.model,
+          prev.bucketStart,
+        );
+        addTotals(prevBucket.totals, {
+          input_tokens: -prev.input_tokens,
+          cached_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+          output_tokens: -prev.output_tokens,
+          reasoning_output_tokens: 0,
+          total_tokens: -(prev.input_tokens + prev.output_tokens),
+          conversation_count: -1,
+        });
+        touchedBuckets.add(bucketKey("kiro", prev.model, prev.bucketStart));
+      }
+      delete requestState[reqId];
+      if (debugEnabled) {
+        process.stderr.write(
+          `[kiro-cli] retracted migrated session entry (conv ${sid})\n`,
+        );
+      }
+    }
+    // D-14: drop matching session-file entries from this run via filter
+    // (O(N)) instead of reverse-splice-in-loop (O(N²)).
+    const before = flatSessions.length;
+    flatSessions = flatSessions.filter((s) => {
+      if (!s) return false;
+      let sid = null;
+      if (typeof s.session_id === "string" && s.session_id) {
+        sid = s.session_id;
+      } else {
+        const rid = s.request_id || "";
+        const colon = rid.indexOf(":");
+        if (colon > 0) sid = rid.slice(0, colon);
+      }
+      return !(sid && migratedConvIds.has(sid));
+    });
+    if (debugEnabled && flatSessions.length !== before) {
+      process.stderr.write(
+        `[kiro-cli] dropped ${before - flatSessions.length} migrated session-file turn(s)\n`,
+      );
+    }
+  }
+
+  const flat = flatDb.concat(flatSessions);
+
+  if (flat.length === 0) {
+    // Bug-1: retraction may have touched buckets even with empty flat.
+    // Clamp + cap BEFORE flushing so the early-return path applies the
+    // same guarantees as the main path (fixes a skip that flushed
+    // negative conversation_counts and left the cap unapplied).
+    const cappedEarly = clampAndCapKiroCliState({
+      requestState,
+      hourlyState,
+      touchedBuckets,
+    });
+    const bucketsQueued = await enqueueTouchedBuckets({
+      queuePath,
+      hourlyState,
+      touchedBuckets,
+    });
+    const updatedAt = new Date().toISOString();
+    hourlyState.updatedAt = updatedAt;
+    cursors.hourly = hourlyState;
+    cursors.kiroCli = { ...kiroCliState, requests: cappedEarly, updatedAt };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued };
+  }
   const cb = typeof onProgress === "function" ? onProgress : null;
   let recordsProcessed = 0;
   let eventsAggregated = 0;
@@ -3497,12 +3662,17 @@ async function parseKiroCliIncremental({ sessionFiles, cursors, queuePath, onPro
 
     // Always record the cursor entry (even for zero-token requests) so we
     // don't re-count later if Kiro rewrites this request with real data.
+    // Bug-2: tag session-origin entries with session_id so the retraction
+    // pass can identify them regardless of request_id format (the
+    // no-loop_id fallback produces a bare UUID with no colon, which would
+    // otherwise be indistinguishable from SQLite's UUID keys).
     requestState[requestId] = {
       fingerprint,
       bucketStart,
       model,
       input_tokens: approxInput,
       output_tokens: approxOutput,
+      ...(r.session_id ? { session_id: r.session_id } : {}),
     };
 
     if (cb && i % 50 === 0) {
@@ -3516,13 +3686,57 @@ async function parseKiroCliIncremental({ sessionFiles, cursors, queuePath, onPro
     }
   }
 
+  const cappedState = clampAndCapKiroCliState({
+    requestState,
+    hourlyState,
+    touchedBuckets,
+  });
+
   const bucketsQueued = await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets });
   const updatedAt = new Date().toISOString();
   hourlyState.updatedAt = updatedAt;
   cursors.hourly = hourlyState;
-  cursors.kiroCli = { ...kiroCliState, requests: requestState, updatedAt };
+  cursors.kiroCli = { ...kiroCliState, requests: cappedState, updatedAt };
 
   return { recordsProcessed, eventsAggregated, bucketsQueued };
+}
+
+// TASK-004 + TASK-010 + Bug-1: shared end-of-run clamp + cap for
+// parseKiroCliIncremental. Centralized so the main path AND the
+// retraction-only early-return path both apply the same guarantees.
+// Mutates hourlyState bucket totals in place (clamp) and returns a new
+// capped requestState object (cap).
+const KIRO_CLI_CURSOR_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
+const KIRO_CLI_CURSOR_MAX_ENTRIES = 20_000;
+
+function clampAndCapKiroCliState({ requestState, hourlyState, touchedBuckets }) {
+  // TASK-010: clamp conversation_count to >= 0 on Kiro-touched buckets
+  // only. The shared enqueueTouchedBuckets is left untouched so
+  // legitimate negatives from the 10 other parsers are not masked. Kiro
+  // negatives come from the subtract-old pass on mutation or retraction.
+  for (const key of touchedBuckets) {
+    const bucket = hourlyState.buckets && hourlyState.buckets[key];
+    if (bucket && bucket.totals && bucket.totals.conversation_count < 0) {
+      bucket.totals.conversation_count = 0;
+    }
+  }
+  // TASK-004: cap cursors.kiroCli.requests by age + count. Runs LAST so
+  // nothing active or just-retracted is pruned mid-flight.
+  const ageCutoffMs = Date.now() - KIRO_CLI_CURSOR_MAX_AGE_MS;
+  const cappedEntries = [];
+  for (const [reqId, entry] of Object.entries(requestState)) {
+    if (!entry || typeof entry !== "object") continue;
+    const ts = entry.bucketStart ? Date.parse(entry.bucketStart) : NaN;
+    if (!Number.isFinite(ts) || ts < ageCutoffMs) continue;
+    cappedEntries.push([reqId, entry, ts]);
+  }
+  if (cappedEntries.length > KIRO_CLI_CURSOR_MAX_ENTRIES) {
+    cappedEntries.sort((a, b) => b[2] - a[2]); // newest first
+    cappedEntries.length = KIRO_CLI_CURSOR_MAX_ENTRIES;
+  }
+  const capped = {};
+  for (const [reqId, entry] of cappedEntries) capped[reqId] = entry;
+  return capped;
 }
 
 // Back-compat path: per-session .json files (the old fixture shape). Emits
