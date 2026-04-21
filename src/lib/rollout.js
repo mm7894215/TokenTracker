@@ -3309,6 +3309,13 @@ async function readKiroCliSessionTurns(jsonPath) {
       request_id: requestId,
       session_model_id: sessionModelId,
       message_id: messageIds[0] || null,
+      // Turn-granular migration match: surface the full list so the
+      // cross-source retraction in parseKiroCliIncremental can drop this
+      // specific turn iff any of its assistant/tool_result message_ids
+      // appears in SQLite. Session-level matching over-retracts newer
+      // turns in an active session whose older turns have already
+      // flushed to SQLite.
+      all_message_ids: messageIds.slice(),
       model_id: turn.model_id || sessionModelId,
       request_start_timestamp_ms: tsMs,
       // D-1 / Bug-2: tag with session_id so the retraction pass can match
@@ -3501,16 +3508,36 @@ async function parseKiroCliIncremental({ sessionFiles, cursors, queuePath, onPro
   //    stays in the bucket absolute and the new SQLite row is added on
   //    top — permanent double-count. D-6: typed non-empty check so a
   //    corrupt NULL/empty conv_id can't poison the match set.
+  //
+  // Two match sets are built:
+  //   • migratedConvIds  — session_id → any row in SQLite. Used to scope
+  //                        cursor retraction (coarse but safe because
+  //                        un-migrated turns still present in the session
+  //                        file are re-added later in this same run).
+  //   • migratedMsgIds   — r.message_id → exact turn in SQLite. Used to
+  //                        filter flatSessions at TURN granularity. An
+  //                        active session with older migrated turns +
+  //                        newer session-file-only turns must keep the
+  //                        newer turns; session-level filtering dropped
+  //                        them and caused Kiro CLI under-count.
   const migratedConvIds = new Set();
+  const migratedMsgIds = new Set();
   for (const row of flatDb) {
     if (!row) continue;
     if (typeof row.conversation_id === "string" && row.conversation_id)
       migratedConvIds.add(row.conversation_id);
     if (typeof row.continuation_id === "string" && row.continuation_id)
       migratedConvIds.add(row.continuation_id);
+    if (typeof row.message_id === "string" && row.message_id)
+      migratedMsgIds.add(row.message_id);
   }
   if (migratedConvIds.size > 0) {
     // Pre-collect to retract so mutation during iteration is safe.
+    // Retraction stays session-level: for every cursor entry whose
+    // session_id has any row in SQLite, subtract its prior contribution.
+    // This is provably correct because turns still live in the session
+    // file get re-added in this same run via the (turn-granular) filter
+    // below, producing a net delta of zero for un-migrated turns.
     const toRetract = [];
     for (const [reqId, prev] of Object.entries(requestState)) {
       if (!prev || typeof prev !== "object") continue;
@@ -3552,20 +3579,30 @@ async function parseKiroCliIncremental({ sessionFiles, cursors, queuePath, onPro
         );
       }
     }
-    // D-14: drop matching session-file entries from this run via filter
-    // (O(N)) instead of reverse-splice-in-loop (O(N²)).
+    // Turn-granular filter: drop a session-file turn only when at least
+    // one of its assistant/tool_result message_ids is present in SQLite
+    // (i.e. this specific turn has been flushed). Newer turns in the
+    // same session that haven't yet landed in SQLite survive.
+    //
+    // Edge: a turn with no message_ids at all cannot be matched. We keep
+    // it — preferring a rare potential double-count (narrow, since such
+    // a turn would also have no request_id under the no-loop_id path and
+    // be discarded upstream) over the reported regression of dropping
+    // legitimate newer turns wholesale. D-14: still O(N) single-pass.
     const before = flatSessions.length;
     flatSessions = flatSessions.filter((s) => {
       if (!s) return false;
-      let sid = null;
-      if (typeof s.session_id === "string" && s.session_id) {
-        sid = s.session_id;
-      } else {
-        const rid = s.request_id || "";
-        const colon = rid.indexOf(":");
-        if (colon > 0) sid = rid.slice(0, colon);
+      const mids = Array.isArray(s.all_message_ids)
+        ? s.all_message_ids
+        : s.message_id
+        ? [s.message_id]
+        : [];
+      for (const mid of mids) {
+        if (typeof mid === "string" && mid && migratedMsgIds.has(mid)) {
+          return false;
+        }
       }
-      return !(sid && migratedConvIds.has(sid));
+      return true;
     });
     if (debugEnabled && flatSessions.length !== before) {
       process.stderr.write(

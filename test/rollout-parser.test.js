@@ -3025,6 +3025,134 @@ test("parseKiroCliIncremental retracts no-loop_id session-file entries via sessi
   }
 });
 
+test("parseKiroCliIncremental keeps newer session-file turns when older ones have migrated to SQLite (mixed-state, turn-granular)", async () => {
+  // Regression: previously, cross-source retraction filtered flatSessions
+  // at session_id granularity — so an active session with turn A in SQLite
+  // AND turns A + B in the session file would drop B entirely, producing
+  // Kiro CLI under-count for the currently-active conversation.
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-kiro-mixed-"));
+  try {
+    const dbPath = path.join(tmp, "data.sqlite3");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const sessionsDir = path.join(tmp, ".kiro", "sessions", "cli");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const convId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    const msgA = "msg-A-migrated";
+    const msgB = "msg-B-session-only";
+    const tsA = Date.parse("2026-04-20T10:05:00.000Z");
+    const tsB = Date.parse("2026-04-20T10:35:00.000Z");
+    const env = { KIRO_CLI_DB_PATH: dbPath, HOME: tmp };
+
+    // Session file: turn A (older, also in SQLite) + turn B (newer, not
+    // yet flushed). kiro-cli keeps flushed turns in the session file
+    // until the whole session ends, so the overlap is normal.
+    await fs.writeFile(
+      path.join(sessionsDir, `${convId}.json`),
+      JSON.stringify({
+        session_id: convId,
+        session_state: {
+          rts_model_state: { model_info: { model_id: "claude-sonnet-4.5" } },
+          conversation_metadata: {
+            user_turn_metadatas: [
+              {
+                loop_id: { rand: 10 },
+                message_ids: [msgA],
+                request_start_timestamp_ms: tsA,
+                input_token_count: 100,
+                output_token_count: 200,
+              },
+              {
+                loop_id: { rand: 11 },
+                message_ids: [msgB],
+                request_start_timestamp_ms: tsB,
+                input_token_count: 60,
+                output_token_count: 30,
+              },
+            ],
+          },
+        },
+      }),
+    );
+    await fs.writeFile(path.join(sessionsDir, `${convId}.jsonl`), "");
+    cp.execFileSync("sqlite3", [
+      dbPath,
+      "CREATE TABLE conversations_v2 (key TEXT, conversation_id TEXT, value TEXT, created_at INTEGER, updated_at INTEGER, PRIMARY KEY (key, conversation_id));",
+    ]);
+
+    // Run 1: only the session file has data (B doesn't exist yet — simulate
+    // by only inserting turn A into the session file for the first pass).
+    // For simplicity we run once with the full file but empty SQLite; both
+    // turns land via session-file parse.
+    const cursors = { version: 1 };
+    const r1 = await rolloutModule.parseKiroCliIncremental({
+      cursors,
+      queuePath,
+      env,
+    });
+    assert.equal(r1.eventsAggregated, 2, "run 1 parses both turns from session file");
+
+    // Run 2: turn A has flushed to SQLite (conv_id=convId, message_id=msgA).
+    // Turn B is still session-only.
+    cp.execFileSync("sqlite3", [
+      dbPath,
+      `INSERT INTO conversations_v2 VALUES ('proj', '${convId}', '${JSON.stringify(
+        {
+          model_info: { model_id: "claude-sonnet-4.5" },
+          user_turn_metadata: {
+            continuation_id: convId,
+            requests: [
+              {
+                request_id: "sqlite-req-A",
+                message_id: msgA,
+                request_start_timestamp_ms: tsA,
+                user_prompt_length: 400,
+                response_size: 800,
+                model_id: "claude-sonnet-4.5",
+              },
+            ],
+          },
+        },
+      ).replace(/'/g, "''")}', 1, 2);`,
+    ]);
+
+    await rolloutModule.parseKiroCliIncremental({
+      cursors,
+      queuePath,
+      env,
+    });
+
+    // Cursor: A's session-file key retracted, SQLite key added. B's
+    // session-file key remains (it has NOT migrated).
+    const keys = Object.keys(cursors.kiroCli.requests);
+    assert.ok(!keys.includes(`${convId}:10`), "turn A session-file cursor retracted");
+    assert.ok(keys.includes("sqlite-req-A"), "turn A SQLite cursor added");
+    assert.ok(
+      keys.includes(`${convId}:11`),
+      "turn B session-file cursor preserved (un-migrated, must survive)",
+    );
+
+    // Bucket totals: A (from SQLite) + B (from session file) = 100+60 in, 200+30 out.
+    const rows = (await fs.readFile(queuePath, "utf8"))
+      .split("\n")
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l));
+    const latest = new Map();
+    for (const row of rows)
+      latest.set(`${row.source}|${row.model}|${row.hour_start}`, row);
+    let totIn = 0;
+    let totOut = 0;
+    for (const row of latest.values()) {
+      if (row.source !== "kiro") continue;
+      totIn += row.input_tokens || 0;
+      totOut += row.output_tokens || 0;
+    }
+    assert.equal(totIn, 160, "A (SQLite) + B (session-only) survive");
+    assert.equal(totOut, 230);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseKiroCliIncremental early-return path still runs cap + clamp (Bug-1)", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-kiro-early-"));
   try {
