@@ -372,18 +372,41 @@ function getModelPricing(model) {
 
 function computeRowCost(row) {
   const pricing = getModelPricing(row.model);
+  const reasoningIncludedInOutput = row.source === "codex" || row.source === "every-code";
+  const reasoningCost = reasoningIncludedInOutput
+    ? 0
+    : (row.reasoning_output_tokens || 0) * (pricing.output || 0);
   return (
     ((row.input_tokens || 0) * (pricing.input || 0) +
       (row.output_tokens || 0) * (pricing.output || 0) +
       (row.cached_input_tokens || 0) * (pricing.cache_read || 0) +
       (row.cache_creation_input_tokens || 0) * (pricing.cache_write || 0) +
-      (row.reasoning_output_tokens || 0) * (pricing.output || 0)) /
+      reasoningCost) /
     1_000_000
   );
 }
 
 async function handleLocalApi(req, res, url) {
   const QUEUE_PATH = path.join(os.homedir(), ".tokentracker", "tracker", "queue.jsonl");
+
+  function isLegacyInclusiveCodexRow(row) {
+    if (!row || (row.source !== "codex" && row.source !== "every-code")) return false;
+    const inputTokens = Number(row.input_tokens || 0);
+    const cachedInputTokens = Number(row.cached_input_tokens || 0);
+    const outputTokens = Number(row.output_tokens || 0);
+    const totalTokens = Number(row.total_tokens || 0);
+    if (!Number.isFinite(inputTokens) || !Number.isFinite(cachedInputTokens)) return false;
+    if (cachedInputTokens <= 0 || inputTokens < cachedInputTokens) return false;
+    return totalTokens === inputTokens + outputTokens;
+  }
+
+  function normalizeQueueRow(row) {
+    if (!isLegacyInclusiveCodexRow(row)) return row;
+    return {
+      ...row,
+      input_tokens: Number(row.input_tokens || 0) - Number(row.cached_input_tokens || 0),
+    };
+  }
 
   function readQueueData() {
     try {
@@ -395,7 +418,7 @@ async function handleLocalApi(req, res, url) {
       const seen = new Map();
       for (const row of parsed) {
         const key = `${row.source || ""}|${row.model || ""}|${row.hour_start || ""}`;
-        seen.set(key, row);
+        seen.set(key, normalizeQueueRow(row));
       }
       return Array.from(seen.values());
     } catch (error) {
@@ -698,14 +721,11 @@ async function handleLocalApi(req, res, url) {
     // 转换为最终格式
     const sources = Array.from(bySource.values()).map(s => {
       s.models = Array.from(s.models.values()).map(m => {
-        const p = getModelPricing(m.model);
-        const cost =
-          ((m.totals.input_tokens || 0) * (p.input || 0) +
-            (m.totals.output_tokens || 0) * (p.output || 0) +
-            (m.totals.cached_input_tokens || 0) * (p.cache_read || 0) +
-            (m.totals.cache_creation_input_tokens || 0) * (p.cache_write || 0) +
-            (m.totals.reasoning_output_tokens || 0) * (p.output || 0)) /
-          1_000_000;
+        const cost = computeRowCost({
+          ...m.totals,
+          model: m.model,
+          source: s.source,
+        });
         return { ...m, totals: { ...m.totals, total_cost_usd: cost.toFixed(6) } };
       }).sort((a, b) => b.totals.total_tokens - a.totals.total_tokens);
       const sourceCost = s.models.reduce((sum, m) => sum + Number(m.totals.total_cost_usd), 0);

@@ -394,6 +394,10 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
 
     // MARK: - WKNavigationDelegate
 
+    private func isLocalDashboardURL(_ url: URL) -> Bool {
+        url.host == "localhost" || url.host == "127.0.0.1"
+    }
+
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
@@ -404,13 +408,18 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
             return
         }
         // Allow local dashboard navigation
-        if url.host == "localhost" || url.host == "127.0.0.1" {
+        if isLocalDashboardURL(url) {
             decisionHandler(.allow)
             return
         }
-        // External links → open in system browser (only user-initiated clicks, not resource loads)
+
+        let isMainFrameNavigation = navigationAction.targetFrame?.isMainFrame ?? true
+        // Only promote top-level user clicks to the system browser. Subframe
+        // clicks (e.g. the Cloud IP Check iframe) should stay inside the
+        // iframe so embedded tools can navigate normally.
         if (url.scheme == "http" || url.scheme == "https"),
-           navigationAction.navigationType == .linkActivated {
+           navigationAction.navigationType == .linkActivated,
+           isMainFrameNavigation {
             NSWorkspace.shared.open(url)
             decisionHandler(.cancel)
             return

@@ -161,6 +161,29 @@ function readProjectQueueData(projectQueuePath) {
   return Array.from(seen.values());
 }
 
+function isLegacyInclusiveCodexRow(row) {
+  if (!row || (row.source !== "codex" && row.source !== "every-code")) return false;
+  const inputTokens = Number(row.input_tokens || 0);
+  const cachedInputTokens = Number(row.cached_input_tokens || 0);
+  const outputTokens = Number(row.output_tokens || 0);
+  const totalTokens = Number(row.total_tokens || 0);
+  if (!Number.isFinite(inputTokens) || !Number.isFinite(cachedInputTokens)) return false;
+  if (cachedInputTokens <= 0 || inputTokens < cachedInputTokens) return false;
+  // Legacy Codex queue rows stored input inclusive of cache reads, while
+  // total_tokens remained input + output. Canonical rows keep input as pure
+  // non-cached input, so cache-heavy legacy rows can be identified by this
+  // exact invariant.
+  return totalTokens === inputTokens + outputTokens;
+}
+
+function normalizeQueueRow(row) {
+  if (!isLegacyInclusiveCodexRow(row)) return row;
+  return {
+    ...row,
+    input_tokens: Number(row.input_tokens || 0) - Number(row.cached_input_tokens || 0),
+  };
+}
+
 function readQueueData(queuePath) {
   let raw;
   try {
@@ -196,7 +219,7 @@ function readQueueData(queuePath) {
   const seen = new Map();
   for (const row of parsed) {
     const key = `${row.source || ""}|${row.model || ""}|${row.hour_start || ""}`;
-    seen.set(key, row);
+    seen.set(key, normalizeQueueRow(row));
   }
   return Array.from(seen.values());
 }
@@ -1037,14 +1060,11 @@ function createLocalApiHandler({ queuePath }) {
       const sources = Array.from(bySource.values()).map((s) => {
         s.models = Array.from(s.models.values())
           .map((m) => {
-            const p = getModelPricing(m.model);
-            const cost =
-              ((m.totals.input_tokens || 0) * (p.input || 0) +
-                (m.totals.output_tokens || 0) * (p.output || 0) +
-                (m.totals.cached_input_tokens || 0) * (p.cache_read || 0) +
-                (m.totals.cache_creation_input_tokens || 0) * (p.cache_write || 0) +
-                (m.totals.reasoning_output_tokens || 0) * (p.output || 0)) /
-              1_000_000;
+            const cost = computeRowCost({
+              ...m.totals,
+              model: m.model,
+              source: s.source,
+            });
             return { ...m, totals: { ...m.totals, total_cost_usd: cost.toFixed(6) } };
           })
           .sort((a, b) => b.totals.total_tokens - a.totals.total_tokens);
