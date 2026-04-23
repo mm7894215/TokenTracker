@@ -223,7 +223,7 @@ struct UsageLimitsView: View {
             Text(label)
                 .font(.system(.caption, design: .default))
                 .foregroundStyle(.secondary)
-                .frame(width: 28, alignment: .leading)
+                .frame(width: 34, alignment: .leading)
 
             GeometryReader { geo in
                 ZStack(alignment: .leading) {

@@ -9,8 +9,11 @@ import { FadeIn, StaggerContainer, StaggerItem } from "../ui/foundation/FadeIn.j
  * Hand-drawn previews of the real macOS widgets. Pure SVG so they stay
  * crisp at any scale and don't require shipping PNGs.
  *
- * 这里保留少量固定示例文案（如预览中的模型名和示例数值），
- * 主要是为了让 SVG 预览和原生 widget 的实际排版保持一致。
+ * Hardcoded strings ("TODAY", "203.2M", "claude-opus-4-6", etc.)
+ * intentionally bypass copy.csv — they mirror the literal Swift string
+ * constants in TokenTrackerWidget/Widgets/*.swift which ship English-only
+ * in the native app. Keeping them inline makes the preview read as a
+ * faithful screenshot.
  */
 
 const WIDGET_W = 264;
@@ -91,11 +94,11 @@ function SummaryWidgetPreview({ size = "sm" }) {
           </linearGradient>
         </defs>
         {/* TODAY column */}
-        <text x="14" y="20" className="fill-oai-gray-500 dark:fill-oai-gray-400" fontSize="8" fontWeight="700" letterSpacing="0.6">今日</text>
+        <text x="14" y="20" className="fill-oai-gray-500 dark:fill-oai-gray-400" fontSize="8" fontWeight="700" letterSpacing="0.6">TODAY</text>
         <text x="14" y="46" className="fill-oai-black dark:fill-white" fontSize="22" fontWeight="700" fontFamily={ROUNDED_FONT}>203.2M</text>
         <text x="14" y="60" className="fill-oai-gray-500 dark:fill-oai-gray-400" fontSize="8" fontWeight="500" fontFamily={ROUNDED_FONT}>$129.56 ±0%</text>
         {/* 7 DAYS column */}
-        <text x="134" y="20" className="fill-oai-gray-500 dark:fill-oai-gray-400" fontSize="8" fontWeight="700" letterSpacing="0.6">近 7 天</text>
+        <text x="134" y="20" className="fill-oai-gray-500 dark:fill-oai-gray-400" fontSize="8" fontWeight="700" letterSpacing="0.6">7 DAYS</text>
         <text x="134" y="46" className="fill-oai-black dark:fill-white" fontSize="22" fontWeight="700" fontFamily={ROUNDED_FONT}>880.9M</text>
         <text x="134" y="60" className="fill-oai-gray-500 dark:fill-oai-gray-400" fontSize="8" fontWeight="500" fontFamily={ROUNDED_FONT}>$673.61</text>
         {/* Area fill under the curve */}
@@ -160,7 +163,7 @@ function HeatmapWidgetPreview() {
           ))}
         </g>
         <text x={gridX} y="102" className="fill-oai-black dark:fill-white" fontSize="10" fontWeight="700" fontFamily={ROUNDED_FONT}>10.3B</text>
-        <text x={gridX + 30} y="102" className="fill-oai-gray-500 dark:fill-oai-gray-400" fontSize="9" fontWeight="500">词元 · 202 个活跃日</text>
+        <text x={gridX + 30} y="102" className="fill-oai-gray-500 dark:fill-oai-gray-400" fontSize="9" fontWeight="500">tokens · 202 active days</text>
       </svg>
     </PreviewShell>
   );
@@ -206,10 +209,10 @@ function UsageLimitsWidgetPreview() {
   // Four rows mirroring LimitRow in UsageLimitsWidget.swift. Bullet color
   // follows the provider source; bar fill follows limitBarColor(fraction).
   const rows = [
-    { label: "Claude · 7d",    source: "claude", reset: "1 天后",     pct: 61 },
-    { label: "Claude · 5h",    source: "claude", reset: "4 小时 28 分", pct: 4 },
-    { label: "Cursor",         source: "cursor", reset: "25 天后",    pct: 51 },
-    { label: "Codex · weekly", source: "codex",  reset: "1 天后",     pct: 32 },
+    { label: "Claude · 7d",    source: "claude", reset: "in 1d",     pct: 61 },
+    { label: "Claude · 5h",    source: "claude", reset: "in 4h 28m", pct: 4 },
+    { label: "Cursor",         source: "cursor", reset: "in 25d",    pct: 51 },
+    { label: "Codex · weekly", source: "codex",  reset: "in 1d",     pct: 32 },
   ];
   const rowGap = 22;
   const rowStart = 28;

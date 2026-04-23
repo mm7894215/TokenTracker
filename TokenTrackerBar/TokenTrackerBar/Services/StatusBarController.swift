@@ -442,7 +442,7 @@ final class StatusBarController: NSObject {
         }
 
         let formatted = TokenFormatter.formatCompact(tokens)
-        return "\(Strings.todayTitle)：\(formatted) \(Strings.tokensUnit) · \(cost)"
+        return "\(Strings.todayTitle): \(formatted) \(Strings.tokensUnit) · \(cost)"
     }
 
     private func applyUpdateMenuItemState(in menu: NSMenu) {

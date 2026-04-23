@@ -106,6 +106,10 @@ export default function App() {
               ? IpCheckPage
               : DashboardPage;
 
+  // /leaderboard/u/:id (LeaderboardProfilePage) still ships its own
+  // min-h-screen + sticky header/footer chrome, so it must NOT be wrapped
+  // in AppLayout — that would double-stack the nav and break scrolling.
+  // Only the index /leaderboard route is migrated to AppLayout for now.
   const isLeaderboardIndexPath = normalizedPath === "/leaderboard";
   const showSidebar =
     !publicMode &&

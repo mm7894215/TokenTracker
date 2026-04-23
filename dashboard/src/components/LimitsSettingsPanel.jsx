@@ -8,6 +8,11 @@ import {
 import { copy } from "../lib/copy";
 import { cn } from "../lib/cn";
 
+// Providers whose brand logo is a pure mono glyph (fill="currentColor")
+// — these render black in <img> and must be inverted under dark mode.
+// Colored logos (claude, codex, gemini, antigravity) are left as-is.
+const MONO_LOGO_PROVIDERS = new Set(["cursor", "kiro", "copilot"]);
+
 function ToggleSwitch({ checked, onChange, ariaLabel }) {
   return (
     <button
@@ -103,7 +108,10 @@ export function LimitsSettingsPanel({ prefs }) {
                 alt=""
                 width={18}
                 height={18}
-                className="h-[18px] w-[18px] shrink-0 pointer-events-none"
+                className={cn(
+                  "h-[18px] w-[18px] shrink-0 pointer-events-none",
+                  MONO_LOGO_PROVIDERS.has(id) && "dark:invert",
+                )}
                 draggable={false}
               />
 

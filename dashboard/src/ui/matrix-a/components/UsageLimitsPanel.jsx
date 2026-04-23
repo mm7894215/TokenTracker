@@ -51,7 +51,10 @@ function LimitBar({ label, pct, reset }) {
 }
 
 function ToolGroup({ name, icon, children }) {
-  const needsInvert = icon === "/brand-logos/cursor.svg" || icon === "/brand-logos/kiro.svg";
+  const needsInvert =
+    icon === "/brand-logos/cursor.svg" ||
+    icon === "/brand-logos/kiro.svg" ||
+    icon === "/brand-logos/copilot.svg";
   const iconClass = needsInvert ? "w-[14px] h-[14px] dark:invert" : "w-[14px] h-[14px]";
 
   return (
