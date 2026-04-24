@@ -28,45 +28,69 @@ test("zh locale keeps CLI subcommands executable", () => {
   assert.doesNotMatch(dashboardCopy, /tokentracker-cli (初始化|同步)/);
 });
 
-test("native macOS defaults stay English until Swift localization exists", () => {
+test("native macOS strings are wired through the Swift localization helpers", () => {
+  const nativeLocalization = read("TokenTrackerBar/Shared/NativeLocalization.swift");
   const strings = read("TokenTrackerBar/TokenTrackerBar/Utilities/Strings.swift");
+  const widgetStrings = read("TokenTrackerBar/TokenTrackerWidget/Views/WidgetStrings.swift");
   const dateHelpers = read("TokenTrackerBar/TokenTrackerBar/Utilities/DateHelpers.swift");
   const clawdCompanion = read("TokenTrackerBar/TokenTrackerBar/Views/ClawdCompanionView.swift");
-  const sharedWidgetViews = read("TokenTrackerBar/TokenTrackerWidget/Views/SharedWidgetViews.swift");
+  const usageLimitsView = read("TokenTrackerBar/TokenTrackerBar/Views/UsageLimitsView.swift");
+  const topModelsView = read("TokenTrackerBar/TokenTrackerBar/Views/TopModelsView.swift");
   const summaryWidget = read("TokenTrackerBar/TokenTrackerWidget/Widgets/SummaryWidget.swift");
   const heatmapWidget = read("TokenTrackerBar/TokenTrackerWidget/Widgets/HeatmapWidget.swift");
   const topModelsWidget = read("TokenTrackerBar/TokenTrackerWidget/Widgets/TopModelsWidget.swift");
   const usageLimitsWidget = read("TokenTrackerBar/TokenTrackerWidget/Widgets/UsageLimitsWidget.swift");
+  const sharedWidgetViews = read("TokenTrackerBar/TokenTrackerWidget/Views/SharedWidgetViews.swift");
 
-  assert.ok(strings.includes('static let serverUnavailable = "Server Unavailable"'));
-  assert.ok(strings.includes('static let menuSyncNow = "Sync Now"'));
-  assert.ok(strings.includes('static let todayTitle = "Today"'));
-  assert.ok(strings.includes('static let menuTokenLabel = "Tokens"'));
-  assert.ok(strings.includes('static let menuCostLabel = "Cost"'));
-  assert.ok(!strings.includes('static let serverUnavailable = "服务不可用"'));
+  // NativeLocalization is the single source of truth for the current locale.
+  assert.ok(nativeLocalization.includes("public static var usesChinese: Bool"));
+  assert.ok(nativeLocalization.includes("public static let chineseLocale = \"zh-CN\""));
 
-  assert.ok(dateHelpers.includes('case .day:   return "Day"'));
-  assert.ok(dateHelpers.includes('case .total: return "Total"'));
+  // Strings.swift goes through the t(en, zh) helper bound to NativeLocalization.
+  assert.ok(strings.includes("NativeLocalization.usesChinese"));
+  assert.ok(strings.includes('t("Server Unavailable", "服务器不可用")'));
+  assert.ok(strings.includes('t("Sync Now", "立即同步")'));
+  assert.ok(strings.includes('t("Today", "今日")'));
+  assert.ok(strings.includes('t("Settings", "设置")'));
+  // Menu-bar inline labels stay English on purpose — they sit next to the token
+  // count so they should never swap with system language.
+  assert.ok(strings.includes('static var menuTokenLabel: String { "Tokens" }'));
+  assert.ok(strings.includes('static var menuCostLabel: String { "Cost" }'));
 
-  assert.ok(clawdCompanion.includes('"Syncing usage data"'));
-  assert.ok(clawdCompanion.includes('"👆 Tap me for more!"'));
-  assert.ok(clawdCompanion.includes('"📊 Today: \\(f) tokens"'));
+  // WidgetStrings mirrors the same helper for the WidgetKit target.
+  assert.ok(widgetStrings.includes("NativeLocalization.usesChinese"));
+  assert.ok(widgetStrings.includes('t("Usage", "使用情况")'));
+  assert.ok(widgetStrings.includes('t("Activity Heatmap", "活跃热力图")'));
 
-  assert.ok(sharedWidgetViews.includes('Text("Updated \\(WidgetFormat.relativeUpdated(updated))")'));
+  // DateHelpers / UsageLimitsView / TopModelsView must not re-implement the
+  // en/zh branch inline — they must route through Strings.* so the copy table
+  // stays centralised.
+  assert.ok(dateHelpers.includes("return Strings.periodDayLabel"));
+  assert.ok(dateHelpers.includes("return Strings.periodTotalLabel"));
+  assert.ok(!dateHelpers.includes('NativeLocalization.usesChinese ? "日" : "Day"'));
 
-  assert.ok(summaryWidget.includes('.configurationDisplayName("Usage")'));
-  assert.ok(summaryWidget.includes('Text("TODAY")'));
-  assert.ok(summaryWidget.includes('Text("vs. yesterday")'));
+  assert.ok(usageLimitsView.includes("Strings.kiroBonusLabel"));
+  assert.ok(usageLimitsView.includes("Strings.limitResetNow"));
+  assert.ok(!usageLimitsView.includes('NativeLocalization.usesChinese ? "奖励" : "Bonus"'));
 
-  assert.ok(heatmapWidget.includes('.configurationDisplayName("Activity Heatmap")'));
-  assert.ok(heatmapWidget.includes('Text("\\(streak)d streak")'));
-  assert.ok(heatmapWidget.includes('Text("tokens · \\(snap.heatmap.activeDays) active days")'));
+  assert.ok(topModelsView.includes("Strings.topModelAccessibility"));
 
-  assert.ok(topModelsWidget.includes('.configurationDisplayName("Top Models")'));
-  assert.ok(topModelsWidget.includes('WidgetEmptyState(message: "No model usage yet")'));
+  // Clawd quips now pull from Strings rather than hardcoded English arrays.
+  assert.ok(clawdCompanion.includes("Strings.syncingQuips"));
+  assert.ok(clawdCompanion.includes("Strings.personalityQuips"));
+  assert.ok(clawdCompanion.includes("Strings.tokensToday(f)"));
 
-  assert.ok(usageLimitsWidget.includes('.configurationDisplayName("Usage Limits")'));
-  assert.ok(usageLimitsWidget.includes('WidgetEmptyState(message: "No configured providers")'));
+  // Widget entry points and shared chrome flow through WidgetStrings.
+  assert.ok(summaryWidget.includes("WidgetStrings.usageName"));
+  assert.ok(summaryWidget.includes("WidgetStrings.today"));
+  assert.ok(summaryWidget.includes("WidgetStrings.vsYesterday"));
+  assert.ok(heatmapWidget.includes("WidgetStrings.heatmapName"));
+  assert.ok(heatmapWidget.includes("WidgetStrings.streak(streak)"));
+  assert.ok(topModelsWidget.includes("WidgetStrings.topModelsName"));
+  assert.ok(topModelsWidget.includes("WidgetStrings.noModelUsage"));
+  assert.ok(usageLimitsWidget.includes("WidgetStrings.limitsName"));
+  assert.ok(usageLimitsWidget.includes("WidgetStrings.noConfiguredProviders"));
+  assert.ok(sharedWidgetViews.includes("WidgetStrings.updated(WidgetFormat.relativeUpdated(updated))"));
 });
 
 test("locale PR stays scoped away from silent auto update flags", () => {

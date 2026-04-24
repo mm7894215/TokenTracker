@@ -175,7 +175,7 @@ struct UsageLimitsView: View {
                 limitRow(label: Strings.kiroMonthLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Kiro")
             }
             if let w = kiro.secondaryWindow {
-                limitRow(label: "Bonus", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Kiro")
+                limitRow(label: Strings.kiroBonusLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Kiro")
             }
         }
     }
@@ -214,10 +214,12 @@ struct UsageLimitsView: View {
     private func limitRow(label: String, pct: Double, reset: String?, toolName: String) -> some View {
         let clamped = min(max(pct, 0), 100)
         let fraction = clamped / 100.0
-        let a11yParts = [
-            "\(toolName) \(label) limit, \(Int(clamped.rounded()))%",
-            reset.map { "resets in \($0)" }
-        ].compactMap { $0 }
+        let accessibilityLabel = Strings.limitAccessibility(
+            toolName: toolName,
+            label: label,
+            percent: Int(clamped.rounded()),
+            reset: reset
+        )
 
         return HStack(spacing: 5) {
             Text(label)
@@ -251,7 +253,7 @@ struct UsageLimitsView: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(a11yParts.joined(separator: ", "))
+        .accessibilityLabel(accessibilityLabel)
     }
 
     // MARK: - Helpers
@@ -274,7 +276,7 @@ struct UsageLimitsView: View {
 
     private func relativeString(from date: Date) -> String {
         let s = date.timeIntervalSince(Date())
-        guard s > 0 else { return "now" }
+        guard s > 0 else { return Strings.limitResetNow }
         let h = Int(s) / 3600
         if h > 24 { return "\(h / 24)d" }
         if h > 0 { return "\(h)h" }

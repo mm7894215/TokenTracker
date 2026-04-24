@@ -33,7 +33,7 @@ final class UpdateChecker {
     func check(silent: Bool = false) {
         guard !isBusy else { return }
         isBusy = true
-        statusText = "Checking for updates..."
+        statusText = Strings.updateChecking
 
         Task.detached { [self] in
             let result: Result<GitHubRelease, Error>
@@ -114,7 +114,7 @@ final class UpdateChecker {
                     // forever — skip instead and surface the problem via statusText.
                     if isRecentlyInstalled(release.tagVersion) {
                         finishUpdate()
-                        statusText = "Auto-update skipped: \(release.tagVersion) reports as \(current). Reinstall manually."
+                        statusText = Strings.updateSkipped(target: release.tagVersion, current: current)
                         Swift.print("[UpdateChecker] Silent install loop averted: target=\(release.tagVersion), current=\(current)")
                         return
                     }
@@ -126,15 +126,15 @@ final class UpdateChecker {
             } else {
                 finishUpdate()
                 if !silent {
-                    showAlert(title: "You're Up to Date", message: "Version \(current) is the latest version.", style: .informational)
+                    showAlert(title: Strings.upToDateTitle, message: Strings.upToDateMessage(current), style: .informational)
                 }
             }
         case .failure(let error):
             finishUpdate()
             if !silent {
                 showAlert(
-                    title: "Update Check Failed",
-                    message: "\(error.localizedDescription)\n\nYou can also check manually:",
+                    title: Strings.updateCheckFailedTitle,
+                    message: "\(error.localizedDescription)\n\n\(Strings.manualCheckHint)",
                     style: .warning,
                     showReleasePage: true
                 )
@@ -206,12 +206,12 @@ final class UpdateChecker {
         statusText = nil
 
         let alert = NSAlert()
-        alert.messageText = "New Version Available — \(release.tagVersion)"
+        alert.messageText = Strings.newVersionTitle(release.tagVersion)
         alert.informativeText = buildUpdateMessage(release: release, currentVersion: currentVersion)
         alert.alertStyle = .informational
         alert.icon = appIcon
-        alert.addButton(withTitle: release.dmgAsset != nil ? "Download & Install" : "View on GitHub")
-        alert.addButton(withTitle: "Later")
+        alert.addButton(withTitle: release.dmgAsset != nil ? Strings.downloadInstallButton : Strings.viewOnGitHubButton)
+        alert.addButton(withTitle: Strings.laterButton)
 
         presentAlert(alert) { response in
             if response == .alertFirstButtonReturn {
@@ -225,13 +225,13 @@ final class UpdateChecker {
     }
 
     private func buildUpdateMessage(release: GitHubRelease, currentVersion: String) -> String {
-        var lines = ["Current: \(currentVersion) → \(release.tagVersion)"]
+        var lines = [Strings.updateCurrentLine(current: currentVersion, target: release.tagVersion)]
         if let body = release.body, !body.isEmpty {
-            lines.append("\nRelease Notes:\n\(body.prefix(300))")
+            lines.append("\n\(Strings.releaseNotesTitle)\n\(body.prefix(300))")
             if body.count > 300 { lines.append("…") }
         }
         if let dmg = release.dmgAsset {
-            lines.append("\nSize: \(String(format: "%.1f", Double(dmg.size) / 1_048_576)) MB")
+            lines.append("\n\(Strings.updateSize(String(format: "%.1f", Double(dmg.size) / 1_048_576)))")
         }
         return lines.joined()
     }
@@ -242,7 +242,7 @@ final class UpdateChecker {
         isBusy = true
         let totalSize = Int64(asset.size)
         let totalMB = Double(totalSize) / 1_048_576
-        statusText = "Downloading 0%..."
+        statusText = Strings.downloadingPercent(0)
 
         // Download into the app's own data directory rather than ~/Downloads/.
         // Downloads is TCC-protected on macOS, so writing there triggers a
@@ -270,8 +270,8 @@ final class UpdateChecker {
         guard let url = URL(string: asset.browser_download_url) else {
             finishUpdate()
             showAlert(
-                title: "Download Failed",
-                message: "Invalid download URL.\n\nYou can download manually from the Releases page.",
+                title: Strings.downloadFailedTitle,
+                message: Strings.invalidDownloadURL,
                 style: .warning,
                 showReleasePage: true
             )
@@ -288,25 +288,29 @@ final class UpdateChecker {
                 guard let self else { return }
                 let denom = expected > 0 ? expected : totalSize
                 guard denom > 0 else {
-                    self.statusText = "Downloading…"
+                    self.statusText = Strings.downloadingUnknown
                     return
                 }
                 let pct = min(Int(Double(received) / Double(denom) * 100), 99)
                 let receivedMB = Double(received) / 1_048_576
-                self.statusText = "Downloading \(pct)% (\(String(format: "%.0f", receivedMB))/\(String(format: "%.0f", totalMB)) MB)"
+                self.statusText = Strings.downloadingProgress(
+                    pct: pct,
+                    receivedMB: String(format: "%.0f", receivedMB),
+                    totalMB: String(format: "%.0f", totalMB)
+                )
             },
             onComplete: { [weak self] result in
                 guard let self else { return }
                 self.activeDownloadDelegate = nil
                 switch result {
                 case .success(let dmgURL):
-                    self.statusText = "Installing..."
+                    self.statusText = Strings.installing
                     self.performInstallAsync(dmgURL, targetVersion: targetVersion)
                 case .failure(let error):
                     self.finishUpdate()
                     self.showAlert(
-                        title: "Download Failed",
-                        message: "\(error.localizedDescription)\n\nYou can download manually from the Releases page.",
+                        title: Strings.downloadFailedTitle,
+                        message: "\(error.localizedDescription)\n\n\(Strings.manualDownloadHint)",
                         style: .warning,
                         showReleasePage: true
                     )
@@ -333,7 +337,7 @@ final class UpdateChecker {
                 switch result {
                 case .success(let appURL):
                     self.recordInstalledVersion(targetVersion)
-                    self.statusText = "Restarting..."
+                    self.statusText = Strings.restarting
                     self.relaunch(appURL: appURL)
                 case .failure(let error):
                     self.finishUpdate()
@@ -341,8 +345,8 @@ final class UpdateChecker {
                         NSWorkspace.shared.open(dmgURL)
                     }
                     self.showAlert(
-                        title: "Installation Failed",
-                        message: "\(error.localizedDescription)\n\nPlease drag TokenTrackerBar into Applications manually.",
+                        title: Strings.installationFailedTitle,
+                        message: "\(error.localizedDescription)\n\n\(Strings.manualInstallHint)",
                         style: .warning
                     )
                 }
@@ -411,7 +415,7 @@ final class UpdateChecker {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { NSApp.terminate(nil) }
         } catch {
             finishUpdate()
-            showAlert(title: "Update Complete", message: "New version installed to /Applications. Please restart manually.", style: .informational)
+            showAlert(title: Strings.updateCompleteTitle, message: Strings.updateCompleteMessage, style: .informational)
         }
     }
 
@@ -424,10 +428,10 @@ final class UpdateChecker {
         alert.alertStyle = style
         alert.icon = appIcon
         if showReleasePage {
-            alert.addButton(withTitle: "Open Releases Page")
-            alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: Strings.openReleasesPageButton)
+            alert.addButton(withTitle: Strings.okButton)
         } else {
-            alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: Strings.okButton)
         }
         presentAlert(alert) { response in
             if showReleasePage && response == .alertFirstButtonReturn {
@@ -559,11 +563,11 @@ final class UpdateChecker {
 
         var errorDescription: String? {
             switch self {
-            case .curlFailed(let code): return "Network request failed (HTTP \(code)). Check your connection or proxy settings."
-            case .emptyResponse: return "Server returned an empty response."
-            case .downloadFailed: return "File download failed. This may be a network issue."
-            case .installFailed(let reason): return "Installation failed: \(reason)"
-            case .noRelease: return "No release available."
+            case .curlFailed(let code): return Strings.networkRequestFailed(code: code)
+            case .emptyResponse: return Strings.emptyServerResponse
+            case .downloadFailed: return Strings.fileDownloadFailed
+            case .installFailed(let reason): return Strings.installFailed(reason)
+            case .noRelease: return Strings.noReleaseAvailable
             }
         }
     }

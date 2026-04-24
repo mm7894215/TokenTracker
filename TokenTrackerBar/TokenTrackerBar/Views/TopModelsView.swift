@@ -26,7 +26,14 @@ struct TopModelsView: View {
                             .frame(width: 38, alignment: .trailing)
                     }
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel("\(model.name), \(model.source), \(TokenFormatter.formatCompact(model.tokens)) tokens, \(model.percent) percent")
+                    .accessibilityLabel(
+                        Strings.topModelAccessibility(
+                            name: model.name,
+                            source: model.source,
+                            tokens: TokenFormatter.formatCompact(model.tokens),
+                            percent: model.percent
+                        )
+                    )
                 }
             }
         }

@@ -1,9 +1,10 @@
 import AppKit
 import ServiceManagement
 import WebKit
+import WidgetKit
 
 extension Notification.Name {
-    /// Posted whenever a menu-bar setting (showStats / animatedIcon) changes via the bridge.
+    /// Posted whenever native UI settings or locale change via the bridge.
     /// StatusBarController listens to refresh its display.
     static let nativeSettingsChanged = Notification.Name("NativeSettingsChanged")
 }
@@ -90,6 +91,7 @@ final class NativeBridge {
             "updateStatus": UpdateChecker.shared.statusText ?? NSNull(),
             "updateBusy": UpdateChecker.shared.isBusy,
             "isSyncing": viewModel?.isSyncing ?? false,
+            "locale": NativeLocalization.currentPreference,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
               let json = String(data: data, encoding: .utf8) else { return }
@@ -115,6 +117,10 @@ final class NativeBridge {
             if let bool = value as? Bool {
                 setLaunchAtLogin(bool)
             }
+        case "locale":
+            LocalizationObserver.shared.storePreference(value)
+            NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
+            WidgetCenter.shared.reloadAllTimelines()
         default:
             break
         }
@@ -162,10 +168,10 @@ final class NativeBridge {
             // desktop → Edit Widgets → search TokenTracker).
             DispatchQueue.main.async {
                 let alert = NSAlert()
-                alert.messageText = "Add TokenTracker widgets"
-                alert.informativeText = "Right-click an empty area of your desktop, choose \"Edit Widgets\", then search for \"TokenTracker\" in the gallery."
+                alert.messageText = Strings.addWidgetsTitle
+                alert.informativeText = Strings.addWidgetsMessage
                 alert.alertStyle = .informational
-                alert.addButton(withTitle: "Got it")
+                alert.addButton(withTitle: Strings.gotItButton)
                 alert.runModal()
             }
         case "quit":

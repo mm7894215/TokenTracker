@@ -99,7 +99,7 @@ struct ClawdCompanionView: View {
             if h { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
         .disabled(viewModel.isSyncing)
-        .accessibilityLabel(viewModel.isSyncing ? "Syncing usage data" : "Sync usage data")
+        .accessibilityLabel(viewModel.isSyncing ? Strings.syncingUsageData : Strings.syncUsageData)
         .onChange(of: viewModel.isSyncing) { syncing in
             if syncing {
                 withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) { syncRotation = 360 }
@@ -725,7 +725,7 @@ struct ClawdCompanionView: View {
         }
     }
 
-    // MARK: - Quip Pool (30+ English lines)
+    // MARK: - Quip Pool
 
     private var currentQuip: String {
         let pool = quipPool
@@ -739,47 +739,34 @@ struct ClawdCompanionView: View {
         let f = TokenFormatter.formatCompact(tokens)
 
         if viewModel.isSyncing {
-            return [
-                "⏳ Crunching numbers...",
-                "📡 Fetching latest data!",
-                "🔄 One moment, syncing...",
-                "🧮 Counting your tokens~",
-            ]
+            return Strings.syncingQuips
         }
 
         var pool: [String] = []
 
         // === Today data ===
         if tokens == 0 {
-            pool += [
-                "😴 No tokens yet today",
-                "💬 Start chatting to wake me up!",
-                "🌙 Quiet day so far...",
-                "⌨️ Waiting for your first prompt",
-                "💤 Zzz... nothing to count",
-                "🌅 The calm before the storm?",
-                "✨ I'm ready when you are!",
-            ]
+            pool += Strings.emptyTodayQuips
         } else {
-            pool.append("📊 Today: \(f) tokens")
+            pool.append(Strings.tokensToday(f))
             if cost != "$0.00" && cost != "$0" {
                 pool += [
-                    "📈 \(f) tokens — \(cost) spent today",
-                    "💰 \(cost) invested in AI so far",
-                    "🧾 Today's bill: \(cost) for \(f) tokens",
-                    "💳 AI tab today: \(cost)",
+                    Strings.tokensSpentToday(tokens: f, cost: cost),
+                    Strings.aiInvestedToday(cost),
+                    Strings.billToday(cost: cost, tokens: f),
+                    Strings.aiTabToday(cost),
                 ]
             }
             if tokens < 50_000 {
-                pool += ["☕ Just warming up!", "🌱 A gentle start"]
+                pool += Strings.warmupQuips
             } else if tokens < 200_000 {
-                pool += ["🎯 Getting into the flow!", "💪 Solid progress today"]
+                pool += Strings.flowQuips
             } else if tokens < 500_000 {
-                pool += ["🔥 Busy day!", "⚡ You're on a roll!"]
+                pool += Strings.busyQuips
             } else if tokens < 2_000_000 {
-                pool += ["🚀 Heavy usage today!", "🖨️ Token machine goes brrr"]
+                pool += Strings.heavyQuips
             } else {
-                pool += ["🤯 MASSIVE day!", "🔥 Token counter on fire!"]
+                pool += Strings.massiveQuips
             }
         }
 
@@ -790,18 +777,18 @@ struct ClawdCompanionView: View {
         let avg = viewModel.last30dAvgPerDay
 
         if w7 > 0 {
-            pool.append("📅 7-day total: \(TokenFormatter.formatCompact(w7)) tokens")
+            pool.append(Strings.sevenDayTotal(TokenFormatter.formatCompact(w7)))
             if d7 > 0 {
-                pool.append("🗓️ \(d7) active days this week")
+                pool.append("🗓️ \(Strings.activeDaysThisWeek(d7))")
                 if d7 >= 7 {
-                    pool.append("🏆 7/7 active days — perfect streak!")
+                    pool.append(Strings.perfectStreak)
                 }
             }
         }
         if m30 > 0 {
-            pool.append("📆 30-day total: \(TokenFormatter.formatCompact(m30)) tokens")
+            pool.append(Strings.thirtyDayTotal(TokenFormatter.formatCompact(m30)))
             if avg > 0 {
-                pool.append("📊 Averaging ~\(TokenFormatter.formatCompact(avg))/day this month")
+                pool.append(Strings.averagingPerDay(TokenFormatter.formatCompact(avg)))
             }
         }
 
@@ -810,48 +797,42 @@ struct ClawdCompanionView: View {
             let streak = heatmap.streakDays
             let totalActive = heatmap.activeDays
             if streak > 1 {
-                pool.append("🔥 \(streak)-day streak! Keep it going")
+                pool.append(Strings.streakDays(streak))
             }
             if totalActive > 30 {
-                pool.append("📈 \(totalActive) active days all-time!")
+                pool.append(Strings.activeDaysAllTime(totalActive))
             }
         }
 
         // === Top model insights ===
         let models = viewModel.topModels
         if let top = models.first {
-            pool.append("🥇 Top model: \(top.name) (\(top.percent))")
+            pool.append(Strings.topModel(top.name, top.percent))
             if models.count >= 2 {
-                pool.append("🥈 Runner-up: \(models[1].name) at \(models[1].percent)")
+                pool.append(Strings.runnerUp(models[1].name, models[1].percent))
             }
             if models.count >= 3 {
-                pool.append("🧰 Using \(models.count) different models")
+                pool.append(Strings.modelCount(models.count))
             }
             // Source variety
             let sources = Set(models.map { $0.source })
             if sources.count >= 2 {
                 let names = sources.map { $0.capitalized }.sorted().joined(separator: " + ")
-                pool.append("🔀 Multi-tool setup: \(names)")
+                pool.append(Strings.multiToolSetup(names))
             }
         }
 
         // === Conversation count ===
         let convos = viewModel.todaySummary?.totals.conversationCount ?? 0
         if convos > 0 {
-            pool.append("💬 \(convos) conversation\(convos == 1 ? "" : "s") today")
+            pool.append(Strings.conversationsToday(convos))
             if convos >= 10 {
-                pool.append("🗣️ \(convos) chats! Busy talker today")
+                pool.append(Strings.busyTalker(convos))
             }
         }
 
         // === Personality (always) ===
-        pool += [
-            "👆 Tap me for more!",
-            "📋 I count so you don't have to",
-            "✨ Every token tells a story",
-            "🤝 Your AI spending buddy",
-            "👋 Hey there~",
-        ]
+        pool += Strings.personalityQuips
 
         return pool
     }

@@ -7,6 +7,7 @@ import {
   resolvePreferredLocale,
   SYSTEM_LOCALE,
 } from "../../lib/locale";
+import { isNativeEmbed, setNativeSetting } from "../../lib/native-bridge.js";
 
 export const LocaleContext = createContext(null);
 
@@ -33,6 +34,11 @@ export function LocaleProvider({ children }) {
   }, [resolvedLocale]);
 
   useLayoutEffect(() => {
+    if (!isNativeEmbed()) return;
+    setNativeSetting("locale", locale);
+  }, [locale]);
+
+  useLayoutEffect(() => {
     if (locale !== SYSTEM_LOCALE || typeof window === "undefined") return undefined;
     const handleChange = () => syncResolvedLocale(resolvePreferredLocale(SYSTEM_LOCALE), setResolvedLocale);
     window.addEventListener("languagechange", handleChange);
@@ -44,6 +50,9 @@ export function LocaleProvider({ children }) {
     syncResolvedLocale(resolvePreferredLocale(next), setResolvedLocale);
     setLocaleState(next);
     persistLocalePreference(next);
+    if (isNativeEmbed()) {
+      setNativeSetting("locale", next);
+    }
   }, []);
 
   const contextValue = useMemo(

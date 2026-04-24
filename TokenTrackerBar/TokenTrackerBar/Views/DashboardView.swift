@@ -3,6 +3,7 @@ import SwiftUI
 struct DashboardView: View {
     @ObservedObject var viewModel: DashboardViewModel
     @ObservedObject var serverManager: ServerManager
+    @ObservedObject private var localization = LocalizationObserver.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -59,6 +60,7 @@ struct DashboardView: View {
             FooterView()
         }
         .background(.ultraThinMaterial)
+        .id(localization.revision)
     }
 
     private var syncingView: some View {

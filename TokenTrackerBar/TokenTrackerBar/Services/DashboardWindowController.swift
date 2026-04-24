@@ -357,6 +357,14 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         NSWorkspace.shared.open(url)
     }
 
+    /// Open the dashboard and navigate directly to the Settings page.
+    func showSettings() {
+        showWindow()
+        if let url = URL(string: Constants.serverBaseURL + "/settings?app=1") {
+            webView?.load(URLRequest(url: url))
+        }
+    }
+
     /// Called when `tokentracker://auth/done` deep link is received after browser login.
     func handleAuthDone() {
         showWindow()

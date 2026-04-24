@@ -13,8 +13,8 @@ struct HeatmapWidget: Widget {
             HeatmapWidgetView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
         }
-        .configurationDisplayName("Activity Heatmap")
-        .description("GitHub-style daily activity calendar.")
+        .configurationDisplayName(WidgetStrings.heatmapName)
+        .description(WidgetStrings.heatmapDescription)
         .supportedFamilies([.systemMedium, .systemLarge, .systemExtraLarge])
     }
 }
@@ -40,7 +40,7 @@ struct HeatmapWidgetView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay(alignment: .topTrailing) {
                     if streak > 0 {
-                        Text("\(streak)d streak")
+                        Text(WidgetStrings.streak(streak))
                             .font(.system(size: 10, weight: .semibold, design: .rounded))
                             .foregroundColor(.accentColor)
                             .padding(.horizontal, 7)
@@ -57,7 +57,7 @@ struct HeatmapWidgetView: View {
                     .font(.system(size: 14, weight: .bold, design: .rounded))
                     .foregroundColor(.primary)
                     .monospacedDigit()
-                Text("tokens · \(snap.heatmap.activeDays) active days")
+                Text(WidgetStrings.tokensActiveDays(activeDays: snap.heatmap.activeDays))
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
                 Spacer(minLength: 0)

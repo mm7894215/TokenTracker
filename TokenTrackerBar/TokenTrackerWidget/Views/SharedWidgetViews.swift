@@ -335,7 +335,7 @@ struct WidgetFooter: View {
             Circle()
                 .fill(serverOnline ? Color.green : Color.orange)
                 .frame(width: 5, height: 5)
-            Text("Updated \(WidgetFormat.relativeUpdated(updated))")
+            Text(WidgetStrings.updated(WidgetFormat.relativeUpdated(updated)))
                 .font(.system(size: 9))
                 .foregroundColor(.secondary)
             Spacer(minLength: 0)

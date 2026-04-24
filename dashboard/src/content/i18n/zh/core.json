@@ -159,7 +159,7 @@
   "live_sniffer.event.hooking": "> 挂钩：AI_CLI_PIPE_LINK",
   "live_sniffer.event.capture": "> 捕获：+128 NEURAL_TOKENS",
   "nav.usage": "用量",
-  "nav.limits": "限制",
+  "nav.limits": "限额",
   "nav.widgets": "小组件",
   "nav.leaderboard": "排行榜",
   "nav.collapse": "折叠侧边栏",

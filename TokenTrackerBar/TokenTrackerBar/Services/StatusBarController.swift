@@ -323,6 +323,14 @@ final class StatusBarController: NSObject {
         dashboardItem.target = self
         menu.addItem(dashboardItem)
 
+        // Settings — jumps straight to the dashboard Settings page.
+        // NOTE: selector must NOT be named `openSettings(_:)` — AppKit treats that as
+        // the system Settings action and injects a gear image + steals the item. Use
+        // a custom name so the item renders plain.
+        let settingsItem = NSMenuItem(title: Strings.menuSettings, action: #selector(openDashboardSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
         // Check for Updates — dynamic text when downloading (refreshes via Notification while menu stays open)
         let updateTitle = UpdateChecker.shared.statusText ?? Strings.menuCheckForUpdates
         let updateItem = NSMenuItem(title: updateTitle, action: #selector(checkForUpdates), keyEquivalent: "u")
@@ -397,6 +405,10 @@ final class StatusBarController: NSObject {
 
     @objc private func openDashboard() {
         DashboardWindowController.shared.showWindow()
+    }
+
+    @objc private func openDashboardSettings() {
+        DashboardWindowController.shared.showSettings()
     }
 
     @objc private func checkForUpdates() {

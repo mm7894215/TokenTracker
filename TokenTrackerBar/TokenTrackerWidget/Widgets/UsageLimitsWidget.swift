@@ -13,8 +13,8 @@ struct UsageLimitsWidget: Widget {
             UsageLimitsWidgetView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
         }
-        .configurationDisplayName("Usage Limits")
-        .description("Rate limits for Claude, Codex, Cursor, Gemini, and more.")
+        .configurationDisplayName(WidgetStrings.limitsName)
+        .description(WidgetStrings.limitsDescription)
         .supportedFamilies([.systemMedium, .systemLarge])
     }
 }
@@ -43,7 +43,7 @@ struct UsageLimitsWidgetView: View {
     var body: some View {
         let trimmed = orderedRows
         if trimmed.isEmpty {
-            WidgetEmptyState(message: "No configured providers")
+            WidgetEmptyState(message: WidgetStrings.noConfiguredProviders)
         } else {
             // Uniform spacing across all rows. The grouping (Claude windows
             // adjacent to each other) is communicated by the dot color and
@@ -82,7 +82,7 @@ private struct LimitRow: View {
                 Circle()
                     .fill(WidgetTheme.sourceColor(limit.source))
                     .frame(width: 6, height: 6)
-                Text(limit.label)
+                Text(WidgetStrings.limitLabel(limit))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(textColor)
                     .lineLimit(1)
