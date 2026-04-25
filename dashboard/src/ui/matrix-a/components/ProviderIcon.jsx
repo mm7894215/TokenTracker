@@ -63,6 +63,14 @@ function KimiIcon({ size = 16, className = "" }) {
   );
 }
 
+function HermesIcon({ size = 16, className = "" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" fillRule="evenodd" clipRule="evenodd" className={className}>
+      <path d="M7 2h10a5 5 0 015 5v10a5 5 0 01-5 5H7a5 5 0 01-5-5V7a5 5 0 015-5zm0 4.5v11h2.35v-4.55h5.3V17.5H17v-11h-2.35v4.1h-5.3V6.5H7z" />
+    </svg>
+  );
+}
+
 function GithubIcon({ size = 16, className = "" }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className}>
@@ -77,17 +85,50 @@ const PROVIDER_ICON_MAP = {
   CURSOR: CursorIcon,
   GEMINI: GeminiIcon,
   GITHUB: GithubIcon,
+  HERMES: HermesIcon,
   KIMI: KimiIcon,
   KIRO: KiroIcon,
   OPENCODE: OpenCodeIcon,
 };
 
+// Brand-colored SVG assets in /public/brand-logos/. When present, the original
+// multi-color logo is preferred over the mono fallback in PROVIDER_ICON_MAP.
+const PROVIDER_LOGO_MAP = {
+  ANTIGRAVITY: "/brand-logos/antigravity.svg",
+  CLAUDE: "/brand-logos/claude-code.svg",
+  CODEX: "/brand-logos/codex.svg",
+  COPILOT: "/brand-logos/copilot.svg",
+  CURSOR: "/brand-logos/cursor.svg",
+  GEMINI: "/brand-logos/gemini.svg",
+  HERMES: "/brand-logos/hermes.svg",
+  KIMI: "/brand-logos/kimi.svg",
+  KIRO: "/brand-logos/kiro.svg",
+  OPENCLAW: "/brand-logos/openclaw.svg",
+  OPENCODE: "/brand-logos/opencode.svg",
+};
+
 /**
- * Renders a provider's brand icon. Falls back to a colored dot for unknown providers.
- * Uses currentColor so icons automatically adapt to dark/light mode.
+ * Renders a provider's brand icon. Prefers the original multi-color logo from
+ * /brand-logos/ when available, otherwise falls back to a mono SVG (currentColor).
  */
 export function ProviderIcon({ provider, size = 16, color, className = "" }) {
   const normalized = provider?.toUpperCase?.() || "";
+  const logoSrc = PROVIDER_LOGO_MAP[normalized];
+
+  if (logoSrc) {
+    return (
+      <img
+        src={logoSrc}
+        alt=""
+        width={size}
+        height={size}
+        className={className}
+        style={{ width: size, height: size, objectFit: "contain" }}
+        aria-hidden
+      />
+    );
+  }
+
   const IconComponent = PROVIDER_ICON_MAP[normalized];
 
   if (IconComponent) {

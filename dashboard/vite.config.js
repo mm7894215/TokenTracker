@@ -953,6 +953,36 @@ async function handleLocalApi(req, res, url) {
   return null;
 }
 
+async function proxyToLocalCli(req, res) {
+  const target = `http://127.0.0.1:7680${req.url}`;
+  const headers = { ...req.headers };
+  delete headers.host;
+  delete headers.connection;
+  const init = { method: req.method, headers };
+  if (req.method && !["GET", "HEAD"].includes(req.method.toUpperCase())) {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    init.body = Buffer.concat(chunks);
+  }
+  try {
+    const upstream = await fetch(target, init);
+    res.statusCode = upstream.status;
+    upstream.headers.forEach((value, key) => {
+      if (key === "content-encoding" || key === "content-length") return;
+      res.setHeader(key, value);
+    });
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    res.end(buf);
+  } catch (error) {
+    res.statusCode = 502;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({
+      error: `Local CLI not reachable on :7680 — start it with: node bin/tracker.js serve --no-sync --no-open`,
+      detail: String(error?.message || error),
+    }));
+  }
+}
+
 function localDataApiPlugin() {
   return {
     name: "tokentracker-local-data-api",
@@ -964,7 +994,8 @@ function localDataApiPlugin() {
           Promise.resolve(handleLocalApi(req, res, url))
             .then((handled) => {
               if (handled) return;
-              next();
+              // Mock 没识别的 endpoint → 转发到仓库 CLI（7680）
+              return proxyToLocalCli(req, res);
             })
             .catch(next);
           return;

@@ -164,6 +164,15 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Global: suppress focus outlines and Tailwind ring on Tab/click focus.
+   Inputs/textareas keep their own border-color :focus styling defined per-component. */
+*:focus,
+*:focus-visible {
+  outline: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+}
+
 /* TokenTrackerBar WKWebView: `native-app` on <html> (inline head script + Swift); NSVisualEffectView under transparent WKWebView. */
 html.native-app,
 html.native-app.dark {
@@ -634,6 +643,15 @@ html.native-app .tt-native-main-card {
   .clawd-animated > svg {
     width: 100%;
     height: 100%;
+  }
+
+  /* Marquee — used by SkillsPage empty state provider rail */
+  @keyframes marquee-x {
+    from { transform: translateX(0); }
+    to   { transform: translateX(-50%); }
+  }
+  .animate-marquee-x {
+    animation: marquee-x 14s linear infinite;
   }
 
   /* ========================================

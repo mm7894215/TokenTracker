@@ -32,6 +32,9 @@ const LimitsPage = React.lazy(() =>
 const SettingsPage = React.lazy(() =>
   import("./pages/SettingsPage.jsx").then((mod) => ({ default: mod.SettingsPage })),
 );
+const SkillsPage = React.lazy(() =>
+  import("./pages/SkillsPage.jsx").then((mod) => ({ default: mod.SkillsPage })),
+);
 const WidgetsPage = React.lazy(() =>
   import("./pages/WidgetsPage.jsx").then((mod) => ({ default: mod.WidgetsPage })),
 );
@@ -92,23 +95,27 @@ export default function App() {
 
   const isLimitsPath = normalizedPath === "/limits";
   const isSettingsPath = normalizedPath === "/settings";
+  const isSkillsPath = normalizedPath === "/skills";
   const isWidgetsPath = normalizedPath === "/widgets";
   const isIpCheckPath = normalizedPath === "/ip-check";
-  if (isLimitsPath || isSettingsPath || isWidgetsPath || isIpCheckPath) gate = "dashboard";
+  if (isLimitsPath || isSettingsPath || isSkillsPath || isWidgetsPath || isIpCheckPath) gate = "dashboard";
 
-  const PageComponent = leaderboardProfileUserId
-    ? LeaderboardProfilePage
-    : normalizedPath === "/leaderboard"
-      ? LeaderboardPage
-      : isLimitsPath
-        ? LimitsPage
-        : isSettingsPath
-          ? SettingsPage
-          : isWidgetsPath
-            ? WidgetsPage
-            : isIpCheckPath
-              ? IpCheckPage
-              : DashboardPage;
+  let PageComponent = DashboardPage;
+  if (leaderboardProfileUserId) {
+    PageComponent = LeaderboardProfilePage;
+  } else if (normalizedPath === "/leaderboard") {
+    PageComponent = LeaderboardPage;
+  } else if (isLimitsPath) {
+    PageComponent = LimitsPage;
+  } else if (isSettingsPath) {
+    PageComponent = SettingsPage;
+  } else if (isSkillsPath) {
+    PageComponent = SkillsPage;
+  } else if (isWidgetsPath) {
+    PageComponent = WidgetsPage;
+  } else if (isIpCheckPath) {
+    PageComponent = IpCheckPage;
+  }
 
   // /leaderboard/u/:id (LeaderboardProfilePage) still ships its own
   // min-h-screen + sticky header/footer chrome, so it must NOT be wrapped
@@ -122,6 +129,7 @@ export default function App() {
       isLeaderboardIndexPath ||
       isLimitsPath ||
       isSettingsPath ||
+      isSkillsPath ||
       isWidgetsPath ||
       isIpCheckPath);
 
@@ -152,7 +160,11 @@ export default function App() {
         />
       </Suspense>
     );
-    content = showSidebar ? <AppLayout>{pageNode}</AppLayout> : pageNode;
+    if (showSidebar) {
+      content = <AppLayout>{pageNode}</AppLayout>;
+    } else {
+      content = pageNode;
+    }
   }
 
   return (

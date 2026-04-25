@@ -6,6 +6,7 @@ import {
   Trophy,
   LayoutGrid,
   Globe,
+  Puzzle,
   Settings as SettingsIcon,
   ChevronLeft,
   ChevronRight,
@@ -43,6 +44,7 @@ function getNavGroups() {
       label: copy("nav.group.tools"),
       items: [
         { id: "widgets", to: "/widgets", icon: LayoutGrid, label: copy("nav.widgets") },
+        { id: "skills", to: "/skills", icon: Puzzle, label: copy("nav.skills") },
         { id: "ip-check", to: "/ip-check", icon: Globe, label: copy("nav.ip_check") },
       ],
     },

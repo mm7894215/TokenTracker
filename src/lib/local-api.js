@@ -1201,6 +1201,89 @@ function createLocalApiHandler({ queuePath }) {
       return true;
     }
 
+    // --- skills manager ---
+    if (p === "/functions/tokentracker-skills") {
+      const method = String(req.method || "GET").toUpperCase();
+      const skills = require("./skills-manager");
+      try {
+        if (method === "GET") {
+          const mode = url.searchParams.get("mode") || "installed";
+          if (mode === "installed") {
+            json(res, { targets: skills.targetList(), skills: skills.listInstalledSkills() });
+            return true;
+          }
+          if (mode === "repos") {
+            json(res, { repos: skills.listRepos() });
+            return true;
+          }
+          if (mode === "discover") {
+            const force = url.searchParams.get("force") === "1";
+            json(res, await skills.discoverSkills({ force }));
+            return true;
+          }
+          if (mode === "search") {
+            const data = await skills.searchSkillsSh(
+              url.searchParams.get("q") || "",
+              Number(url.searchParams.get("limit") || 20),
+              Number(url.searchParams.get("offset") || 0),
+            );
+            json(res, data);
+            return true;
+          }
+          json(res, { error: "Unknown skills mode" }, 400);
+          return true;
+        }
+
+        if (method === "POST") {
+          if (!isAuthorizedLocalMutation(req)) {
+            json(res, { ok: false, error: "Unauthorized" }, 401);
+            return true;
+          }
+          const body = await readJsonBody(req);
+          const action = String(body?.action || "");
+          if (action === "install") {
+            json(res, { ok: true, skill: await skills.installSkill(body.skill, body.targets || ["claude", "codex"]) });
+            return true;
+          }
+          if (action === "uninstall") {
+            json(res, { ok: true, ...(skills.uninstallSkill(body.id) || {}) });
+            return true;
+          }
+          if (action === "restore") {
+            json(res, { ok: true, skill: skills.restoreSkill(body.id) });
+            return true;
+          }
+          if (action === "set_targets") {
+            json(res, { ok: true, skill: skills.setSkillTargets(body.id, body.targets || []) });
+            return true;
+          }
+          if (action === "import_local") {
+            json(res, { ok: true, skill: skills.importLocalSkill(body.directory, body.targets || []) });
+            return true;
+          }
+          if (action === "delete_local") {
+            json(res, { ok: true, ...(skills.deleteLocalSkill(body.directory, body.targets || []) || {}) });
+            return true;
+          }
+          if (action === "add_repo") {
+            json(res, { ok: true, repo: skills.addRepo(body.repo) });
+            return true;
+          }
+          if (action === "remove_repo") {
+            json(res, { ok: true, ...(skills.removeRepo(body.owner, body.name) || {}) });
+            return true;
+          }
+          json(res, { ok: false, error: "Unknown skills action" }, 400);
+          return true;
+        }
+
+        json(res, { ok: false, error: "Method Not Allowed" }, 405);
+      } catch (e) {
+        json(res, { ok: false, error: e?.message || "Unknown skills error" }, 500);
+      }
+      return true;
+    }
+
     // --- usage-limits ---
     if (p === "/functions/tokentracker-usage-limits") {
       const { getUsageLimits, resetUsageLimitsCache } = require("./usage-limits");

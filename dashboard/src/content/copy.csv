@@ -659,6 +659,55 @@ limits.label.copilot_premium,ui,LimitsPage,UsageLimitsPanel,copilot_premium,"Pre
 limits.label.copilot_chat,ui,LimitsPage,UsageLimitsPanel,copilot_chat,"Chat",,active
 shared.time.now,shared,*,Shared,time_now,"now",,active
 nav.ip_check,shared,*,Sidebar,nav_ip_check,Claude IP Check,,active
+nav.skills,shared,*,Sidebar,nav_skills,Skills,,active
+skills.page.title,ui,SkillsPage,SkillsPage,title,Skills,,active
+skills.tab.my,ui,SkillsPage,SkillsPage,tab_my,My Skills,,active
+skills.tab.browse,ui,SkillsPage,SkillsPage,tab_browse,Browse,,active
+skills.action.refresh,ui,SkillsPage,SkillsPage,action_refresh,Refresh,,active
+skills.action.view,ui,SkillsPage,SkillCard,action_view,Details,,active
+skills.action.install,ui,SkillsPage,SkillCard,action_install,Install,,active
+skills.action.install_to,ui,SkillsPage,SkillCard,action_install_to,"Install to {{count}} Agents",,active
+skills.action.choose_targets,ui,SkillsPage,SkillCard,action_choose_targets,"Choose targets",,active
+skills.target.menu_label,ui,SkillsPage,SkillCard,target_menu_label,"Install to",,active
+skills.target.none,ui,SkillsPage,SkillsPage,target_none,"no targets",,active
+skills.toast.installed,ui,SkillsPage,SkillsPage,toast_installed,"Installed {{name}} to {{targets}}.",,active
+skills.action.remove,ui,SkillsPage,SkillsPage,action_remove,Remove,,active
+skills.action.search,ui,SkillsPage,SkillsPage,action_search,Search,,active
+skills.card.installed,ui,SkillsPage,SkillCard,card_installed,Installed,,active
+skills.my.count,ui,SkillsPage,SkillsPage,my_count,"{{count}} skills",,active
+skills.target.toggle_aria,ui,SkillsPage,InstalledSkillRow,target_toggle_aria,"Toggle {{target}}",,active
+skills.target.sync_title,ui,SkillsPage,InstalledSkillRow,target_sync_title,"Enable in {{target}}",,active
+skills.target.remove_title,ui,SkillsPage,InstalledSkillRow,target_remove_title,"Disable in {{target}}",,active
+skills.card.installs,ui,SkillsPage,SkillCard,installs,"{{count}} installs",,active
+skills.source.label,ui,SkillsPage,SkillsPage,source_label,Source,,active
+skills.source.all,ui,SkillsPage,SkillsPage,source_all,All repositories,,active
+skills.source.skillssh,ui,SkillsPage,SkillsPage,source_skillssh,skills.sh (search),,active
+skills.browse.placeholder_all,ui,SkillsPage,SkillsPage,browse_placeholder_all,"Search across enabled repositories…",,active
+skills.browse.placeholder_repo,ui,SkillsPage,SkillsPage,browse_placeholder_repo,"Search in {{repo}}…",,active
+skills.browse.placeholder_skillssh,ui,SkillsPage,SkillsPage,browse_placeholder_skillssh,"Search the skills.sh registry…",,active
+skills.browse.empty_sources,ui,SkillsPage,SkillsPage,browse_empty_sources,"Add a GitHub repository below to start browsing skills.",,active
+skills.browse.sources_summary,ui,SkillsPage,SkillsPage,browse_sources_summary,"{{count}} sources enabled",,active
+skills.browse.sources_none,ui,SkillsPage,SkillsPage,browse_sources_none,"No sources yet",,active
+skills.browse.manage_sources,ui,SkillsPage,SkillsPage,browse_manage_sources,Manage sources,,active
+skills.browse.hint_skillssh,ui,SkillsPage,SkillsPage,browse_hint_skillssh,"Type at least 2 characters to search skills.sh.",,active
+skills.browse.loading_hint,ui,SkillsPage,SkillsPage,browse_loading_hint,"Fetching skill metadata from GitHub. First load can take up to a minute; results are cached.",,active
+skills.error.generic,ui,SkillsPage,SkillsPage,error_generic,"Skill operation failed.",,active
+skills.confirm.remove_title,ui,SkillsPage,SkillsPage,confirm_remove_title,"Remove {{name}}?",,active
+skills.confirm.remove_managed,ui,SkillsPage,SkillsPage,confirm_remove_managed,"This skill will be removed from every connected AI tool. You'll have a few seconds to undo.",,active
+skills.confirm.remove_local,ui,SkillsPage,SkillsPage,confirm_remove_local,"This will delete the skill folder on disk from every connected AI tool. This cannot be undone.",,active
+skills.toast.removed,ui,SkillsPage,SkillsPage,toast_removed,"Removed {{name}}.",,active
+shared.action.undo,shared,*,Shared,action_undo,"Undo",,active
+shared.action.cancel,shared,*,Shared,action_cancel,"Cancel",,active
+skills.empty.my,ui,SkillsPage,SkillsPage,empty_my,"No skills yet. Open Discover to search and install.",,active
+skills.empty.my_cta,ui,SkillsPage,SkillsPage,empty_my_cta,"Browse",,active
+skills.empty.browse,ui,SkillsPage,SkillsPage,empty_browse,"No skills found for this source.",,active
+skills.empty.search,ui,SkillsPage,SkillsPage,empty_search,"No results. Try a different query.",,active
+skills.repo.add_title,ui,SkillsPage,SkillsPage,repo_add_title,"Add repository",,active
+skills.repo.placeholder,ui,SkillsPage,SkillsPage,repo_placeholder,"owner/repository",,active
+skills.repo.add,ui,SkillsPage,SkillsPage,repo_add,"Add repository",,active
+skills.repo.invalid,ui,SkillsPage,SkillsPage,repo_invalid,"Use owner/repository or a GitHub repository URL.",,active
+skills.repo.list_title,ui,SkillsPage,SkillsPage,repo_list_title,"Enabled repositories",,active
+skills.repo.remove,ui,SkillsPage,RepoRow,repo_remove,"Remove repository",,active
 settings.appearance.language.label,ui,SettingsPage,SettingsPage,language_label,Language,,active
 settings.appearance.language.hint,ui,SettingsPage,SettingsPage,language_hint,Use System to follow your computer language by default.,,active
 settings.appearance.language.system,ui,SettingsPage,SettingsPage,language_system,System,,active

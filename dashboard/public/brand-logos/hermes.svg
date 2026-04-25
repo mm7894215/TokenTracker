@@ -1,0 +1,11 @@
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="hermes-a" x1="3" x2="21" y1="3" y2="21" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#A855F7"/>
+      <stop offset=".48" stop-color="#6366F1"/>
+      <stop offset="1" stop-color="#06B6D4"/>
+    </linearGradient>
+  </defs>
+  <rect width="20" height="20" x="2" y="2" rx="5" fill="url(#hermes-a)"/>
+  <path fill="#fff" d="M7 6.5h2.35v4.1h5.3V6.5H17v11h-2.35v-4.55h-5.3v4.55H7z"/>
+</svg>
