@@ -73,7 +73,11 @@ jobs:
           ECR_REPO_NAME: token-tracker-staging
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPO_NAME:$IMAGE_TAG .
+          source .env
+          docker build \
+            --build-arg VITE_INSFORGE_BASE_URL="$VITE_INSFORGE_BASE_URL" \
+            --build-arg VITE_INSFORGE_ANON_KEY="$VITE_INSFORGE_ANON_KEY" \
+            -t $ECR_REGISTRY/$ECR_REPO_NAME:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPO_NAME:$IMAGE_TAG
 
       - name: Set up SSH
