@@ -644,7 +644,7 @@ export function SkillsPage() {
   if (loading) {
     contentNode = loadingNode;
   } else if (tab === "my") {
-    contentNode = false /* TEMP empty preview - revert when done */ && mySkills.length ? (
+    contentNode = mySkills.length ? (
       <MySkillsView
         items={mySkills}
         targets={targets}
@@ -697,19 +697,11 @@ export function SkillsPage() {
             </div>
             {/* Background color fade — left edge */}
             <div
-              className="pointer-events-none absolute inset-y-0 left-0 w-20"
-              style={{
-                background:
-                  "linear-gradient(to right, var(--oai-white) 0%, transparent 100%)",
-              }}
+              className="pointer-events-none absolute inset-y-0 left-0 w-20 bg-gradient-to-r from-oai-white to-transparent dark:from-oai-gray-900"
             />
             {/* Background color fade — right edge */}
             <div
-              className="pointer-events-none absolute inset-y-0 right-0 w-20"
-              style={{
-                background:
-                  "linear-gradient(to left, var(--oai-white) 0%, transparent 100%)",
-              }}
+              className="pointer-events-none absolute inset-y-0 right-0 w-20 bg-gradient-to-l from-oai-white to-transparent dark:from-oai-gray-900"
             />
           </div>
         ) : null}
