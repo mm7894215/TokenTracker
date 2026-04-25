@@ -61,7 +61,7 @@ async function fetchLocalJson(slug: string, params?: AnyRecord, options?: AnyRec
   return response.json();
 }
 
-// Holds the current user's access token for cloud API calls.
+// Cloud-aware fetch: routes to InsForge when not on localhost.
 let _currentAccessToken: string | null = null;
 export function setCurrentAccessToken(token: string | null) { _currentAccessToken = token; }
 
