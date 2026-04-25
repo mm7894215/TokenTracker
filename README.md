@@ -132,6 +132,8 @@ Upgrade with `brew upgrade --cask mm7894215/tokentracker/tokentracker`. The tap 
 
 **Skills Manager** — browse 250+ public skills from GitHub & `skills.sh`, install once, sync to Claude / Codex / Gemini / OpenCode / Hermes. Per-target toggles, one-click Undo, no manual file copying.
 
+<img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/skills.png" alt="Skills Manager" />
+
 </td>
 </tr>
 </table>
