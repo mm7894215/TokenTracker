@@ -1,4 +1,4 @@
-import React, { Suspense, useMemo } from "react";
+import React, { useMemo } from "react";
 import { useLocation } from "react-router-dom";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
@@ -12,33 +12,18 @@ import { getBackendBaseUrl } from "./lib/config";
 import { isMockEnabled } from "./lib/mock-data";
 import { isScreenshotModeEnabled } from "./lib/screenshot-mode";
 import { useCloudUsageSync } from "./hooks/use-cloud-usage-sync";
+import { DashboardPage } from "./pages/DashboardPage.jsx";
+import IpCheckPage from "./pages/IpCheckPage.jsx";
 import { LandingPage } from "./pages/LandingPage.jsx";
+import { LeaderboardPage } from "./pages/LeaderboardPage.jsx";
+import { LeaderboardProfilePage } from "./pages/LeaderboardProfilePage.jsx";
+import { LimitsPage } from "./pages/LimitsPage.jsx";
 import { LoginPage } from "./pages/LoginPage.jsx";
 import { NativeAuthCallbackPage } from "./pages/NativeAuthCallbackPage.jsx";
+import { SettingsPage } from "./pages/SettingsPage.jsx";
+import { SkillsPage } from "./pages/SkillsPage.jsx";
 import { AppLayout } from "./ui/openai/components/Sidebar.jsx";
-
-const DashboardPage = React.lazy(() =>
-  import("./pages/DashboardPage.jsx").then((mod) => ({ default: mod.DashboardPage })),
-);
-const LeaderboardPage = React.lazy(() =>
-  import("./pages/LeaderboardPage.jsx").then((mod) => ({ default: mod.LeaderboardPage })),
-);
-const LeaderboardProfilePage = React.lazy(() =>
-  import("./pages/LeaderboardProfilePage.jsx").then((mod) => ({ default: mod.LeaderboardProfilePage })),
-);
-const LimitsPage = React.lazy(() =>
-  import("./pages/LimitsPage.jsx").then((mod) => ({ default: mod.LimitsPage })),
-);
-const SettingsPage = React.lazy(() =>
-  import("./pages/SettingsPage.jsx").then((mod) => ({ default: mod.SettingsPage })),
-);
-const SkillsPage = React.lazy(() =>
-  import("./pages/SkillsPage.jsx").then((mod) => ({ default: mod.SkillsPage })),
-);
-const WidgetsPage = React.lazy(() =>
-  import("./pages/WidgetsPage.jsx").then((mod) => ({ default: mod.WidgetsPage })),
-);
-const IpCheckPage = React.lazy(() => import("./pages/IpCheckPage.jsx"));
+import { WidgetsPage } from "./pages/WidgetsPage.jsx";
 
 export default function App() {
   // Subscribing to locale here makes App rerender on language switch, which
@@ -133,8 +118,6 @@ export default function App() {
       isWidgetsPath ||
       isIpCheckPath);
 
-  const loadingShell = <div className="min-h-screen bg-oai-white dark:bg-[#050505]" />;
-
   let content = null;
   if (normalizedPath === "/auth/callback" || normalizedPath === "/auth/native-callback") {
     content = <NativeAuthCallbackPage />;
@@ -144,21 +127,19 @@ export default function App() {
     content = <LandingPage signInUrl="/login" signUpUrl="/login" />;
   } else {
     const pageNode = (
-      <Suspense fallback={loadingShell}>
-        <PageComponent
-          key={resolvedLocale}
-          baseUrl={baseUrl}
-          auth={authObject}
-          signedIn={signedIn}
-          sessionSoftExpired={sessionSoftExpired}
-          signOut={() => (insforge.enabled ? insforge.signOut() : Promise.resolve())}
-          publicMode={publicMode}
-          publicToken={publicToken}
-          userId={leaderboardProfileUserId}
-          signInUrl="/login"
-          signUpUrl="/login"
-        />
-      </Suspense>
+      <PageComponent
+        key={resolvedLocale}
+        baseUrl={baseUrl}
+        auth={authObject}
+        signedIn={signedIn}
+        sessionSoftExpired={sessionSoftExpired}
+        signOut={() => (insforge.enabled ? insforge.signOut() : Promise.resolve())}
+        publicMode={publicMode}
+        publicToken={publicToken}
+        userId={leaderboardProfileUserId}
+        signInUrl="/login"
+        signUpUrl="/login"
+      />
     );
     if (showSidebar) {
       content = <AppLayout>{pageNode}</AppLayout>;
