@@ -32,9 +32,13 @@ export default async function (req: Request): Promise<Response> {
     return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
+  // Accept device token hash from custom header (preferred — avoids InsForge
+  // gateway JWT validation on the Authorization header) or fall back to
+  // hashing the raw Bearer token for backward compatibility.
+  const precomputedHash = req.headers.get("x-tokentracker-device-token-hash");
   const authHeader = req.headers.get("Authorization");
   const deviceToken = authHeader?.replace(/^Bearer\s+/i, "");
-  if (!deviceToken) return json({ error: "Missing bearer token" }, 401);
+  if (!precomputedHash && !deviceToken) return json({ error: "Missing bearer token" }, 401);
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   if (!body) return json({ error: "Invalid JSON body" }, 400);
@@ -45,7 +49,6 @@ export default async function (req: Request): Promise<Response> {
     req.headers.get("apikey") ?? req.headers.get("Apikey") ?? req.headers.get("x-api-key") ?? undefined;
   const anonKey =
     Deno.env.get("INSFORGE_ANON_KEY") ?? Deno.env.get("ANON_KEY") ?? incomingApiKey ?? undefined;
-  // 优先用 service role key；未配置时用 anon key（RLS 未启用时可用）
   const dbToken = serviceRoleKey || anonKey || deviceToken;
 
   const client = createClient({
@@ -55,7 +58,7 @@ export default async function (req: Request): Promise<Response> {
     ...(anonKey ? { headers: { apikey: anonKey } } : {}),
   });
 
-  const tokenHash = await sha256Hex(deviceToken);
+  const tokenHash = precomputedHash || await sha256Hex(deviceToken!);
 
   const { data: tokenRow, error: tokenErr } = await client.database
     .from("tokentracker_device_tokens")
