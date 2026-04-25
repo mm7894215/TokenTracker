@@ -1,0 +1,111 @@
+name: Deploying CMS Service Production
+
+on:
+  push:
+    branches:
+      - preprod
+      - main
+  pull_request:
+    types: [closed]
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: arc-runner-set
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.8.0"
+
+      - name: Installing dependencies
+        shell: bash
+        run: |
+          sudo apt-get update -y \
+          && umask 0002 \
+          && sudo apt-get install -y ca-certificates jq zip curl unzip wget apt-transport-https lsb-release gnupg
+
+      - name: Install AWS CLI
+        uses: unfor19/install-aws-cli-action@v1
+        with:
+          version: 2
+          verbose: false
+          arch: amd64
+
+      - name: Set AWS credentials for different branches
+        if: github.ref == 'refs/heads/main' # For all branches except master
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_DEV }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}
+          aws-region: ap-south-1
+
+    #   - name: Set AWS credentials for master branch
+    #     if: github.ref == 'refs/heads/master' # Only for master branch
+    #     uses: aws-actions/configure-aws-credentials@v1
+    #     with:
+    #       aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_PROD_MAIN}}
+    #       aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_PROD_MAIN }}
+    #       aws-region: ap-south-1
+
+      - name: Extract branch name
+        id: extract_branch
+        run: |
+          echo "BRANCH_NAME=$(echo ${GITHUB_REF#refs/heads/})" >> $GITHUB_ENV
+      - name: Get AWS secrets From AWS Secret Manager
+        env:
+          ASM_NAME: ${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}
+        run: |
+          SECRET_JSON=$(aws secretsmanager get-secret-value --region ap-south-1 --secret-id "$ASM_NAME" --query SecretString --output text)
+          echo "$SECRET_JSON" | jq -r 'to_entries[] | "\(.key)=\(.value)"' > .env
+          cat .env
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPO_NAME: tokentracker-main
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPO_NAME:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPO_NAME:$IMAGE_TAG
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          sudo apt-get -yq update && sudo apt-get -yqq install ssh git
+          ssh-keyscan -t rsa github.com >> ~/.ssh/known_hosts
+          echo "${{ secrets.ARGOCD_SSH_PVT_KEY }}" > ~/.ssh/id_rsa_github_org
+          chmod 400 ~/.ssh/id_rsa_github_org
+          echo "Host github.com
+            HostName github.com
+            User git
+            IdentityFile ~/.ssh/id_rsa_github_org" > ~/.ssh/config
+        shell: bash
+
+      - name: Update Argocd values.yaml
+        run: |
+          git clone git@github.com:mumzworld-tech/mumz-argocd-k8s-templates.git
+          git config --global user.name 'Argocd Bot'
+          git config --global user.email 'tech-sre@mumzworld.com'
+          cd mumz-argocd-k8s-templates
+          git checkout staging
+          # cd ${{ github.event.repository.name }}/$(echo ${GITHUB_REF#refs/heads/})
+          cd ${{ github.event.repository.name }}
+          ls -la
+          sed -i "s#amazonaws.com/${{ github.event.repository.name }}.*#amazonaws.com/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ github.sha }}#g" values.yaml
+          sed -i 's/gitCommitHash: "[^"]*"/gitCommitHash: "'${{ github.sha }}'"/' values.yaml
+          git add values.yaml
+          git status
+          git commit -m "Updated the image tag in values file in ${{ github.event.repository.name }}  with commit ${{ github.sha }}"
+          git remote set-url origin https://sreaccount:${{ secrets.ORG_PAT_TOKEN }}@github.com/mumzworld-tech/mumz-argocd-k8s-templates.git
+          git push origin staging
+          echo "Image Pushed"
+        shell: bash

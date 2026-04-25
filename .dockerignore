@@ -1,0 +1,11 @@
+node_modules
+dashboard/node_modules
+dashboard/dist
+.git
+.github
+test
+docs
+TokenTrackerBar
+scripts
+*.md
+.env*
