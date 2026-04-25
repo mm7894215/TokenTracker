@@ -2,7 +2,7 @@ name: npm publish
 
 on:
   push:
-    branches: [main]
+    branches: [master]
 
 concurrency:
   group: npm-publish
