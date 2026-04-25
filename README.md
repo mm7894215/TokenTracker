@@ -1,7 +1,7 @@
  <div align="center">
 
 # Token Tracker
-
+---
 ### Know exactly what you're spending on AI — across every CLI
 
 Auto-collect token counts from **10 AI coding tools**, aggregate them locally, and see real cost trends in a beautiful dashboard. No cloud account, no API keys, no setup — just one command.
