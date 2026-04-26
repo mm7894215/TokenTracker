@@ -7,11 +7,6 @@ COPY dashboard/ ./
 COPY package.json /app/package.json
 ARG VITE_INSFORGE_BASE_URL
 ARG VITE_INSFORGE_ANON_KEY
-
-# Build-time patch: add auth headers to fetchLocalJson for nginx→InsForge proxy.
-COPY patch-api.js /app/patch-api.js
-RUN node /app/patch-api.js
-
 RUN npm run build
 
 # --- Stage 2: Nginx serves dashboard + proxies /functions to InsForge ---
