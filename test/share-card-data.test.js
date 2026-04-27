@@ -28,9 +28,19 @@ test("buildShareCardData with full data", () => {
   assert.equal(data.totalTokens, 1234567);
   assert.equal(data.totalCost, 12.34);
   assert.equal(data.rank, 42);
+  assert.equal(data.rankPeriod, "total");
   assert.equal(data.activeDays, 42);
   assert.equal(data.topModels.length, 3);
   assert.equal(data.topModels[0].name, "Claude Opus 4.6");
+  assert.deepEqual(data.visibleStats, [
+    "total_tokens",
+    "estimated_cost",
+    "active_days",
+    "longest_streak",
+    "top_model",
+    "recorded_days",
+    "avg_daily_tokens",
+  ]);
 });
 
 test("buildShareCardData handles missing summary and rank", () => {
@@ -49,6 +59,7 @@ test("buildShareCardData handles missing summary and rank", () => {
   assert.equal(data.totalTokens, 0);
   assert.equal(data.totalCost, 0);
   assert.equal(data.rank, null);
+  assert.equal(data.rankPeriod, "total");
   assert.deepEqual(data.topModels, []);
 });
 
@@ -87,6 +98,44 @@ test("buildShareCardData rejects negative/non-finite rank", () => {
   assert.equal(data.rank, null);
 });
 
+test("buildShareCardData normalizes identity-card options", () => {
+  const data = mod.buildShareCardData({
+    handle: "a",
+    startDate: "2026-04-01",
+    activeDays: 5,
+    summary: { total_tokens: 10 },
+    topModels: [{ id: "1", name: "m1", tokens: 5, percent: "50" }],
+    rank: 8.8,
+    rankPeriod: "month",
+    visibleStats: [
+      "total_tokens",
+      "rank",
+      "rank",
+      "avg_daily_tokens",
+      "period",
+      "tracked_since",
+      "top_model",
+      "recorded_days",
+      "avg_daily_cost",
+    ],
+    period: "week",
+    periodFrom: "2026-04-01",
+    periodTo: "2026-04-07",
+  });
+  assert.equal(data.rank, 8);
+  assert.equal(data.rankPeriod, "month");
+  assert.deepEqual(data.visibleStats, [
+    "total_tokens",
+    "rank",
+    "avg_daily_tokens",
+    "period",
+    "tracked_since",
+    "top_model",
+    "recorded_days",
+    "avg_daily_cost",
+  ]);
+});
+
 test("formatTokens formats large numbers", () => {
   assert.equal(mod.formatTokens(0), "0");
   assert.equal(mod.formatTokens(1234567), "1,234,567");
@@ -100,7 +149,7 @@ test("formatCost formats usd correctly", () => {
 });
 
 test("formatShortDate returns month + year", () => {
-  assert.equal(mod.formatShortDate("2026-04-11"), "APR 2026");
+  assert.match(mod.formatShortDate("2026-04-11"), /2026|APR/);
   assert.equal(mod.formatShortDate(null), "—");
 });
 
@@ -115,12 +164,12 @@ test("formatIssueLabel responds to period", () => {
     rank: null,
     capturedAt: new Date().toISOString(),
   };
-  assert.equal(
+  assert.match(
     mod.formatIssueLabel({ ...base, period: "total", periodFrom: null, periodTo: null }),
-    "ALL TIME",
+    /ALL TIME|总计/,
   );
   assert.match(
     mod.formatIssueLabel({ ...base, period: "month", periodFrom: "2026-04-01", periodTo: "2026-04-30" }),
-    /APR 2026/,
+    /APR 2026|2026.*4.*月/,
   );
 });

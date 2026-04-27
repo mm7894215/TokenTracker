@@ -1,5 +1,10 @@
 import { toFiniteNumber } from "../../lib/format";
 import { copy } from "../../lib/copy";
+import {
+  normalizeVisibleStats,
+  type ShareRankPeriod,
+  type ShareStatId,
+} from "./share-card-options";
 
 type AnyRec = Record<string, any>;
 
@@ -30,6 +35,8 @@ export interface ShareCardData {
   periodTo: string | null;
   topModels: ShareCardModel[];
   rank: number | null;
+  rankPeriod: ShareRankPeriod;
+  visibleStats: ShareStatId[];
   heatmapWeeks: ShareCardHeatmapCell[][];
   heatmapTotalDays: number;
   heatmapActiveDays: number;
@@ -88,6 +95,8 @@ export function buildShareCardData(params: {
   summary: AnyRec | null;
   topModels: ShareCardModel[] | null | undefined;
   rank: number | null;
+  rankPeriod?: ShareRankPeriod;
+  visibleStats?: ShareStatId[];
   period: ShareCardPeriod;
   periodFrom: string | null;
   periodTo: string | null;
@@ -101,6 +110,8 @@ export function buildShareCardData(params: {
     summary,
     topModels,
     rank,
+    rankPeriod,
+    visibleStats,
     period,
     periodFrom,
     periodTo,
@@ -134,6 +145,8 @@ export function buildShareCardData(params: {
     periodTo,
     topModels: normalizedModels,
     rank: typeof rank === "number" && Number.isFinite(rank) && rank > 0 ? Math.floor(rank) : null,
+    rankPeriod: rankPeriod || "total",
+    visibleStats: normalizeVisibleStats(visibleStats),
     heatmapWeeks: hm.weeks,
     heatmapTotalDays: hm.totalDays,
     heatmapActiveDays: hm.activeDays,

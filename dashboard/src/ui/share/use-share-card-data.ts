@@ -7,6 +7,7 @@ import {
   type ShareCardModel,
   type ShareCardPeriod,
 } from "./build-share-card-data";
+import { defaultShareVisibleStats } from "./share-card-options";
 
 interface UseShareCardDataParams {
   enabled: boolean;
@@ -83,6 +84,8 @@ export function useShareCardData(params: UseShareCardDataParams): ShareCardData 
         summary,
         topModels,
         rank,
+        rankPeriod: "total",
+        visibleStats: defaultShareVisibleStats({ rankEnabled: rank != null }),
         period,
         periodFrom,
         periodTo,

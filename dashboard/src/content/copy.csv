@@ -598,8 +598,10 @@ share.modal.action.download,share,DashboardPage,ShareModal,action_download,"Down
 share.modal.action.copy,share,DashboardPage,ShareModal,action_copy,"Copy image",,active
 share.modal.hint.x,share,DashboardPage,ShareModal,hint_x,"Paste image in tweet",,active
 share.modal.hint.copy,share,DashboardPage,ShareModal,hint_copy,"to clipboard",,active
+share.modal.format.png,share,DashboardPage,ShareModal,format_png,"PNG",,active
 share.modal.name_label,share,DashboardPage,ShareModal,name_label,"Display name",,active
 share.modal.name_placeholder,share,DashboardPage,ShareModal,name_placeholder,"Enter your name",,active
+share.modal.name_hint,share,DashboardPage,ShareModal,name_hint,"Uses your signed-in account display name when available. You can still edit the name printed on this exported card.",,active
 share.modal.footer,share,DashboardPage,ShareModal,footer,"Your data stays local — images are generated in your browser and never uploaded.",,active
 share.button.label,share,DashboardPage,DashboardHeader,share_button,"Share",,active
 share.button.aria,share,DashboardPage,DashboardHeader,share_button_aria,"Open share card",,active
@@ -608,8 +610,14 @@ share.toast.downloaded,share,DashboardPage,ShareModal,toast_downloaded,"Image sa
 share.toast.failed,share,DashboardPage,ShareModal,toast_failed,"Couldn't generate image",,active
 share.toast.working,share,DashboardPage,ShareModal,toast_working,"Generating…",,active
 share.modal.style_label,share,DashboardPage,ShareModal,style_label,"Style",,active
+share.modal.rank_period_label,share,DashboardPage,ShareModal,rank_period_label,"Rank period",,active
+share.modal.stats_label,share,DashboardPage,ShareModal,stats_label,"Card details",,active
+share.modal.stats_count,share,DashboardPage,ShareModal,stats_count,"{{count}}/{{max}} shown",,active
+share.modal.stats_limit_reached,share,DashboardPage,ShareModal,stats_limit,"Maximum fields shown",,active
+share.modal.rank_login_required,share,DashboardPage,ShareModal,rank_login_required,"Sign in to show global rank",,active
 share.variant.neon,share,DashboardPage,ShareModal,variant_neon,"Neon",,active
 share.variant.broadsheet,share,DashboardPage,ShareModal,variant_broadsheet,"Broadsheet",,active
+share.variant.identity,share,DashboardPage,ShareModal,variant_identity,"Usage Card",,active
 share.date.month_year,share,DashboardPage,ShareCard,date_month_year,"{{month}} {{year}}",,active
 share.issue.all_time,share,DashboardPage,ShareCard,issue_all_time,"ALL TIME",,active
 share.month_short.jan,share,DashboardPage,ShareCard,month_short,"JAN",,active
@@ -630,6 +638,27 @@ share.hook.top_led,share,DashboardPage,ShareCard,hook_top_led,"Led by {{name}} (
 share.hook.multi_models,share,DashboardPage,ShareCard,hook_multi_models,"Across {{count}} models, {{days}} days.",,active
 share.hook.days_with_model,share,DashboardPage,ShareCard,hook_days_with_model,"{{days}} days with {{name}}.",,active
 share.hook.new_chapter,share,DashboardPage,ShareCard,hook_new_chapter,"The beginning of a new chapter.",,active
+share.card.identity.brand,share,DashboardPage,IdentityCard,brand,"TokenTracker",,active
+share.card.identity.title,share,DashboardPage,IdentityCard,title,"Usage Card",,active
+share.card.identity.holder,share,DashboardPage,IdentityCard,holder,"Name",,active
+share.card.identity.period,share,DashboardPage,IdentityCard,period,"Period",,active
+share.card.identity.panel_title,share,DashboardPage,IdentityCard,panel_title,"Usage profile",,active
+share.card.identity.total_tokens,share,DashboardPage,IdentityCard,total_tokens,"Total tokens",,active
+share.card.identity.estimated_cost,share,DashboardPage,IdentityCard,estimated_cost,"Estimated cost",,active
+share.card.identity.active_days,share,DashboardPage,IdentityCard,active_days,"Active days",,active
+share.card.identity.longest_streak,share,DashboardPage,IdentityCard,longest_streak,"Longest streak",,active
+share.card.identity.top_model,share,DashboardPage,IdentityCard,top_model,"Common model",,active
+share.card.identity.top_model_share,share,DashboardPage,IdentityCard,top_model_share,"Top model share",,active
+share.card.identity.avg_daily_tokens,share,DashboardPage,IdentityCard,avg_daily_tokens,"Daily avg tokens",,active
+share.card.identity.avg_daily_cost,share,DashboardPage,IdentityCard,avg_daily_cost,"Daily avg cost",,active
+share.card.identity.recorded_days,share,DashboardPage,IdentityCard,recorded_days,"Recorded days",,active
+share.card.identity.tracked_since,share,DashboardPage,IdentityCard,tracked_since,"Tracked since",,active
+share.card.identity.global_rank,share,DashboardPage,IdentityCard,global_rank,"Total rank",,active
+share.card.identity.rank.day,share,DashboardPage,IdentityCard,rank_day,"Daily rank",,active
+share.card.identity.rank.week,share,DashboardPage,IdentityCard,rank_week,"Weekly rank",,active
+share.card.identity.rank.month,share,DashboardPage,IdentityCard,rank_month,"Monthly rank",,active
+share.card.identity.rank.total,share,DashboardPage,IdentityCard,rank_total,"Total rank",,active
+share.card.identity.days,share,DashboardPage,IdentityCard,days,"{{days}} days",,active
 share.card.broadsheet.issue,share,DashboardPage,BroadsheetCard,issue_label,"Issue",,active
 share.card.broadsheet.by,share,DashboardPage,BroadsheetCard,by_label,"By",,active
 share.card.broadsheet.tracked_since,share,DashboardPage,BroadsheetCard,tracked_since,"Tracked since",,active
