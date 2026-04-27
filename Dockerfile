@@ -20,6 +20,18 @@ RUN printf 'server {\n\
         proxy_pass INSFORGE_URL_PLACEHOLDER/functions/;\n\
         proxy_set_header Host $proxy_host;\n\
         proxy_set_header X-Real-IP $remote_addr;\n\
+        proxy_set_header Cookie $http_cookie;\n\
+        proxy_set_header Authorization $http_authorization;\n\
+        proxy_set_header apikey $http_apikey;\n\
+        proxy_pass_header Set-Cookie;\n\
+    }\n\
+    location /api/ {\n\
+        proxy_pass INSFORGE_URL_PLACEHOLDER/api/;\n\
+        proxy_set_header Host $proxy_host;\n\
+        proxy_set_header X-Real-IP $remote_addr;\n\
+        proxy_set_header Cookie $http_cookie;\n\
+        proxy_set_header Authorization $http_authorization;\n\
+        proxy_pass_header Set-Cookie;\n\
     }\n\
     location / {\n\
         try_files $uri $uri/ /index.html;\n\
