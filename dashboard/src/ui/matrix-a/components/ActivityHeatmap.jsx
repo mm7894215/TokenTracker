@@ -8,7 +8,7 @@ const CELL_GAP = 3;
 const LABEL_WIDTH = 26;
 
 const HEATMAP_COLORS_LIGHT = [
-  "#ecfdf5", // level 0
+  "#ebedf0", // level 0 - inactive, GitHub-style neutral
   "#a7f3d0", // level 1
   "#6ee7b7", // level 2
   "#34d399", // level 3
@@ -16,7 +16,7 @@ const HEATMAP_COLORS_LIGHT = [
 ];
 
 const HEATMAP_COLORS_DARK = [
-  "#064e3b", // level 0 - darkest emerald
+  "#30363d", // level 0 - inactive, GitHub-style neutral
   "#065f46", // level 1
   "#059669", // level 2
   "#10b981", // level 3
