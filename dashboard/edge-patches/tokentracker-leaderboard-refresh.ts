@@ -60,6 +60,8 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   "gpt-5.4": { input: 2.5, output: 15, cache_read: 0.25 },
   "gpt-5.4-mini": { input: 0.75, output: 4.5, cache_read: 0.075 },
   "gpt-5.4-medium": { input: 1.5, output: 10, cache_read: 0.15 },
+  "gpt-5.5": { input: 5, output: 30, cache_read: 0.5 },
+  "gpt-5-mini": { input: 0.25, output: 2, cache_read: 0.025 },
   "o3": { input: 2, output: 8, cache_read: 0.5 },
   // ── Google Gemini ──
   "gemini-2.5-pro": { input: 1.25, output: 10, cache_read: 0.125 },
@@ -78,6 +80,11 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   "kimi-for-coding": { input: 0.6, output: 2, cache_read: 0.15 },
   "kimi-k2.5": { input: 0.6, output: 2, cache_read: 0.15 },
   "kimi-k2.5-free": { input: 0, output: 0, cache_read: 0 },
+  // ── MiniMax / DeepSeek ──
+  "MiniMax-M2.7": { input: 0.3, output: 1.2, cache_read: 0.06, cache_write: 0.375 },
+  "MiniMax-M2.7-highspeed": { input: 0.6, output: 2.4, cache_read: 0.06, cache_write: 0.375 },
+  "deepseek-v4-flash": { input: 0.14, output: 0.28, cache_read: 0.0028, cache_write: 0.14 },
+  "deepseek-v4-pro": { input: 0.435, output: 0.87, cache_read: 0.003625, cache_write: 0.435 },
   // ── AWS Kiro (mirrored byte-for-byte from src/lib/local-api.js to
   //    prevent cloud/local cost drift — Kiro routes through Bedrock,
   //    most commonly claude-sonnet-4). ──
@@ -106,12 +113,18 @@ function getModelPricing(model: string) {
   if (lower.includes("haiku")) return MODEL_PRICING["claude-haiku-4-5-20251001"];
   if (lower.includes("sonnet")) return MODEL_PRICING["claude-sonnet-4-6"];
   if (lower.includes("gpt-5.4")) return MODEL_PRICING["gpt-5.4"];
+  if (lower.includes("gpt-5.5")) return MODEL_PRICING["gpt-5.5"];
+  if (lower.includes("gpt-5-mini")) return MODEL_PRICING["gpt-5-mini"];
   if (lower.includes("gpt-5.3")) return MODEL_PRICING["gpt-5.3-codex"];
   if (lower.includes("gpt-5.2")) return MODEL_PRICING["gpt-5.2"];
   if (lower.includes("gpt-5.1")) return MODEL_PRICING["gpt-5.1-codex"];
   if (lower.includes("gpt-5")) return MODEL_PRICING["gpt-5"];
   if (lower.includes("gemini-3")) return MODEL_PRICING["gemini-3-flash-preview"];
   if (lower.includes("gemini-2.5")) return MODEL_PRICING["gemini-2.5-pro"];
+  if (lower.includes("minimax-m2.7-highspeed")) return MODEL_PRICING["MiniMax-M2.7-highspeed"];
+  if (lower.includes("minimax-m2.7")) return MODEL_PRICING["MiniMax-M2.7"];
+  if (lower.includes("deepseek-v4-flash")) return MODEL_PRICING["deepseek-v4-flash"];
+  if (lower.includes("deepseek-v4-pro")) return MODEL_PRICING["deepseek-v4-pro"];
   if (lower.includes("kimi")) return MODEL_PRICING["kimi-k2.5"];
   if (lower.includes("kiro")) return MODEL_PRICING["kiro-cli-agent"];
   if (lower.includes("hy3")) return MODEL_PRICING["hy3-preview-agent"];

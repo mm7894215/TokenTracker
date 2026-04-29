@@ -229,6 +229,38 @@ test("computeRowCost still bills reasoning for non-Codex sources (e.g. gemini)",
   );
 });
 
+test("pricing covers production MiniMax and DeepSeek model ids used by leaderboard", () => {
+  const cases = [
+    ["MiniMax-M2.7", { input: 0.3, output: 1.2, cache_read: 0.06, cache_write: 0.375 }],
+    ["MiniMax-M2.7-highspeed", { input: 0.6, output: 2.4, cache_read: 0.06, cache_write: 0.375 }],
+    ["deepseek-v4-flash", { input: 0.14, output: 0.28, cache_read: 0.0028, cache_write: 0.14 }],
+    ["deepseek-v4-pro", { input: 0.435, output: 0.87, cache_read: 0.003625, cache_write: 0.435 }],
+  ];
+
+  for (const [model, expected] of cases) {
+    assert.deepEqual(localApi.getModelPricing(model), expected, `${model} must not fall back to zero pricing`);
+  }
+
+  // DB rows can arrive with provider/model prefixes or lower-cased aliases.
+  assert.deepEqual(localApi.getModelPricing("openrouter/minimax-m2.7"), cases[0][1]);
+  assert.deepEqual(localApi.getModelPricing("DeepSeek-V4-Pro"), cases[3][1]);
+});
+
+test("leaderboard-refresh edge pricing covers MiniMax and DeepSeek model ids", () => {
+  const edgeSrc = fs.readFileSync(leaderboardRefreshPath, "utf8");
+  for (const snippet of [
+    '"MiniMax-M2.7": { input: 0.3, output: 1.2, cache_read: 0.06, cache_write: 0.375 },',
+    '"MiniMax-M2.7-highspeed": { input: 0.6, output: 2.4, cache_read: 0.06, cache_write: 0.375 },',
+    '"deepseek-v4-flash": { input: 0.14, output: 0.28, cache_read: 0.0028, cache_write: 0.14 },',
+    '"deepseek-v4-pro": { input: 0.435, output: 0.87, cache_read: 0.003625, cache_write: 0.435 },',
+    'lower.includes("minimax-m2.7")',
+    'lower.includes("deepseek-v4-flash")',
+    'lower.includes("deepseek-v4-pro")',
+  ]) {
+    assert.ok(edgeSrc.includes(snippet), `leaderboard-refresh must include: ${snippet}`);
+  }
+});
+
 test("local-api MODEL_PRICING Kiro entries are byte-equivalent with leaderboard-refresh edge patch", () => {
   const edgeSrc = fs.readFileSync(leaderboardRefreshPath, "utf8");
   // Extract the literal Kiro pricing lines from the edge patch so byte-drift

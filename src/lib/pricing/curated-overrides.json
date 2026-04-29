@@ -12,6 +12,10 @@
     "composer-1.5":     { "input": 3.5,  "output": 17.5, "cache_read": 0.35 },
     "composer-2":       { "input": 0.5,  "output": 2.5,  "cache_read": 0.2 },
     "composer-2-fast":  { "input": 1.5,  "output": 7.5,  "cache_read": 0.15 },
+    "MiniMax-M2.7":     { "input": 0.3,  "output": 1.2,  "cache_read": 0.06,  "cache_write": 0.375 },
+    "MiniMax-M2.7-highspeed":{ "input": 0.6, "output": 2.4, "cache_read": 0.06, "cache_write": 0.375 },
+    "deepseek-v4-flash":{ "input": 0.14, "output": 0.28, "cache_read": 0.0028, "cache_write": 0.14 },
+    "deepseek-v4-pro":  { "input": 0.435,"output": 0.87, "cache_read": 0.003625, "cache_write": 0.435 },
     "kimi-for-coding":  { "input": 0.6,  "output": 2,    "cache_read": 0.15 },
     "kimi-k2.5":        { "input": 0.6,  "output": 2,    "cache_read": 0.15 },
     "kimi-k2.5-free":   { "input": 0,    "output": 0,    "cache_read": 0 },
@@ -25,9 +29,13 @@
     "auto": "composer-1"
   },
   "fuzzy": [
-    { "match": "kiro",     "ref": "kiro-cli-agent" },
-    { "match": "hy3",      "ref": "hy3-preview-agent" },
-    { "match": "composer", "ref": "composer-1" },
-    { "match": "kimi",     "ref": "kimi-k2.5" }
+    { "match": "kiro",                   "ref": "kiro-cli-agent" },
+    { "match": "hy3",                    "ref": "hy3-preview-agent" },
+    { "match": "composer",               "ref": "composer-1" },
+    { "match": "minimax-m2.7-highspeed", "ref": "MiniMax-M2.7-highspeed" },
+    { "match": "minimax-m2.7",           "ref": "MiniMax-M2.7" },
+    { "match": "deepseek-v4-flash",      "ref": "deepseek-v4-flash" },
+    { "match": "deepseek-v4-pro",        "ref": "deepseek-v4-pro" },
+    { "match": "kimi",                   "ref": "kimi-k2.5" }
   ]
 }
