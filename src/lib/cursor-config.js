@@ -8,18 +8,31 @@ const { readJson } = require("./fs");
 
 // ── Path resolution ──
 
-function resolveCursorPaths({ home } = {}) {
+function resolveCursorPaths({ home, platform = process.platform, env = process.env } = {}) {
   const h = home || os.homedir();
-  const appSupport = path.join(h, "Library", "Application Support", "Cursor");
+  let appDir;
+  if (platform === "darwin") {
+    appDir = path.join(h, "Library", "Application Support", "Cursor");
+  } else if (platform === "win32") {
+    const appData =
+      (typeof env.APPDATA === "string" && env.APPDATA.trim()) ||
+      path.join(h, "AppData", "Roaming");
+    appDir = path.join(appData, "Cursor");
+  } else {
+    const xdg =
+      (typeof env.XDG_CONFIG_HOME === "string" && env.XDG_CONFIG_HOME.trim()) ||
+      path.join(h, ".config");
+    appDir = path.join(xdg, "Cursor");
+  }
   return {
-    appDir: appSupport,
-    stateDbPath: path.join(appSupport, "User", "globalStorage", "state.vscdb"),
+    appDir,
+    stateDbPath: path.join(appDir, "User", "globalStorage", "state.vscdb"),
     cliConfigPath: path.join(h, ".cursor", "cli-config.json"),
   };
 }
 
-function isCursorInstalled({ home } = {}) {
-  const { appDir } = resolveCursorPaths({ home });
+function isCursorInstalled({ home, platform, env } = {}) {
+  const { appDir } = resolveCursorPaths({ home, platform, env });
   try {
     return fs.statSync(appDir).isDirectory();
   } catch {

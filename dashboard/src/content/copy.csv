@@ -702,6 +702,8 @@ skills.card.installs,ui,SkillsPage,SkillCard,installs,"{{count}} installs",,acti
 skills.source.label,ui,SkillsPage,SkillsPage,source_label,Source,,active
 skills.source.all,ui,SkillsPage,SkillsPage,source_all,All repositories,,active
 skills.source.skillssh,ui,SkillsPage,SkillsPage,source_skillssh,skills.sh (search),,active
+skills.mode.repo,ui,SkillsPage,SkillsPage,mode_repo,Repositories,,active
+skills.mode.skillssh,ui,SkillsPage,SkillsPage,mode_skillssh,skills.sh,,active
 skills.browse.placeholder_all,ui,SkillsPage,SkillsPage,browse_placeholder_all,"Search across enabled repositories…",,active
 skills.browse.placeholder_repo,ui,SkillsPage,SkillsPage,browse_placeholder_repo,"Search in {{repo}}…",,active
 skills.browse.placeholder_skillssh,ui,SkillsPage,SkillsPage,browse_placeholder_skillssh,"Search the skills.sh registry…",,active

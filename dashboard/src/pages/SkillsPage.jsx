@@ -188,7 +188,10 @@ const BrowseCard = React.memo(function BrowseCard({ skill, installed, installing
     : copy("skills.action.choose_targets");
 
   return (
-    <Card className="h-full rounded-lg" bodyClassName="flex h-full flex-col">
+    <Card
+      className="h-full rounded-lg"
+      bodyClassName="flex h-full flex-col"
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           {skill.readmeUrl ? (
@@ -212,7 +215,7 @@ const BrowseCard = React.memo(function BrowseCard({ skill, installed, installing
           ) : null}
         </div>
         {installed ? (
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-oai-black/[0.06] px-2 py-1 text-xs font-medium text-oai-gray-700 ring-1 ring-oai-black/10 dark:bg-white/[0.08] dark:text-oai-gray-200 dark:ring-white/10">
             <Check className="h-3 w-3" aria-hidden />
             {copy("skills.card.installed")}
           </span>
@@ -227,10 +230,10 @@ const BrowseCard = React.memo(function BrowseCard({ skill, installed, installing
 
       <div className="mt-auto pt-5">
         {installed ? (
-          <Button type="button" size="sm" disabled className="w-full">
-            <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+          <div className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-oai-black/[0.04] text-sm font-medium text-oai-gray-700 ring-1 ring-inset ring-oai-black/[0.08] dark:bg-white/[0.05] dark:text-oai-gray-200 dark:ring-white/[0.08]">
+            <Check className="h-3.5 w-3.5" aria-hidden />
             {copy("skills.card.installed")}
-          </Button>
+          </div>
         ) : (
           <div className="flex">
             <Button
@@ -395,6 +398,11 @@ export function SkillsPage() {
       if (skill.repoOwner && skill.repoName) {
         keys.add(`${skill.repoOwner}/${skill.repoName}:${skill.sourceDirectory || skill.directory}`.toLowerCase());
       }
+      // Directory-name fallback so unmanaged installs (no repoOwner recorded
+      // — e.g. CLI-installed skills physically placed under ~/.claude/skills/)
+      // still match browse entries from skills.sh or GitHub by skill folder name.
+      const tail = String(skill.directory || "").split(/[\\/]/).pop().toLowerCase();
+      if (tail) keys.add(`dir:${tail}`);
     }
     return keys;
   }, [installedData.skills]);
@@ -614,10 +622,15 @@ export function SkillsPage() {
           (skill.name || "").toLowerCase().includes(q) ||
           (skill.directory || "").toLowerCase().includes(q) ||
           (skill.description || "").toLowerCase().includes(q));
-    return matched.map((skill) => ({
-      ...skill,
-      installed: installedKeys.has(getSkillKey(skill).toLowerCase()),
-    }));
+    return matched.map((skill) => {
+      const fullKey = getSkillKey(skill).toLowerCase();
+      const tail = String(skill.directory || "").split(/[\\/]/).pop().toLowerCase();
+      const dirKey = tail ? `dir:${tail}` : "";
+      return {
+        ...skill,
+        installed: installedKeys.has(fullKey) || (dirKey && installedKeys.has(dirKey)),
+      };
+    });
   }, [debouncedQuery, discoverData, installedKeys, searchData, source]);
 
   const loadingNode = (
@@ -828,63 +841,84 @@ export function SkillsPage() {
           ) : null}
 
           {tab === "browse" ? (
-            <div className="mb-5 flex flex-col gap-3 sm:flex-row">
-              <Select.Root value={source} onValueChange={setSource}>
-                <Select.Trigger
-                  aria-label={copy("skills.source.label")}
-                  className="inline-flex h-10 w-44 shrink-0 items-center justify-between gap-2 rounded-md border border-oai-gray-200 bg-white px-3 text-sm text-oai-black focus:outline-none data-[popup-open]:border-oai-gray-300 dark:border-oai-gray-800 dark:bg-oai-gray-950 dark:text-white dark:data-[popup-open]:border-oai-gray-700"
-                >
-                  <Select.Value>
-                    {(value) => {
-                      if (value === SOURCE_ALL) return copy("skills.source.all");
-                      if (value === SOURCE_SKILLSSH) return copy("skills.source.skillssh");
-                      return value;
-                    }}
-                  </Select.Value>
-                  <Select.Icon className="text-oai-gray-400">
-                    <ChevronDown className="h-4 w-4" aria-hidden />
-                  </Select.Icon>
-                </Select.Trigger>
-                <Select.Portal>
-                  <Select.Positioner sideOffset={4} alignItemWithTrigger={false} className="z-[60]">
-                    <Select.Popup className="min-w-[var(--anchor-width)] overflow-hidden rounded-md border border-oai-gray-200 bg-white p-1 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.18)] outline-none transition-[opacity,transform] duration-150 ease-out data-[ending-style]:scale-[0.97] data-[ending-style]:opacity-0 data-[starting-style]:scale-[0.97] data-[starting-style]:opacity-0 dark:border-oai-gray-800 dark:bg-oai-gray-950 dark:shadow-[0_12px_32px_-12px_rgba(0,0,0,0.6)]">
-                      <Select.Item
-                        value={SOURCE_ALL}
-                        className="flex cursor-default select-none items-center justify-between gap-2 rounded px-3 py-1.5 text-sm text-oai-black outline-none data-[highlighted]:bg-oai-gray-100 dark:text-white dark:data-[highlighted]:bg-oai-gray-800"
-                      >
-                        <Select.ItemText>{copy("skills.source.all")}</Select.ItemText>
-                        <Select.ItemIndicator>
-                          <Check className="h-3.5 w-3.5" aria-hidden />
-                        </Select.ItemIndicator>
-                      </Select.Item>
-                      {repos.map((repo) => {
-                        const value = `${repo.owner}/${repo.name}`;
-                        return (
-                          <Select.Item
-                            key={value}
-                            value={value}
-                            className="flex cursor-default select-none items-center justify-between gap-2 rounded px-3 py-1.5 text-sm text-oai-black outline-none data-[highlighted]:bg-oai-gray-100 dark:text-white dark:data-[highlighted]:bg-oai-gray-800"
-                          >
-                            <Select.ItemText>{value}</Select.ItemText>
-                            <Select.ItemIndicator>
-                              <Check className="h-3.5 w-3.5" aria-hidden />
-                            </Select.ItemIndicator>
-                          </Select.Item>
-                        );
-                      })}
-                      <Select.Item
-                        value={SOURCE_SKILLSSH}
-                        className="flex cursor-default select-none items-center justify-between gap-2 rounded px-3 py-1.5 text-sm text-oai-black outline-none data-[highlighted]:bg-oai-gray-100 dark:text-white dark:data-[highlighted]:bg-oai-gray-800"
-                      >
-                        <Select.ItemText>{copy("skills.source.skillssh")}</Select.ItemText>
-                        <Select.ItemIndicator>
-                          <Check className="h-3.5 w-3.5" aria-hidden />
-                        </Select.ItemIndicator>
-                      </Select.Item>
-                    </Select.Popup>
-                  </Select.Positioner>
-                </Select.Portal>
-              </Select.Root>
+            <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div
+                role="tablist"
+                aria-label={copy("skills.source.label")}
+                className="inline-flex h-10 shrink-0 items-center rounded-md border border-oai-gray-200 bg-oai-white p-1 dark:border-oai-gray-800 dark:bg-oai-gray-900"
+              >
+                {[
+                  ["repo", copy("skills.mode.repo")],
+                  ["skillssh", copy("skills.mode.skillssh")],
+                ].map(([value, label]) => {
+                  const active = (value === "skillssh") === (source === SOURCE_SKILLSSH);
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => {
+                        if (value === "skillssh") setSource(SOURCE_SKILLSSH);
+                        else if (source === SOURCE_SKILLSSH) setSource(SOURCE_ALL);
+                      }}
+                      className={cn(
+                        "rounded px-3 py-1 text-sm font-medium transition-colors",
+                        active
+                          ? "bg-oai-gray-100 text-oai-black dark:bg-oai-gray-700 dark:text-white"
+                          : "text-oai-gray-500 hover:text-oai-gray-800 dark:text-oai-gray-400 dark:hover:text-oai-gray-200",
+                      )}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              {source !== SOURCE_SKILLSSH ? (
+                <Select.Root value={source} onValueChange={setSource}>
+                  <Select.Trigger
+                    aria-label={copy("skills.source.label")}
+                    className="inline-flex h-10 w-44 shrink-0 items-center justify-between gap-2 rounded-md border border-oai-gray-200 bg-oai-white px-3 text-sm text-oai-black focus:outline-none data-[popup-open]:border-oai-gray-300 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white dark:data-[popup-open]:border-oai-gray-700"
+                  >
+                    <Select.Value>
+                      {(value) => (value === SOURCE_ALL ? copy("skills.source.all") : value)}
+                    </Select.Value>
+                    <Select.Icon className="text-oai-gray-400">
+                      <ChevronDown className="h-4 w-4" aria-hidden />
+                    </Select.Icon>
+                  </Select.Trigger>
+                  <Select.Portal>
+                    <Select.Positioner sideOffset={4} alignItemWithTrigger={false} className="z-[60]">
+                      <Select.Popup className="min-w-[var(--anchor-width)] overflow-hidden rounded-md border border-oai-gray-200 bg-white p-1 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.18)] outline-none transition-[opacity,transform] duration-150 ease-out data-[ending-style]:scale-[0.97] data-[ending-style]:opacity-0 data-[starting-style]:scale-[0.97] data-[starting-style]:opacity-0 dark:border-oai-gray-800 dark:bg-oai-gray-950 dark:shadow-[0_12px_32px_-12px_rgba(0,0,0,0.6)]">
+                        <Select.Item
+                          value={SOURCE_ALL}
+                          className="flex cursor-default select-none items-center justify-between gap-2 rounded px-3 py-1.5 text-sm text-oai-black outline-none data-[highlighted]:bg-oai-gray-100 dark:text-white dark:data-[highlighted]:bg-oai-gray-800"
+                        >
+                          <Select.ItemText>{copy("skills.source.all")}</Select.ItemText>
+                          <Select.ItemIndicator>
+                            <Check className="h-3.5 w-3.5" aria-hidden />
+                          </Select.ItemIndicator>
+                        </Select.Item>
+                        {repos.map((repo) => {
+                          const value = `${repo.owner}/${repo.name}`;
+                          return (
+                            <Select.Item
+                              key={value}
+                              value={value}
+                              className="flex cursor-default select-none items-center justify-between gap-2 rounded px-3 py-1.5 text-sm text-oai-black outline-none data-[highlighted]:bg-oai-gray-100 dark:text-white dark:data-[highlighted]:bg-oai-gray-800"
+                            >
+                              <Select.ItemText>{value}</Select.ItemText>
+                              <Select.ItemIndicator>
+                                <Check className="h-3.5 w-3.5" aria-hidden />
+                              </Select.ItemIndicator>
+                            </Select.Item>
+                          );
+                        })}
+                      </Select.Popup>
+                    </Select.Positioner>
+                  </Select.Portal>
+                </Select.Root>
+              ) : null}
               <div className="relative flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-oai-gray-400" aria-hidden />
                 <Input
@@ -900,11 +934,16 @@ export function SkillsPage() {
                         ? copy("skills.browse.placeholder_all")
                         : copy("skills.browse.placeholder_repo", { repo: source })
                   }
-                  className="pl-9"
+                  className="pl-9 !border-oai-gray-200 dark:!border-oai-gray-800 focus:!border-oai-gray-400 focus:!ring-oai-gray-400/20 dark:focus:!border-oai-gray-500 dark:focus:!ring-oai-gray-500/20"
                 />
               </div>
               {source === SOURCE_SKILLSSH ? (
-                <Button type="button" onClick={handleSearch} disabled={query.trim().length < 2 || busyKey === "search"}>
+                <Button
+                  type="button"
+                  onClick={handleSearch}
+                  disabled={query.trim().length < 2 || busyKey === "search"}
+                  className="focus:!ring-oai-gray-400/30"
+                >
                   {busyKey === "search" ? (
                     <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden />
                   ) : (
@@ -912,21 +951,22 @@ export function SkillsPage() {
                   )}
                   {copy("skills.action.search")}
                 </Button>
-              ) : null}
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => setManageOpen((prev) => !prev)}
-                aria-expanded={manageOpen}
-                className="!h-10 shrink-0 whitespace-nowrap"
-              >
-                <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                {copy("skills.browse.manage_sources")}
-                <span className="ml-1.5 rounded bg-oai-gray-100 px-1.5 py-0.5 text-xs font-medium text-oai-gray-600 dark:bg-oai-gray-800 dark:text-oai-gray-300">
-                  {repos.length}
-                </span>
-              </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setManageOpen((prev) => !prev)}
+                  aria-expanded={manageOpen}
+                  className="!h-10 shrink-0 whitespace-nowrap !border-oai-gray-200 dark:!border-oai-gray-800 hover:!border-oai-gray-300 dark:hover:!border-oai-gray-700 hover:!text-oai-black dark:hover:!text-white focus:!ring-oai-gray-400/30"
+                >
+                  <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                  {copy("skills.browse.manage_sources")}
+                  <span className="ml-1.5 rounded bg-oai-gray-100 px-1.5 py-0.5 text-xs font-medium text-oai-gray-600 dark:bg-oai-gray-800 dark:text-oai-gray-300">
+                    {repos.length}
+                  </span>
+                </Button>
+              )}
             </div>
           ) : null}
 

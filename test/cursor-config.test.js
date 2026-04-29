@@ -6,6 +6,7 @@ const {
   normalizeCursorUsage,
   isCursorInstalled,
   extractCursorSessionToken,
+  resolveCursorPaths,
 } = require("../src/lib/cursor-config");
 
 // ── parseCursorCsv — new format ──
@@ -168,12 +169,108 @@ describe("normalizeCursorUsage — edge cases", () => {
   });
 });
 
+// ── resolveCursorPaths ──
+
+describe("resolveCursorPaths", () => {
+  it("uses ~/Library/Application Support/Cursor on macOS", () => {
+    const { appDir, stateDbPath } = resolveCursorPaths({
+      home: "/Users/alice",
+      platform: "darwin",
+      env: {},
+    });
+    assert.equal(appDir, "/Users/alice/Library/Application Support/Cursor");
+    assert.equal(
+      stateDbPath,
+      "/Users/alice/Library/Application Support/Cursor/User/globalStorage/state.vscdb",
+    );
+  });
+
+  it("uses %APPDATA%\\Cursor on Windows when APPDATA is set", () => {
+    const { appDir } = resolveCursorPaths({
+      home: "C:\\Users\\alice",
+      platform: "win32",
+      env: { APPDATA: "C:\\Users\\alice\\AppData\\Roaming" },
+    });
+    // path.join uses the host separator; just check the suffix
+    assert.ok(
+      appDir.endsWith("Cursor"),
+      `expected appDir to end with Cursor, got ${appDir}`,
+    );
+    assert.ok(
+      appDir.includes("AppData") && appDir.includes("Roaming"),
+      `expected AppData/Roaming in path, got ${appDir}`,
+    );
+  });
+
+  it("falls back to <home>/AppData/Roaming/Cursor on Windows when APPDATA is missing", () => {
+    const { appDir } = resolveCursorPaths({
+      home: "C:\\Users\\alice",
+      platform: "win32",
+      env: {},
+    });
+    assert.ok(
+      appDir.includes("AppData") && appDir.includes("Roaming") && appDir.endsWith("Cursor"),
+      `expected fallback AppData/Roaming/Cursor, got ${appDir}`,
+    );
+  });
+
+  it("uses XDG_CONFIG_HOME on Linux when set", () => {
+    const { appDir } = resolveCursorPaths({
+      home: "/home/alice",
+      platform: "linux",
+      env: { XDG_CONFIG_HOME: "/home/alice/.cfg" },
+    });
+    assert.equal(appDir, "/home/alice/.cfg/Cursor");
+  });
+
+  it("falls back to ~/.config/Cursor on Linux", () => {
+    const { appDir } = resolveCursorPaths({
+      home: "/home/alice",
+      platform: "linux",
+      env: {},
+    });
+    assert.equal(appDir, "/home/alice/.config/Cursor");
+  });
+
+  it("keeps cliConfigPath at ~/.cursor/cli-config.json on every platform", () => {
+    for (const platform of ["darwin", "win32", "linux"]) {
+      const { cliConfigPath } = resolveCursorPaths({
+        home: "/h",
+        platform,
+        env: { APPDATA: "C:\\AppData" },
+      });
+      assert.ok(
+        cliConfigPath.endsWith("cli-config.json") && cliConfigPath.includes(".cursor"),
+        `[${platform}] expected ~/.cursor/cli-config.json, got ${cliConfigPath}`,
+      );
+    }
+  });
+});
+
 // ── isCursorInstalled ──
 
 describe("isCursorInstalled", () => {
   it("returns a boolean", () => {
     const result = isCursorInstalled();
     assert.equal(typeof result, "boolean");
+  });
+
+  it("returns false when the resolved appDir does not exist (Windows)", () => {
+    const result = isCursorInstalled({
+      home: "/tmp/nonexistent-cursor-windows-home",
+      platform: "win32",
+      env: { APPDATA: "/tmp/nonexistent-cursor-appdata" },
+    });
+    assert.equal(result, false);
+  });
+
+  it("returns false when the resolved appDir does not exist (Linux)", () => {
+    const result = isCursorInstalled({
+      home: "/tmp/nonexistent-cursor-linux-home",
+      platform: "linux",
+      env: {},
+    });
+    assert.equal(result, false);
   });
 });
 

@@ -281,6 +281,8 @@
   "skills.source.label": "来源",
   "skills.source.all": "全部仓库",
   "skills.source.skillssh": "skills.sh（搜索）",
+  "skills.mode.repo": "仓库",
+  "skills.mode.skillssh": "skills.sh",
   "skills.browse.placeholder_all": "在已启用的仓库里搜索…",
   "skills.browse.placeholder_repo": "在 {{repo}} 中搜索…",
   "skills.browse.placeholder_skillssh": "在 skills.sh 仓库中搜索…",
