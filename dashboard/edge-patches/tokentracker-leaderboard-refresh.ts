@@ -422,14 +422,27 @@ export default async function (req: Request): Promise<Response> {
     };
     const settingsMap = new Map<string, UserSettingsRow>();
 
-    // Fetch in batches of 100 (IN filter limit)
-    for (let i = 0; i < userIds.length; i += 100) {
-      const batch = userIds.slice(i, i + 100);
-      const { data: settings } = await client.database
+    // Fetch in batches of 25. PostgREST .in() encodes user_ids into the URL
+    // (~42 bytes per UUID after URL-encoding); a batch of 100 produces a
+    // ~4 KB URL that the InsForge gateway silently truncates, returning
+    // {data: null, error}. The bug surfaced once the all-time leaderboard
+    // crossed ~80 users and produced an entirely Anonymous snapshot. 25
+    // keeps the URL well under 1.5 KB regardless of user count.
+    for (let i = 0; i < userIds.length; i += 25) {
+      const batch = userIds.slice(i, i + 25);
+      const { data: settings, error: settingsErr } = await client.database
         .from("tokentracker_user_settings")
         .select("user_id, leaderboard_public, leaderboard_anonymous, github_url, show_github_url")
         .in("user_id", batch);
 
+      if (settingsErr) {
+        logRefreshEvent({
+          event: "user_settings_fetch_error",
+          period,
+          batch_size: batch.length,
+          error: settingsErr.message,
+        });
+      }
       if (settings) {
         for (const s of settings as UserSettingsRow[]) {
           settingsMap.set(s.user_id, s);
@@ -439,13 +452,21 @@ export default async function (req: Request): Promise<Response> {
 
     // --- Fetch display_name/avatar_url from auth.users ---
     const userProfiles = new Map<string, { display_name: string | null; avatar_url: string | null }>();
-    for (let i = 0; i < userIds.length; i += 100) {
-      const batch = userIds.slice(i, i + 100);
-      const { data: users } = await client.database
+    for (let i = 0; i < userIds.length; i += 25) {
+      const batch = userIds.slice(i, i + 25);
+      const { data: users, error: profilesErr } = await client.database
         .from("tokentracker_user_profiles")
         .select("user_id, display_name, avatar_url")
         .in("user_id", batch);
 
+      if (profilesErr) {
+        logRefreshEvent({
+          event: "user_profiles_fetch_error",
+          period,
+          batch_size: batch.length,
+          error: profilesErr.message,
+        });
+      }
       if (users) {
         for (const u of users as { user_id: string; display_name: string | null; avatar_url: string | null }[]) {
           userProfiles.set(u.user_id, { display_name: u.display_name, avatar_url: u.avatar_url });
@@ -454,15 +475,23 @@ export default async function (req: Request): Promise<Response> {
     }
 
     // Fallback: existing snapshots for users not in auth.users
-    for (let i = 0; i < userIds.length; i += 100) {
-      if ([...userIds.slice(i, i + 100)].every(id => userProfiles.has(id))) continue;
-      const missing = userIds.slice(i, i + 100).filter(id => !userProfiles.has(id));
+    for (let i = 0; i < userIds.length; i += 25) {
+      if ([...userIds.slice(i, i + 25)].every(id => userProfiles.has(id))) continue;
+      const missing = userIds.slice(i, i + 25).filter(id => !userProfiles.has(id));
       if (missing.length === 0) continue;
-      const { data: existing } = await client.database
+      const { data: existing, error: fallbackErr } = await client.database
         .from("tokentracker_leaderboard_snapshots")
         .select("user_id, display_name, avatar_url")
         .in("user_id", missing)
         .order("generated_at", { ascending: false });
+      if (fallbackErr) {
+        logRefreshEvent({
+          event: "snapshot_fallback_fetch_error",
+          period,
+          batch_size: missing.length,
+          error: fallbackErr.message,
+        });
+      }
       if (existing) {
         for (const e of existing as { user_id: string; display_name: string | null; avatar_url: string | null }[]) {
           if (!userProfiles.has(e.user_id)) {

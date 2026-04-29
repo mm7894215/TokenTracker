@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from "react";
+import React from "react";
 import { motion } from "motion/react";
 import { Shell, Card, Button } from "../../openai/components";
 import { CostAnalysisModal } from "../components/CostAnalysisModal.jsx";
@@ -95,29 +95,6 @@ export function DashboardView(props) {
   const header = null;
   const footer = null;
 
-  // Measure left column height so right column can match it when the two-column
-  // grid is active (lg breakpoint = 1024px).
-  const leftColRef = useRef(null);
-  const [leftColHeight, setLeftColHeight] = useState(0);
-  const [isTwoCol, setIsTwoCol] = useState(false);
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return;
-    const mq = window.matchMedia("(min-width: 1024px)");
-    const update = () => setIsTwoCol(mq.matches);
-    update();
-    mq.addEventListener?.("change", update);
-    return () => mq.removeEventListener?.("change", update);
-  }, []);
-  useEffect(() => {
-    const el = leftColRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      setLeftColHeight(entry.contentRect.height);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
   return (
     <>
       <Shell
@@ -130,7 +107,7 @@ export function DashboardView(props) {
         {(showExpiredGate || showAuthGate) ? null : (
           <>
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-              <div ref={leftColRef} className="lg:col-span-4 flex flex-col gap-4 min-w-0 order-2 lg:order-1">
+              <div className="lg:col-span-4 flex flex-col gap-4 min-w-0 order-2 lg:order-1">
                 {screenshotMode ? (
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex flex-col gap-1">
@@ -221,10 +198,7 @@ export function DashboardView(props) {
                 ) : null}
               </div>
 
-              <div
-                className="lg:col-span-8 flex flex-col gap-4 min-w-0 order-1 lg:order-2"
-                style={isTwoCol && leftColHeight ? { maxHeight: leftColHeight } : undefined}
-              >
+              <div className="lg:col-span-8 flex flex-col gap-4 min-w-0 order-1 lg:order-2">
                 <UsageOverview
                   period={period}
                   periods={periodsForDisplay}
@@ -245,7 +219,7 @@ export function DashboardView(props) {
                 />
 
                 {!screenshotMode ? (
-                  <FadeIn delay={0.5} className="flex-1 flex flex-col min-h-0">
+                  <FadeIn delay={0.5}>
                     <DataDetails
                     projectEntries={projectUsageEntries}
                     projectLimit={projectUsageLimit}
