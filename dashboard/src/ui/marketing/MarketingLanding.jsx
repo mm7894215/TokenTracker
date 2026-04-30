@@ -1,10 +1,8 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion, useReducedMotion } from "motion/react";
 import { cn } from "../../lib/cn";
-import { getDashboardEntryPath } from "../../lib/host-mode";
 import { HeaderGithubStar } from "../openai/components/HeaderGithubStar.jsx";
-import { InsforgeUserHeaderControls } from "../../components/InsforgeUserHeaderControls.jsx";
 import { useInsforgeAuth } from "../../contexts/InsforgeAuthContext.jsx";
 import LaserFlow from "./components/LaserFlow.jsx";
 import LightRays from "./components/LightRays.jsx";
@@ -38,6 +36,17 @@ function CheckIcon({ className }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
       <polyline points="20 6 9 17 4 12"></polyline>
+    </svg>
+  );
+}
+
+function GoogleIcon({ className }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden>
+      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1Z" fill="#4285F4" />
+      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23Z" fill="#34A853" />
+      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18A10.96 10.96 0 0 0 1 12c0 1.77.42 3.44 1.18 4.93l3.66-2.84Z" fill="#FBBC05" />
+      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53Z" fill="#EA4335" />
     </svg>
   );
 }
@@ -79,10 +88,34 @@ export function MarketingLanding({
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  const isLocalMode =
-    typeof window !== "undefined" &&
-    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-  const { signedIn, loading: authLoading } = useInsforgeAuth();
+  const isLocalMode = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    // Dev escape hatch: append `?cloud=1` to preview the cloud-signed-out
+    // experience while running on localhost.
+    if (new URLSearchParams(window.location.search).get("cloud") === "1") return false;
+    return (
+      window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1"
+    );
+  }, []);
+  const { signedIn, loading: authLoading, signInWithOAuth } = useInsforgeAuth();
+  // Hide the Google CTA when the visitor is local-mode or already signed in.
+  const isInDashboardMode = isLocalMode || signedIn || authLoading;
+  const [oauthBusy, setOauthBusy] = useState(false);
+  const handleGoogleSignIn = useCallback(async () => {
+    if (typeof window === "undefined") return;
+    setOauthBusy(true);
+    try {
+      const { error: err } = await signInWithOAuth("google", `${window.location.origin}/`);
+      if (err) {
+        // Surface to console; the /login page remains available as a fallback
+        // via the header LOGIN / SIGN UP buttons.
+        console.error("[MarketingLanding] Google OAuth failed:", err);
+      }
+    } finally {
+      setOauthBusy(false);
+    }
+  }, [signInWithOAuth]);
 
   const modelAgentLabels = useMemo(
     () => ({
@@ -145,24 +178,6 @@ export function MarketingLanding({
               <HeaderGithubStar />
             </div>
           </div>
-          {isLocalMode && (
-            <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
-              <Link
-                to={getDashboardEntryPath()}
-                className={cn(
-                  buttonClass(signedIn || authLoading ? "default" : "ghost", "sm"),
-                  "no-underline px-5 rounded-full group",
-                  signedIn || authLoading
-                    ? "shadow-sm ring-1 ring-white/10"
-                    : "ring-1 ring-oai-gray-700",
-                )}
-              >
-                {copy("landing.v2.cta.primary")}
-                <span className="ml-2 inline-block transition-transform duration-200 group-hover:translate-x-0.5">&rarr;</span>
-              </Link>
-              <InsforgeUserHeaderControls />
-            </div>
-          )}
         </div>
       </header>
 
@@ -247,7 +262,42 @@ export function MarketingLanding({
                     </div>
                   </motion.div>
                   
-                  <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-4">
+                  {!isInDashboardMode && (
+                    <motion.div
+                      whileHover={reduceMotion ? undefined : { scale: 1.01, y: -1 }}
+                      transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                      className="group relative mt-3 inline-block w-full overflow-hidden rounded-2xl"
+                      style={{ padding: "1.5px 0" }}
+                    >
+                      <div
+                        className="absolute w-[300%] h-[50%] opacity-70 bottom-[-11px] right-[-250%] rounded-full animate-star-movement-bottom z-0"
+                        style={{
+                          background: "radial-gradient(circle, #b8b3ff, transparent 10%)",
+                          animationDuration: "6s",
+                        }}
+                      />
+                      <div
+                        className="absolute w-[300%] h-[50%] opacity-70 top-[-10px] left-[-250%] rounded-full animate-star-movement-top z-0"
+                        style={{
+                          background: "radial-gradient(circle, #b8b3ff, transparent 10%)",
+                          animationDuration: "6s",
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleGoogleSignIn}
+                        disabled={oauthBusy}
+                        className="relative z-[1] flex h-12 w-full items-center justify-center gap-2.5 rounded-2xl border border-[#b8b3ff]/30 bg-gradient-to-b from-[#a89eff] to-[#6d5ff0] text-base font-semibold text-white shadow-[0_0_24px_rgba(138,122,255,0.3)] transition-all duration-200 group-hover:from-[#c1b8ff] group-hover:to-[#7d6ffa] group-hover:shadow-[0_8px_32px_rgba(138,122,255,0.45)] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white">
+                          <GoogleIcon className="h-3.5 w-3.5" />
+                        </span>
+                        {copy("login.oauth.continue", { provider: "Google" })}
+                      </button>
+                    </motion.div>
+                  )}
+
+                  <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-4">
                     <a href={MAC_RELEASE_URL} target="_blank" rel="noopener noreferrer" className="group flex items-center gap-2 text-sm font-medium text-oai-gray-400 hover:text-white transition-colors">
                       <div className="flex items-center justify-center h-8 w-8 rounded-full bg-oai-gray-800 group-hover:bg-oai-gray-700 transition-colors">
                         <AppleIcon className="h-4 w-4 text-oai-gray-400 group-hover:text-white" />
