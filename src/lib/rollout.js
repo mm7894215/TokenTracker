@@ -2163,26 +2163,18 @@ function pickDelta(lastUsage, totalUsage, prevTotals) {
   const hasTotal = isNonEmptyObject(totalUsage);
   const hasPrevTotals = isNonEmptyObject(prevTotals);
 
-  // NOTE: We used to guard against "duplicate token_count records where
-  // total_token_usage is unchanged" by returning null here. We removed that
-  // guard to align token counts with ccusage exactly (audited against 10 days
-  // of real rollouts). When last_token_usage is present we trust it as the
-  // per-turn delta; when it's absent the cumulative-subtract path naturally
-  // yields an all-zero delta on duplicates and is still filtered below.
-  if (!hasLast && hasTotal && hasPrevTotals && totalsReset(totalUsage, prevTotals)) {
-    const normalized = normalizeUsage(totalUsage);
-    return isAllZeroUsage(normalized) ? null : normalized;
-  }
-
-  if (hasLast) {
-    return normalizeUsage(lastUsage);
-  }
-
   if (hasTotal && hasPrevTotals) {
+    if (totalsReset(totalUsage, prevTotals)) {
+      const resetUsage = hasLast ? lastUsage : totalUsage;
+      const normalized = normalizeUsage(resetUsage);
+      return isAllZeroUsage(normalized) ? null : normalized;
+    }
+
     const delta = {};
     for (const k of [
       "input_tokens",
       "cached_input_tokens",
+      "cache_creation_input_tokens",
       "output_tokens",
       "reasoning_output_tokens",
       "total_tokens",
@@ -2192,6 +2184,11 @@ function pickDelta(lastUsage, totalUsage, prevTotals) {
       if (Number.isFinite(a) && Number.isFinite(b)) delta[k] = Math.max(0, a - b);
     }
     const normalized = normalizeUsage(delta);
+    return isAllZeroUsage(normalized) ? null : normalized;
+  }
+
+  if (hasLast) {
+    const normalized = normalizeUsage(lastUsage);
     return isAllZeroUsage(normalized) ? null : normalized;
   }
 

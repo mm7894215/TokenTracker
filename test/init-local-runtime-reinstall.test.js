@@ -84,6 +84,7 @@ test("installLocalTrackerApp replaces stale installed runtime and writes a packa
     assert.notEqual(copiedParser, "stale parser\n");
     assert.equal(marker.name, "tokentracker-cli");
     assert.equal(typeof marker.version, "string");
+    await fs.stat(path.join(appDir, "dashboard", "dist", "index.html"));
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
