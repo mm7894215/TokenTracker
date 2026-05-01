@@ -1244,6 +1244,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
             output_tokens: zeroTotals.output_tokens,
             reasoning_output_tokens: zeroTotals.reasoning_output_tokens,
             total_tokens: zeroTotals.total_tokens,
+            billable_total_tokens: zeroTotals.billable_total_tokens,
             conversation_count: zeroTotals.conversation_count,
           }),
         );
@@ -1265,6 +1266,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
               output_tokens: zeroTotals.output_tokens,
               reasoning_output_tokens: zeroTotals.reasoning_output_tokens,
               total_tokens: zeroTotals.total_tokens,
+              billable_total_tokens: zeroTotals.billable_total_tokens,
               conversation_count: zeroTotals.conversation_count,
             }),
           );
@@ -1292,6 +1294,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
             output_tokens: totals.output_tokens,
             reasoning_output_tokens: totals.reasoning_output_tokens,
             total_tokens: totals.total_tokens,
+            billable_total_tokens: totals.billable_total_tokens ?? totals.total_tokens,
             conversation_count: totals.conversation_count,
           }),
         );
@@ -1318,6 +1321,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
           output_tokens: zeroTotals.output_tokens,
           reasoning_output_tokens: zeroTotals.reasoning_output_tokens,
           total_tokens: zeroTotals.total_tokens,
+          billable_total_tokens: zeroTotals.billable_total_tokens,
           conversation_count: zeroTotals.conversation_count,
         }),
       );
@@ -1340,6 +1344,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
             output_tokens: zeroTotals.output_tokens,
             reasoning_output_tokens: zeroTotals.reasoning_output_tokens,
             total_tokens: zeroTotals.total_tokens,
+            billable_total_tokens: zeroTotals.billable_total_tokens,
             conversation_count: zeroTotals.conversation_count,
           }),
         );
@@ -1361,6 +1366,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
         output_tokens: unknownBucket.totals.output_tokens,
         reasoning_output_tokens: unknownBucket.totals.reasoning_output_tokens,
         total_tokens: unknownBucket.totals.total_tokens,
+        billable_total_tokens: unknownBucket.totals.billable_total_tokens ?? unknownBucket.totals.total_tokens,
         conversation_count: unknownBucket.totals.conversation_count,
       }),
     );
@@ -1407,6 +1413,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
           output_tokens: group.totals.output_tokens,
           reasoning_output_tokens: group.totals.reasoning_output_tokens,
           total_tokens: group.totals.total_tokens,
+          billable_total_tokens: group.totals.billable_total_tokens ?? group.totals.total_tokens,
           conversation_count: group.totals.conversation_count,
         }),
       );
@@ -1461,6 +1468,7 @@ async function enqueueTouchedProjectBuckets({
         output_tokens: totals.output_tokens,
         reasoning_output_tokens: totals.reasoning_output_tokens,
         total_tokens: totals.total_tokens,
+        billable_total_tokens: totals.billable_total_tokens ?? totals.total_tokens,
         conversation_count: totals.conversation_count,
       }),
     );
@@ -1716,6 +1724,7 @@ function initTotals() {
     output_tokens: 0,
     reasoning_output_tokens: 0,
     total_tokens: 0,
+    billable_total_tokens: 0,
     conversation_count: 0,
   };
 }
@@ -1727,6 +1736,7 @@ function addTotals(target, delta) {
   target.output_tokens += delta.output_tokens || 0;
   target.reasoning_output_tokens += delta.reasoning_output_tokens || 0;
   target.total_tokens += delta.total_tokens || 0;
+  target.billable_total_tokens += delta.billable_total_tokens ?? delta.total_tokens ?? 0;
   target.conversation_count += delta.conversation_count || 0;
 }
 
@@ -1738,6 +1748,7 @@ function totalsKey(totals) {
     totals.output_tokens || 0,
     totals.reasoning_output_tokens || 0,
     totals.total_tokens || 0,
+    totals.billable_total_tokens ?? totals.total_tokens ?? 0,
     totals.conversation_count || 0,
   ].join("|");
 }
@@ -2056,7 +2067,9 @@ function normalizeGeminiTokens(tokens) {
   const output = toNonNegativeInt(tokens.output);
   const tool = toNonNegativeInt(tokens.tool);
   const thoughts = toNonNegativeInt(tokens.thoughts);
-  const total = toNonNegativeInt(tokens.total);
+  const reportedTotal = toNonNegativeInt(tokens.total);
+  const computedTotal = input + cached + output + tool + thoughts;
+  const total = Math.max(reportedTotal, computedTotal);
 
   return {
     input_tokens: input,
@@ -2554,20 +2567,30 @@ async function parseCursorApiIncremental({
   const hourlyState = normalizeHourlyState(cursors?.hourly);
   const touchedBuckets = new Set();
 
-  // Incremental: skip records we already processed
+  // Cursor's CSV is an account-level API export, not an append-only local log.
+  // Treat the fetched CSV as authoritative so historical backfills and row
+  // corrections replace prior local bucket totals instead of being skipped.
   const lastTs = cursors?.cursorApi?.lastRecordTimestamp || null;
   let latestTs = lastTs;
   let eventsAggregated = 0;
   const cb = typeof onProgress === "function" ? onProgress : null;
   const total = records.length;
 
+  if (records.length > 0) {
+    for (const [key, bucket] of Object.entries(hourlyState.buckets || {})) {
+      const parsed = parseBucketKey(key);
+      const sourceKey = normalizeSourceInput(parsed.source) || DEFAULT_SOURCE;
+      if (sourceKey !== defaultSource) continue;
+      if (!bucket?.totals) continue;
+      bucket.totals = initTotals();
+      touchedBuckets.add(key);
+    }
+  }
+
   for (let i = 0; i < records.length; i++) {
     const record = records[i];
     const recordDate = record.date;
     if (!recordDate) continue;
-
-    // Skip records we already processed (CSV is ordered newest-first)
-    if (lastTs && recordDate <= lastTs) continue;
 
     const { normalizeCursorUsage } = require("./cursor-config");
     const delta = normalizeCursorUsage(record);

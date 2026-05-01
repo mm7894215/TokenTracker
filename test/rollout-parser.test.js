@@ -15,6 +15,7 @@ const {
   parseCopilotIncremental,
   parseKimiIncremental,
   parseCodebuddyIncremental,
+  parseCursorApiIncremental,
   resolveCodebuddyDefaultModel,
   resolveCodebuddyProjectFiles,
 } = require("../src/lib/rollout");
@@ -743,6 +744,42 @@ test("parseGeminiIncremental aggregates gemini tokens and model", async () => {
   }
 });
 
+test("parseGeminiIncremental recomputes total when Gemini reported total excludes cache", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibescore-gemini-total-"));
+  try {
+    const sessionPath = path.join(tmp, "session.json");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const session = buildGeminiSession({
+      messages: [
+        {
+          id: "m1",
+          type: "assistant",
+          timestamp: "2025-12-26T08:05:00.000Z",
+          model: "gemini-3-flash-preview",
+          tokens: { input: 10, output: 5, cached: 20, thoughts: 3, tool: 2, total: 17 },
+        },
+      ],
+    });
+
+    await fs.writeFile(sessionPath, JSON.stringify(session), "utf8");
+
+    const res = await parseGeminiIncremental({ sessionFiles: [sessionPath], cursors, queuePath });
+    assert.equal(res.bucketsQueued, 1);
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].input_tokens, 10);
+    assert.equal(queued[0].cached_input_tokens, 20);
+    assert.equal(queued[0].output_tokens, 7);
+    assert.equal(queued[0].reasoning_output_tokens, 3);
+    assert.equal(queued[0].total_tokens, 40);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseGeminiIncremental is idempotent with unchanged totals", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibescore-gemini-"));
   try {
@@ -803,6 +840,61 @@ test("parseGeminiIncremental defaults missing model to unknown", async () => {
     const queued = await readJsonLines(queuePath);
     assert.equal(queued.length, 1);
     assert.equal(queued[0].model, "unknown");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCursorApiIncremental treats Cursor CSV as authoritative and replaces prior cursor buckets", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibescore-cursor-reconcile-"));
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const first = await parseCursorApiIncremental({
+      records: [
+        {
+          date: "2026-04-01T10:00:00.000Z",
+          model: "auto",
+          kind: "Included",
+          inputTokens: 100,
+          cacheReadTokens: 10,
+          cacheWriteTokens: 0,
+          outputTokens: 20,
+          totalTokens: 130,
+        },
+      ],
+      cursors,
+      queuePath,
+      source: "cursor",
+    });
+    assert.equal(first.eventsAggregated, 1);
+
+    const second = await parseCursorApiIncremental({
+      records: [
+        {
+          date: "2026-04-01T10:00:00.000Z",
+          model: "auto",
+          kind: "Included",
+          inputTokens: 40,
+          cacheReadTokens: 4,
+          cacheWriteTokens: 0,
+          outputTokens: 6,
+          totalTokens: 50,
+        },
+      ],
+      cursors,
+      queuePath,
+      source: "cursor",
+    });
+    assert.equal(second.eventsAggregated, 1);
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 2);
+    assert.equal(queued.at(-1).total_tokens, 50);
+    assert.equal(queued.at(-1).input_tokens, 40);
+    assert.equal(queued.at(-1).cached_input_tokens, 4);
+    assert.equal(cursors.hourly.buckets["cursor|auto|2026-04-01T10:00:00.000Z"].totals.total_tokens, 50);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

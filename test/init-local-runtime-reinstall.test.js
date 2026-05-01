@@ -4,6 +4,7 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const { spawnSync } = require("node:child_process");
 const { test } = require("node:test");
+const { installLocalTrackerApp } = require("../src/commands/init");
 
 const repoRoot = path.join(__dirname, "..");
 
@@ -62,6 +63,27 @@ test("init can rerun from installed local runtime without self-deleting app sour
     );
 
     await fs.stat(path.join(tmp, ".tokentracker", "tracker", "app", "src", "commands", "init.js"));
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("installLocalTrackerApp replaces stale installed runtime and writes a package marker", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-runtime-refresh-"));
+  try {
+    const appDir = path.join(tmp, "app");
+    await fs.mkdir(path.join(appDir, "src", "lib"), { recursive: true });
+    await fs.mkdir(path.join(appDir, "bin"), { recursive: true });
+    await fs.writeFile(path.join(appDir, "src", "lib", "cursor-config.js"), "stale parser\n", "utf8");
+    await fs.writeFile(path.join(appDir, "bin", "tracker.js"), "stale bin\n", "utf8");
+
+    await installLocalTrackerApp({ appDir });
+
+    const copiedParser = await fs.readFile(path.join(appDir, "src", "lib", "cursor-config.js"), "utf8");
+    const marker = JSON.parse(await fs.readFile(path.join(appDir, "package.json"), "utf8"));
+    assert.notEqual(copiedParser, "stale parser\n");
+    assert.equal(marker.name, "tokentracker-cli");
+    assert.equal(typeof marker.version, "string");
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

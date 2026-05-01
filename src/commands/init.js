@@ -879,7 +879,7 @@ function isRunnableCommand(command) {
 `;
 }
 
-module.exports = { cmdInit, buildNotifyHandler };
+module.exports = { cmdInit, buildNotifyHandler, installLocalTrackerApp };
 
 async function probeFile(p) {
   try {
@@ -908,6 +908,7 @@ async function installLocalTrackerApp({ appDir }) {
   const packageRoot = path.resolve(__dirname, "../..");
   const srcFrom = path.join(packageRoot, "src");
   const binFrom = path.join(packageRoot, "bin", "tracker.js");
+  const packageJsonFrom = path.join(packageRoot, "package.json");
   const nodeModulesFrom = path.join(packageRoot, "node_modules");
 
   // When running from the installed local runtime (or when appDir is symlinked to this package),
@@ -927,6 +928,7 @@ async function installLocalTrackerApp({ appDir }) {
   await ensureDir(binToDir);
   await fs.copyFile(binFrom, binTo);
   await fs.chmod(binTo, 0o755).catch(() => {});
+  await fs.copyFile(packageJsonFrom, path.join(appDir, "package.json")).catch(() => {});
   await copyRuntimeDependencies({ from: nodeModulesFrom, to: nodeModulesTo });
 }
 
