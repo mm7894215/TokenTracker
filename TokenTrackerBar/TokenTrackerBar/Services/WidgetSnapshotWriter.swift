@@ -266,6 +266,25 @@ enum WidgetSnapshotWriter {
             }
         }
 
+        // Kimi
+        if let kimi = limits.kimi, kimi.configured {
+            if let w = kimi.primaryWindow {
+                out.append(LimitProvider(source: "kimi", label: "Kimi · weekly",
+                                         fraction: w.usedPercent / 100.0,
+                                         resetsAt: parseISO(w.resetAt)))
+            }
+            if let w = kimi.secondaryWindow {
+                out.append(LimitProvider(source: "kimi", label: "Kimi · 5h",
+                                         fraction: w.usedPercent / 100.0,
+                                         resetsAt: parseISO(w.resetAt)))
+            }
+            if let w = kimi.tertiaryWindow {
+                out.append(LimitProvider(source: "kimi", label: "Kimi · total",
+                                         fraction: w.usedPercent / 100.0,
+                                         resetsAt: parseISO(w.resetAt)))
+            }
+        }
+
         // Kiro
         if limits.kiro.configured {
             if let w = limits.kiro.primaryWindow {

@@ -202,6 +202,81 @@ describe("getUsageLimits", () => {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  it("refreshes expired Kimi credentials before fetching usage limits", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-kimi-refresh-"));
+    try {
+      const kimiHome = path.join(tmp, ".kimi");
+      const credsPath = path.join(kimiHome, "credentials", "kimi-code.json");
+      fs.mkdirSync(path.dirname(credsPath), { recursive: true });
+      fs.writeFileSync(path.join(kimiHome, "config.toml"), 'default_model = "kimi-code/kimi-for-coding"\n');
+      fs.writeFileSync(
+        credsPath,
+        JSON.stringify({
+          access_token: "expired-kimi-token",
+          refresh_token: "refresh-kimi-token",
+          expires_at: 1,
+          scope: "kimi-code",
+          token_type: "Bearer",
+          expires_in: 900,
+        }),
+      );
+
+      const calls = [];
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "darwin",
+        securityRunner() {
+          return { status: 1, stdout: "" };
+        },
+        commandRunner() {
+          return { status: 1, stdout: "" };
+        },
+        fetchImpl(url, options = {}) {
+          calls.push({ url, authorization: options.headers?.Authorization || null, body: String(options.body || "") });
+          if (url === "https://auth.kimi.com/api/oauth/token") {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                access_token: "fresh-kimi-token",
+                refresh_token: "fresh-refresh-token",
+                expires_in: 900,
+                scope: "kimi-code",
+                token_type: "Bearer",
+              }),
+            });
+          }
+          if (url === "https://api.kimi.com/coding/v1/usages") {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                usage: { used: 4, limit: 10, resetTime: "2026-05-04T06:02:56.054Z" },
+              }),
+            });
+          }
+          return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+        },
+      });
+
+      assert.equal(calls[0].url, "https://auth.kimi.com/api/oauth/token");
+      assert.match(calls[0].body, /grant_type=refresh_token/);
+      assert.match(calls[0].body, /refresh_token=refresh-kimi-token/);
+      assert.equal(calls[1].authorization, "Bearer fresh-kimi-token");
+      assert.equal(result.kimi.error, null);
+      assert.equal(result.kimi.primary_window.used_percent, 40);
+
+      const saved = JSON.parse(fs.readFileSync(credsPath, "utf8"));
+      assert.equal(saved.access_token, "fresh-kimi-token");
+      assert.equal(saved.refresh_token, "fresh-refresh-token");
+      assert.ok(saved.expires_at > Date.now() / 1000);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("loadKimiCredentials", () => {
