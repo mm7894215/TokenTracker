@@ -4,6 +4,12 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const { DEFAULT_BASE_URL, resolveRuntimeConfig } = require("./runtime-config");
+const {
+  filterRowsByUsageScope,
+  getSourceScope,
+  listExcludedSources,
+  normalizeUsageScope,
+} = require("./source-metadata");
 
 const SYNC_TIMEOUT_MS = 120_000;
 const TRACKER_BIN = path.resolve(__dirname, "../../bin/tracker.js");
@@ -154,7 +160,7 @@ function aggregateByDay(rows, timeZoneContext = null) {
     }
     const a = byDay.get(day);
     a.total_tokens += row.total_tokens || 0;
-    a.billable_total_tokens += row.total_tokens || 0;
+    a.billable_total_tokens += row.billable_total_tokens ?? row.total_tokens ?? 0;
     a.total_cost_usd += computeRowCost(row);
     a.input_tokens += row.input_tokens || 0;
     a.output_tokens += row.output_tokens || 0;
@@ -164,6 +170,22 @@ function aggregateByDay(rows, timeZoneContext = null) {
     a.conversation_count += row.conversation_count || 0;
   }
   return Array.from(byDay.values()).sort((a, b) => a.day.localeCompare(b.day));
+}
+
+function getRequestedUsageScope(url) {
+  if (url.searchParams.get("include_account_level") === "1") return "all";
+  return normalizeUsageScope(url.searchParams.get("scope"));
+}
+
+function scopedQueueRows(queuePath, url) {
+  const scope = getRequestedUsageScope(url);
+  const allRows = readQueueData(queuePath);
+  return {
+    scope,
+    allRows,
+    rows: filterRowsByUsageScope(allRows, scope),
+    excludedSources: listExcludedSources(allRows, scope),
+  };
 }
 
 function getTimeZoneContext(url) {
@@ -796,7 +818,7 @@ function createLocalApiHandler({ queuePath }) {
       const from = url.searchParams.get("from") || "";
       const to = url.searchParams.get("to") || "";
       const timeZoneContext = getTimeZoneContext(url);
-      const rows = readQueueData(qp);
+      const { rows, scope, excludedSources } = scopedQueueRows(qp, url);
       const daily = aggregateByDay(rows, timeZoneContext).filter((d) => d.day >= from && d.day <= to);
       const totals = daily.reduce(
         (acc, r) => {
@@ -848,7 +870,7 @@ function createLocalApiHandler({ queuePath }) {
       const l30fromStr = shiftDay(todayStr, -29);
 
       json(res, {
-        from, to, days: daily.length,
+        from, to, days: daily.length, scope, excluded_sources: excludedSources,
         totals: { ...totals, total_cost_usd: totalCost.toFixed(6) },
         rolling: {
           last_7d: { from: l7fromStr, to: todayStr, active_days: l7.length, totals: l7t },
@@ -863,9 +885,9 @@ function createLocalApiHandler({ queuePath }) {
       const from = url.searchParams.get("from") || "";
       const to = url.searchParams.get("to") || "";
       const timeZoneContext = getTimeZoneContext(url);
-      const rows = readQueueData(qp);
+      const { rows, scope, excludedSources } = scopedQueueRows(qp, url);
       const daily = aggregateByDay(rows, timeZoneContext).filter((d) => d.day >= from && d.day <= to);
-      json(res, { from, to, data: daily });
+      json(res, { from, to, scope, excluded_sources: excludedSources, data: daily });
       return true;
     }
 
@@ -873,7 +895,7 @@ function createLocalApiHandler({ queuePath }) {
     if (p === "/functions/tokentracker-usage-heatmap") {
       const weeks = parseInt(url.searchParams.get("weeks") || "52", 10);
       const timeZoneContext = getTimeZoneContext(url);
-      const rows = readQueueData(qp);
+      const { rows, scope, excludedSources } = scopedQueueRows(qp, url);
       const daily = aggregateByDay(rows, timeZoneContext);
       const todayParts = getZonedParts(new Date(), timeZoneContext);
       const todayStr = formatPartsDayKey(todayParts) || new Date().toISOString().slice(0, 10);
@@ -910,7 +932,7 @@ function createLocalApiHandler({ queuePath }) {
       for (let i = 0; i < cells.length; i += 7) {
         weeksArr.push(cells.slice(i, i + 7));
       }
-      json(res, { from, to, week_starts_on: "sun", active_days: cells.filter((c) => c.billable_total_tokens > 0).length, streak_days: 0, weeks: weeksArr });
+      json(res, { from, to, scope, excluded_sources: excludedSources, week_starts_on: "sun", active_days: cells.filter((c) => c.billable_total_tokens > 0).length, streak_days: 0, weeks: weeksArr });
       return true;
     }
 
@@ -919,7 +941,8 @@ function createLocalApiHandler({ queuePath }) {
       const from = url.searchParams.get("from") || "";
       const to = url.searchParams.get("to") || "";
       const timeZoneContext = getTimeZoneContext(url);
-      const rows = readQueueData(qp).filter((r) => {
+      const { rows: scopedRows, scope, excludedSources } = scopedQueueRows(qp, url);
+      const rows = scopedRows.filter((r) => {
         if (!r.hour_start) return false;
         const d = rowDayKey(r, timeZoneContext);
         return d >= from && d <= to;
@@ -930,10 +953,10 @@ function createLocalApiHandler({ queuePath }) {
         const src = row.source || "unknown";
         const mdl = row.model || "unknown";
         if (!bySource.has(src))
-          bySource.set(src, { source: src, totals: { total_tokens: 0, billable_total_tokens: 0, input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_output_tokens: 0, total_cost_usd: "0" }, models: new Map() });
+          bySource.set(src, { source: src, source_scope: getSourceScope(src), totals: { total_tokens: 0, billable_total_tokens: 0, input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_output_tokens: 0, total_cost_usd: "0" }, models: new Map() });
         const sa = bySource.get(src);
         sa.totals.total_tokens += row.total_tokens || 0;
-        sa.totals.billable_total_tokens += row.total_tokens || 0;
+        sa.totals.billable_total_tokens += row.billable_total_tokens ?? row.total_tokens ?? 0;
         sa.totals.input_tokens += row.input_tokens || 0;
         sa.totals.output_tokens += row.output_tokens || 0;
         sa.totals.cached_input_tokens += row.cached_input_tokens || 0;
@@ -943,7 +966,7 @@ function createLocalApiHandler({ queuePath }) {
           sa.models.set(mdl, { model: mdl, model_id: mdl, totals: { total_tokens: 0, billable_total_tokens: 0, input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_output_tokens: 0, total_cost_usd: "0" } });
         const ma = sa.models.get(mdl);
         ma.totals.total_tokens += row.total_tokens || 0;
-        ma.totals.billable_total_tokens += row.total_tokens || 0;
+        ma.totals.billable_total_tokens += row.billable_total_tokens ?? row.total_tokens ?? 0;
         ma.totals.input_tokens += row.input_tokens || 0;
         ma.totals.output_tokens += row.output_tokens || 0;
         ma.totals.cached_input_tokens += row.cached_input_tokens || 0;
@@ -968,7 +991,7 @@ function createLocalApiHandler({ queuePath }) {
       });
 
       json(res, {
-        from, to, days: 0, sources,
+        from, to, days: 0, scope, excluded_sources: excludedSources, sources,
         pricing: { model: "per-model", pricing_mode: "per_token_type", source: "litellm", effective_from: new Date().toISOString().slice(0, 10) },
       });
       return true;
@@ -1061,9 +1084,9 @@ function createLocalApiHandler({ queuePath }) {
     if (p === "/functions/tokentracker-usage-hourly") {
       const day = url.searchParams.get("day") || new Date().toISOString().slice(0, 10);
       const timeZoneContext = getTimeZoneContext(url);
-      const rows = readQueueData(qp);
+      const { rows, scope, excludedSources } = scopedQueueRows(qp, url);
       const data = aggregateHourlyByDay(rows, day, timeZoneContext);
-      json(res, { day, data });
+      json(res, { day, scope, excluded_sources: excludedSources, data });
       return true;
     }
 
@@ -1072,7 +1095,7 @@ function createLocalApiHandler({ queuePath }) {
       const from = url.searchParams.get("from") || "";
       const to = url.searchParams.get("to") || "";
       const timeZoneContext = getTimeZoneContext(url);
-      const rows = readQueueData(qp);
+      const { rows, scope, excludedSources } = scopedQueueRows(qp, url);
       const byMonth = new Map();
       for (const row of rows) {
         if (!row.hour_start) continue;
@@ -1091,7 +1114,7 @@ function createLocalApiHandler({ queuePath }) {
         a.reasoning_output_tokens += row.reasoning_output_tokens || 0;
         a.conversation_count += row.conversation_count || 0;
       }
-      json(res, { from, to, data: Array.from(byMonth.values()).sort((a, b) => a.month.localeCompare(b.month)) });
+      json(res, { from, to, scope, excluded_sources: excludedSources, data: Array.from(byMonth.values()).sort((a, b) => a.month.localeCompare(b.month)) });
       return true;
     }
 

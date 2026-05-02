@@ -1,7 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { Settings as SettingsIcon } from "lucide-react";
-import { useUsageLimits } from "../hooks/use-usage-limits.js";
+import { useUsageLimits } from "../hooks/use-usage-limits";
 import { useLimitsDisplayPrefs } from "../hooks/use-limits-display-prefs.js";
 import { copy } from "../lib/copy";
 import { LimitsPageSkeleton } from "../components/LimitsPageSkeleton.jsx";
@@ -48,6 +48,7 @@ export function LimitsPage() {
                 codex={usageLimits?.codex}
                 cursor={usageLimits?.cursor}
                 gemini={usageLimits?.gemini}
+                kimi={usageLimits?.kimi}
                 kiro={usageLimits?.kiro}
                 antigravity={usageLimits?.antigravity}
                 copilot={usageLimits?.copilot}

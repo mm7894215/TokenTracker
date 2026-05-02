@@ -39,9 +39,15 @@ enum Strings {
     static var allProvidersHidden: String { t("All providers hidden", "所有提供方均已隐藏") }
     static var cursorPlanLabel: String { t("Plan", "套餐") }
     static var cursorAutoLabel: String { t("Auto", "自动") }
+    static var kimiWeeklyLabel: String { t("Weekly", "周") }
+    static var kimiFiveHourLabel: String { t("5h", "5h") }
+    static var kimiTotalLabel: String { t("Total", "总量") }
     static var kiroMonthLabel: String { t("Month", "本月") }
     static var kiroBonusLabel: String { t("Bonus", "奖励") }
     static var limitResetNow: String { t("now", "现在") }
+    static func kimiParallelLabel(_ count: Int) -> String {
+        t("Parallel: \(count)", "并发：\(count)")
+    }
 
     static var periodDayLabel: String { t("Day", "日") }
     static var periodWeekLabel: String { t("Week", "周") }

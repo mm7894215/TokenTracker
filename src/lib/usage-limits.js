@@ -1,5 +1,6 @@
 const cp = require("node:child_process");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const http = require("node:http");
 const https = require("node:https");
@@ -14,6 +15,7 @@ const {
 // 2-minute in-memory cache
 let cache = { data: null, fetchedAt: 0 };
 const CACHE_TTL_MS = 2 * 60 * 1000;
+const DEFAULT_PROVIDER_TIMEOUT_MS = 15_000;
 
 function clampPercent(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -52,14 +54,44 @@ function sleepMs(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchClaudeUsageLimits(accessToken, { fetchImpl = fetch } = {}) {
+function mergeAbortSignals(signalA, signalB) {
+  if (!signalA) return signalB;
+  if (!signalB) return signalA;
+  if (typeof AbortSignal.any === "function") {
+    return AbortSignal.any([signalA, signalB]);
+  }
+  return signalA;
+}
+
+function withFetchTimeout(fetchImpl, timeoutMs) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return fetchImpl;
+  return (url, options = {}) => {
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    return fetchImpl(url, {
+      ...options,
+      signal: mergeAbortSignals(options.signal, timeoutSignal),
+    });
+  };
+}
+
+function withProviderTimeout(promise, label, timeoutMs) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label} usage request timed out.`));
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function fetchClaudeUsageLimits(accessToken, { fetchImpl = fetch, maxAttempts = 3 } = {}) {
   const url = "https://api.anthropic.com/api/oauth/usage";
   const headers = {
     Authorization: `Bearer ${accessToken}`,
     "anthropic-beta": "oauth-2025-04-20",
     Accept: "application/json",
   };
-  const maxAttempts = 3;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const res = await fetchImpl(url, { method: "GET", headers });
     if (res.status === 401) {
@@ -202,6 +234,190 @@ async function fetchCursorLimits({ home, fetchImpl = fetch } = {}) {
   }
 }
 
+function resolveKimiHome({ home, env } = {}) {
+  const explicit = typeof env?.KIMI_HOME === "string" ? env.KIMI_HOME.trim() : "";
+  return explicit ? path.resolve(explicit) : path.join(home || os.homedir(), ".kimi");
+}
+
+function loadKimiCredentials({ home, env } = {}) {
+  const kimiHome = resolveKimiHome({ home, env });
+  const credsPath = path.join(kimiHome, "credentials", "kimi-code.json");
+  if (!fs.existsSync(credsPath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(credsPath, "utf8"));
+  } catch (_error) {
+    return null;
+  }
+}
+
+function saveKimiCredentials(creds, { home, env } = {}) {
+  const kimiHome = resolveKimiHome({ home, env });
+  const credsPath = path.join(kimiHome, "credentials", "kimi-code.json");
+  fs.mkdirSync(path.dirname(credsPath), { recursive: true });
+  fs.writeFileSync(credsPath, JSON.stringify(creds, null, 2));
+}
+
+function hasKimiConfig({ home, env } = {}) {
+  return fs.existsSync(path.join(resolveKimiHome({ home, env }), "config.toml"));
+}
+
+function kimiNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function kimiResetTime(value) {
+  if (typeof value !== "string" || !value) return null;
+  const ts = Date.parse(value);
+  return Number.isFinite(ts) && ts > 0 ? new Date(ts).toISOString() : null;
+}
+
+function kimiWindowFromUsage(data) {
+  if (!data || typeof data !== "object") return null;
+  const limit = kimiNumber(data.limit);
+  if (!Number.isFinite(limit) || limit <= 0) return null;
+  let used = kimiNumber(data.used);
+  if (used === null) {
+    const remaining = kimiNumber(data.remaining);
+    if (remaining !== null) used = limit - remaining;
+  }
+  if (!Number.isFinite(used)) return null;
+  return buildWindow({
+    usedPercent: (used / limit) * 100,
+    resetAt: kimiResetTime(data.resetTime || data.reset_at || data.resetAt),
+  });
+}
+
+function normalizeKimiUsageResponse(body) {
+  const firstLimit = Array.isArray(body?.limits) ? body.limits[0] : null;
+  const detail = firstLimit?.detail && typeof firstLimit.detail === "object" ? firstLimit.detail : firstLimit;
+  const parallelLimit = kimiNumber(body?.parallel?.limit);
+
+  return {
+    membership_level: typeof body?.user?.membership?.level === "string" ? body.user.membership.level : null,
+    subscription_type: typeof body?.subType === "string" ? body.subType : null,
+    parallel_limit: parallelLimit !== null ? parallelLimit : null,
+    primary_window: kimiWindowFromUsage(body?.usage),
+    secondary_window: kimiWindowFromUsage(detail),
+    tertiary_window: kimiWindowFromUsage(body?.totalQuota),
+  };
+}
+
+function kimiCredentialsExpired(creds, nowMs = Date.now()) {
+  const expiresAt = Number(creds?.expires_at);
+  if (!Number.isFinite(expiresAt) || expiresAt <= 0) return false;
+  return expiresAt * 1000 <= nowMs + 30_000;
+}
+
+async function refreshKimiAccessToken({ refreshToken, home, env, fetchImpl = fetch } = {}) {
+  if (typeof refreshToken !== "string" || !refreshToken.trim()) {
+    throw new Error("Not logged in to Kimi. Run 'kimi' in Terminal to authenticate.");
+  }
+
+  const body = new URLSearchParams({
+    client_id: "17e5f671-d194-4dfb-9706-5516cb48c098",
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+  });
+
+  const res = await fetchImpl("https://auth.kimi.com/api/oauth/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "X-Msh-Platform": "kimi_cli",
+    },
+    body,
+  });
+  if (res.status === 401 || res.status === 403) {
+    throw new Error("Not logged in to Kimi. Run 'kimi' in Terminal to authenticate.");
+  }
+  if (!res.ok) {
+    throw new Error(`Kimi token refresh failed (HTTP ${res.status})`);
+  }
+
+  const json = await res.json();
+  if (!json?.access_token) {
+    throw new Error("Could not parse Kimi token refresh response");
+  }
+
+  const expiresIn = Number(json.expires_in);
+  const next = {
+    access_token: String(json.access_token),
+    refresh_token: String(json.refresh_token || refreshToken),
+    expires_at: Date.now() / 1000 + (Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 900),
+    scope: String(json.scope || "kimi-code"),
+    token_type: String(json.token_type || "Bearer"),
+    expires_in: Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 900,
+  };
+  saveKimiCredentials(next, { home, env });
+  return next.access_token;
+}
+
+async function fetchKimiUsage(accessToken, { fetchImpl = fetch } = {}) {
+  const res = await fetchImpl("https://api.kimi.com/coding/v1/usages", {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json",
+    },
+  });
+  if (res.status === 401) {
+    throw new Error("token_expired");
+  }
+  if (!res.ok) {
+    throw new Error(`Kimi API returned ${res.status}`);
+  }
+  return res.json();
+}
+
+async function fetchKimiLimits({ home, env, fetchImpl = fetch } = {}) {
+  if (!hasKimiConfig({ home, env })) {
+    return { configured: false };
+  }
+  const creds = loadKimiCredentials({ home, env });
+  let accessToken = typeof creds?.access_token === "string" ? creds.access_token.trim() : "";
+  if (!accessToken) {
+    return { configured: false };
+  }
+  try {
+    if (kimiCredentialsExpired(creds) && creds?.refresh_token) {
+      accessToken = await refreshKimiAccessToken({
+        refreshToken: creds.refresh_token,
+        home,
+        env,
+        fetchImpl,
+      });
+    }
+    let body;
+    try {
+      body = await fetchKimiUsage(accessToken, { fetchImpl });
+    } catch (error) {
+      if (error?.message === "token_expired" && creds?.refresh_token) {
+        accessToken = await refreshKimiAccessToken({
+          refreshToken: creds.refresh_token,
+          home,
+          env,
+          fetchImpl,
+        });
+        body = await fetchKimiUsage(accessToken, { fetchImpl });
+      } else {
+        throw error;
+      }
+    }
+    return {
+      configured: true,
+      error: null,
+      ...normalizeKimiUsageResponse(body),
+    };
+  } catch (error) {
+    return {
+      configured: true,
+      error: error?.message || "Unknown error",
+    };
+  }
+}
+
 function resolveGeminiHome({ home, env } = {}) {
   const explicit = typeof env?.GEMINI_HOME === "string" ? env.GEMINI_HOME.trim() : "";
   return explicit ? path.resolve(explicit) : path.join(home, ".gemini");
@@ -229,39 +445,83 @@ function loadGeminiCredentials({ home, env } = {}) {
   }
 }
 
-function extractGeminiOauthClientCredentials({ commandRunner } = {}) {
-  const result = runCommand(commandRunner, "which", ["gemini"], { timeout: 2000 });
-  const geminiPath = typeof result?.stdout === "string" ? result.stdout.trim() : "";
-  if (!geminiPath) return null;
-
-  let realPath = geminiPath;
+function resolveSymlinkOnce(filePath) {
   try {
-    const resolved = fs.readlinkSync(geminiPath);
-    realPath = path.isAbsolute(resolved)
+    const resolved = fs.readlinkSync(filePath);
+    return path.isAbsolute(resolved)
       ? resolved
-      : path.join(path.dirname(geminiPath), resolved);
+      : path.join(path.dirname(filePath), resolved);
+  } catch (_error) {
+    return filePath;
+  }
+}
+
+function expandGeminiExecutableCandidates({ home } = {}) {
+  const candidates = [];
+  const add = (filePath) => {
+    if (typeof filePath === "string" && filePath && !candidates.includes(filePath)) {
+      candidates.push(filePath);
+    }
+  };
+
+  const nvmDir = path.join(home || os.homedir(), ".nvm", "versions", "node");
+  try {
+    for (const version of fs.readdirSync(nvmDir)) {
+      add(path.join(nvmDir, version, "bin", "gemini"));
+    }
   } catch (_error) {}
 
-  const binDir = path.dirname(realPath);
-  const baseDir = path.dirname(binDir);
-  const candidates = [
-    path.join(baseDir, "libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js"),
-    path.join(baseDir, "lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js"),
-    path.join(baseDir, "share/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js"),
-    path.join(baseDir, "../gemini-cli-core/dist/src/code_assist/oauth2.js"),
-    path.join(baseDir, "node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js"),
+  add(path.join(path.dirname(resolveSymlinkOnce(process.execPath)), "gemini"));
+  add("/opt/homebrew/bin/gemini");
+  add("/usr/local/bin/gemini");
+
+  return candidates;
+}
+
+function extractGeminiOauthClientCredentials({ commandRunner, home } = {}) {
+  const result = runCommand(commandRunner, "which", ["gemini"], { timeout: 2000 });
+  const geminiPath = typeof result?.stdout === "string" ? result.stdout.trim() : "";
+
+  const geminiPaths = [
+    ...(geminiPath ? [geminiPath] : []),
+    ...expandGeminiExecutableCandidates({ home }),
   ];
 
-  for (const candidate of candidates) {
-    if (!fs.existsSync(candidate)) continue;
-    try {
-      const content = fs.readFileSync(candidate, "utf8");
-      const clientId = content.match(/OAUTH_CLIENT_ID\s*=\s*['"]([\w\-\.]+)['"]\s*;/)?.[1] || null;
-      const clientSecret = content.match(/OAUTH_CLIENT_SECRET\s*=\s*['"]([\w\-]+)['"]\s*;/)?.[1] || null;
-      if (clientId && clientSecret) {
-        return { clientId, clientSecret };
-      }
-    } catch (_error) {}
+  for (const candidateGeminiPath of geminiPaths) {
+    if (!fs.existsSync(candidateGeminiPath)) continue;
+    const realPath = resolveSymlinkOnce(candidateGeminiPath);
+    const binDir = path.dirname(realPath);
+    const baseDir = path.dirname(binDir);
+    const bundleDir = path.dirname(realPath);
+    const candidates = [
+      path.join(baseDir, "libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js"),
+      path.join(baseDir, "lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js"),
+      path.join(baseDir, "share/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js"),
+      path.join(baseDir, "../gemini-cli-core/dist/src/code_assist/oauth2.js"),
+      path.join(baseDir, "node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js"),
+    ];
+    if (path.basename(bundleDir) === "bundle") {
+      candidates.push(realPath);
+      try {
+        for (const file of fs.readdirSync(bundleDir)) {
+          if (/^chunk-.*\.js$/.test(file)) {
+            candidates.push(path.join(bundleDir, file));
+          }
+        }
+      } catch (_error) {}
+    }
+
+    for (const candidate of candidates) {
+      if (!fs.existsSync(candidate)) continue;
+      try {
+        const content = fs.readFileSync(candidate, "utf8");
+        const clientId = content.match(/OAUTH_CLIENT_ID\s*=\s*['"]([^'"]+)['"]/)?.[1] || null;
+        const clientSecret = content.match(/OAUTH_CLIENT_SECRET\s*=\s*['"]([^'"]+)['"]/)?.[1] || null;
+        if (clientId && clientSecret) {
+          return { clientId, clientSecret };
+        }
+      } catch (_error) {}
+    }
   }
   return null;
 }
@@ -273,7 +533,7 @@ async function refreshGeminiAccessToken({
   fetchImpl = fetch,
   commandRunner,
 }) {
-  const oauthClient = extractGeminiOauthClientCredentials({ commandRunner });
+  const oauthClient = extractGeminiOauthClientCredentials({ commandRunner, home });
   if (!oauthClient?.clientId || !oauthClient?.clientSecret) {
     throw new Error("Gemini API error: Could not find Gemini CLI OAuth configuration");
   }
@@ -990,14 +1250,15 @@ function antigravityCodeIsOk(code) {
 
 function parseAntigravityDate(value) {
   if (typeof value === "string" && value) {
-    const iso = Date.parse(value);
-    if (Number.isFinite(iso)) return new Date(iso).toISOString();
     const numeric = Number(value);
-    if (Number.isFinite(numeric)) {
+    if (Number.isFinite(numeric) && numeric > 0) {
       return new Date(numeric * 1000).toISOString();
     }
+    if (Number.isFinite(numeric)) return null;
+    const iso = Date.parse(value);
+    if (Number.isFinite(iso) && iso > 0) return new Date(iso).toISOString();
   }
-  if (typeof value === "number" && Number.isFinite(value)) {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
     return new Date(value * 1000).toISOString();
   }
   return null;
@@ -1203,6 +1464,7 @@ async function getUsageLimits({
   commandRunner,
   requestFn,
   now = new Date(),
+  providerTimeoutMs = DEFAULT_PROVIDER_TIMEOUT_MS,
 } = {}) {
   const nowMs = Date.now();
   if (cache.data && nowMs - cache.fetchedAt < CACHE_TTL_MS) {
@@ -1214,24 +1476,30 @@ async function getUsageLimits({
     readCodexAccessToken({ home, env }),
   ]);
 
-  const [claudeResult, codexResult, cursor, gemini, kiro, antigravity, copilot] = await Promise.all([
+  const providerFetch = withFetchTimeout(fetchImpl, providerTimeoutMs);
+  const [claudeResult, codexResult, cursor, kimi, gemini, kiro, antigravity, copilot] = await Promise.all([
     claudeToken
-      ? fetchClaudeUsageLimits(claudeToken, { fetchImpl }).then(
+      ? withProviderTimeout(fetchClaudeUsageLimits(claudeToken, { fetchImpl: providerFetch, maxAttempts: 1 }), "Claude", providerTimeoutMs).then(
           (value) => ({ status: "fulfilled", value }),
           (reason) => ({ status: "rejected", reason }),
         )
       : Promise.resolve(null),
     codexToken
-      ? fetchCodexUsageLimits(codexToken, { fetchImpl }).then(
+      ? withProviderTimeout(fetchCodexUsageLimits(codexToken, { fetchImpl: providerFetch }), "Codex", providerTimeoutMs).then(
           (value) => ({ status: "fulfilled", value }),
           (reason) => ({ status: "rejected", reason }),
         )
       : Promise.resolve(null),
-    fetchCursorLimits({ home, fetchImpl }),
-    fetchGeminiLimits({ home, env, fetchImpl, commandRunner }),
+    withProviderTimeout(fetchCursorLimits({ home, fetchImpl: providerFetch }), "Cursor", providerTimeoutMs)
+      .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
+    withProviderTimeout(fetchKimiLimits({ home, env, fetchImpl: providerFetch }), "Kimi", providerTimeoutMs)
+      .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
+    withProviderTimeout(fetchGeminiLimits({ home, env, fetchImpl: providerFetch, commandRunner }), "Gemini", providerTimeoutMs)
+      .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
     Promise.resolve().then(() => fetchKiroLimits({ commandRunner, now })),
     fetchAntigravityLimits({ commandRunner, requestFn }),
-    fetchCopilotLimits({ home, env, fetchImpl }),
+    withProviderTimeout(fetchCopilotLimits({ home, env, fetchImpl: providerFetch }), "GitHub Copilot", providerTimeoutMs)
+      .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
   ]);
 
   let claude;
@@ -1269,6 +1537,7 @@ async function getUsageLimits({
     claude,
     codex,
     cursor,
+    kimi,
     gemini,
     kiro,
     antigravity,
@@ -1286,8 +1555,11 @@ function resetUsageLimitsCache() {
 module.exports = {
   getUsageLimits,
   resetUsageLimitsCache,
+  extractGeminiOauthClientCredentials,
+  loadKimiCredentials,
   normalizeCursorUsageSummary,
   normalizeGeminiQuotaResponse,
+  normalizeKimiUsageResponse,
   parseKiroUsageOutput,
   normalizeAntigravityResponse,
   parseListeningPorts,

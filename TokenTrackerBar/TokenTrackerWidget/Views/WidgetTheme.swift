@@ -33,6 +33,7 @@ enum WidgetTheme {
         case "opencode":    return .orange
         case "openclaw":    return .pink
         case "cursor":      return .yellow
+        case "kimi":        return .purple
         case "everycode":   return .cyan
         case "kiro":        return .mint
         case "antigravity": return .indigo

@@ -37,6 +37,13 @@ async function cmdServe(argv) {
     }
   }
 
+  try {
+    const { installLocalTrackerApp } = require("./init");
+    await installLocalTrackerApp({ appDir: path.join(trackerDir, "app") });
+  } catch (e) {
+    process.stdout.write(`Runtime refresh warning: ${e?.message || e}\n`);
+  }
+
   // 0.1 Ensure config.json baseUrl matches the canonical default
   try {
     const { DEFAULT_BASE_URL } = require("../lib/runtime-config");

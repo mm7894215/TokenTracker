@@ -52,6 +52,7 @@ const { resolveTrackerPaths } = require("../lib/tracker-paths");
 const { resolveRuntimeConfig } = require("../lib/runtime-config");
 
 const CURSOR_UNKNOWN_MIGRATION_KEY = "cursorUnknownPurge_2026_04";
+const ROLLOUT_CUMULATIVE_DELTA_MIGRATION_KEY = "rolloutCumulativeDeltaReparse_2026_05";
 
 async function cmdSync(argv) {
   const opts = parseArgs(argv);
@@ -113,6 +114,8 @@ async function cmdSync(argv) {
         rolloutFiles.push({ path: filePath, source: entry.source });
       }
     }
+
+    await migrateRolloutCumulativeDeltaBuckets({ cursors, queuePath, rolloutFiles });
 
     const openclawFiles = openclawSignal?.sessionFile
       ? [{ path: openclawSignal.sessionFile, source: "openclaw" }]
@@ -621,7 +624,13 @@ function parseArgs(argv) {
   return out;
 }
 
-module.exports = { cmdSync, migrateCursorUnknownBuckets, CURSOR_UNKNOWN_MIGRATION_KEY };
+module.exports = {
+  cmdSync,
+  migrateCursorUnknownBuckets,
+  migrateRolloutCumulativeDeltaBuckets,
+  CURSOR_UNKNOWN_MIGRATION_KEY,
+  ROLLOUT_CUMULATIVE_DELTA_MIGRATION_KEY,
+};
 
 function normalizeString(value) {
   if (typeof value !== "string") return null;
@@ -1033,4 +1042,68 @@ async function migrateCursorUnknownBuckets({ cursors, queuePath }) {
   }
 
   cursors.migrations[CURSOR_UNKNOWN_MIGRATION_KEY] = new Date().toISOString();
+}
+
+async function migrateRolloutCumulativeDeltaBuckets({ cursors, queuePath, rolloutFiles }) {
+  if (!cursors || typeof cursors !== "object") return;
+  cursors.migrations = cursors.migrations || {};
+  if (cursors.migrations[ROLLOUT_CUMULATIVE_DELTA_MIGRATION_KEY]) return;
+
+  const rolloutPathSources = new Map();
+  for (const entry of Array.isArray(rolloutFiles) ? rolloutFiles : []) {
+    const filePath = typeof entry === "string" ? entry : entry?.path;
+    const source = typeof entry === "string" ? "codex" : String(entry?.source || "codex");
+    if (!filePath) continue;
+    if (source === "codex" || source === "every-code") {
+      rolloutPathSources.set(filePath, source);
+    }
+  }
+
+  if (cursors.files && typeof cursors.files === "object") {
+    for (const filePath of rolloutPathSources.keys()) {
+      delete cursors.files[filePath];
+    }
+  }
+
+  const buckets = cursors.hourly?.buckets;
+  const retractions = [];
+  if (buckets && typeof buckets === "object") {
+    for (const key of Object.keys(buckets)) {
+      const [source, model, ...hourParts] = key.split("|");
+      if (source !== "codex" && source !== "every-code") continue;
+      const hourStart = hourParts.join("|");
+      retractions.push(
+        JSON.stringify({
+          source,
+          model: model || "unknown",
+          hour_start: hourStart,
+          input_tokens: 0,
+          cached_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+          output_tokens: 0,
+          reasoning_output_tokens: 0,
+          total_tokens: 0,
+          billable_total_tokens: 0,
+          conversation_count: 0,
+        }),
+      );
+      delete buckets[key];
+    }
+  }
+
+  const groupQueued = cursors.hourly?.groupQueued;
+  if (groupQueued && typeof groupQueued === "object") {
+    for (const key of Object.keys(groupQueued)) {
+      if (key.startsWith("codex|") || key.startsWith("every-code|")) {
+        delete groupQueued[key];
+      }
+    }
+  }
+
+  if (retractions.length > 0) {
+    await ensureDir(path.dirname(queuePath));
+    await fs.appendFile(queuePath, retractions.join("\n") + "\n");
+  }
+
+  cursors.migrations[ROLLOUT_CUMULATIVE_DELTA_MIGRATION_KEY] = new Date().toISOString();
 }
