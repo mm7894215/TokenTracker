@@ -1035,14 +1035,15 @@ function antigravityCodeIsOk(code) {
 
 function parseAntigravityDate(value) {
   if (typeof value === "string" && value) {
-    const iso = Date.parse(value);
-    if (Number.isFinite(iso)) return new Date(iso).toISOString();
     const numeric = Number(value);
-    if (Number.isFinite(numeric)) {
+    if (Number.isFinite(numeric) && numeric > 0) {
       return new Date(numeric * 1000).toISOString();
     }
+    if (Number.isFinite(numeric)) return null;
+    const iso = Date.parse(value);
+    if (Number.isFinite(iso) && iso > 0) return new Date(iso).toISOString();
   }
-  if (typeof value === "number" && Number.isFinite(value)) {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
     return new Date(value * 1000).toISOString();
   }
   return null;

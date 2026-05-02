@@ -247,6 +247,18 @@ describe("normalizeGeminiQuotaResponse", () => {
     assert.equal(result.secondary_window.used_percent, 20);
     assert.equal(result.tertiary_window.used_percent, 10);
   });
+
+  it("does not show epoch reset time when Gemini returns resetTime 0", () => {
+    const result = normalizeGeminiQuotaResponse({
+      buckets: [
+        { modelId: "gemini-2.5-pro", remainingFraction: 0, resetTime: "0" },
+        { modelId: "gemini-3-pro-preview", remainingFraction: 0, resetTime: "1970-01-01T00:00:00Z" },
+      ],
+    });
+
+    assert.equal(result.primary_window.used_percent, 100);
+    assert.equal(result.primary_window.reset_at, null);
+  });
 });
 
 describe("normalizeAntigravityResponse", () => {
