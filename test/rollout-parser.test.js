@@ -3800,6 +3800,8 @@ test("parseOmpIncremental computes totalTokens fallback when usage.totalTokens m
     const queued = await readJsonLines(queuePath);
     assert.equal(queued.length, 1);
     assert.equal(queued[0].total_tokens, 98);
+    assert.equal(queued[0].cached_input_tokens, 10);
+    assert.equal(queued[0].cache_creation_input_tokens, 5);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
