@@ -7,8 +7,10 @@ const path = require("node:path");
 const {
   extractGeminiOauthClientCredentials,
   getUsageLimits,
+  loadKimiCredentials,
   normalizeCursorUsageSummary,
   normalizeGeminiQuotaResponse,
+  normalizeKimiUsageResponse,
   parseKiroUsageOutput,
   resetUsageLimitsCache,
   normalizeAntigravityResponse,
@@ -161,6 +163,112 @@ describe("getUsageLimits", () => {
       resetUsageLimitsCache();
       fs.rmSync(tmp, { recursive: true, force: true });
     }
+  });
+
+  it("does not block the whole response when Kimi usage hangs", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-kimi-timeout-"));
+    try {
+      const kimiHome = path.join(tmp, ".kimi");
+      fs.mkdirSync(path.join(kimiHome, "credentials"), { recursive: true });
+      fs.writeFileSync(path.join(kimiHome, "config.toml"), 'default_model = "kimi-code/kimi-for-coding"\n');
+      fs.writeFileSync(
+        path.join(kimiHome, "credentials", "kimi-code.json"),
+        JSON.stringify({ access_token: "kimi-token" }),
+      );
+
+      const started = Date.now();
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "darwin",
+        providerTimeoutMs: 10,
+        securityRunner() {
+          return { status: 1, stdout: "" };
+        },
+        commandRunner() {
+          return { status: 1, stdout: "" };
+        },
+        fetchImpl() {
+          return new Promise(() => {});
+        },
+      });
+
+      assert.ok(Date.now() - started < 500);
+      assert.equal(result.kimi.configured, true);
+      assert.match(result.kimi.error, /Kimi usage request timed out/);
+      assert.equal(result.claude.configured, false);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("loadKimiCredentials", () => {
+  it("returns null when Kimi credentials are absent", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-kimi-missing-"));
+    try {
+      assert.equal(loadKimiCredentials({ home: tmp }), null);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("normalizeKimiUsageResponse", () => {
+  it("maps weekly, 5h, total, and parallel quota windows", () => {
+    const result = normalizeKimiUsageResponse({
+      usage: {
+        limit: "100",
+        used: "64",
+        remaining: "36",
+        resetTime: "2026-05-04T06:02:56.054721Z",
+      },
+      limits: [
+        {
+          window: { duration: 300, timeUnit: "TIME_UNIT_MINUTE" },
+          detail: {
+            limit: "100",
+            used: "4",
+            remaining: "96",
+            resetTime: "2026-05-02T05:02:56.054721Z",
+          },
+        },
+      ],
+      parallel: { limit: "20" },
+      totalQuota: { limit: "100", remaining: "99" },
+      user: { membership: { level: "LEVEL_INTERMEDIATE" } },
+      subType: "TYPE_PURCHASE",
+    });
+
+    assert.equal(result.membership_level, "LEVEL_INTERMEDIATE");
+    assert.equal(result.subscription_type, "TYPE_PURCHASE");
+    assert.equal(result.parallel_limit, 20);
+    assert.deepEqual(result.primary_window, {
+      used_percent: 64,
+      reset_at: "2026-05-04T06:02:56.054Z",
+    });
+    assert.deepEqual(result.secondary_window, {
+      used_percent: 4,
+      reset_at: "2026-05-02T05:02:56.054Z",
+    });
+    assert.deepEqual(result.tertiary_window, {
+      used_percent: 1,
+      reset_at: null,
+    });
+  });
+
+  it("returns null windows for invalid or zero limits", () => {
+    const result = normalizeKimiUsageResponse({
+      usage: { limit: "0", used: "12", remaining: "0" },
+      limits: [{ detail: { limit: "bad", used: "1" } }],
+      totalQuota: { limit: "0", remaining: "0" },
+    });
+
+    assert.equal(result.primary_window, null);
+    assert.equal(result.secondary_window, null);
+    assert.equal(result.tertiary_window, null);
+    assert.equal(result.parallel_limit, null);
   });
 });
 

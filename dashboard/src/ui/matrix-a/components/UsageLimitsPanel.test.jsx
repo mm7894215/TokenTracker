@@ -24,4 +24,34 @@ describe("UsageLimitsPanel", () => {
     expect(screen.getByText("Not connected")).toBeInTheDocument();
     expect(screen.getByText("Plan")).toBeInTheDocument();
   });
+
+  it("renders Kimi quota windows and not-connected state", () => {
+    const { rerender } = render(
+      <UsageLimitsPanel
+        kimi={{
+          configured: true,
+          error: null,
+          parallel_limit: 20,
+          primary_window: { used_percent: 64, reset_at: "2026-05-04T06:02:56.054Z" },
+          secondary_window: { used_percent: 4, reset_at: "2026-05-02T05:02:56.054Z" },
+          tertiary_window: { used_percent: 1, reset_at: null },
+        }}
+        order={["kimi"]}
+      />,
+    );
+
+    expect(screen.getByText("Kimi")).toBeInTheDocument();
+    expect(screen.getByText("Weekly")).toBeInTheDocument();
+    expect(screen.getByText("5h")).toBeInTheDocument();
+    expect(screen.getByText("Total")).toBeInTheDocument();
+    expect(screen.getByText("Parallel: 20")).toBeInTheDocument();
+    expect(screen.getByText("64%")).toBeInTheDocument();
+    expect(screen.getByText("4%")).toBeInTheDocument();
+    expect(screen.getByText("1%")).toBeInTheDocument();
+
+    rerender(<UsageLimitsPanel kimi={{ configured: false }} order={["kimi"]} />);
+
+    expect(screen.getByText("Kimi")).toBeInTheDocument();
+    expect(screen.getByText("Not connected")).toBeInTheDocument();
+  });
 });

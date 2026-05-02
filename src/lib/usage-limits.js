@@ -234,6 +234,106 @@ async function fetchCursorLimits({ home, fetchImpl = fetch } = {}) {
   }
 }
 
+function resolveKimiHome({ home, env } = {}) {
+  const explicit = typeof env?.KIMI_HOME === "string" ? env.KIMI_HOME.trim() : "";
+  return explicit ? path.resolve(explicit) : path.join(home || os.homedir(), ".kimi");
+}
+
+function loadKimiCredentials({ home, env } = {}) {
+  const kimiHome = resolveKimiHome({ home, env });
+  const credsPath = path.join(kimiHome, "credentials", "kimi-code.json");
+  if (!fs.existsSync(credsPath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(credsPath, "utf8"));
+  } catch (_error) {
+    return null;
+  }
+}
+
+function hasKimiConfig({ home, env } = {}) {
+  return fs.existsSync(path.join(resolveKimiHome({ home, env }), "config.toml"));
+}
+
+function kimiNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function kimiResetTime(value) {
+  if (typeof value !== "string" || !value) return null;
+  const ts = Date.parse(value);
+  return Number.isFinite(ts) && ts > 0 ? new Date(ts).toISOString() : null;
+}
+
+function kimiWindowFromUsage(data) {
+  if (!data || typeof data !== "object") return null;
+  const limit = kimiNumber(data.limit);
+  if (!Number.isFinite(limit) || limit <= 0) return null;
+  let used = kimiNumber(data.used);
+  if (used === null) {
+    const remaining = kimiNumber(data.remaining);
+    if (remaining !== null) used = limit - remaining;
+  }
+  if (!Number.isFinite(used)) return null;
+  return buildWindow({
+    usedPercent: (used / limit) * 100,
+    resetAt: kimiResetTime(data.resetTime || data.reset_at || data.resetAt),
+  });
+}
+
+function normalizeKimiUsageResponse(body) {
+  const firstLimit = Array.isArray(body?.limits) ? body.limits[0] : null;
+  const detail = firstLimit?.detail && typeof firstLimit.detail === "object" ? firstLimit.detail : firstLimit;
+  const parallelLimit = kimiNumber(body?.parallel?.limit);
+
+  return {
+    membership_level: typeof body?.user?.membership?.level === "string" ? body.user.membership.level : null,
+    subscription_type: typeof body?.subType === "string" ? body.subType : null,
+    parallel_limit: parallelLimit !== null ? parallelLimit : null,
+    primary_window: kimiWindowFromUsage(body?.usage),
+    secondary_window: kimiWindowFromUsage(detail),
+    tertiary_window: kimiWindowFromUsage(body?.totalQuota),
+  };
+}
+
+async function fetchKimiLimits({ home, env, fetchImpl = fetch } = {}) {
+  if (!hasKimiConfig({ home, env })) {
+    return { configured: false };
+  }
+  const creds = loadKimiCredentials({ home, env });
+  const accessToken = typeof creds?.access_token === "string" ? creds.access_token.trim() : "";
+  if (!accessToken) {
+    return { configured: false };
+  }
+  try {
+    const res = await fetchImpl("https://api.kimi.com/coding/v1/usages", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+      },
+    });
+    if (res.status === 401) {
+      throw new Error("token_expired");
+    }
+    if (!res.ok) {
+      throw new Error(`Kimi API returned ${res.status}`);
+    }
+    const body = await res.json();
+    return {
+      configured: true,
+      error: null,
+      ...normalizeKimiUsageResponse(body),
+    };
+  } catch (error) {
+    return {
+      configured: true,
+      error: error?.message || "Unknown error",
+    };
+  }
+}
+
 function resolveGeminiHome({ home, env } = {}) {
   const explicit = typeof env?.GEMINI_HOME === "string" ? env.GEMINI_HOME.trim() : "";
   return explicit ? path.resolve(explicit) : path.join(home, ".gemini");
@@ -1293,7 +1393,7 @@ async function getUsageLimits({
   ]);
 
   const providerFetch = withFetchTimeout(fetchImpl, providerTimeoutMs);
-  const [claudeResult, codexResult, cursor, gemini, kiro, antigravity, copilot] = await Promise.all([
+  const [claudeResult, codexResult, cursor, kimi, gemini, kiro, antigravity, copilot] = await Promise.all([
     claudeToken
       ? withProviderTimeout(fetchClaudeUsageLimits(claudeToken, { fetchImpl: providerFetch, maxAttempts: 1 }), "Claude", providerTimeoutMs).then(
           (value) => ({ status: "fulfilled", value }),
@@ -1307,6 +1407,8 @@ async function getUsageLimits({
         )
       : Promise.resolve(null),
     withProviderTimeout(fetchCursorLimits({ home, fetchImpl: providerFetch }), "Cursor", providerTimeoutMs)
+      .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
+    withProviderTimeout(fetchKimiLimits({ home, env, fetchImpl: providerFetch }), "Kimi", providerTimeoutMs)
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
     withProviderTimeout(fetchGeminiLimits({ home, env, fetchImpl: providerFetch, commandRunner }), "Gemini", providerTimeoutMs)
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
@@ -1351,6 +1453,7 @@ async function getUsageLimits({
     claude,
     codex,
     cursor,
+    kimi,
     gemini,
     kiro,
     antigravity,
@@ -1369,8 +1472,10 @@ module.exports = {
   getUsageLimits,
   resetUsageLimitsCache,
   extractGeminiOauthClientCredentials,
+  loadKimiCredentials,
   normalizeCursorUsageSummary,
   normalizeGeminiQuotaResponse,
+  normalizeKimiUsageResponse,
   parseKiroUsageOutput,
   normalizeAntigravityResponse,
   parseListeningPorts,
