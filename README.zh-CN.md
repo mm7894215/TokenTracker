@@ -156,6 +156,7 @@ brew install mm7894215/tokentracker/tokentracker
 | **GitHub Copilot** | ✅ 自动 | OpenTelemetry 文件导出（`COPILOT_OTEL_FILE_EXPORTER_PATH`） |
 | **Kimi Code** | ✅ 自动 | 被动读取 `wire.jsonl`（`~/.kimi/sessions/**/wire.jsonl`） |
 | **oh-my-pi (Pi Coding Agent)** | ✅ 自动 | 被动读取（`~/.omp/agent/sessions/**/*.jsonl`） |
+| **CodeBuddy** (腾讯) | ✅ 自动 | 写入 `~/.codebuddy/settings.json` 的 SessionEnd hook（Claude-Code fork） |
 
 > **需要手动装什么插件 / hook 吗？** 不需要。`tokentracker`（或 `tokentracker init`）第一次跑的时候会全部搞定：
 > - **基于 hook 的工具**（Claude Code、Codex、Gemini、Every Code）—— 我们把 SessionEnd hook 或 TOML notify 条目写入它们自己的配置文件
@@ -174,7 +175,7 @@ brew install mm7894215/tokentracker/tokentracker
 
 |                          | **TokenTracker** | ccusage     | Cursor 自带统计 |
 |--------------------------|:---:|:---:|:---:|
-|| **支持的 AI 工具数**     | **13**           | 1（Claude）  | 1（Cursor）   |
+| **支持的 AI 工具数**     | **13**           | 1（Claude）  | 1（Cursor）   |
 | **本地优先，无需账号**   | ✅               | ✅           | ❌            |
 | **原生菜单栏 App**       | ✅               | ❌           | ❌            |
 | **桌面小组件**           | ✅ 4 个小组件    | ❌           | ❌            |
