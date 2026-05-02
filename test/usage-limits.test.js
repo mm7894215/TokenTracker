@@ -48,6 +48,44 @@ describe("extractGeminiOauthClientCredentials", () => {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  it("falls back to nvm-installed Gemini when launchd PATH cannot find gemini", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-gemini-nvm-"));
+    try {
+      const home = path.join(tmp, "home");
+      const root = path.join(home, ".nvm", "versions", "node", "v22.21.1");
+      const binDir = path.join(root, "bin");
+      const bundleDir = path.join(root, "lib", "node_modules", "@google", "gemini-cli", "bundle");
+      fs.mkdirSync(binDir, { recursive: true });
+      fs.mkdirSync(bundleDir, { recursive: true });
+      const geminiTarget = path.join(bundleDir, "gemini.js");
+      const geminiLink = path.join(binDir, "gemini");
+      fs.writeFileSync(geminiTarget, "#!/usr/bin/env node\n", "utf8");
+      fs.symlinkSync("../lib/node_modules/@google/gemini-cli/bundle/gemini.js", geminiLink);
+      fs.writeFileSync(
+        path.join(bundleDir, "chunk-test.js"),
+        [
+          'var OAUTH_CLIENT_ID = "fallback-client.apps.googleusercontent.com";',
+          'var OAUTH_CLIENT_SECRET = "fallback-secret";',
+        ].join("\n"),
+        "utf8",
+      );
+
+      const result = extractGeminiOauthClientCredentials({
+        home,
+        commandRunner() {
+          return { status: 1, stdout: "" };
+        },
+      });
+
+      assert.deepEqual(result, {
+        clientId: "fallback-client.apps.googleusercontent.com",
+        clientSecret: "fallback-secret",
+      });
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("normalizeCursorUsageSummary", () => {

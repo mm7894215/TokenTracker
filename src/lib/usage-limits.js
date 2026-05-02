@@ -1,5 +1,6 @@
 const cp = require("node:child_process");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const http = require("node:http");
 const https = require("node:https");
@@ -229,50 +230,83 @@ function loadGeminiCredentials({ home, env } = {}) {
   }
 }
 
-function extractGeminiOauthClientCredentials({ commandRunner } = {}) {
-  const result = runCommand(commandRunner, "which", ["gemini"], { timeout: 2000 });
-  const geminiPath = typeof result?.stdout === "string" ? result.stdout.trim() : "";
-  if (!geminiPath) return null;
-
-  let realPath = geminiPath;
+function resolveSymlinkOnce(filePath) {
   try {
-    const resolved = fs.readlinkSync(geminiPath);
-    realPath = path.isAbsolute(resolved)
+    const resolved = fs.readlinkSync(filePath);
+    return path.isAbsolute(resolved)
       ? resolved
-      : path.join(path.dirname(geminiPath), resolved);
+      : path.join(path.dirname(filePath), resolved);
+  } catch (_error) {
+    return filePath;
+  }
+}
+
+function expandGeminiExecutableCandidates({ home } = {}) {
+  const candidates = [];
+  const add = (filePath) => {
+    if (typeof filePath === "string" && filePath && !candidates.includes(filePath)) {
+      candidates.push(filePath);
+    }
+  };
+
+  const nvmDir = path.join(home || os.homedir(), ".nvm", "versions", "node");
+  try {
+    for (const version of fs.readdirSync(nvmDir)) {
+      add(path.join(nvmDir, version, "bin", "gemini"));
+    }
   } catch (_error) {}
 
-  const binDir = path.dirname(realPath);
-  const baseDir = path.dirname(binDir);
-  const bundleDir = path.dirname(realPath);
-  const candidates = [
-    path.join(baseDir, "libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js"),
-    path.join(baseDir, "lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js"),
-    path.join(baseDir, "share/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js"),
-    path.join(baseDir, "../gemini-cli-core/dist/src/code_assist/oauth2.js"),
-    path.join(baseDir, "node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js"),
-  ];
-  if (path.basename(bundleDir) === "bundle") {
-    candidates.push(realPath);
-    try {
-      for (const file of fs.readdirSync(bundleDir)) {
-        if (/^chunk-.*\.js$/.test(file)) {
-          candidates.push(path.join(bundleDir, file));
-        }
-      }
-    } catch (_error) {}
-  }
+  add(path.join(path.dirname(resolveSymlinkOnce(process.execPath)), "gemini"));
+  add("/opt/homebrew/bin/gemini");
+  add("/usr/local/bin/gemini");
 
-  for (const candidate of candidates) {
-    if (!fs.existsSync(candidate)) continue;
-    try {
-      const content = fs.readFileSync(candidate, "utf8");
-      const clientId = content.match(/OAUTH_CLIENT_ID\s*=\s*['"]([^'"]+)['"]/)?.[1] || null;
-      const clientSecret = content.match(/OAUTH_CLIENT_SECRET\s*=\s*['"]([^'"]+)['"]/)?.[1] || null;
-      if (clientId && clientSecret) {
-        return { clientId, clientSecret };
-      }
-    } catch (_error) {}
+  return candidates;
+}
+
+function extractGeminiOauthClientCredentials({ commandRunner, home } = {}) {
+  const result = runCommand(commandRunner, "which", ["gemini"], { timeout: 2000 });
+  const geminiPath = typeof result?.stdout === "string" ? result.stdout.trim() : "";
+
+  const geminiPaths = [
+    ...(geminiPath ? [geminiPath] : []),
+    ...expandGeminiExecutableCandidates({ home }),
+  ];
+
+  for (const candidateGeminiPath of geminiPaths) {
+    if (!fs.existsSync(candidateGeminiPath)) continue;
+    const realPath = resolveSymlinkOnce(candidateGeminiPath);
+    const binDir = path.dirname(realPath);
+    const baseDir = path.dirname(binDir);
+    const bundleDir = path.dirname(realPath);
+    const candidates = [
+      path.join(baseDir, "libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js"),
+      path.join(baseDir, "lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js"),
+      path.join(baseDir, "share/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js"),
+      path.join(baseDir, "../gemini-cli-core/dist/src/code_assist/oauth2.js"),
+      path.join(baseDir, "node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js"),
+    ];
+    if (path.basename(bundleDir) === "bundle") {
+      candidates.push(realPath);
+      try {
+        for (const file of fs.readdirSync(bundleDir)) {
+          if (/^chunk-.*\.js$/.test(file)) {
+            candidates.push(path.join(bundleDir, file));
+          }
+        }
+      } catch (_error) {}
+    }
+
+    for (const candidate of candidates) {
+      if (!fs.existsSync(candidate)) continue;
+      try {
+        const content = fs.readFileSync(candidate, "utf8");
+        const clientId = content.match(/OAUTH_CLIENT_ID\s*=\s*['"]([^'"]+)['"]/)?.[1] || null;
+        const clientSecret = content.match(/OAUTH_CLIENT_SECRET\s*=\s*['"]([^'"]+)['"]/)?.[1] || null;
+        if (clientId && clientSecret) {
+          return { clientId, clientSecret };
+        }
+      } catch (_error) {}
+    }
   }
   return null;
 }
@@ -284,7 +318,7 @@ async function refreshGeminiAccessToken({
   fetchImpl = fetch,
   commandRunner,
 }) {
-  const oauthClient = extractGeminiOauthClientCredentials({ commandRunner });
+  const oauthClient = extractGeminiOauthClientCredentials({ commandRunner, home });
   if (!oauthClient?.clientId || !oauthClient?.clientSecret) {
     throw new Error("Gemini API error: Could not find Gemini CLI OAuth configuration");
   }
