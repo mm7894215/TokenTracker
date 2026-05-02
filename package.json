@@ -29,6 +29,7 @@
     "dashboard:open": "bash scripts/open-dashboard.sh",
     "dashboard:preview": "npm --prefix dashboard run preview",
     "dev:shim": "node scripts/dev-bin-shim.cjs",
+    "audit:tokens": "node scripts/audit-token-correctness.cjs",
     "graph:auto-index": "node scripts/graph/auto-index.cjs",
     "graph:scip": "node scripts/graph/generate-scip.cjs",
     "pricing:build-seed": "node scripts/build-pricing-seed.cjs",

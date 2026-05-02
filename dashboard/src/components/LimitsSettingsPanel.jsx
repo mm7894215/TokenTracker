@@ -11,7 +11,7 @@ import { cn } from "../lib/cn";
 // Providers whose brand logo is a pure mono glyph (fill="currentColor")
 // — these render black in <img> and must be inverted under dark mode.
 // Colored logos (claude, codex, gemini, antigravity) are left as-is.
-const MONO_LOGO_PROVIDERS = new Set(["cursor", "kiro", "copilot"]);
+const MONO_LOGO_PROVIDERS = new Set(["cursor", "kiro", "copilot", "kimi"]);
 
 function ToggleSwitch({ checked, onChange, ariaLabel }) {
   return (

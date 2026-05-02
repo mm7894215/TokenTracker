@@ -14,6 +14,7 @@ struct UsageLimitsView: View {
             (limits.codex.configured, limits.codex.error),
             (limits.cursor.configured, limits.cursor.error),
             (limits.gemini.configured, limits.gemini.error),
+            (limits.kimi?.configured ?? false, limits.kimi?.error),
             (limits.kiro.configured, limits.kiro.error),
             (limits.antigravity.configured, limits.antigravity.error),
             (limits.copilot?.configured ?? false, limits.copilot?.error),
@@ -70,6 +71,10 @@ struct UsageLimitsView: View {
                 groups.append(AnyView(toolSection(title: "Cursor", assetName: "CursorLogo") { cursorContent(limits.cursor) }))
             case "gemini" where limits.gemini.configured && limits.gemini.error == nil:
                 groups.append(AnyView(toolSection(title: "Gemini", assetName: "GeminiLogo") { geminiContent(limits.gemini) }))
+            case "kimi":
+                if let kimi = limits.kimi, kimi.configured, kimi.error == nil {
+                    groups.append(AnyView(toolSection(title: "Kimi", assetName: "KimiLogo") { kimiContent(kimi) }))
+                }
             case "kiro" where limits.kiro.configured && limits.kiro.error == nil:
                 groups.append(AnyView(toolSection(title: "Kiro", assetName: "KiroLogo") { kiroContent(limits.kiro) }))
             case "antigravity" where limits.antigravity.configured && limits.antigravity.error == nil:
@@ -163,6 +168,27 @@ struct UsageLimitsView: View {
             }
             if let w = gemini.tertiaryWindow {
                 limitRow(label: "Lite", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Gemini")
+            }
+        }
+    }
+
+    // MARK: - Kimi
+
+    private func kimiContent(_ kimi: KimiLimits) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let w = kimi.primaryWindow {
+                limitRow(label: Strings.kimiWeeklyLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Kimi")
+            }
+            if let w = kimi.secondaryWindow {
+                limitRow(label: Strings.kimiFiveHourLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Kimi")
+            }
+            if let w = kimi.tertiaryWindow {
+                limitRow(label: Strings.kimiTotalLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Kimi")
+            }
+            if let parallelLimit = kimi.parallelLimit {
+                Text(Strings.kimiParallelLabel(parallelLimit))
+                    .font(.system(.caption2, design: .default))
+                    .foregroundStyle(.tertiary)
             }
         }
     }
@@ -286,10 +312,11 @@ struct UsageLimitsView: View {
     @ViewBuilder
     private func brandIcon(_ name: String) -> some View {
         switch name {
-        case "CursorLogo", "KiroLogo", "CopilotLogo":
+        case "CursorLogo", "KimiLogo", "KiroLogo", "CopilotLogo":
             let filename: String = {
                 switch name {
                 case "CursorLogo": return "cursor.svg"
+                case "KimiLogo": return "kimi.svg"
                 case "KiroLogo": return "kiro.svg"
                 default: return "copilot.svg"
                 }

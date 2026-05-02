@@ -3,6 +3,7 @@ const { describe, it } = require("node:test");
 
 const {
   parseCursorCsv,
+  isCursorBillableKind,
   normalizeCursorUsage,
   isCursorInstalled,
   extractCursorSessionToken,
@@ -67,7 +68,21 @@ describe("parseCursorCsv — with Cloud Agent ID columns", () => {
     assert.equal(records[0].cacheReadTokens, 194368);
     assert.equal(records[0].outputTokens, 1815);
     assert.equal(records[0].totalTokens, 199372);
+    assert.equal(records[0].sourceScope, "account");
+    assert.equal(records[0].billableKind, "billable");
     assert.equal(records[1].model, "auto");
+  });
+});
+
+describe("Cursor billing kind classification", () => {
+  it("treats included and on-demand usage as billable-ish", () => {
+    assert.equal(isCursorBillableKind("Included"), true);
+    assert.equal(isCursorBillableKind("On-Demand"), true);
+  });
+
+  it("treats free and no-charge errored usage as non-billable", () => {
+    assert.equal(isCursorBillableKind("Free"), false);
+    assert.equal(isCursorBillableKind("Errored, No Charge"), false);
   });
 });
 

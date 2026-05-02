@@ -15,17 +15,15 @@ const {
   parseCopilotIncremental,
   parseKimiIncremental,
   parseCodebuddyIncremental,
+  parseCursorApiIncremental,
   resolveCodebuddyDefaultModel,
   resolveCodebuddyProjectFiles,
 } = require("../src/lib/rollout");
 
-test("parseRolloutIncremental aggregates repeated token_count records without deduping (matches ccusage)", async () => {
-  // B-plan audit alignment: when a Codex rollout emits the SAME token_count
-  // event twice (same last_token_usage + same total_token_usage), ccusage
-  // adds the last_token_usage delta a second time. We follow that convention
-  // so cost numbers line up with ccusage's per-day totals. The risk is
-  // slight over-counting on genuinely duplicated events, which the audit
-  // showed is small vs. the risk of under-counting seen under our old guard.
+test("parseRolloutIncremental ignores repeated token_count records with unchanged totals", async () => {
+  // Codex can repeat the same token_count record in a rollout. The cumulative
+  // total_token_usage value is authoritative for a file; if it did not move,
+  // the repeated last_token_usage must not be counted again.
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibescore-rollout-"));
   try {
     const rolloutPath = path.join(tmp, "rollout-test.jsonl");
@@ -67,17 +65,67 @@ test("parseRolloutIncremental aggregates repeated token_count records without de
 
     const res = await parseRolloutIncremental({ rolloutFiles: [rolloutPath], cursors, queuePath });
     assert.equal(res.filesProcessed, 1);
-    assert.equal(res.eventsAggregated, 4);
+    assert.equal(res.eventsAggregated, 2);
     assert.equal(res.bucketsQueued, 1);
 
     const queued = await readJsonLines(queuePath);
     assert.equal(queued.length, 1);
     assert.equal(queued[0].model, "unknown");
-    // Two originals + two duplicates each contribute their last_token_usage.
     assert.equal(
       queued.reduce((sum, ev) => sum + Number(ev.total_tokens || 0), 0),
-      2 * (usage1.total_tokens + usage2.total_tokens),
+      usage1.total_tokens + usage2.total_tokens,
     );
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseRolloutIncremental prefers cumulative total_token_usage delta over larger last_token_usage", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibescore-rollout-"));
+  try {
+    const rolloutPath = path.join(tmp, "rollout-test.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const usage1 = {
+      input_tokens: 10,
+      cached_input_tokens: 0,
+      output_tokens: 5,
+      reasoning_output_tokens: 0,
+      total_tokens: 15,
+    };
+    const inflatedLast = {
+      input_tokens: 100,
+      cached_input_tokens: 0,
+      output_tokens: 50,
+      reasoning_output_tokens: 0,
+      total_tokens: 150,
+    };
+    const totals2 = {
+      input_tokens: 14,
+      cached_input_tokens: 0,
+      output_tokens: 8,
+      reasoning_output_tokens: 0,
+      total_tokens: 22,
+    };
+
+    const lines = [
+      buildTokenCountLine({ ts: "2025-12-17T00:00:00.000Z", last: usage1, total: usage1 }),
+      buildTokenCountLine({ ts: "2025-12-17T00:00:01.000Z", last: inflatedLast, total: totals2 }),
+    ];
+
+    await fs.writeFile(rolloutPath, lines.join("\n") + "\n", "utf8");
+
+    const res = await parseRolloutIncremental({ rolloutFiles: [rolloutPath], cursors, queuePath });
+    assert.equal(res.filesProcessed, 1);
+    assert.equal(res.eventsAggregated, 2);
+    assert.equal(res.bucketsQueued, 1);
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].input_tokens, 14);
+    assert.equal(queued[0].output_tokens, 8);
+    assert.equal(queued[0].total_tokens, 22);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
@@ -513,7 +561,17 @@ test("parseRolloutIncremental splits usage into half-hour buckets", async () => 
 
     const lines = [
       buildTokenCountLine({ ts: "2025-12-17T00:10:00.000Z", last: usage1, total: usage1 }),
-      buildTokenCountLine({ ts: "2025-12-17T00:40:00.000Z", last: usage2, total: usage2 }),
+      buildTokenCountLine({
+        ts: "2025-12-17T00:40:00.000Z",
+        last: usage2,
+        total: {
+          input_tokens: usage1.input_tokens + usage2.input_tokens,
+          cached_input_tokens: 0,
+          output_tokens: usage1.output_tokens + usage2.output_tokens,
+          reasoning_output_tokens: 0,
+          total_tokens: usage1.total_tokens + usage2.total_tokens,
+        },
+      }),
     ];
 
     await fs.writeFile(rolloutPath, lines.join("\n") + "\n", "utf8");
@@ -626,22 +684,22 @@ test("parseRolloutIncremental handles total_token_usage reset by counting last_t
       buildTokenCountLine({ ts: "2025-12-17T00:00:00.000Z", last: usageA, total: totalsA }),
       buildTokenCountLine({ ts: "2025-12-17T00:00:01.000Z", last: usageB, total: totalsB }),
       buildTokenCountLine({ ts: "2025-12-17T00:00:02.000Z", last: usageReset, total: totalsReset }),
-      buildTokenCountLine({ ts: "2025-12-17T00:00:03.000Z", last: usageReset, total: totalsReset }), // duplicate after reset — now counted (B-plan ccusage alignment)
+      buildTokenCountLine({ ts: "2025-12-17T00:00:03.000Z", last: usageReset, total: totalsReset }), // duplicate after reset
     ];
 
     await fs.writeFile(rolloutPath, lines.join("\n") + "\n", "utf8");
 
     const res = await parseRolloutIncremental({ rolloutFiles: [rolloutPath], cursors, queuePath });
     assert.equal(res.filesProcessed, 1);
-    assert.equal(res.eventsAggregated, 4);
+    assert.equal(res.eventsAggregated, 3);
     assert.equal(res.bucketsQueued, 1);
 
     const queued = await readJsonLines(queuePath);
     assert.equal(queued.length, 1);
-    // A + B + Reset + Reset (duplicate after reset is no longer deduped).
+    // A + B + Reset; the repeated reset event has unchanged cumulative totals.
     assert.equal(
       queued.reduce((sum, ev) => sum + Number(ev.total_tokens || 0), 0),
-      usageA.total_tokens + usageB.total_tokens + 2 * usageReset.total_tokens,
+      usageA.total_tokens + usageB.total_tokens + usageReset.total_tokens,
     );
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
@@ -743,6 +801,42 @@ test("parseGeminiIncremental aggregates gemini tokens and model", async () => {
   }
 });
 
+test("parseGeminiIncremental recomputes total when Gemini reported total excludes cache", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibescore-gemini-total-"));
+  try {
+    const sessionPath = path.join(tmp, "session.json");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const session = buildGeminiSession({
+      messages: [
+        {
+          id: "m1",
+          type: "assistant",
+          timestamp: "2025-12-26T08:05:00.000Z",
+          model: "gemini-3-flash-preview",
+          tokens: { input: 10, output: 5, cached: 20, thoughts: 3, tool: 2, total: 17 },
+        },
+      ],
+    });
+
+    await fs.writeFile(sessionPath, JSON.stringify(session), "utf8");
+
+    const res = await parseGeminiIncremental({ sessionFiles: [sessionPath], cursors, queuePath });
+    assert.equal(res.bucketsQueued, 1);
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].input_tokens, 10);
+    assert.equal(queued[0].cached_input_tokens, 20);
+    assert.equal(queued[0].output_tokens, 7);
+    assert.equal(queued[0].reasoning_output_tokens, 3);
+    assert.equal(queued[0].total_tokens, 40);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseGeminiIncremental is idempotent with unchanged totals", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibescore-gemini-"));
   try {
@@ -803,6 +897,61 @@ test("parseGeminiIncremental defaults missing model to unknown", async () => {
     const queued = await readJsonLines(queuePath);
     assert.equal(queued.length, 1);
     assert.equal(queued[0].model, "unknown");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCursorApiIncremental treats Cursor CSV as authoritative and replaces prior cursor buckets", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibescore-cursor-reconcile-"));
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const first = await parseCursorApiIncremental({
+      records: [
+        {
+          date: "2026-04-01T10:00:00.000Z",
+          model: "auto",
+          kind: "Included",
+          inputTokens: 100,
+          cacheReadTokens: 10,
+          cacheWriteTokens: 0,
+          outputTokens: 20,
+          totalTokens: 130,
+        },
+      ],
+      cursors,
+      queuePath,
+      source: "cursor",
+    });
+    assert.equal(first.eventsAggregated, 1);
+
+    const second = await parseCursorApiIncremental({
+      records: [
+        {
+          date: "2026-04-01T10:00:00.000Z",
+          model: "auto",
+          kind: "Included",
+          inputTokens: 40,
+          cacheReadTokens: 4,
+          cacheWriteTokens: 0,
+          outputTokens: 6,
+          totalTokens: 50,
+        },
+      ],
+      cursors,
+      queuePath,
+      source: "cursor",
+    });
+    assert.equal(second.eventsAggregated, 1);
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 2);
+    assert.equal(queued.at(-1).total_tokens, 50);
+    assert.equal(queued.at(-1).input_tokens, 40);
+    assert.equal(queued.at(-1).cached_input_tokens, 4);
+    assert.equal(cursors.hourly.buckets["cursor|auto|2026-04-01T10:00:00.000Z"].totals.total_tokens, 50);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
@@ -1405,9 +1554,29 @@ test("parseRolloutIncremental backfills unknown into dominant known model", asyn
         total: usageUnknown,
       }),
       buildTurnContextLine({ model: "gpt-4o" }),
-      buildTokenCountLine({ ts: "2025-12-17T00:10:00.000Z", last: usageA, total: usageA }),
+      buildTokenCountLine({
+        ts: "2025-12-17T00:10:00.000Z",
+        last: usageA,
+        total: {
+          input_tokens: usageUnknown.input_tokens + usageA.input_tokens,
+          cached_input_tokens: 0,
+          output_tokens: usageUnknown.output_tokens + usageA.output_tokens,
+          reasoning_output_tokens: 0,
+          total_tokens: usageUnknown.total_tokens + usageA.total_tokens,
+        },
+      }),
       buildTurnContextLine({ model: "gpt-4o-mini" }),
-      buildTokenCountLine({ ts: "2025-12-17T00:15:00.000Z", last: usageB, total: usageB }),
+      buildTokenCountLine({
+        ts: "2025-12-17T00:15:00.000Z",
+        last: usageB,
+        total: {
+          input_tokens: usageUnknown.input_tokens + usageA.input_tokens + usageB.input_tokens,
+          cached_input_tokens: 0,
+          output_tokens: usageUnknown.output_tokens + usageA.output_tokens + usageB.output_tokens,
+          reasoning_output_tokens: 0,
+          total_tokens: usageUnknown.total_tokens + usageA.total_tokens + usageB.total_tokens,
+        },
+      }),
     ];
 
     await fs.writeFile(rolloutPath, lines.join("\n") + "\n", "utf8");
@@ -1577,7 +1746,17 @@ test("parseRolloutIncremental breaks ties by earlier codex bucket", async () => 
       buildTurnContextLine({ model: "gpt-4o" }),
       buildTokenCountLine({ ts: "2025-12-17T00:00:00.000Z", last: usage, total: usage }),
       buildTurnContextLine({ model: "gpt-4o-mini" }),
-      buildTokenCountLine({ ts: "2025-12-17T01:00:00.000Z", last: usage, total: usage }),
+      buildTokenCountLine({
+        ts: "2025-12-17T01:00:00.000Z",
+        last: usage,
+        total: {
+          input_tokens: usage.input_tokens * 2,
+          cached_input_tokens: 0,
+          output_tokens: 0,
+          reasoning_output_tokens: 0,
+          total_tokens: usage.total_tokens * 2,
+        },
+      }),
     ];
     const everyLines = [
       buildTokenCountLine({ ts: "2025-12-17T00:30:00.000Z", last: usage, total: usage }),

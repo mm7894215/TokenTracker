@@ -879,7 +879,7 @@ function isRunnableCommand(command) {
 `;
 }
 
-module.exports = { cmdInit, buildNotifyHandler };
+module.exports = { cmdInit, buildNotifyHandler, installLocalTrackerApp };
 
 async function probeFile(p) {
   try {
@@ -908,7 +908,9 @@ async function installLocalTrackerApp({ appDir }) {
   const packageRoot = path.resolve(__dirname, "../..");
   const srcFrom = path.join(packageRoot, "src");
   const binFrom = path.join(packageRoot, "bin", "tracker.js");
+  const packageJsonFrom = path.join(packageRoot, "package.json");
   const nodeModulesFrom = path.join(packageRoot, "node_modules");
+  const dashboardDistFrom = path.join(packageRoot, "dashboard", "dist");
 
   // When running from the installed local runtime (or when appDir is symlinked to this package),
   // source and destination resolve to the same place. Do not delete appDir in that case.
@@ -920,6 +922,7 @@ async function installLocalTrackerApp({ appDir }) {
   const binToDir = path.join(appDir, "bin");
   const binTo = path.join(binToDir, "tracker.js");
   const nodeModulesTo = path.join(appDir, "node_modules");
+  const dashboardDistTo = path.join(appDir, "dashboard", "dist");
 
   await fs.rm(appDir, { recursive: true, force: true }).catch(() => {});
   await ensureDir(appDir);
@@ -927,6 +930,10 @@ async function installLocalTrackerApp({ appDir }) {
   await ensureDir(binToDir);
   await fs.copyFile(binFrom, binTo);
   await fs.chmod(binTo, 0o755).catch(() => {});
+  await fs.copyFile(packageJsonFrom, path.join(appDir, "package.json")).catch(() => {});
+  if (await isDir(dashboardDistFrom)) {
+    await fs.cp(dashboardDistFrom, dashboardDistTo, { recursive: true });
+  }
   await copyRuntimeDependencies({ from: nodeModulesFrom, to: nodeModulesTo });
 }
 

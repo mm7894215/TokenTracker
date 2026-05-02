@@ -1,14 +1,351 @@
 const assert = require("node:assert/strict");
 const { describe, it } = require("node:test");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
 const {
+  extractGeminiOauthClientCredentials,
+  getUsageLimits,
+  loadKimiCredentials,
   normalizeCursorUsageSummary,
   normalizeGeminiQuotaResponse,
+  normalizeKimiUsageResponse,
   parseKiroUsageOutput,
+  resetUsageLimitsCache,
   normalizeAntigravityResponse,
   parseListeningPorts,
   detectAntigravityProcess,
 } = require("../src/lib/usage-limits");
+
+describe("extractGeminiOauthClientCredentials", () => {
+  it("finds OAuth constants from bundled Gemini CLI chunk files", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-gemini-bundle-"));
+    try {
+      const root = path.join(tmp, "lib", "node_modules", "@google", "gemini-cli");
+      const bundleDir = path.join(root, "bundle");
+      fs.mkdirSync(bundleDir, { recursive: true });
+      const geminiPath = path.join(bundleDir, "gemini.js");
+      fs.writeFileSync(geminiPath, "#!/usr/bin/env node\n", "utf8");
+      fs.writeFileSync(
+        path.join(bundleDir, "chunk-test.js"),
+        [
+          'var OAUTH_CLIENT_ID = "client.apps.googleusercontent.com";',
+          'var OAUTH_CLIENT_SECRET = "secret-value";',
+        ].join("\n"),
+        "utf8",
+      );
+
+      const result = extractGeminiOauthClientCredentials({
+        commandRunner(command, args) {
+          assert.equal(command, "which");
+          assert.deepEqual(args, ["gemini"]);
+          return { status: 0, stdout: `${geminiPath}\n` };
+        },
+      });
+
+      assert.deepEqual(result, {
+        clientId: "client.apps.googleusercontent.com",
+        clientSecret: "secret-value",
+      });
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to nvm-installed Gemini when launchd PATH cannot find gemini", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-gemini-nvm-"));
+    try {
+      const home = path.join(tmp, "home");
+      const root = path.join(home, ".nvm", "versions", "node", "v22.21.1");
+      const binDir = path.join(root, "bin");
+      const bundleDir = path.join(root, "lib", "node_modules", "@google", "gemini-cli", "bundle");
+      fs.mkdirSync(binDir, { recursive: true });
+      fs.mkdirSync(bundleDir, { recursive: true });
+      const geminiTarget = path.join(bundleDir, "gemini.js");
+      const geminiLink = path.join(binDir, "gemini");
+      fs.writeFileSync(geminiTarget, "#!/usr/bin/env node\n", "utf8");
+      fs.symlinkSync("../lib/node_modules/@google/gemini-cli/bundle/gemini.js", geminiLink);
+      fs.writeFileSync(
+        path.join(bundleDir, "chunk-test.js"),
+        [
+          'var OAUTH_CLIENT_ID = "fallback-client.apps.googleusercontent.com";',
+          'var OAUTH_CLIENT_SECRET = "fallback-secret";',
+        ].join("\n"),
+        "utf8",
+      );
+
+      const result = extractGeminiOauthClientCredentials({
+        home,
+        commandRunner() {
+          return { status: 1, stdout: "" };
+        },
+      });
+
+      assert.deepEqual(result, {
+        clientId: "fallback-client.apps.googleusercontent.com",
+        clientSecret: "fallback-secret",
+      });
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("getUsageLimits", () => {
+  it("does not block the whole response when Claude usage hangs", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-timeout-"));
+    try {
+      const started = Date.now();
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "darwin",
+        providerTimeoutMs: 10,
+        securityRunner() {
+          return {
+            status: 0,
+            stdout: JSON.stringify({ claudeAiOauth: { accessToken: "claude-token" } }),
+          };
+        },
+        commandRunner(command) {
+          if (command === "/bin/ps") return { status: 1, stdout: "" };
+          return { status: 1, stdout: "" };
+        },
+        fetchImpl() {
+          return new Promise(() => {});
+        },
+      });
+
+      assert.ok(Date.now() - started < 500);
+      assert.equal(result.claude.configured, true);
+      assert.match(result.claude.error, /Claude usage request timed out/);
+      assert.equal(result.codex.configured, false);
+      assert.equal(result.gemini.configured, false);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("does not wait for Claude 429 retry delays on limits page refresh", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-429-"));
+    try {
+      let calls = 0;
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "darwin",
+        providerTimeoutMs: 1000,
+        securityRunner() {
+          return {
+            status: 0,
+            stdout: JSON.stringify({ claudeAiOauth: { accessToken: "claude-token" } }),
+          };
+        },
+        commandRunner() {
+          return { status: 1, stdout: "" };
+        },
+        fetchImpl() {
+          calls += 1;
+          return Promise.resolve({
+            status: 429,
+            ok: false,
+            headers: { get: () => "30" },
+          });
+        },
+      });
+
+      assert.equal(calls, 1);
+      assert.equal(result.claude.configured, true);
+      assert.match(result.claude.error, /rate limited/);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("does not block the whole response when Kimi usage hangs", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-kimi-timeout-"));
+    try {
+      const kimiHome = path.join(tmp, ".kimi");
+      fs.mkdirSync(path.join(kimiHome, "credentials"), { recursive: true });
+      fs.writeFileSync(path.join(kimiHome, "config.toml"), 'default_model = "kimi-code/kimi-for-coding"\n');
+      fs.writeFileSync(
+        path.join(kimiHome, "credentials", "kimi-code.json"),
+        JSON.stringify({ access_token: "kimi-token" }),
+      );
+
+      const started = Date.now();
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "darwin",
+        providerTimeoutMs: 10,
+        securityRunner() {
+          return { status: 1, stdout: "" };
+        },
+        commandRunner() {
+          return { status: 1, stdout: "" };
+        },
+        fetchImpl() {
+          return new Promise(() => {});
+        },
+      });
+
+      assert.ok(Date.now() - started < 500);
+      assert.equal(result.kimi.configured, true);
+      assert.match(result.kimi.error, /Kimi usage request timed out/);
+      assert.equal(result.claude.configured, false);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("refreshes expired Kimi credentials before fetching usage limits", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-kimi-refresh-"));
+    try {
+      const kimiHome = path.join(tmp, ".kimi");
+      const credsPath = path.join(kimiHome, "credentials", "kimi-code.json");
+      fs.mkdirSync(path.dirname(credsPath), { recursive: true });
+      fs.writeFileSync(path.join(kimiHome, "config.toml"), 'default_model = "kimi-code/kimi-for-coding"\n');
+      fs.writeFileSync(
+        credsPath,
+        JSON.stringify({
+          access_token: "expired-kimi-token",
+          refresh_token: "refresh-kimi-token",
+          expires_at: 1,
+          scope: "kimi-code",
+          token_type: "Bearer",
+          expires_in: 900,
+        }),
+      );
+
+      const calls = [];
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "darwin",
+        securityRunner() {
+          return { status: 1, stdout: "" };
+        },
+        commandRunner() {
+          return { status: 1, stdout: "" };
+        },
+        fetchImpl(url, options = {}) {
+          calls.push({ url, authorization: options.headers?.Authorization || null, body: String(options.body || "") });
+          if (url === "https://auth.kimi.com/api/oauth/token") {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                access_token: "fresh-kimi-token",
+                refresh_token: "fresh-refresh-token",
+                expires_in: 900,
+                scope: "kimi-code",
+                token_type: "Bearer",
+              }),
+            });
+          }
+          if (url === "https://api.kimi.com/coding/v1/usages") {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                usage: { used: 4, limit: 10, resetTime: "2026-05-04T06:02:56.054Z" },
+              }),
+            });
+          }
+          return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+        },
+      });
+
+      assert.equal(calls[0].url, "https://auth.kimi.com/api/oauth/token");
+      assert.match(calls[0].body, /grant_type=refresh_token/);
+      assert.match(calls[0].body, /refresh_token=refresh-kimi-token/);
+      assert.equal(calls[1].authorization, "Bearer fresh-kimi-token");
+      assert.equal(result.kimi.error, null);
+      assert.equal(result.kimi.primary_window.used_percent, 40);
+
+      const saved = JSON.parse(fs.readFileSync(credsPath, "utf8"));
+      assert.equal(saved.access_token, "fresh-kimi-token");
+      assert.equal(saved.refresh_token, "fresh-refresh-token");
+      assert.ok(saved.expires_at > Date.now() / 1000);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("loadKimiCredentials", () => {
+  it("returns null when Kimi credentials are absent", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-kimi-missing-"));
+    try {
+      assert.equal(loadKimiCredentials({ home: tmp }), null);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("normalizeKimiUsageResponse", () => {
+  it("maps weekly, 5h, total, and parallel quota windows", () => {
+    const result = normalizeKimiUsageResponse({
+      usage: {
+        limit: "100",
+        used: "64",
+        remaining: "36",
+        resetTime: "2026-05-04T06:02:56.054721Z",
+      },
+      limits: [
+        {
+          window: { duration: 300, timeUnit: "TIME_UNIT_MINUTE" },
+          detail: {
+            limit: "100",
+            used: "4",
+            remaining: "96",
+            resetTime: "2026-05-02T05:02:56.054721Z",
+          },
+        },
+      ],
+      parallel: { limit: "20" },
+      totalQuota: { limit: "100", remaining: "99" },
+      user: { membership: { level: "LEVEL_INTERMEDIATE" } },
+      subType: "TYPE_PURCHASE",
+    });
+
+    assert.equal(result.membership_level, "LEVEL_INTERMEDIATE");
+    assert.equal(result.subscription_type, "TYPE_PURCHASE");
+    assert.equal(result.parallel_limit, 20);
+    assert.deepEqual(result.primary_window, {
+      used_percent: 64,
+      reset_at: "2026-05-04T06:02:56.054Z",
+    });
+    assert.deepEqual(result.secondary_window, {
+      used_percent: 4,
+      reset_at: "2026-05-02T05:02:56.054Z",
+    });
+    assert.deepEqual(result.tertiary_window, {
+      used_percent: 1,
+      reset_at: null,
+    });
+  });
+
+  it("returns null windows for invalid or zero limits", () => {
+    const result = normalizeKimiUsageResponse({
+      usage: { limit: "0", used: "12", remaining: "0" },
+      limits: [{ detail: { limit: "bad", used: "1" } }],
+      totalQuota: { limit: "0", remaining: "0" },
+    });
+
+    assert.equal(result.primary_window, null);
+    assert.equal(result.secondary_window, null);
+    assert.equal(result.tertiary_window, null);
+    assert.equal(result.parallel_limit, null);
+  });
+});
 
 describe("normalizeCursorUsageSummary", () => {
   it("maps total, auto, and api windows from usage-summary", () => {
@@ -168,6 +505,18 @@ describe("normalizeGeminiQuotaResponse", () => {
     assert.equal(result.primary_window.used_percent, 60);
     assert.equal(result.secondary_window.used_percent, 20);
     assert.equal(result.tertiary_window.used_percent, 10);
+  });
+
+  it("does not show epoch reset time when Gemini returns resetTime 0", () => {
+    const result = normalizeGeminiQuotaResponse({
+      buckets: [
+        { modelId: "gemini-2.5-pro", remainingFraction: 0, resetTime: "0" },
+        { modelId: "gemini-3-pro-preview", remainingFraction: 0, resetTime: "1970-01-01T00:00:00Z" },
+      ],
+    });
+
+    assert.equal(result.primary_window.used_percent, 100);
+    assert.equal(result.primary_window.reset_at, null);
   });
 });
 

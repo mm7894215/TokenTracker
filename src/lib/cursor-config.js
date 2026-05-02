@@ -107,6 +107,7 @@ function extractUserIdFromJwt(jwt) {
 
 const CURSOR_CSV_URL = "https://cursor.com/api/dashboard/export-usage-events-csv?strategy=tokens";
 const CURSOR_SUMMARY_URL = "https://cursor.com/api/usage-summary";
+const CURSOR_SOURCE_SCOPE = "account";
 
 /**
  * Fetch full usage CSV from Cursor API.
@@ -280,6 +281,10 @@ function parseCursorCsv(csvText) {
       kind: kindIdx !== undefined ? stripQuotes(fields[kindIdx]) : "unknown",
       model: stripQuotes(fields[modelIdx]),
       maxMode: maxModeIdx !== undefined ? stripQuotes(fields[maxModeIdx]) : "No",
+      sourceScope: CURSOR_SOURCE_SCOPE,
+      billableKind: isCursorBillableKind(kindIdx !== undefined ? fields[kindIdx] : "unknown")
+        ? "billable"
+        : "non_billable",
       inputTokens: inputWithoutCache,
       cacheWriteTokens: Math.max(0, inputWithCache - inputWithoutCache),
       cacheReadTokens: toNum(fields[cacheReadIdx]),
@@ -312,7 +317,16 @@ function normalizeCursorUsage(record) {
     output_tokens: outputTokens,
     reasoning_output_tokens: 0,
     total_tokens: totalTokens,
+    billable_total_tokens: isCursorBillableKind(record?.kind) ? totalTokens : 0,
   };
+}
+
+function isCursorBillableKind(kind) {
+  const normalized = String(kind || "").trim().toLowerCase();
+  if (!normalized) return true;
+  if (normalized.includes("no charge")) return false;
+  if (normalized === "free") return false;
+  return true;
 }
 
 // ── CSV helpers ──
@@ -364,5 +378,6 @@ module.exports = {
   fetchCursorUsageCsv,
   fetchCursorUsageSummary,
   parseCursorCsv,
+  isCursorBillableKind,
   normalizeCursorUsage,
 };
