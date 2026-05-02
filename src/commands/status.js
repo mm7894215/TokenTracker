@@ -16,19 +16,31 @@ const {
   isGeminiHookConfigured,
   buildGeminiHookCommand,
 } = require("../lib/gemini-config");
-const { resolveOpencodeConfigDir, isOpencodePluginInstalled } = require("../lib/opencode-config");
+const {
+  resolveOpencodeConfigDir,
+  isOpencodePluginInstalled,
+} = require("../lib/opencode-config");
 const { collectLocalSubscriptions } = require("../lib/subscriptions");
-const { describeCopilotOtelStatus, readCopilotOauthToken } = require("../lib/usage-limits");
-const { normalizeState: normalizeUploadState } = require("../lib/upload-throttle");
+const {
+  describeCopilotOtelStatus,
+  readCopilotOauthToken,
+} = require("../lib/usage-limits");
+const {
+  normalizeState: normalizeUploadState,
+} = require("../lib/upload-throttle");
 const { collectTrackerDiagnostics } = require("../lib/diagnostics");
 const { probeOpenclawHookState } = require("../lib/openclaw-hook");
-const { probeOpenclawSessionPluginState } = require("../lib/openclaw-session-plugin");
+const {
+  probeOpenclawSessionPluginState,
+} = require("../lib/openclaw-session-plugin");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
 const {
   resolveKimiWireFiles,
   resolveKiroCliDbPath,
   resolveCodebuddyHome,
   resolveCodebuddyProjectFiles,
+  resolveOmpSessionFiles,
+  resolveOmpAgentDir,
 } = require("../lib/rollout");
 
 async function cmdStatus(argv = []) {
@@ -60,8 +72,13 @@ async function cmdStatus(argv = []) {
     "settings.json",
   );
   const geminiConfigDir = resolveGeminiConfigDir({ home, env: process.env });
-  const geminiSettingsPath = resolveGeminiSettingsPath({ configDir: geminiConfigDir });
-  const opencodeConfigDir = resolveOpencodeConfigDir({ home, env: process.env });
+  const geminiSettingsPath = resolveGeminiSettingsPath({
+    configDir: geminiConfigDir,
+  });
+  const opencodeConfigDir = resolveOpencodeConfigDir({
+    home,
+    env: process.env,
+  });
   const notifyPath = path.join(binDir, "notify.cjs");
   const claudeHookCommand = buildClaudeHookCommand(notifyPath);
   const codebuddyHookCommand = buildHookCommand(notifyPath, "codebuddy");
@@ -70,20 +87,26 @@ async function cmdStatus(argv = []) {
   const config = await readJson(configPath);
   const cursors = await readJson(cursorsPath);
   const queueState = (await readJson(queueStatePath)) || { offset: 0 };
-  const uploadThrottle = normalizeUploadState(await readJson(uploadThrottlePath));
+  const uploadThrottle = normalizeUploadState(
+    await readJson(uploadThrottlePath),
+  );
   const autoRetry = await readJson(autoRetryPath);
 
   const queueSize = await safeStatSize(queuePath);
   const pendingBytes = Math.max(0, queueSize - (queueState.offset || 0));
 
   const lastNotify = (await safeReadText(notifySignalPath))?.trim() || null;
-  const lastOpenclawSync = (await safeReadText(openclawSignalPath))?.trim() || null;
-  const lastNotifySpawn = parseEpochMsToIso((await safeReadText(throttlePath))?.trim() || null);
+  const lastOpenclawSync =
+    (await safeReadText(openclawSignalPath))?.trim() || null;
+  const lastNotifySpawn = parseEpochMsToIso(
+    (await safeReadText(throttlePath))?.trim() || null,
+  );
 
   const codexNotify = await readCodexNotify(codexConfigPath);
   const notifyConfigured = Array.isArray(codexNotify) && codexNotify.length > 0;
   const everyCodeNotify = await readEveryCodeNotify(codeConfigPath);
-  const everyCodeConfigured = Array.isArray(everyCodeNotify) && everyCodeNotify.length > 0;
+  const everyCodeConfigured =
+    Array.isArray(everyCodeNotify) && everyCodeNotify.length > 0;
   const claudeHookConfigured = await isClaudeHookConfigured({
     settingsPath: claudeSettingsPath,
     hookCommand: claudeHookCommand,
@@ -104,7 +127,11 @@ async function cmdStatus(argv = []) {
     trackerDir,
     env: process.env,
   });
-  const openclawHookState = await probeOpenclawHookState({ home, trackerDir, env: process.env });
+  const openclawHookState = await probeOpenclawHookState({
+    home,
+    trackerDir,
+    env: process.env,
+  });
 
   const lastUpload = uploadThrottle.lastSuccessMs
     ? parseEpochMsToIso(uploadThrottle.lastSuccessMs)
@@ -151,9 +178,17 @@ async function cmdStatus(argv = []) {
     ? resolveCodebuddyProjectFiles(process.env)
     : [];
 
+  // oh-my-pi — passive scan only (no hooks).
+  const ompAgentDir = resolveOmpAgentDir(process.env);
+  const ompInstalled = fssync.existsSync(path.join(ompAgentDir, "sessions"));
+  const ompFiles = ompInstalled ? resolveOmpSessionFiles(process.env) : [];
+
   const copilotToken = readCopilotOauthToken({ home });
   const copilotOtel = describeCopilotOtelStatus({ home, env: process.env });
-  const copilotLines = formatCopilotLines({ token: copilotToken, otel: copilotOtel });
+  const copilotLines = formatCopilotLines({
+    token: copilotToken,
+    otel: copilotOtel,
+  });
 
   process.stdout.write(
     [
@@ -186,6 +221,9 @@ async function cmdStatus(argv = []) {
       codebuddyInstalled
         ? `- CodeBuddy hooks: ${codebuddyHookConfigured ? "set" : "unset"} (${codebuddyFiles.length} session jsonl file${codebuddyFiles.length !== 1 ? "s" : ""} found)`
         : null,
+      ompInstalled
+        ? `- oh-my-pi: passive reader (${ompFiles.length} session jsonl file${ompFiles.length !== 1 ? "s" : ""} found)`
+        : null,
       ...copilotLines,
       ...subscriptionLines,
       "",
@@ -197,7 +235,9 @@ async function cmdStatus(argv = []) {
 
 function formatCopilotLines({ token, otel }) {
   if (!token && !otel.otel_has_files) return [];
-  const limitsState = token ? "set (via GitHub OAuth)" : "unset (no Copilot OAuth token found)";
+  const limitsState = token
+    ? "set (via GitHub OAuth)"
+    : "unset (no Copilot OAuth token found)";
   const usageState = otel.otel_has_files
     ? `set (${otel.otel_path || otel.otel_default_dir})`
     : otel.otel_enabled
@@ -235,7 +275,11 @@ function formatSubscriptionLine(entry = {}) {
 
   if (!planType) return null;
 
-  if (tool === "claude" && provider === "anthropic" && product === "subscription") {
+  if (
+    tool === "claude" &&
+    provider === "anthropic" &&
+    product === "subscription"
+  ) {
     const suffix = rateLimitTier ? ` (rate limit tier: ${rateLimitTier})` : "";
     return `- ${toolLabel} subscription: ${planType}${suffix}`;
   }
@@ -249,7 +293,11 @@ function formatSubscriptionLine(entry = {}) {
 }
 
 function parseArgs(argv) {
-  const out = { diagnostics: false, probeKeychain: false, probeKeychainDetails: false };
+  const out = {
+    diagnostics: false,
+    probeKeychain: false,
+    probeKeychainDetails: false,
+  };
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];

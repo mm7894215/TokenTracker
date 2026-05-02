@@ -27,6 +27,8 @@ const {
   parseCopilotIncremental,
   resolveKimiWireFiles,
   parseKimiIncremental,
+  resolveOmpSessionFiles,
+  parseOmpIncremental,
   resolveCodebuddyProjectFiles,
   parseCodebuddyIncremental,
   resolveKiroCliSessionFiles,
@@ -447,6 +449,28 @@ async function cmdSync(argv) {
       });
     }
 
+    // ── oh-my-pi (passive ~/.omp/agent/sessions/**/*.jsonl reader) ──
+    let ompResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    const ompFiles = resolveOmpSessionFiles(process.env);
+    if (ompFiles.length > 0) {
+      if (progress?.enabled) {
+        progress.start(`Parsing oh-my-pi ${renderBar(0)} | buckets 0`);
+      }
+      ompResult = await parseOmpIncremental({
+        sessionFiles: ompFiles,
+        cursors,
+        queuePath,
+        env: process.env,
+        onProgress: (p) => {
+          if (!progress?.enabled) return;
+          const pct = p.total > 0 ? p.index / p.total : 1;
+          progress.update(
+            `Parsing oh-my-pi ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} files | buckets ${formatNumber(p.bucketsQueued)}`,
+          );
+        },
+      });
+    }
+
     // ── GitHub Copilot CLI (OTEL JSONL files) ──
     let copilotResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     const copilotPaths = resolveCopilotOtelPaths(process.env);
@@ -566,6 +590,7 @@ async function cmdSync(argv) {
         hermesResult.recordsProcessed +
         kimiResult.recordsProcessed +
         codebuddyResult.recordsProcessed +
+        ompResult.recordsProcessed +
         copilotResult.recordsProcessed;
       const totalBuckets =
         parseResult.bucketsQueued +
@@ -579,6 +604,7 @@ async function cmdSync(argv) {
         hermesResult.bucketsQueued +
         kimiResult.bucketsQueued +
         codebuddyResult.bucketsQueued +
+        ompResult.bucketsQueued +
         copilotResult.bucketsQueued;
       process.stdout.write(
         [

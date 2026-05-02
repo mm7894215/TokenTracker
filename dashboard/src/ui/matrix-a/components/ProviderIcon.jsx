@@ -115,6 +115,24 @@ function GithubIcon({ size = 16, className = "" }) {
   );
 }
 
+function OmpIcon({ size = 16, className = "" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 120 90" fill="currentColor" className={className}>
+      {/* Horizontal bar of pi */}
+      <rect x="10" y="8" width="100" height="12" rx="2" />
+      {/* Left leg */}
+      <rect x="25" y="20" width="12" height="62" rx="2" />
+      {/* Right leg (shortened for connector) */}
+      <rect x="75" y="20" width="12" height="45" rx="2" />
+      {/* Plugin connector block */}
+      <rect x="71" y="55" width="20" height="16" rx="3" />
+      {/* Connector prongs */}
+      <rect x="76" y="71" width="3" height="8" rx="1" />
+      <rect x="82" y="71" width="3" height="8" rx="1" />
+    </svg>
+  );
+}
+
 const PROVIDER_ICON_MAP = {
   CLAUDE: ClaudeIcon,
   CODEBUDDY: CodeBuddyIcon,
@@ -127,6 +145,7 @@ const PROVIDER_ICON_MAP = {
   KIMI: KimiIcon,
   KIRO: KiroIcon,
   OPENCODE: OpenCodeIcon,
+  OMP: OmpIcon,
 };
 
 // Multi-color brand SVG assets in /public/brand-logos/. Only logos that have

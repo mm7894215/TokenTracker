@@ -18,6 +18,8 @@ const {
   parseCursorApiIncremental,
   resolveCodebuddyDefaultModel,
   resolveCodebuddyProjectFiles,
+  parseOmpIncremental,
+  resolveOmpSessionFiles,
 } = require("../src/lib/rollout");
 
 test("parseRolloutIncremental ignores repeated token_count records with unchanged totals", async () => {
@@ -3753,6 +3755,232 @@ test("parseKiroCliIncremental early-return path still runs cap + clamp (Bug-1)",
       ["fresh"],
       "cap must drop stale entries on the zero-flat early-return path",
     );
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+
+// ─── oh-my-pi (omp) helpers ───
+
+function buildOmpSessionHeader() {
+  return JSON.stringify({ type: "session", id: "session-1", timestamp: new Date().toISOString() });
+}
+
+function buildOmpAssistantLine({ id, model, input, output, cacheRead = 0, cacheWrite = 0, timestamp, reasoningTokens = 0, totalTokens }) {
+  const usage = {
+    input,
+    output,
+    cacheRead,
+    cacheWrite,
+    reasoningTokens,
+  };
+  if (typeof totalTokens === "number") {
+    usage.totalTokens = totalTokens;
+  }
+  return JSON.stringify({
+    type: "message",
+    id,
+    parentId: "parent-1",
+    timestamp: new Date(timestamp).toISOString(),
+    message: {
+      role: "assistant",
+      provider: "anthropic",
+      model,
+      usage,
+      timestamp: Date.parse(new Date(timestamp).toISOString()),
+    },
+  });
+}
+
+// ─── oh-my-pi (omp) tests ───
+
+test("parseOmpIncremental parses a single session and queues correct 30-min bucket", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-"));
+  try {
+    const sessionsDir = path.join(tmp, "sessions", "--test--");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const filePath = path.join(sessionsDir, "session.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const ts = Date.UTC(2026, 3, 5, 14, 10, 0);
+    const lines = [
+      buildOmpSessionHeader(),
+      buildOmpAssistantLine({ id: "msg-1", model: "claude-sonnet-4-5", input: 100, output: 20, cacheRead: 0, cacheWrite: 0, timestamp: ts, totalTokens: 120 }),
+    ];
+    await fs.writeFile(filePath, lines.join("\n") + "\n", "utf8");
+
+    const res = await parseOmpIncremental({ sessionFiles: [filePath], cursors, queuePath });
+    assert.equal(res.eventsAggregated, 1);
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].source, "omp");
+    assert.equal(queued[0].model, "claude-sonnet-4-5");
+    assert.equal(queued[0].input_tokens, 100);
+    assert.equal(queued[0].output_tokens, 20);
+    assert.equal(queued[0].total_tokens, 120);
+    assert.equal(queued[0].hour_start, "2026-04-05T14:00:00.000Z");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseOmpIncremental dedupes by entry id across two runs", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-"));
+  try {
+    const sessionsDir = path.join(tmp, "sessions", "--test--");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const filePath = path.join(sessionsDir, "session.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const ts1 = Date.UTC(2026, 3, 5, 14, 0, 0);
+    const ts2 = Date.UTC(2026, 3, 5, 14, 35, 0);
+    const lines = [
+      buildOmpSessionHeader(),
+      buildOmpAssistantLine({ id: "aaaaaaaa", model: "claude-sonnet-4-5", input: 10, output: 10, timestamp: ts1, totalTokens: 20 }),
+      buildOmpAssistantLine({ id: "bbbbbbbb", model: "claude-sonnet-4-5", input: 20, output: 20, timestamp: ts2, totalTokens: 40 }),
+      buildOmpAssistantLine({ id: "aaaaaaaa", model: "claude-sonnet-4-5", input: 10, output: 10, timestamp: ts1, totalTokens: 20 }),
+    ];
+    await fs.writeFile(filePath, lines.join("\n") + "\n", "utf8");
+
+    const res1 = await parseOmpIncremental({ sessionFiles: [filePath], cursors, queuePath });
+    assert.equal(res1.eventsAggregated, 2);
+    assert.ok(cursors.omp.seenIds.includes("aaaaaaaa"));
+    assert.ok(cursors.omp.seenIds.includes("bbbbbbbb"));
+
+    const queued1 = await readJsonLines(queuePath);
+    assert.equal(queued1.length, 2);
+
+    const res2 = await parseOmpIncremental({ sessionFiles: [filePath], cursors, queuePath });
+    assert.equal(res2.eventsAggregated, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseOmpIncremental skips entries without usage field", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-"));
+  try {
+    const sessionsDir = path.join(tmp, "sessions", "--test--");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const filePath = path.join(sessionsDir, "session.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const lines = [
+      buildOmpSessionHeader(),
+      JSON.stringify({
+        type: "message",
+        id: "msg-1",
+        timestamp: new Date().toISOString(),
+        message: { role: "assistant", provider: "anthropic", model: "claude-sonnet-4-5" },
+      }),
+    ];
+    await fs.writeFile(filePath, lines.join("\n") + "\n", "utf8");
+
+    const res = await parseOmpIncremental({ sessionFiles: [filePath], cursors, queuePath });
+    assert.equal(res.eventsAggregated, 0);
+    assert.equal(res.bucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseOmpIncremental skips entries where message.role !== 'assistant'", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-"));
+  try {
+    const sessionsDir = path.join(tmp, "sessions", "--test--");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const filePath = path.join(sessionsDir, "session.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const lines = [
+      buildOmpSessionHeader(),
+      JSON.stringify({
+        type: "message",
+        id: "msg-1",
+        timestamp: new Date().toISOString(),
+        message: { role: "user", provider: "anthropic", model: "claude-sonnet-4-5", usage: { input: 10, output: 5, totalTokens: 15 } },
+      }),
+    ];
+    await fs.writeFile(filePath, lines.join("\n") + "\n", "utf8");
+
+    const res = await parseOmpIncremental({ sessionFiles: [filePath], cursors, queuePath });
+    assert.equal(res.eventsAggregated, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseOmpIncremental handles file with no assistant messages (zero queued)", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-"));
+  try {
+    const sessionsDir = path.join(tmp, "sessions", "--test--");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const filePath = path.join(sessionsDir, "session.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    await fs.writeFile(filePath, buildOmpSessionHeader() + "\n", "utf8");
+
+    const res = await parseOmpIncremental({ sessionFiles: [filePath], cursors, queuePath });
+    assert.equal(res.recordsProcessed, 0);
+    assert.equal(res.eventsAggregated, 0);
+    assert.equal(res.bucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveOmpSessionFiles returns empty when ~/.omp/agent/sessions missing", async () => {
+  const result = resolveOmpSessionFiles({ OMP_HOME: path.join(os.tmpdir(), "no-such-omp-dir") });
+  assert.deepEqual(result, []);
+});
+
+test("OMP_HOME env override redirects discovery", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-"));
+  try {
+    const sessionsDir = path.join(tmp, "agent", "sessions", "--myproject--");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const filePath = path.join(sessionsDir, "session.jsonl");
+    await fs.writeFile(filePath, buildOmpSessionHeader() + "\n", "utf8");
+
+    const result = resolveOmpSessionFiles({ OMP_HOME: tmp });
+    assert.equal(result.length, 1);
+    assert.ok(result[0].endsWith(".jsonl"));
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseOmpIncremental computes totalTokens fallback when usage.totalTokens missing", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-"));
+  try {
+    const sessionsDir = path.join(tmp, "sessions", "--test--");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const filePath = path.join(sessionsDir, "session.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const ts = Date.UTC(2026, 3, 5, 14, 10, 0);
+    const lines = [
+      buildOmpSessionHeader(),
+      buildOmpAssistantLine({ id: "msg-1", model: "claude-sonnet-4-5", input: 50, output: 30, cacheRead: 10, cacheWrite: 5, reasoningTokens: 3, timestamp: ts }),
+    ];
+    await fs.writeFile(filePath, lines.join("\n") + "\n", "utf8");
+
+    const res = await parseOmpIncremental({ sessionFiles: [filePath], cursors, queuePath });
+    assert.equal(res.eventsAggregated, 1);
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].total_tokens, 98);
+    assert.equal(queued[0].cached_input_tokens, 10);
+    assert.equal(queued[0].cache_creation_input_tokens, 5);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

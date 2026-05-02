@@ -425,6 +425,18 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
     }
   }
 
+  // oh-my-pi: passive reader — no hook installation needed.
+  // TokenTracker reads ~/.omp/agent/sessions/**/*.jsonl directly.
+  {
+    const ompHome = process.env.OMP_HOME ||
+      (process.env.PI_CONFIG_DIR ? path.join(home, process.env.PI_CONFIG_DIR) : path.join(home, ".omp"));
+    const ompAgentDir = process.env.PI_CODING_AGENT_DIR || path.join(ompHome, "agent");
+    const ompSessions = path.join(ompAgentDir, "sessions");
+    if (fssync.existsSync(ompSessions)) {
+      summary.push({ label: "oh-my-pi", status: "detected", detail: "Passive reader (no hook needed)" });
+    }
+  }
+
   // CodeBuddy: Claude-Code fork. Install the SessionEnd hook so finished
   // sessions trigger notify.cjs → tracker sync; passive scan still runs as a
   // safety net for sessions that don't fire SessionEnd cleanly.

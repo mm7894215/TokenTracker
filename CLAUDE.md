@@ -36,7 +36,7 @@ AI CLI Tools → hooks/notify.cjs trigger sync → rollout.js parses logs → qu
 
 **Cloud backend** — InsForge Edge Functions live in a separate repo and are documented in `BACKEND_API.md`. Handles cloud authentication, leaderboard, and data sync. Not needed for local-only usage.
 
-### Supported AI Tools (11 providers)
+### Supported AI Tools (13 providers)
 
 | Tool | Hook Method | Parser |
 |------|------------|--------|
@@ -51,6 +51,8 @@ AI CLI Tools → hooks/notify.cjs trigger sync → rollout.js parses logs → qu
 | Hermes Agent | SQLite sessions table (`~/.hermes/state.db`) | `parseHermesIncremental` |
 | GitHub Copilot | OpenTelemetry file exporter (`COPILOT_OTEL_FILE_EXPORTER_PATH`) | Rollout JSONL |
 | Kimi Code | Passive `wire.jsonl` reader (`~/.kimi/sessions/**/wire.jsonl`) | `parseKimiIncremental` |
+| oh-my-pi (omp) | Passive JSONL reader (`~/.omp/agent/sessions/**/*.jsonl`) | `parseOmpIncremental` |
+| CodeBuddy (Tencent) | SessionEnd hook in `~/.codebuddy/settings.json` (Claude-Code fork) | `parseCodebuddyIncremental` |
 
 ### CLI Commands
 

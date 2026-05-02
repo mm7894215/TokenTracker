@@ -402,6 +402,7 @@ leaderboard.column.kiro,dashboard,LeaderboardPage,LeaderboardPage,column_kiro,"K
 leaderboard.column.copilot,dashboard,LeaderboardPage,LeaderboardPage,column_copilot,"GitHub Copilot",,active
 leaderboard.column.kimi,dashboard,LeaderboardPage,LeaderboardPage,column_kimi,"Kimi Code",,active
 leaderboard.column.codebuddy,dashboard,LeaderboardPage,LeaderboardPage,column_codebuddy,"CodeBuddy",,active
+leaderboard.column.omp,dashboard,LeaderboardPage,LeaderboardPage,column_omp,"oh-my-pi",,active
 limits.copilot.otelHint.title,dashboard,LimitsPage,LimitsPage,otel_hint_title,"Track Copilot token usage",,active
 limits.copilot.otelHint.body,dashboard,LimitsPage,LimitsPage,otel_hint_body,"Limits load via your GitHub OAuth token. To also record per-token usage, enable Copilot's OpenTelemetry export and add these lines to your shell profile (~/.zshrc or ~/.bashrc):",,active
 limits.copilot.otelHint.copy,dashboard,LimitsPage,LimitsPage,otel_hint_copy,"Copy",,active
