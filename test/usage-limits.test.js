@@ -6,9 +6,11 @@ const path = require("node:path");
 
 const {
   extractGeminiOauthClientCredentials,
+  getUsageLimits,
   normalizeCursorUsageSummary,
   normalizeGeminiQuotaResponse,
   parseKiroUsageOutput,
+  resetUsageLimitsCache,
   normalizeAntigravityResponse,
   parseListeningPorts,
   detectAntigravityProcess,
@@ -83,6 +85,80 @@ describe("extractGeminiOauthClientCredentials", () => {
         clientSecret: "fallback-secret",
       });
     } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("getUsageLimits", () => {
+  it("does not block the whole response when Claude usage hangs", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-timeout-"));
+    try {
+      const started = Date.now();
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "darwin",
+        providerTimeoutMs: 10,
+        securityRunner() {
+          return {
+            status: 0,
+            stdout: JSON.stringify({ claudeAiOauth: { accessToken: "claude-token" } }),
+          };
+        },
+        commandRunner(command) {
+          if (command === "/bin/ps") return { status: 1, stdout: "" };
+          return { status: 1, stdout: "" };
+        },
+        fetchImpl() {
+          return new Promise(() => {});
+        },
+      });
+
+      assert.ok(Date.now() - started < 500);
+      assert.equal(result.claude.configured, true);
+      assert.match(result.claude.error, /Claude usage request timed out/);
+      assert.equal(result.codex.configured, false);
+      assert.equal(result.gemini.configured, false);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("does not wait for Claude 429 retry delays on limits page refresh", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-429-"));
+    try {
+      let calls = 0;
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "darwin",
+        providerTimeoutMs: 1000,
+        securityRunner() {
+          return {
+            status: 0,
+            stdout: JSON.stringify({ claudeAiOauth: { accessToken: "claude-token" } }),
+          };
+        },
+        commandRunner() {
+          return { status: 1, stdout: "" };
+        },
+        fetchImpl() {
+          calls += 1;
+          return Promise.resolve({
+            status: 429,
+            ok: false,
+            headers: { get: () => "30" },
+          });
+        },
+      });
+
+      assert.equal(calls, 1);
+      assert.equal(result.claude.configured, true);
+      assert.match(result.claude.error, /rate limited/);
+    } finally {
+      resetUsageLimitsCache();
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });

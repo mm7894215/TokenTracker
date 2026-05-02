@@ -15,6 +15,7 @@ const {
 // 2-minute in-memory cache
 let cache = { data: null, fetchedAt: 0 };
 const CACHE_TTL_MS = 2 * 60 * 1000;
+const DEFAULT_PROVIDER_TIMEOUT_MS = 15_000;
 
 function clampPercent(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -53,14 +54,44 @@ function sleepMs(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchClaudeUsageLimits(accessToken, { fetchImpl = fetch } = {}) {
+function mergeAbortSignals(signalA, signalB) {
+  if (!signalA) return signalB;
+  if (!signalB) return signalA;
+  if (typeof AbortSignal.any === "function") {
+    return AbortSignal.any([signalA, signalB]);
+  }
+  return signalA;
+}
+
+function withFetchTimeout(fetchImpl, timeoutMs) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return fetchImpl;
+  return (url, options = {}) => {
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    return fetchImpl(url, {
+      ...options,
+      signal: mergeAbortSignals(options.signal, timeoutSignal),
+    });
+  };
+}
+
+function withProviderTimeout(promise, label, timeoutMs) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label} usage request timed out.`));
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function fetchClaudeUsageLimits(accessToken, { fetchImpl = fetch, maxAttempts = 3 } = {}) {
   const url = "https://api.anthropic.com/api/oauth/usage";
   const headers = {
     Authorization: `Bearer ${accessToken}`,
     "anthropic-beta": "oauth-2025-04-20",
     Accept: "application/json",
   };
-  const maxAttempts = 3;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const res = await fetchImpl(url, { method: "GET", headers });
     if (res.status === 401) {
@@ -1249,6 +1280,7 @@ async function getUsageLimits({
   commandRunner,
   requestFn,
   now = new Date(),
+  providerTimeoutMs = DEFAULT_PROVIDER_TIMEOUT_MS,
 } = {}) {
   const nowMs = Date.now();
   if (cache.data && nowMs - cache.fetchedAt < CACHE_TTL_MS) {
@@ -1260,24 +1292,28 @@ async function getUsageLimits({
     readCodexAccessToken({ home, env }),
   ]);
 
+  const providerFetch = withFetchTimeout(fetchImpl, providerTimeoutMs);
   const [claudeResult, codexResult, cursor, gemini, kiro, antigravity, copilot] = await Promise.all([
     claudeToken
-      ? fetchClaudeUsageLimits(claudeToken, { fetchImpl }).then(
+      ? withProviderTimeout(fetchClaudeUsageLimits(claudeToken, { fetchImpl: providerFetch, maxAttempts: 1 }), "Claude", providerTimeoutMs).then(
           (value) => ({ status: "fulfilled", value }),
           (reason) => ({ status: "rejected", reason }),
         )
       : Promise.resolve(null),
     codexToken
-      ? fetchCodexUsageLimits(codexToken, { fetchImpl }).then(
+      ? withProviderTimeout(fetchCodexUsageLimits(codexToken, { fetchImpl: providerFetch }), "Codex", providerTimeoutMs).then(
           (value) => ({ status: "fulfilled", value }),
           (reason) => ({ status: "rejected", reason }),
         )
       : Promise.resolve(null),
-    fetchCursorLimits({ home, fetchImpl }),
-    fetchGeminiLimits({ home, env, fetchImpl, commandRunner }),
+    withProviderTimeout(fetchCursorLimits({ home, fetchImpl: providerFetch }), "Cursor", providerTimeoutMs)
+      .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
+    withProviderTimeout(fetchGeminiLimits({ home, env, fetchImpl: providerFetch, commandRunner }), "Gemini", providerTimeoutMs)
+      .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
     Promise.resolve().then(() => fetchKiroLimits({ commandRunner, now })),
     fetchAntigravityLimits({ commandRunner, requestFn }),
-    fetchCopilotLimits({ home, env, fetchImpl }),
+    withProviderTimeout(fetchCopilotLimits({ home, env, fetchImpl: providerFetch }), "GitHub Copilot", providerTimeoutMs)
+      .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
   ]);
 
   let claude;
