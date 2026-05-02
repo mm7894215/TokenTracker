@@ -244,6 +244,7 @@ function extractGeminiOauthClientCredentials({ commandRunner } = {}) {
 
   const binDir = path.dirname(realPath);
   const baseDir = path.dirname(binDir);
+  const bundleDir = path.dirname(realPath);
   const candidates = [
     path.join(baseDir, "libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js"),
     path.join(baseDir, "lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js"),
@@ -251,13 +252,23 @@ function extractGeminiOauthClientCredentials({ commandRunner } = {}) {
     path.join(baseDir, "../gemini-cli-core/dist/src/code_assist/oauth2.js"),
     path.join(baseDir, "node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js"),
   ];
+  if (path.basename(bundleDir) === "bundle") {
+    candidates.push(realPath);
+    try {
+      for (const file of fs.readdirSync(bundleDir)) {
+        if (/^chunk-.*\.js$/.test(file)) {
+          candidates.push(path.join(bundleDir, file));
+        }
+      }
+    } catch (_error) {}
+  }
 
   for (const candidate of candidates) {
     if (!fs.existsSync(candidate)) continue;
     try {
       const content = fs.readFileSync(candidate, "utf8");
-      const clientId = content.match(/OAUTH_CLIENT_ID\s*=\s*['"]([\w\-\.]+)['"]\s*;/)?.[1] || null;
-      const clientSecret = content.match(/OAUTH_CLIENT_SECRET\s*=\s*['"]([\w\-]+)['"]\s*;/)?.[1] || null;
+      const clientId = content.match(/OAUTH_CLIENT_ID\s*=\s*['"]([^'"]+)['"]/)?.[1] || null;
+      const clientSecret = content.match(/OAUTH_CLIENT_SECRET\s*=\s*['"]([^'"]+)['"]/)?.[1] || null;
       if (clientId && clientSecret) {
         return { clientId, clientSecret };
       }
@@ -1286,6 +1297,7 @@ function resetUsageLimitsCache() {
 module.exports = {
   getUsageLimits,
   resetUsageLimitsCache,
+  extractGeminiOauthClientCredentials,
   normalizeCursorUsageSummary,
   normalizeGeminiQuotaResponse,
   parseKiroUsageOutput,

@@ -1,7 +1,11 @@
 const assert = require("node:assert/strict");
 const { describe, it } = require("node:test");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
 const {
+  extractGeminiOauthClientCredentials,
   normalizeCursorUsageSummary,
   normalizeGeminiQuotaResponse,
   parseKiroUsageOutput,
@@ -9,6 +13,42 @@ const {
   parseListeningPorts,
   detectAntigravityProcess,
 } = require("../src/lib/usage-limits");
+
+describe("extractGeminiOauthClientCredentials", () => {
+  it("finds OAuth constants from bundled Gemini CLI chunk files", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-gemini-bundle-"));
+    try {
+      const root = path.join(tmp, "lib", "node_modules", "@google", "gemini-cli");
+      const bundleDir = path.join(root, "bundle");
+      fs.mkdirSync(bundleDir, { recursive: true });
+      const geminiPath = path.join(bundleDir, "gemini.js");
+      fs.writeFileSync(geminiPath, "#!/usr/bin/env node\n", "utf8");
+      fs.writeFileSync(
+        path.join(bundleDir, "chunk-test.js"),
+        [
+          'var OAUTH_CLIENT_ID = "client.apps.googleusercontent.com";',
+          'var OAUTH_CLIENT_SECRET = "secret-value";',
+        ].join("\n"),
+        "utf8",
+      );
+
+      const result = extractGeminiOauthClientCredentials({
+        commandRunner(command, args) {
+          assert.equal(command, "which");
+          assert.deepEqual(args, ["gemini"]);
+          return { status: 0, stdout: `${geminiPath}\n` };
+        },
+      });
+
+      assert.deepEqual(result, {
+        clientId: "client.apps.googleusercontent.com",
+        clientSecret: "secret-value",
+      });
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("normalizeCursorUsageSummary", () => {
   it("maps total, auto, and api windows from usage-summary", () => {

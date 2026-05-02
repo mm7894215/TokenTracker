@@ -677,6 +677,9 @@ limits.label.kiro_month,ui,LimitsPage,UsageLimitsPanel,kiro_month,"Month",,activ
 limits.label.kiro_bonus,ui,LimitsPage,UsageLimitsPanel,kiro_bonus,"Bonus",,active
 limits.label.copilot_premium,ui,LimitsPage,UsageLimitsPanel,copilot_premium,"Premium",,active
 limits.label.copilot_chat,ui,LimitsPage,UsageLimitsPanel,copilot_chat,"Chat",,active
+limits.status.not_connected,ui,LimitsPage,UsageLimitsPanel,status_not_connected,"Not connected",,active
+limits.status.no_data,ui,LimitsPage,UsageLimitsPanel,status_no_data,"No live limit data returned",,active
+limits.status.all_hidden,ui,LimitsPage,UsageLimitsPanel,status_all_hidden,"All limit providers are hidden. Open display settings to show them.",,active
 shared.time.now,shared,*,Shared,time_now,"now",,active
 nav.ip_check,shared,*,Sidebar,nav_ip_check,Claude IP Check,,active
 nav.skills,shared,*,Sidebar,nav_skills,Skills,,active
