@@ -576,6 +576,7 @@ async function cmdSync(argv) {
 
     if (!opts.auto) {
       const totalParsed =
+        parseResult.filesProcessed +
         openclawResult.filesProcessed +
         claudeResult.filesProcessed +
         geminiResult.filesProcessed +
@@ -589,6 +590,7 @@ async function cmdSync(argv) {
         ompResult.recordsProcessed +
         copilotResult.recordsProcessed;
       const totalBuckets =
+        parseResult.bucketsQueued +
         openclawResult.bucketsQueued +
         claudeResult.bucketsQueued +
         geminiResult.bucketsQueued +
