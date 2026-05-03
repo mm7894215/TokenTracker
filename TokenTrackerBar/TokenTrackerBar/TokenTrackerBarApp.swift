@@ -38,6 +38,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        ProcessInfo.processInfo.disableAutomaticTermination("TokenTrackerBar keeps a menu bar status item alive")
+
         statusBarController = StatusBarController(
             viewModel: viewModel,
             serverManager: serverManager,
@@ -55,8 +57,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 await viewModel.syncThenLoad()
                 viewModel.startAutoRefresh()
             }
-
-            UpdateChecker.shared.check(silent: true)
         }
     }
 
