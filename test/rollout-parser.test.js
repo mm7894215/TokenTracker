@@ -20,6 +20,9 @@ const {
   resolveCodebuddyProjectFiles,
   parseOmpIncremental,
   resolveOmpSessionFiles,
+  parseCraftIncremental,
+  resolveCraftSessionFiles,
+  resolveCraftWorkspaceRoots,
 } = require("../src/lib/rollout");
 
 test("parseRolloutIncremental ignores repeated token_count records with unchanged totals", async () => {
@@ -3981,6 +3984,389 @@ test("parseOmpIncremental computes totalTokens fallback when usage.totalTokens m
     assert.equal(queued[0].total_tokens, 98);
     assert.equal(queued[0].cached_input_tokens, 10);
     assert.equal(queued[0].cache_creation_input_tokens, 5);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+// ─── Craft Agents helpers ───
+
+function buildCraftSessionHeader({
+  id = "260430-swift-river",
+  model = "claude-sonnet-4-6",
+  llmConnection = "anthropic-default",
+  inputTokens,
+  outputTokens,
+  cacheReadTokens = 0,
+  cacheCreationTokens = 0,
+  totalTokens,
+  lastMessageAt,
+} = {}) {
+  return JSON.stringify({
+    id,
+    sdkSessionId: `sdk-${id}`,
+    workspaceRootPath: "/tmp/ws",
+    createdAt: lastMessageAt - 60_000,
+    lastUsedAt: lastMessageAt,
+    lastMessageAt,
+    model,
+    llmConnection,
+    messageCount: 4,
+    tokenUsage: {
+      inputTokens,
+      outputTokens,
+      totalTokens:
+        typeof totalTokens === "number"
+          ? totalTokens
+          : inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens,
+      contextTokens: 8400,
+      costUsd: 0.04,
+      cacheReadTokens,
+      cacheCreationTokens,
+      contextWindow: 200000,
+    },
+  });
+}
+
+async function writeCraftSession({ rootPath, sessionId, headerOpts, extraLines = [] }) {
+  const dir = path.join(rootPath, "sessions", sessionId);
+  await fs.mkdir(dir, { recursive: true });
+  const filePath = path.join(dir, "session.jsonl");
+  const lines = [buildCraftSessionHeader({ id: sessionId, ...headerOpts }), ...extraLines];
+  await fs.writeFile(filePath, lines.join("\n") + "\n", "utf8");
+  return filePath;
+}
+
+// ─── Craft Agents tests ───
+
+test("parseCraftIncremental parses a single session header into a 30-min bucket", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-craft-"));
+  try {
+    const rootPath = path.join(tmp, "ws");
+    const ts = Date.UTC(2026, 3, 5, 14, 10, 0);
+    const filePath = await writeCraftSession({
+      rootPath,
+      sessionId: "260405-swift-river",
+      headerOpts: {
+        model: "claude-sonnet-4-6",
+        inputTokens: 1000,
+        outputTokens: 200,
+        cacheReadTokens: 5500,
+        cacheCreationTokens: 1100,
+        lastMessageAt: ts,
+      },
+    });
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const res = await parseCraftIncremental({ sessionFiles: [filePath], cursors, queuePath });
+    assert.equal(res.eventsAggregated, 1);
+    assert.equal(res.bucketsQueued, 1);
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].source, "craft");
+    assert.equal(queued[0].model, "claude-sonnet-4-6");
+    assert.equal(queued[0].input_tokens, 1000);
+    assert.equal(queued[0].output_tokens, 200);
+    assert.equal(queued[0].cached_input_tokens, 5500);
+    assert.equal(queued[0].cache_creation_input_tokens, 1100);
+    assert.equal(queued[0].total_tokens, 7800);
+    assert.equal(queued[0].hour_start, "2026-04-05T14:00:00.000Z");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCraftIncremental aggregates growing snapshots into the same bucket without double-counting", async () => {
+  // Validates the delta path: each sync only contributes the *new* tokens
+  // since the prior snapshot, but the bucket retains a cumulative running
+  // total via enqueueTouchedBuckets' replace semantics.
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-craft-"));
+  try {
+    const rootPath = path.join(tmp, "ws");
+    const sessionId = "260405-grow-delta";
+    const ts = Date.UTC(2026, 3, 5, 14, 10, 0);
+    const dir = path.join(rootPath, "sessions", sessionId);
+    await fs.mkdir(dir, { recursive: true });
+    const filePath = path.join(dir, "session.jsonl");
+
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    // First snapshot: 100/20 input/output
+    await fs.writeFile(
+      filePath,
+      buildCraftSessionHeader({
+        id: sessionId,
+        inputTokens: 100,
+        outputTokens: 20,
+        lastMessageAt: ts,
+      }) + "\n",
+      "utf8",
+    );
+    let res = await parseCraftIncremental({ sessionFiles: [filePath], cursors, queuePath });
+    assert.equal(res.eventsAggregated, 1);
+    // After first sync: cursor remembers 100/20 as previous totals.
+    assert.equal(cursors.craft.sessionTotals[sessionId].input, 100);
+    assert.equal(cursors.craft.sessionTotals[sessionId].output, 20);
+
+    // Second snapshot — header rewritten with growing totals (300/60)
+    await fs.writeFile(
+      filePath,
+      buildCraftSessionHeader({
+        id: sessionId,
+        inputTokens: 300,
+        outputTokens: 60,
+        lastMessageAt: ts,
+      }) + "\n",
+      "utf8",
+    );
+    res = await parseCraftIncremental({ sessionFiles: [filePath], cursors, queuePath });
+    assert.equal(res.eventsAggregated, 1);
+    // After second sync: cursor advanced to the new cumulative total.
+    assert.equal(cursors.craft.sessionTotals[sessionId].input, 300);
+    assert.equal(cursors.craft.sessionTotals[sessionId].output, 60);
+
+    const queued = await readJsonLines(queuePath);
+    // Bucket cumulative total reflects the running sum (300/60), proving the
+    // delta-of-200/40 added to the prior 100/20 in-memory bucket — not a
+    // re-emission of the full cumulative (which would have double-counted to 400/80).
+    const bucket = queued[queued.length - 1];
+    assert.equal(bucket.input_tokens, 300);
+    assert.equal(bucket.output_tokens, 60);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCraftIncremental routes growth into a new hour bucket when lastMessageAt advances", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-craft-"));
+  try {
+    const rootPath = path.join(tmp, "ws");
+    const sessionId = "260405-cross-hour";
+    const tsBucket1 = Date.UTC(2026, 3, 5, 14, 10, 0);
+    const tsBucket2 = Date.UTC(2026, 3, 5, 15, 5, 0); // next 30-min slot
+    const dir = path.join(rootPath, "sessions", sessionId);
+    await fs.mkdir(dir, { recursive: true });
+    const filePath = path.join(dir, "session.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    // Bucket 1 sync: 100/20
+    await fs.writeFile(
+      filePath,
+      buildCraftSessionHeader({
+        id: sessionId,
+        inputTokens: 100,
+        outputTokens: 20,
+        lastMessageAt: tsBucket1,
+      }) + "\n",
+      "utf8",
+    );
+    await parseCraftIncremental({ sessionFiles: [filePath], cursors, queuePath });
+
+    // Bucket 2 sync: header now reports cumulative 250/45 (delta 150/25 in new hour)
+    await fs.writeFile(
+      filePath,
+      buildCraftSessionHeader({
+        id: sessionId,
+        inputTokens: 250,
+        outputTokens: 45,
+        lastMessageAt: tsBucket2,
+      }) + "\n",
+      "utf8",
+    );
+    await parseCraftIncremental({ sessionFiles: [filePath], cursors, queuePath });
+
+    const queued = await readJsonLines(queuePath);
+    const byHour = new Map();
+    for (const row of queued) byHour.set(row.hour_start, row);
+    const h1 = "2026-04-05T14:00:00.000Z";
+    const h2 = "2026-04-05T15:00:00.000Z";
+    assert.ok(byHour.has(h1), "first hour bucket queued");
+    assert.ok(byHour.has(h2), "second hour bucket queued");
+    // Bucket 1 keeps its original 100/20, bucket 2 carries only the delta 150/25.
+    assert.equal(byHour.get(h1).input_tokens, 100);
+    assert.equal(byHour.get(h1).output_tokens, 20);
+    assert.equal(byHour.get(h2).input_tokens, 150);
+    assert.equal(byHour.get(h2).output_tokens, 25);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCraftIncremental cap evicts least-recently-seen sessions, not insertion order", async () => {
+  // Pre-populate cursors with 5001 entries: one ancient long-lived session
+  // (#0) with a high lastSeenAt set BELOW the rest, and 5000 newer one-shots
+  // with later lastSeenAt. When we re-sync the ancient session, eviction
+  // must drop the oldest of the newer one-shots, not the ancient session.
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-craft-"));
+  try {
+    const rootPath = path.join(tmp, "ws");
+    const ancientId = "session-ancient";
+    const dir = path.join(rootPath, "sessions", ancientId);
+    await fs.mkdir(dir, { recursive: true });
+    const filePath = path.join(dir, "session.jsonl");
+    const ts = Date.UTC(2026, 3, 5, 14, 10, 0);
+    await fs.writeFile(
+      filePath,
+      buildCraftSessionHeader({
+        id: ancientId,
+        inputTokens: 1000,
+        outputTokens: 200,
+        lastMessageAt: ts,
+      }) + "\n",
+      "utf8",
+    );
+    const queuePath = path.join(tmp, "queue.jsonl");
+
+    // Seed cursor: ancient at lastSeenAt=1000, plus 5000 newer entries
+    // each with lastSeenAt 2000 + i. Ancient must NOT be evicted because
+    // the new sync will refresh its lastSeenAt to a much larger value.
+    const sessionTotals = {
+      [ancientId]: { input: 500, output: 100, cacheRead: 0, cacheWrite: 0, total: 600, lastSeenAt: 1000 },
+    };
+    for (let i = 0; i < 5000; i++) {
+      sessionTotals[`other-${i}`] = {
+        input: 1, output: 1, cacheRead: 0, cacheWrite: 0, total: 2,
+        lastSeenAt: 2000 + i,
+      };
+    }
+    const cursors = {
+      version: 1, files: {}, updatedAt: null,
+      craft: { sessionTotals, updatedAt: null },
+    };
+
+    await parseCraftIncremental({ sessionFiles: [filePath], cursors, queuePath });
+
+    // After sync: ancient must still be in sessionTotals with the new total.
+    const surviving = cursors.craft.sessionTotals;
+    assert.ok(
+      surviving[ancientId],
+      "ancient long-lived session should not be evicted",
+    );
+    assert.equal(surviving[ancientId].input, 1000);
+    assert.equal(Object.keys(surviving).length, 5000);
+    // Concretely: the OLDEST of the 5000 one-shots (lastSeenAt=2000) is gone.
+    assert.ok(!surviving["other-0"], "least-recently-seen one-shot should have been evicted");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCraftIncremental dedups when the header has not changed across runs", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-craft-"));
+  try {
+    const rootPath = path.join(tmp, "ws");
+    const ts = Date.UTC(2026, 3, 5, 14, 10, 0);
+    const filePath = await writeCraftSession({
+      rootPath,
+      sessionId: "260405-stable",
+      headerOpts: { inputTokens: 50, outputTokens: 10, lastMessageAt: ts },
+    });
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const res1 = await parseCraftIncremental({ sessionFiles: [filePath], cursors, queuePath });
+    assert.equal(res1.eventsAggregated, 1);
+
+    const res2 = await parseCraftIncremental({ sessionFiles: [filePath], cursors, queuePath });
+    assert.equal(res2.eventsAggregated, 0);
+    assert.equal(res2.bucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCraftIncremental skips entries with zero usage", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-craft-"));
+  try {
+    const rootPath = path.join(tmp, "ws");
+    const filePath = await writeCraftSession({
+      rootPath,
+      sessionId: "260405-empty",
+      headerOpts: { inputTokens: 0, outputTokens: 0, lastMessageAt: Date.now() },
+    });
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const res = await parseCraftIncremental({ sessionFiles: [filePath], cursors, queuePath });
+    assert.equal(res.eventsAggregated, 0);
+    assert.equal(res.bucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveCraftSessionFiles returns empty when ~/.craft-agent missing", async () => {
+  const result = resolveCraftSessionFiles({
+    HOME: path.join(os.tmpdir(), "no-such-craft-home"),
+    CRAFT_CONFIG_DIR: path.join(os.tmpdir(), "no-such-craft-dir"),
+  });
+  assert.deepEqual(result, []);
+});
+
+test("CRAFT_CONFIG_DIR redirects discovery to default workspaces folder", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-craft-"));
+  try {
+    const wsDir = path.join(tmp, "workspaces", "ws-1");
+    await fs.mkdir(path.join(wsDir, "sessions", "260405-foo"), { recursive: true });
+    await fs.writeFile(
+      path.join(wsDir, "sessions", "260405-foo", "session.jsonl"),
+      buildCraftSessionHeader({ id: "260405-foo", inputTokens: 1, outputTokens: 1, lastMessageAt: Date.now() }) + "\n",
+      "utf8",
+    );
+
+    const files = resolveCraftSessionFiles({ CRAFT_CONFIG_DIR: tmp });
+    assert.equal(files.length, 1);
+    assert.ok(files[0].endsWith("session.jsonl"));
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveCraftWorkspaceRoots layers user-relocated workspaces from config.json", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-craft-"));
+  try {
+    const externalRoot = path.join(tmp, "external", "ws");
+    await fs.mkdir(externalRoot, { recursive: true });
+    const configPath = path.join(tmp, "config.json");
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({ workspaces: [{ rootPath: externalRoot }] }),
+      "utf8",
+    );
+    const roots = resolveCraftWorkspaceRoots({ CRAFT_CONFIG_DIR: tmp });
+    assert.ok(roots.includes(externalRoot));
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCraftIncremental falls back to craft-unknown model when header.model missing", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-craft-"));
+  try {
+    const rootPath = path.join(tmp, "ws");
+    const dir = path.join(rootPath, "sessions", "260405-nomodel");
+    await fs.mkdir(dir, { recursive: true });
+    const filePath = path.join(dir, "session.jsonl");
+    await fs.writeFile(
+      filePath,
+      JSON.stringify({
+        id: "260405-nomodel",
+        lastMessageAt: Date.UTC(2026, 3, 5, 14, 10, 0),
+        tokenUsage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+      }) + "\n",
+      "utf8",
+    );
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const res = await parseCraftIncremental({ sessionFiles: [filePath], cursors, queuePath });
+    assert.equal(res.eventsAggregated, 1);
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued[0].model, "craft-unknown");
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

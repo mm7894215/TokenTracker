@@ -41,6 +41,8 @@ const {
   resolveCodebuddyProjectFiles,
   resolveOmpSessionFiles,
   resolveOmpAgentDir,
+  resolveCraftSessionFiles,
+  resolveCraftConfigDir,
 } = require("../lib/rollout");
 
 async function cmdStatus(argv = []) {
@@ -183,6 +185,11 @@ async function cmdStatus(argv = []) {
   const ompInstalled = fssync.existsSync(path.join(ompAgentDir, "sessions"));
   const ompFiles = ompInstalled ? resolveOmpSessionFiles(process.env) : [];
 
+  // Craft Agents — passive scan only (no hooks).
+  const craftConfigDir = resolveCraftConfigDir(process.env);
+  const craftInstalled = fssync.existsSync(craftConfigDir);
+  const craftFiles = craftInstalled ? resolveCraftSessionFiles(process.env) : [];
+
   const copilotToken = readCopilotOauthToken({ home });
   const copilotOtel = describeCopilotOtelStatus({ home, env: process.env });
   const copilotLines = formatCopilotLines({
@@ -223,6 +230,9 @@ async function cmdStatus(argv = []) {
         : null,
       ompInstalled
         ? `- oh-my-pi: passive reader (${ompFiles.length} session jsonl file${ompFiles.length !== 1 ? "s" : ""} found)`
+        : null,
+      craftInstalled
+        ? `- Craft Agents: passive reader (${craftFiles.length} session jsonl file${craftFiles.length !== 1 ? "s" : ""} found)`
         : null,
       ...copilotLines,
       ...subscriptionLines,

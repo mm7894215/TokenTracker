@@ -29,6 +29,8 @@ const {
   parseKimiIncremental,
   resolveOmpSessionFiles,
   parseOmpIncremental,
+  resolveCraftSessionFiles,
+  parseCraftIncremental,
   resolveCodebuddyProjectFiles,
   parseCodebuddyIncremental,
   resolveKiroCliSessionFiles,
@@ -471,6 +473,28 @@ async function cmdSync(argv) {
       });
     }
 
+    // ── Craft Agents (passive ~/.craft-agent + workspaces session.jsonl reader) ──
+    let craftResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    const craftFiles = resolveCraftSessionFiles(process.env);
+    if (craftFiles.length > 0) {
+      if (progress?.enabled) {
+        progress.start(`Parsing Craft ${renderBar(0)} | buckets 0`);
+      }
+      craftResult = await parseCraftIncremental({
+        sessionFiles: craftFiles,
+        cursors,
+        queuePath,
+        env: process.env,
+        onProgress: (p) => {
+          if (!progress?.enabled) return;
+          const pct = p.total > 0 ? p.index / p.total : 1;
+          progress.update(
+            `Parsing Craft ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} files | buckets ${formatNumber(p.bucketsQueued)}`,
+          );
+        },
+      });
+    }
+
     // ── GitHub Copilot CLI (OTEL JSONL files) ──
     let copilotResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     const copilotPaths = resolveCopilotOtelPaths(process.env);
@@ -591,6 +615,7 @@ async function cmdSync(argv) {
         kimiResult.recordsProcessed +
         codebuddyResult.recordsProcessed +
         ompResult.recordsProcessed +
+        craftResult.recordsProcessed +
         copilotResult.recordsProcessed;
       const totalBuckets =
         parseResult.bucketsQueued +
@@ -605,6 +630,7 @@ async function cmdSync(argv) {
         kimiResult.bucketsQueued +
         codebuddyResult.bucketsQueued +
         ompResult.bucketsQueued +
+        craftResult.bucketsQueued +
         copilotResult.bucketsQueued;
       process.stdout.write(
         [
