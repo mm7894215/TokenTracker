@@ -1,7 +1,8 @@
 {
   "_meta": {
     "note": "Curated price overrides. Always wins over LiteLLM. Two reasons to live here: (1) self-defined alias names that LiteLLM will never carry (kiro-*, hy3-*, composer-*, kimi-for-coding, free-tier OpenRouter routes); (2) prices we want to pin even if LiteLLM has the model (e.g. cache_write fields LiteLLM often omits). Units: USD per million tokens. Edit this file to override pricing without redeploying.",
-    "units": "usd_per_million_tokens"
+    "units": "usd_per_million_tokens",
+    "deepseek_v4_pro_discount_expiry": "2026-05-31T15:59:00Z — DeepSeek v4-pro is currently at a 75% promotional discount. After expiry the prices revert to 4x: input $1.74/M, output $3.48/M, cache_read $0.0145/M, cache_write $1.74/M. Update this file before the cutover."
   },
   "exact": {
     "kiro-agent":       { "input": 3,    "output": 15,   "cache_read": 0.3,   "cache_write": 3.75 },
@@ -16,6 +17,8 @@
     "MiniMax-M2.7-highspeed":{ "input": 0.6, "output": 2.4, "cache_read": 0.06, "cache_write": 0.375 },
     "deepseek-v4-flash":{ "input": 0.14, "output": 0.28, "cache_read": 0.0028, "cache_write": 0.14 },
     "deepseek-v4-pro":  { "input": 0.435,"output": 0.87, "cache_read": 0.003625, "cache_write": 0.435 },
+    "deepseek-chat":    { "input": 0.14, "output": 0.28, "cache_read": 0.0028, "cache_write": 0.14 },
+    "deepseek-reasoner":{ "input": 0.14, "output": 0.28, "cache_read": 0.0028, "cache_write": 0.14 },
     "kimi-for-coding":  { "input": 0.6,  "output": 2,    "cache_read": 0.15 },
     "kimi-k2.5":        { "input": 0.6,  "output": 2,    "cache_read": 0.15 },
     "kimi-k2.5-free":   { "input": 0,    "output": 0,    "cache_read": 0 },

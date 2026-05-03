@@ -115,6 +115,31 @@ function GithubIcon({ size = 16, className = "" }) {
   );
 }
 
+// Craft Agents (lukilabs/craft-agents-oss). Mono mark — a stylized hammer
+// crossing a chisel inside a rounded square, evoking "craft". Uses
+// currentColor so it adapts to the surrounding text colour.
+function CraftIcon({ size = 16, className = "" }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      className={className}
+      aria-hidden="true"
+    >
+      <rect x="2" y="2" width="20" height="20" rx="5" stroke="currentColor" strokeWidth="1.6" />
+      <path
+        d="M7.2 16.8l4.4-4.4M14.5 9.5l1.8-1.8a1.4 1.4 0 0 1 2 2l-1.8 1.8M9 17.5l-1.5 1.5a1.06 1.06 0 0 1-1.5-1.5L7.5 16M11.6 12.4l3.5-3.5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <circle cx="17" cy="13" r="1.2" fill="currentColor" />
+    </svg>
+  );
+}
+
 function OmpIcon({ size = 16, className = "" }) {
   return (
     <svg width={size} height={size} viewBox="0 0 120 90" fill="currentColor" className={className}>
@@ -138,6 +163,7 @@ const PROVIDER_ICON_MAP = {
   CODEBUDDY: CodeBuddyIcon,
   CODEX: CodexIcon,
   COPILOT: CopilotIcon,
+  CRAFT: CraftIcon,
   CURSOR: CursorIcon,
   GEMINI: GeminiIcon,
   GITHUB: GithubIcon,

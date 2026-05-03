@@ -437,6 +437,16 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
     }
   }
 
+  // Craft Agents: passive reader — no hook installation needed.
+  // TokenTracker reads ~/.craft-agent/workspaces/<id>/sessions/**/session.jsonl
+  // (and any user-relocated workspace listed in ~/.craft-agent/config.json).
+  {
+    const craftConfigDir = process.env.CRAFT_CONFIG_DIR || path.join(home, ".craft-agent");
+    if (fssync.existsSync(craftConfigDir)) {
+      summary.push({ label: "Craft Agents", status: "detected", detail: "Passive reader (no hook needed)" });
+    }
+  }
+
   // CodeBuddy: Claude-Code fork. Install the SessionEnd hook so finished
   // sessions trigger notify.cjs → tracker sync; passive scan still runs as a
   // safety net for sessions that don't fire SessionEnd cleanly.
