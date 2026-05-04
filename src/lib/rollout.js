@@ -2952,10 +2952,13 @@ function resolveHermesDbPath() {
   return path.join(home, ".hermes", "state.db");
 }
 
-function readHermesSessions(dbPath, sinceEpoch) {
+function readHermesSessions(dbPath, lastCompletedEpoch) {
   if (!dbPath || !fssync.existsSync(dbPath)) return [];
-  const since = Number.isFinite(sinceEpoch) && sinceEpoch > 0 ? sinceEpoch : 0;
-  const sql = `SELECT id, model, started_at, ended_at, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, message_count FROM sessions WHERE started_at > ${since} AND (input_tokens > 0 OR output_tokens > 0 OR cache_read_tokens > 0 OR reasoning_tokens > 0) ORDER BY started_at ASC`;
+  const since = Number.isFinite(lastCompletedEpoch) && lastCompletedEpoch > 0 ? lastCompletedEpoch : 0;
+  // Fetch sessions that started after the cursor, OR sessions that are still
+  // in-progress (ended_at IS NULL).  Hermes updates token counts in real-time,
+  // so an active session keeps growing and must be re-read on every sync.
+  const sql = `SELECT id, model, started_at, ended_at, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, message_count FROM sessions WHERE (started_at > ${since} OR ended_at IS NULL) AND (input_tokens > 0 OR output_tokens > 0 OR cache_read_tokens > 0 OR reasoning_tokens > 0) ORDER BY started_at ASC`;
   let raw;
   try {
     raw = cp.execFileSync("sqlite3", ["-json", dbPath, sql], {
@@ -2979,17 +2982,25 @@ function readHermesSessions(dbPath, sinceEpoch) {
 async function parseHermesIncremental({ dbPath, cursors, queuePath, onProgress }) {
   await ensureDir(path.dirname(queuePath));
   const hermesState = cursors.hermes && typeof cursors.hermes === "object" ? cursors.hermes : {};
-  const lastStartedAt =
-    typeof hermesState.lastStartedAt === "number" ? hermesState.lastStartedAt : 0;
+
+  // Only advance past sessions that have fully ended.  Active sessions
+  // (ended_at IS NULL) must be re-read every sync because Hermes updates
+  // their token counts in real-time after each turn.
+  const lastCompletedStartedAt =
+    typeof hermesState.lastCompletedStartedAt === "number" ? hermesState.lastCompletedStartedAt : 0;
+
+  // Per-session snapshot from the previous sync: { [sessionId]: { in, out, cacheRead, cacheWrite, reasoning } }
+  const prevSnapshots = (hermesState.snapshots && typeof hermesState.snapshots === "object")
+    ? hermesState.snapshots : {};
 
   const resolvedDbPath = dbPath || resolveHermesDbPath();
   if (!fssync.existsSync(resolvedDbPath)) {
     return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
   }
 
-  const rows = readHermesSessions(resolvedDbPath, lastStartedAt);
+  const rows = readHermesSessions(resolvedDbPath, lastCompletedStartedAt);
   if (rows.length === 0) {
-    cursors.hermes = { ...hermesState, lastStartedAt, updatedAt: new Date().toISOString() };
+    cursors.hermes = { ...hermesState, lastCompletedStartedAt, updatedAt: new Date().toISOString() };
     return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
   }
 
@@ -2997,7 +3008,8 @@ async function parseHermesIncremental({ dbPath, cursors, queuePath, onProgress }
   const touchedBuckets = new Set();
   const cb = typeof onProgress === "function" ? onProgress : null;
   let eventsAggregated = 0;
-  let maxStartedAt = lastStartedAt;
+  let maxCompletedStartedAt = lastCompletedStartedAt;
+  const nextSnapshots = {};
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
@@ -3007,6 +3019,28 @@ async function parseHermesIncremental({ dbPath, cursors, queuePath, onProgress }
     const cacheWrite = toNonNegativeInt(row.cache_write_tokens);
     const reasoning = toNonNegativeInt(row.reasoning_tokens);
     if (inputTokens === 0 && outputTokens === 0 && cacheRead === 0 && reasoning === 0) continue;
+
+    // Save current snapshot for next sync
+    nextSnapshots[row.id] = { in: inputTokens, out: outputTokens, cacheRead, cacheWrite, reasoning };
+
+    // Compute delta from previous snapshot (if any) so that we only count
+    // new tokens since the last sync.  First time we see a session the
+    // previous snapshot is absent, so the full amount is the delta.
+    const prev = prevSnapshots[row.id];
+    let dInput = inputTokens;
+    let dOutput = outputTokens;
+    let dCacheRead = cacheRead;
+    let dCacheWrite = cacheWrite;
+    let dReasoning = reasoning;
+    if (prev) {
+      dInput = Math.max(0, inputTokens - (prev.in || 0));
+      dOutput = Math.max(0, outputTokens - (prev.out || 0));
+      dCacheRead = Math.max(0, cacheRead - (prev.cacheRead || 0));
+      dCacheWrite = Math.max(0, cacheWrite - (prev.cacheWrite || 0));
+      dReasoning = Math.max(0, reasoning - (prev.reasoning || 0));
+    }
+    // Skip if delta is zero (session unchanged since last sync)
+    if (dInput === 0 && dOutput === 0 && dCacheRead === 0 && dCacheWrite === 0 && dReasoning === 0) continue;
 
     // Prefer ended_at for bucket placement; fall back to started_at
     const epochSec = row.ended_at || row.started_at;
@@ -3018,12 +3052,12 @@ async function parseHermesIncremental({ dbPath, cursors, queuePath, onProgress }
     const model = normalizeModelInput(row.model) || "hermes-agent";
 
     const delta = {
-      input_tokens: inputTokens,
-      cached_input_tokens: cacheRead,
-      cache_creation_input_tokens: cacheWrite,
-      output_tokens: outputTokens,
-      reasoning_output_tokens: reasoning,
-      total_tokens: inputTokens + outputTokens + cacheRead + cacheWrite + reasoning,
+      input_tokens: dInput,
+      cached_input_tokens: dCacheRead,
+      cache_creation_input_tokens: dCacheWrite,
+      output_tokens: dOutput,
+      reasoning_output_tokens: dReasoning,
+      total_tokens: dInput + dOutput + dCacheRead + dCacheWrite + dReasoning,
       conversation_count: toNonNegativeInt(row.message_count) || 1,
     };
 
@@ -3032,7 +3066,10 @@ async function parseHermesIncremental({ dbPath, cursors, queuePath, onProgress }
     touchedBuckets.add(bucketKey("hermes", model, bucketStart));
     eventsAggregated++;
 
-    if (row.started_at > maxStartedAt) maxStartedAt = row.started_at;
+    // Only advance cursor past sessions that have ended
+    if (row.ended_at && row.started_at > maxCompletedStartedAt) {
+      maxCompletedStartedAt = row.started_at;
+    }
 
     if (cb) {
       cb({
@@ -3049,7 +3086,13 @@ async function parseHermesIncremental({ dbPath, cursors, queuePath, onProgress }
   const updatedAt = new Date().toISOString();
   hourlyState.updatedAt = updatedAt;
   cursors.hourly = hourlyState;
-  cursors.hermes = { ...hermesState, lastStartedAt: maxStartedAt, updatedAt };
+  cursors.hermes = {
+    ...hermesState,
+    lastStartedAt: maxCompletedStartedAt, // keep for backward compat
+    lastCompletedStartedAt: maxCompletedStartedAt,
+    snapshots: nextSnapshots,
+    updatedAt,
+  };
 
   return { recordsProcessed: rows.length, eventsAggregated, bucketsQueued };
 }
