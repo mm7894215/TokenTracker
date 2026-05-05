@@ -39,7 +39,16 @@ public enum NativeLocalization {
     ) -> String {
         let normalized = normalizePreference(preference ?? currentPreference)
         guard normalized == systemPreference else { return normalized }
-        return preferredLanguages.contains { $0.range(of: #"^zh([-_]|$)"#, options: .regularExpression) != nil }
+        // Use only the primary (most preferred) language, not any zh entry in the list.
+        // Many English macOS users keep zh-Hans-CN as a secondary preferred language for
+        // input methods or fallback menus — scanning the whole array mis-resolves their
+        // primary "en" to Chinese. See issue #54.
+        let primary = preferredLanguages
+            .lazy
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+        guard let primary else { return englishLocale }
+        return primary.range(of: #"^zh([-_]|$)"#, options: .regularExpression) != nil
             ? chineseLocale
             : englishLocale
     }

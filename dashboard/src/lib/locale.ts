@@ -26,8 +26,15 @@ function getBrowserLanguages() {
 export function resolvePreferredLocale(preference: any, languages = getBrowserLanguages()) {
   const normalized = normalizeLocalePreference(preference);
   if (normalized !== SYSTEM_LOCALE) return normalized;
-  const matched = languages.find((value) => /^zh(?:[-_]|$)/i.test(String(value).trim()));
-  return matched ? ZH_CN_LOCALE : EN_LOCALE;
+  // Use only the primary (most preferred) language, not any zh entry in the list.
+  // Many English macOS users keep zh-Hans-CN as a secondary language for input methods or
+  // fallback menus — scanning the whole array mis-resolves their primary "en" to Chinese.
+  // See issue #54.
+  const primary = languages
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .find((value) => value.length > 0);
+  if (!primary) return EN_LOCALE;
+  return /^zh(?:[-_]|$)/i.test(primary) ? ZH_CN_LOCALE : EN_LOCALE;
 }
 
 export function getInitialLocalePreference() {
