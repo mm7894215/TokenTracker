@@ -5,7 +5,16 @@ const path = require("node:path");
 const http = require("node:http");
 const https = require("node:https");
 
-const { readClaudeCodeAccessToken, readCodexAccessToken } = require("./subscriptions");
+const {
+  readClaudeCodeAccessToken,
+  readCodexAccessToken,
+  readCodexAuthBundle,
+} = require("./subscriptions");
+const {
+  isTokenStale,
+  refreshCodexTokens,
+  persistRefreshedAuth,
+} = require("./codex-token-refresh");
 const {
   isCursorInstalled,
   extractCursorSessionToken,
@@ -122,23 +131,72 @@ async function fetchClaudeUsageLimits(accessToken, { fetchImpl = fetch, maxAttem
   }
 }
 
-async function fetchCodexUsageLimits(accessToken, { fetchImpl = fetch } = {}) {
+// Classify a wham window by `limit_window_seconds` rather than its slot name.
+// 18000s = 5h session window. 604800s = 7d weekly window. Free-tier accounts only get a
+// weekly window, often delivered in the `primary_window` slot — naive position-based
+// reading mislabels it as "5h". Aligned with steipete/CodexBar's rate-window normalizer.
+const CODEX_SESSION_WINDOW_SECONDS = 18000;
+const CODEX_WEEKLY_WINDOW_SECONDS = 604800;
+
+function classifyCodexWindow(window) {
+  if (!window || typeof window !== "object") return null;
+  const seconds = Number(window.limit_window_seconds);
+  if (!Number.isFinite(seconds)) return null;
+  if (seconds === CODEX_SESSION_WINDOW_SECONDS) return "session";
+  if (seconds === CODEX_WEEKLY_WINDOW_SECONDS) return "weekly";
+  return null;
+}
+
+function normalizeCodexRateWindows(rateLimit) {
+  const candidates = [rateLimit?.primary_window, rateLimit?.secondary_window].filter(
+    (w) => w && typeof w === "object",
+  );
+  let session = null;
+  let weekly = null;
+  for (const w of candidates) {
+    const kind = classifyCodexWindow(w);
+    if (kind === "session" && !session) session = w;
+    else if (kind === "weekly" && !weekly) weekly = w;
+  }
+  // Fall back to positional read only if classification failed for both — preserves data
+  // from unexpected window durations rather than dropping it silently.
+  if (!session && !weekly && candidates.length > 0) {
+    return {
+      primary_window: candidates[0] ?? null,
+      secondary_window: candidates[1] ?? null,
+    };
+  }
+  return { primary_window: session, secondary_window: weekly };
+}
+
+async function fetchCodexUsageLimits(
+  accessToken,
+  { fetchImpl = fetch, accountId = null } = {},
+) {
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    Accept: "application/json",
+  };
+  // The wham endpoint rejects some plan tiers without an explicit account id — match
+  // CodexBar's request shape so free / multi-account users don't see opaque 4xx.
+  if (accountId) {
+    headers["ChatGPT-Account-Id"] = accountId;
+  }
+
   const res = await fetchImpl("https://chatgpt.com/backend-api/wham/usage", {
     method: "GET",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: "application/json",
-    },
+    headers,
   });
+  // 401/403/404 from wham means "no usage data available for this auth state" — render
+  // a neutral empty state instead of a red "Fetch failed" error.
+  if (res.status === 401 || res.status === 403 || res.status === 404) {
+    return { primary_window: null, secondary_window: null };
+  }
   if (!res.ok) {
     throw new Error(`Codex API returned ${res.status}`);
   }
   const body = await res.json();
-  const rateLimit = body.rate_limit || {};
-  return {
-    primary_window: rateLimit.primary_window ?? null,
-    secondary_window: rateLimit.secondary_window ?? null,
-  };
+  return normalizeCodexRateWindows(body.rate_limit || {});
 }
 
 function cursorPercentFromCentsUsedLimit(usedRaw, limitRaw) {
@@ -1471,10 +1529,44 @@ async function getUsageLimits({
     return cache.data;
   }
 
-  const [claudeToken, codexToken] = await Promise.all([
+  const [claudeToken, codexAuth] = await Promise.all([
     Promise.resolve().then(() => readClaudeCodeAccessToken({ platform, securityRunner })),
-    readCodexAccessToken({ home, env }),
+    readCodexAuthBundle({ home, env }),
   ]);
+
+  // Proactively refresh Codex tokens that are >8 days stale, mirroring CodexBar's
+  // CodexTokenRefresher.swift. Without this, users who logged in once and didn't run
+  // `codex` for >a week get wham 401 → "Fetch failed" (issue #52). Best-effort: any
+  // refresh failure falls through to using the existing (possibly stale) token, then the
+  // 4xx graceful path in fetchCodexUsageLimits surfaces a neutral state instead of red.
+  let refreshError = null;
+  let codexAuthRefreshed = codexAuth;
+  if (codexAuth && isTokenStale(codexAuth.lastRefresh) && codexAuth.refreshToken) {
+    try {
+      const newTokens = await refreshCodexTokens({
+        refreshToken: codexAuth.refreshToken,
+        fetchImpl,
+      });
+      const updatedAuth = await persistRefreshedAuth(
+        codexAuth.authPath,
+        codexAuth.authJson,
+        newTokens,
+      );
+      codexAuthRefreshed = {
+        ...codexAuth,
+        accessToken: newTokens.access_token,
+        refreshToken: newTokens.refresh_token,
+        lastRefresh: updatedAuth.last_refresh,
+        authJson: updatedAuth,
+      };
+    } catch (err) {
+      refreshError = err;
+    }
+  }
+
+  const codexToken = codexAuthRefreshed?.accessToken || null;
+  const codexAccountId = codexAuthRefreshed?.accountId || null;
+  const codexPlanType = codexAuthRefreshed?.planType || null;
 
   const providerFetch = withFetchTimeout(fetchImpl, providerTimeoutMs);
   const [claudeResult, codexResult, cursor, kimi, gemini, kiro, antigravity, copilot] = await Promise.all([
@@ -1485,7 +1577,11 @@ async function getUsageLimits({
         )
       : Promise.resolve(null),
     codexToken
-      ? withProviderTimeout(fetchCodexUsageLimits(codexToken, { fetchImpl: providerFetch }), "Codex", providerTimeoutMs).then(
+      ? withProviderTimeout(
+          fetchCodexUsageLimits(codexToken, { fetchImpl: providerFetch, accountId: codexAccountId }),
+          "Codex",
+          providerTimeoutMs,
+        ).then(
           (value) => ({ status: "fulfilled", value }),
           (reason) => ({ status: "rejected", reason }),
         )
@@ -1521,12 +1617,21 @@ async function getUsageLimits({
   let codex;
   if (!codexToken) {
     codex = { configured: false };
+  } else if (refreshError && refreshError.code === "REFRESH_TOKEN_EXPIRED") {
+    // Refresh token is dead — the user must re-run `codex` to log in again. Surface a
+    // specific, actionable message rather than the generic "Fetch failed".
+    codex = {
+      configured: true,
+      error: refreshError.message,
+      auth_action_required: "reauth",
+    };
   } else if (!codexResult || codexResult.status === "rejected") {
     codex = { configured: true, error: codexResult?.reason?.message || "Unknown error" };
   } else {
     codex = {
       configured: true,
       error: null,
+      plan_type: codexPlanType || null,
       primary_window: codexResult.value.primary_window,
       secondary_window: codexResult.value.secondary_window,
     };

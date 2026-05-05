@@ -92,7 +92,312 @@ describe("extractGeminiOauthClientCredentials", () => {
   });
 });
 
+function makeFakeCodexJwt(planType) {
+  const header = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url");
+  const payload = Buffer.from(
+    JSON.stringify({
+      "https://api.openai.com/auth": { chatgpt_plan_type: planType },
+    }),
+  ).toString("base64url");
+  return `${header}.${payload}.`;
+}
+
 describe("getUsageLimits", () => {
+  it("classifies a 5h session window into primary regardless of slot position", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-codex-classify-"));
+    try {
+      const codexHome = path.join(tmp, ".codex");
+      fs.mkdirSync(codexHome, { recursive: true });
+      fs.writeFileSync(
+        path.join(codexHome, "auth.json"),
+        JSON.stringify({
+          tokens: {
+            access_token: makeFakeCodexJwt("plus"),
+            id_token: makeFakeCodexJwt("plus"),
+            account_id: "acc-classify",
+          },
+        }),
+      );
+
+      let observedHeader = null;
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 2000,
+        securityRunner() {
+          return { status: 1, stdout: "" };
+        },
+        commandRunner() {
+          return { status: 1, stdout: "" };
+        },
+        fetchImpl(url, opts) {
+          if (typeof url === "string" && url.includes("chatgpt.com/backend-api/wham/usage")) {
+            observedHeader = opts?.headers?.["ChatGPT-Account-Id"] || null;
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              // API delivers 7d in primary slot and 5h in secondary — sorter must swap them.
+              json: async () => ({
+                rate_limit: {
+                  primary_window: { used_percent: 30, limit_window_seconds: 604800, reset_at: 99999 },
+                  secondary_window: { used_percent: 12, limit_window_seconds: 18000, reset_at: 11111 },
+                },
+              }),
+            });
+          }
+          return new Promise(() => {});
+        },
+      });
+
+      assert.equal(observedHeader, "acc-classify", "ChatGPT-Account-Id header must be sent");
+      assert.equal(result.codex.configured, true);
+      assert.equal(result.codex.error, null);
+      assert.equal(result.codex.plan_type, "plus");
+      assert.deepEqual(result.codex.primary_window, {
+        used_percent: 12,
+        limit_window_seconds: 18000,
+        reset_at: 11111,
+      });
+      assert.deepEqual(result.codex.secondary_window, {
+        used_percent: 30,
+        limit_window_seconds: 604800,
+        reset_at: 99999,
+      });
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("renders free-tier weekly-only response into the secondary (7d) lane", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-codex-free-weekly-"));
+    try {
+      const codexHome = path.join(tmp, ".codex");
+      fs.mkdirSync(codexHome, { recursive: true });
+      fs.writeFileSync(
+        path.join(codexHome, "auth.json"),
+        JSON.stringify({
+          tokens: {
+            access_token: makeFakeCodexJwt("free"),
+            id_token: makeFakeCodexJwt("free"),
+          },
+        }),
+      );
+
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 2000,
+        securityRunner() {
+          return { status: 1, stdout: "" };
+        },
+        commandRunner() {
+          return { status: 1, stdout: "" };
+        },
+        fetchImpl(url) {
+          if (typeof url === "string" && url.includes("chatgpt.com/backend-api/wham/usage")) {
+            // Free plans get a single 7-day window in the primary slot.
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                rate_limit: {
+                  primary_window: { used_percent: 8, limit_window_seconds: 604800, reset_at: 42 },
+                  secondary_window: null,
+                },
+              }),
+            });
+          }
+          return new Promise(() => {});
+        },
+      });
+
+      assert.equal(result.codex.configured, true);
+      assert.equal(result.codex.error, null);
+      assert.equal(result.codex.plan_type, "free");
+      // No 5h session window for free — primary lane stays empty, weekly fills secondary.
+      assert.equal(result.codex.primary_window, null);
+      assert.deepEqual(result.codex.secondary_window, {
+        used_percent: 8,
+        limit_window_seconds: 604800,
+        reset_at: 42,
+      });
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("proactively refreshes a stale Codex token and persists the new one before calling wham", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-codex-refresh-"));
+    try {
+      const codexHome = path.join(tmp, ".codex");
+      fs.mkdirSync(codexHome, { recursive: true });
+      const authPath = path.join(codexHome, "auth.json");
+      // Write an auth.json whose last_refresh is >8 days old → must be refreshed.
+      fs.writeFileSync(
+        authPath,
+        JSON.stringify({
+          auth_mode: "chatgpt",
+          tokens: {
+            access_token: makeFakeCodexJwt("plus"),
+            id_token: makeFakeCodexJwt("plus"),
+            refresh_token: "rt-stale",
+            account_id: "acc-stale",
+          },
+          last_refresh: "2026-01-01T00:00:00Z",
+        }),
+      );
+
+      let refreshCalled = false;
+      let whamAuthHeader = null;
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 2000,
+        securityRunner() {
+          return { status: 1, stdout: "" };
+        },
+        commandRunner() {
+          return { status: 1, stdout: "" };
+        },
+        fetchImpl(url, opts) {
+          if (typeof url === "string" && url.includes("auth.openai.com/oauth/token")) {
+            refreshCalled = true;
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                access_token: "fresh-access",
+                refresh_token: "fresh-refresh",
+                id_token: "fresh-id",
+              }),
+            });
+          }
+          if (typeof url === "string" && url.includes("chatgpt.com/backend-api/wham/usage")) {
+            whamAuthHeader = opts?.headers?.Authorization || null;
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                rate_limit: {
+                  primary_window: { used_percent: 1, limit_window_seconds: 18000, reset_at: 100 },
+                  secondary_window: { used_percent: 9, limit_window_seconds: 604800, reset_at: 200 },
+                },
+              }),
+            });
+          }
+          return new Promise(() => {});
+        },
+      });
+
+      assert.equal(refreshCalled, true, "refresh endpoint must be called when token is stale");
+      assert.equal(whamAuthHeader, "Bearer fresh-access", "wham must use the new token");
+      assert.equal(result.codex.configured, true);
+      assert.equal(result.codex.error, null);
+      assert.deepEqual(result.codex.primary_window, { used_percent: 1, limit_window_seconds: 18000, reset_at: 100 });
+
+      // Persisted auth.json gets the new tokens + a fresh last_refresh.
+      const updated = JSON.parse(fs.readFileSync(authPath, "utf8"));
+      assert.equal(updated.tokens.access_token, "fresh-access");
+      assert.equal(updated.tokens.refresh_token, "fresh-refresh");
+      assert.notEqual(updated.last_refresh, "2026-01-01T00:00:00Z");
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("surfaces a reauth-required error when the refresh token itself is expired", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-codex-reauth-"));
+    try {
+      const codexHome = path.join(tmp, ".codex");
+      fs.mkdirSync(codexHome, { recursive: true });
+      fs.writeFileSync(
+        path.join(codexHome, "auth.json"),
+        JSON.stringify({
+          tokens: {
+            access_token: makeFakeCodexJwt("plus"),
+            refresh_token: "rt-dead",
+          },
+          last_refresh: "2026-01-01T00:00:00Z",
+        }),
+      );
+
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 2000,
+        securityRunner() {
+          return { status: 1, stdout: "" };
+        },
+        commandRunner() {
+          return { status: 1, stdout: "" };
+        },
+        fetchImpl(url) {
+          if (typeof url === "string" && url.includes("auth.openai.com/oauth/token")) {
+            return Promise.resolve({
+              ok: false,
+              status: 401,
+              json: async () => ({ error: { code: "refresh_token_expired" } }),
+            });
+          }
+          return new Promise(() => {});
+        },
+      });
+
+      assert.equal(result.codex.configured, true);
+      assert.equal(result.codex.auth_action_required, "reauth");
+      assert.match(result.codex.error, /Run `codex` to re-authenticate/);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("treats wham 403 (free / unauthorized) as no-data instead of a hard error", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-codex-403-"));
+    try {
+      const codexHome = path.join(tmp, ".codex");
+      fs.mkdirSync(codexHome, { recursive: true });
+      fs.writeFileSync(
+        path.join(codexHome, "auth.json"),
+        JSON.stringify({ tokens: { access_token: "opaque-token" } }),
+      );
+
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 1000,
+        securityRunner() {
+          return { status: 1, stdout: "" };
+        },
+        commandRunner() {
+          return { status: 1, stdout: "" };
+        },
+        fetchImpl(url) {
+          if (typeof url === "string" && url.includes("chatgpt.com/backend-api/wham/usage")) {
+            return Promise.resolve({ ok: false, status: 403, json: async () => ({}) });
+          }
+          return new Promise(() => {});
+        },
+      });
+
+      assert.equal(result.codex.configured, true);
+      assert.equal(result.codex.error, null);
+      assert.equal(result.codex.primary_window, null);
+      assert.equal(result.codex.secondary_window, null);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("does not block the whole response when Claude usage hangs", async () => {
     resetUsageLimitsCache();
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-timeout-"));
