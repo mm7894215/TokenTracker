@@ -2590,6 +2590,130 @@ test("parseHermesIncremental skips sessions with zero tokens", async () => {
   }
 });
 
+test("parseHermesIncremental tracks real-time token growth for active sessions (ended_at IS NULL)", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-hermes-"));
+  try {
+    const dbPath = path.join(tmp, "state.db");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+
+    const epoch1 = 1775993779.0; // 2026-04-12T11:36:19Z
+
+    // Start with one completed session and one active (no ended_at)
+    createHermesDb(dbPath, [
+      { id: "sess_done", model: "gpt-5.4-mini", started_at: epoch1, ended_at: epoch1 + 120, input_tokens: 1000, output_tokens: 500, cache_read_tokens: 200, message_count: 4 },
+      { id: "sess_active", model: "claude-sonnet-4-6", started_at: epoch1 + 200, ended_at: null, input_tokens: 5000, output_tokens: 200, cache_read_tokens: 1000, message_count: 5 },
+    ]);
+
+    // First parse — both sessions processed
+    const first = await parseHermesIncremental({ dbPath, cursors, queuePath });
+    assert.equal(first.recordsProcessed, 2);
+    assert.equal(first.eventsAggregated, 2);
+
+    // Cursor should have snapshots for both sessions
+    assert.ok(cursors.hermes.snapshots);
+    assert.equal(cursors.hermes.snapshots["sess_active"].in, 5000);
+    assert.equal(cursors.hermes.snapshots["sess_done"].in, 1000);
+
+    // Cursor only advances past completed sessions
+    assert.equal(cursors.hermes.lastCompletedStartedAt, epoch1);
+
+    // Simulate Hermes updating the active session in real-time
+    cp.execFileSync("sqlite3", [
+      dbPath,
+      `UPDATE sessions SET input_tokens = 8000, output_tokens = 400, cache_read_tokens = 2000, message_count = 10 WHERE id = 'sess_active';`,
+    ]);
+
+    // Second parse — should pick up the delta for the active session
+    const second = await parseHermesIncremental({ dbPath, cursors, queuePath });
+    assert.equal(second.recordsProcessed, 1); // only the active session re-read
+    assert.equal(second.eventsAggregated, 1);
+
+    // Verify the delta was computed correctly
+    // queue.jsonl accumulates lines per sync; the last line for this model
+    // holds the running total (first full + subsequent deltas).
+    const queued2 = await readJsonLines(queuePath);
+    const activeBuckets = queued2.filter((b) => b.source === "hermes" && b.model === "claude-sonnet-4-6");
+    const activeBucket = activeBuckets[activeBuckets.length - 1];
+    assert.ok(activeBucket);
+    assert.equal(activeBucket.input_tokens, 8000);
+    assert.equal(activeBucket.output_tokens, 400);
+    assert.equal(activeBucket.cached_input_tokens, 2000);
+
+    // Snapshot should be updated
+    assert.equal(cursors.hermes.snapshots["sess_active"].in, 8000);
+    assert.equal(cursors.hermes.snapshots["sess_active"].out, 400);
+
+    // Cursor still hasn't advanced past the active session
+    assert.equal(cursors.hermes.lastCompletedStartedAt, epoch1);
+
+    // Now end the active session
+    cp.execFileSync("sqlite3", [
+      dbPath,
+      `UPDATE sessions SET ended_at = ${epoch1 + 600}, input_tokens = 10000, output_tokens = 600, cache_read_tokens = 3000 WHERE id = 'sess_active';`,
+    ]);
+
+    const third = await parseHermesIncremental({ dbPath, cursors, queuePath });
+    assert.equal(third.recordsProcessed, 1);
+    assert.equal(third.eventsAggregated, 1);
+
+    // Now cursor should advance past the ended session
+    assert.equal(cursors.hermes.lastCompletedStartedAt, epoch1 + 200);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseHermesIncremental skips active session when delta is zero (unchanged)", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-hermes-"));
+  try {
+    const dbPath = path.join(tmp, "state.db");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+
+    const epoch1 = 1775993779.0;
+    createHermesDb(dbPath, [
+      { id: "sess_active", model: "gpt-5.4-mini", started_at: epoch1, ended_at: null, input_tokens: 5000, output_tokens: 200, message_count: 5 },
+    ]);
+
+    // First parse
+    const first = await parseHermesIncremental({ dbPath, cursors, queuePath });
+    assert.equal(first.eventsAggregated, 1);
+
+    // Second parse without any changes — should be no-op
+    const second = await parseHermesIncremental({ dbPath, cursors, queuePath });
+    assert.equal(second.eventsAggregated, 0);
+    assert.equal(second.bucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseHermesIncremental backward compat: old cursor without snapshots", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-hermes-"));
+  try {
+    const dbPath = path.join(tmp, "state.db");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    // Old-style cursor with lastStartedAt but no snapshots
+    const cursors = { version: 1, hermes: { lastStartedAt: 0, updatedAt: "2026-04-12T00:00:00Z" } };
+
+    const epoch1 = 1775993779.0;
+    createHermesDb(dbPath, [
+      { id: "sess_001", model: "gpt-5.4-mini", started_at: epoch1, ended_at: epoch1 + 120, input_tokens: 1000, output_tokens: 500, message_count: 4 },
+    ]);
+
+    const result = await parseHermesIncremental({ dbPath, cursors, queuePath });
+    assert.equal(result.eventsAggregated, 1);
+    // Should have created snapshots
+    assert.ok(cursors.hermes.snapshots);
+    assert.equal(cursors.hermes.snapshots["sess_001"].in, 1000);
+    // New cursor field
+    assert.equal(cursors.hermes.lastCompletedStartedAt, epoch1);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 // ── GitHub Copilot OTEL parser tests ──
 
 function writeCopilotOtelFile(filePath, spans) {
