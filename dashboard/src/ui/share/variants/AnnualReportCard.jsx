@@ -231,7 +231,7 @@ export function AnnualReportCard({ data }) {
             <img src="/app-icon.png" alt="" width={44} height={44} style={{width:44,height:44,borderRadius:8,display:"block"}}/>
             <span style={{fontSize:22,fontWeight:600,color:WHITE}}>Token Tracker</span>
           </div>
-          <span style={{fontSize:22,fontWeight:600,color:ACCENT}}>token.rynn.me</span>
+          <span style={{fontSize:22,fontWeight:600,color:ACCENT}}>tokentracker.cc</span>
         </div>
 
       </div>

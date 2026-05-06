@@ -409,6 +409,6 @@ Clawd pixel art inspired by [Clawd-on-Desk](https://github.com/Angel2518975237/C
 
 **Token Tracker** — Quantify your AI output.
 
-<a href="https://token.rynn.me">token.rynn.me</a>  ·  <a href="https://www.npmjs.com/package/tokentracker-cli">npm</a>  ·  <a href="https://github.com/mm7894215/TokenTracker">GitHub</a>
+<a href="https://www.tokentracker.cc">tokentracker.cc</a>  ·  <a href="https://www.npmjs.com/package/tokentracker-cli">npm</a>  ·  <a href="https://github.com/mm7894215/TokenTracker">GitHub</a>
 
 </div>

@@ -409,6 +409,6 @@ Clawd 像素风形象的灵感来自 [@marciogranzotto](https://github.com/marci
 
 **Token Tracker** —— 把你的 AI 产出量化。
 
-<a href="https://token.rynn.me">token.rynn.me</a>  ·  <a href="https://www.npmjs.com/package/tokentracker-cli">npm</a>  ·  <a href="https://github.com/mm7894215/TokenTracker">GitHub</a>
+<a href="https://www.tokentracker.cc">tokentracker.cc</a>  ·  <a href="https://www.npmjs.com/package/tokentracker-cli">npm</a>  ·  <a href="https://github.com/mm7894215/TokenTracker">GitHub</a>
 
 </div>

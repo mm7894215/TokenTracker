@@ -163,5 +163,5 @@
   "dashboard.screenshot.twitter_button": "分享到 X",
   "dashboard.screenshot.twitter_label": "分享到 X",
   "dashboard.screenshot.twitter_hint": "自动将图像复制到剪贴板",
-  "dashboard.screenshot.twitter_text": "记录中的 {{total_tokens}} Token。\\n{{model_name}} 以 {{model_percent}}% 领先。\\n\\n我的 AI 使用情况，未经审计 →\\ntoken.rynn.me"
+  "dashboard.screenshot.twitter_text": "记录中的 {{total_tokens}} Token。\\n{{model_name}} 以 {{model_percent}}% 领先。\\n\\n我的 AI 使用情况，未经审计 →\\ntokentracker.cc"
 }

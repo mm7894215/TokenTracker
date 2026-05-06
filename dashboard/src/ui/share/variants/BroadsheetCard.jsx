@@ -422,7 +422,7 @@ export function BroadsheetCard({ data }) {
         </div>
         <div>
           {copy("share.card.broadsheet.track_yours")}{" "}
-          <span style={{ color: VERMILLION }}>→ token.rynn.me</span>
+          <span style={{ color: VERMILLION }}>→ tokentracker.cc</span>
         </div>
       </footer>
     </div>

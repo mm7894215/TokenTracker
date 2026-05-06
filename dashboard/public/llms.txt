@@ -3,11 +3,11 @@
 Token Tracker tracks token usage across AI coding agent clients (Claude Code, Codex, Cursor, Kiro, Gemini, OpenCode, OpenClaw, Every Code).
 
 ## Canonical URL
-- [Homepage](https://token.rynn.me/)
+- [Homepage](https://www.tokentracker.cc/)
 
 ## Priority URLs
-- [Homepage](https://token.rynn.me/)
-- [Leaderboard](https://token.rynn.me/leaderboard)
+- [Homepage](https://www.tokentracker.cc/)
+- [Leaderboard](https://www.tokentracker.cc/leaderboard)
 
 ## Product
 - Install command: `npx tokentracker-cli`
@@ -15,7 +15,7 @@ Token Tracker tracks token usage across AI coding agent clients (Claude Code, Co
 - [Source repository](https://github.com/mm7894215/TokenTracker)
 
 ## Policy and Discovery
-- [llms.txt](https://token.rynn.me/llms.txt)
+- [llms.txt](https://www.tokentracker.cc/llms.txt)
 - Data principle: token counts only, never prompts or conversation content.
 
 ## Contact

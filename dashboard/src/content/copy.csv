@@ -479,7 +479,7 @@ dashboard.screenshot.title_line2,dashboard,DashboardPage,ScreenshotTitle,title_l
 dashboard.screenshot.twitter_button,dashboard,DashboardPage,ScreenshotShare,button_label,"Share on X",,active
 dashboard.screenshot.twitter_label,dashboard,DashboardPage,ScreenshotShare,aria_label,"Share on X",,active
 dashboard.screenshot.twitter_hint,dashboard,DashboardPage,ScreenshotShare,helper_text,"Auto-copies image to clipboard",,active
-dashboard.screenshot.twitter_text,dashboard,DashboardPage,ScreenshotShare,share_text,"{{total_tokens}} tokens on the record.\n{{model_name}} led with {{model_percent}}%.\n\nMy AI usage, unaudited →\ntoken.rynn.me",,active
+dashboard.screenshot.twitter_text,dashboard,DashboardPage,ScreenshotShare,share_text,"{{total_tokens}} tokens on the record.\n{{model_name}} led with {{model_percent}}%.\n\nMy AI usage, unaudited →\ntokentracker.cc",,active
 
 live_sniffer.log.system,ui,LiveSniffer,LiveSniffer,log,"[SYSTEM] KERNEL_LINK_ESTABLISHED",,active
 live_sniffer.log.socket,ui,LiveSniffer,LiveSniffer,log,"[SOCKET] LISTENING_ON_LOCAL_CLI_PIPE...",,active

@@ -30,7 +30,7 @@ AI CLI Tools → hooks/notify.cjs trigger sync → rollout.js parses logs → qu
 
 **CLI (`src/`)** — Node.js CommonJS. Entry: `bin/tracker.js` → `src/cli.js` dispatches commands. Default command (no args) runs `serve` which auto-runs `init` on first use, then launches local HTTP server on port 7680.
 
-**Dashboard (`dashboard/`)** — React 18 + Vite 7 + TypeScript + TailwindCSS. Built to `dashboard/dist/` and served by the CLI's `serve` command. In local mode (`localhost`), skips auth and reads data from local API endpoints. Deployed to Vercel at token.rynn.me for cloud mode.
+**Dashboard (`dashboard/`)** — React 18 + Vite 7 + TypeScript + TailwindCSS. Built to `dashboard/dist/` and served by the CLI's `serve` command. In local mode (`localhost`), skips auth and reads data from local API endpoints. Deployed to Vercel at www.tokentracker.cc for cloud mode.
 
 **macOS App (`TokenTrackerBar/`)** — Native Swift 5.9 menu bar + widget app. Embeds a complete Node.js + tokentracker runtime (`EmbeddedServer/`, universal arm64+x64). Hosts the React dashboard via WKWebView and provides native UI panels (usage summary, heatmap, model breakdown, usage limits, Clawd companion). Ships a `TokenTrackerWidget` WidgetKit target. Built with XcodeGen.
 
