@@ -100,9 +100,11 @@ export function DataDetails({
                 </div>
               </div>
               <div className="oai-text-body-sm font-medium text-oai-black dark:text-oai-white tabular-nums">
-                {entry?.billable_total_tokens?.toLocaleString?.() ||
-                  entry?.total_tokens?.toLocaleString?.() ||
-                  "—"}
+                {(() => {
+                  const raw = entry?.billable_total_tokens ?? entry?.total_tokens;
+                  const n = Number(raw);
+                  return Number.isFinite(n) ? n.toLocaleString() : "—";
+                })()}
               </div>
             </a>
           ))}

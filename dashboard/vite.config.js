@@ -651,7 +651,53 @@ async function handleLocalApi(req, res, url) {
 
   // 处理 project-usage-summary
   if (pathname === "/functions/tokentracker-project-usage-summary") {
-    // 从原始日志解析项目数据
+    // 优先读 ~/.tokentracker/tracker/project.queue.jsonl（与 7680 真实归因一致）
+    const projectQueuePath = path.join(os.homedir(), ".tokentracker", "tracker", "project.queue.jsonl");
+    try {
+      const projectRaw = fs.readFileSync(projectQueuePath, "utf8");
+      const dedup = new Map();
+      for (const line of projectRaw.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const row = JSON.parse(trimmed);
+          const k = `${row.project_key || ""}|${row.source || ""}|${row.hour_start || ""}`;
+          dedup.set(k, row);
+        } catch { /* skip malformed */ }
+      }
+      const byProject = new Map();
+      for (const row of dedup.values()) {
+        const key = row.project_key || "unknown";
+        if (!byProject.has(key)) {
+          byProject.set(key, {
+            project_key: key,
+            project_ref: row.project_ref || key,
+            total_tokens: 0,
+            billable_total_tokens: 0,
+          });
+        }
+        const agg = byProject.get(key);
+        agg.total_tokens += Number(row.total_tokens || 0);
+        agg.billable_total_tokens += Number(row.total_tokens || 0);
+        if (!agg.project_ref && row.project_ref) agg.project_ref = row.project_ref;
+      }
+      if (byProject.size > 0) {
+        const entries = Array.from(byProject.values())
+          .sort((a, b) => b.billable_total_tokens - a.billable_total_tokens)
+          .map((e) => ({
+            ...e,
+            total_tokens: String(e.total_tokens),
+            billable_total_tokens: String(e.billable_total_tokens),
+          }));
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ generated_at: new Date().toISOString(), entries }));
+        return true;
+      }
+    } catch (e) {
+      if (e?.code !== "ENOENT") console.warn("[vite-mock] project.queue.jsonl read failed:", e?.message || e);
+    }
+
+    // Fallback：扫 raw 日志按 session count 估算（旧逻辑）
     const projectMap = new Map();
 
     function parseGitUrl(url) {

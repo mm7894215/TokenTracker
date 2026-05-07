@@ -1858,13 +1858,35 @@ function hashRepoRoot(repoRoot) {
   return crypto.createHash("sha256").update(String(repoRoot)).digest("hex");
 }
 
+function deriveProjectKeyFromRef(projectRef) {
+  if (typeof projectRef !== "string") return null;
+  try {
+    const parsed = new URL(projectRef);
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    if (segments.length < 2) return null;
+    return `${segments[0]}/${segments[1]}`;
+  } catch (_e) {
+    return null;
+  }
+}
+
 async function defaultPublicRepoResolver({ projectRef, repoRoot }) {
+  const repoRootHash = repoRoot ? hashRepoRoot(repoRoot) : null;
+  const projectKey = deriveProjectKeyFromRef(projectRef);
+  if (!projectKey) {
+    return {
+      status: "blocked",
+      projectKey: null,
+      projectRef: projectRef || null,
+      repoRootHash,
+      reason: projectRef ? "unparseable_ref" : "missing_ref",
+    };
+  }
   return {
-    status: "blocked",
-    projectKey: null,
-    projectRef: projectRef || null,
-    repoRootHash: repoRoot ? hashRepoRoot(repoRoot) : null,
-    reason: projectRef ? "local_only" : "missing_ref",
+    status: "public_verified",
+    projectKey,
+    projectRef,
+    repoRootHash,
   };
 }
 
