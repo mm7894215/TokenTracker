@@ -3,7 +3,6 @@ import { motion, useReducedMotion } from "motion/react";
 import { Info, SquareArrowOutUpRight } from "lucide-react";
 import { Popover } from "@base-ui/react/popover";
 import { Card, Button, Counter } from "../../openai/components";
-import { FadeIn } from "../../foundation/FadeIn.jsx";
 import { useTheme } from "../../../hooks/useTheme.js";
 import { copy } from "../../../lib/copy";
 import { DateRangePopover, formatDateShort } from "./DateRangePopover.jsx";
@@ -130,8 +129,7 @@ export function UsageOverview({
   const providers = fleetData.filter((f) => f.models?.length > 0);
 
   return (
-    <FadeIn delay={0.2}>
-      <Card className={className}>
+    <Card className={className}>
         {/* Header: Period Tabs + Refresh */}
         <div className="flex items-center justify-between gap-3 mb-6">
           <div role="tablist" aria-label={copy("usage.overview.tablist_aria")} className="flex gap-1">
@@ -284,7 +282,7 @@ export function UsageOverview({
                     key={provider.label}
                     initial={{ width: 0 }}
                     animate={{ width: `${provider.totalPercent}%` }}
-                    transition={{ duration: 0.6, delay: 0.3 + idx * 0.1 }}
+                    transition={{ duration: 0.5, delay: 0.45 + idx * 0.04, ease: [0.16, 1, 0.3, 1] }}
                     className="h-full"
                     style={{ backgroundColor: color }}
                     title={`${provider.label}: ${provider.totalPercent}%`}
@@ -414,6 +412,5 @@ export function UsageOverview({
           </div>
         )}
       </Card>
-    </FadeIn>
   );
 }

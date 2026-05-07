@@ -23,7 +23,7 @@ const isNativeApp = (() => {
  * Only renders inside the native app — widgets are macOS-only.
  * Dismissible; remembers the choice via localStorage.
  */
-export function WidgetOnboardingCard() {
+export function WidgetOnboardingCard({ enterDelay = 0 }) {
   const [dismissed, setDismissed] = useState(() => {
     try {
       return localStorage.getItem(DISMISS_KEY) === "1";
@@ -48,10 +48,10 @@ export function WidgetOnboardingCard() {
       {!dismissed && (
         <motion.div
           key="widget-onboarding-card"
-          initial={{ opacity: 0, y: -8 }}
+          initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -8, transition: { duration: 0.2, ease: [0.4, 0, 0.2, 1] } }}
-          transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ duration: 0.35, delay: enterDelay, ease: [0.16, 1, 0.3, 1] }}
           className="relative rounded-xl border border-oai-gray-200 dark:border-oai-gray-800 bg-white dark:bg-oai-gray-900 p-4"
         >
           <button

@@ -2,7 +2,6 @@ import React from "react";
 import { copy } from "../../../lib/copy";
 import { formatCompactNumber } from "../../../lib/format";
 import { Card, Badge } from "../../openai/components";
-import { FadeIn } from "../../foundation/FadeIn.jsx";
 
 function normalizeBadgePart(value) {
   if (typeof value !== "string") return "";
@@ -82,8 +81,7 @@ export function StatsPanel({
   const displayModels = topModels.slice(0, 3);
 
   return (
-    <FadeIn delay={0.1}>
-      <Card className={`h-full ${className}`}>
+    <Card className={`h-full ${className}`}>
         {/* Rolling Stats */}
         <div className="grid grid-cols-4 gap-2">
           <div className="flex flex-col items-center justify-center px-2 py-2 bg-oai-gray-50 dark:bg-oai-gray-800 rounded-lg">
@@ -168,6 +166,5 @@ export function StatsPanel({
           </div>
         </div>
       </Card>
-    </FadeIn>
   );
 }

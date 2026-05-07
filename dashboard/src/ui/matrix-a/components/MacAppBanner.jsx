@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { motion } from "motion/react";
 import { useLoginModal } from "../../../contexts/LoginModalContext.jsx";
 import { useInsforgeAuth } from "../../../contexts/InsforgeAuthContext.jsx";
 import { ClawdAnimated } from "../../foundation/ClawdAnimated.jsx";
@@ -28,7 +28,7 @@ const isNativeApp = (() => {
  * - Native app + not signed in → Login CTA
  * - Browser → Download App CTA
  */
-export function MacAppBanner({ todayTokens = 0, isSyncing = false }) {
+export function MacAppBanner({ todayTokens = 0, isSyncing = false, enterDelay = 0 }) {
   const { openLoginModal } = useLoginModal();
   const { signedIn: cloudSignedIn } = useInsforgeAuth();
   const clawdState = useClawdState({ todayTokens, isSyncing });
@@ -99,14 +99,12 @@ export function MacAppBanner({ todayTokens = 0, isSyncing = false }) {
     : { onClick: onButtonClick };
 
   return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0, y: -8 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -8 }}
-        transition={{ duration: 0.3 }}
-        className="rounded-xl border border-oai-gray-200 dark:border-oai-gray-800 bg-white dark:bg-oai-gray-900 p-4"
-      >
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, delay: enterDelay, ease: [0.16, 1, 0.3, 1] }}
+      className="rounded-xl border border-oai-gray-200 dark:border-oai-gray-800 bg-white dark:bg-oai-gray-900 p-4"
+    >
         <div className="flex items-center gap-3">
           <div className="flex-shrink-0">
             <ClawdAnimated state={clawdState} size={56} />
@@ -142,7 +140,6 @@ export function MacAppBanner({ todayTokens = 0, isSyncing = false }) {
             </button>
           </div>
         </div>
-      </motion.div>
-    </AnimatePresence>
+    </motion.div>
   );
 }

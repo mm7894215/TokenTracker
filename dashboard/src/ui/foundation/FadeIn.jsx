@@ -4,8 +4,8 @@ import { motion, useReducedMotion } from "motion/react";
 export function FadeIn({
   children,
   delay = 0,
-  duration = 0.4,
-  y = 20,
+  duration = 0.35,
+  y = 12,
   className = "",
   once = true,
 }) {
@@ -22,7 +22,7 @@ export function FadeIn({
       transition={{
         duration,
         delay,
-        ease: [0.25, 0.1, 0.25, 1],
+        ease: [0.16, 1, 0.3, 1],
       }}
       className={className}
     >
@@ -66,7 +66,7 @@ export function StaggerContainer({
 export function StaggerItem({
   children,
   className = "",
-  y = 20,
+  y = 12,
 }) {
   const shouldReduceMotion = useReducedMotion();
 
@@ -82,8 +82,8 @@ export function StaggerItem({
           opacity: 1,
           y: 0,
           transition: {
-            duration: 0.4,
-            ease: [0.25, 0.1, 0.25, 1],
+            duration: 0.35,
+            ease: [0.16, 1, 0.3, 1],
           },
         },
       }}

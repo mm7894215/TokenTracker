@@ -68,8 +68,8 @@ function TrendBar({ value, displayValue, scale, index, row, totalBars }) {
       animate={{ opacity: 1, scaleY: 1 }}
       transition={{
         duration: shouldReduceMotion ? 0 : 0.3,
-        delay: shouldReduceMotion ? 0 : index * 0.02,
-        ease: [0.25, 0.1, 0.25, 1],
+        delay: shouldReduceMotion ? 0 : 0.4 + index * 0.008,
+        ease: [0.16, 1, 0.3, 1],
       }}
       style={{ originY: 1 }}
     >

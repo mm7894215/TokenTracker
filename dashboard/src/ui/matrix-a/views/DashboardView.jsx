@@ -95,6 +95,14 @@ export function DashboardView(props) {
   const header = null;
   const footer = null;
 
+  // 入场瀑布：右列主卡先到，左列依序跟进
+  const STEP = 0.06;
+  const D_USAGE_OVERVIEW = 0.05;
+  const D_LEFT_BASE = 0.11;
+  let leftIdx = 0;
+  const nextLeft = () => D_LEFT_BASE + STEP * leftIdx++;
+  const D_DATA_DETAILS = D_LEFT_BASE + STEP * 5; // 留给右列底部
+
   return (
     <>
       <Shell
@@ -105,8 +113,7 @@ export function DashboardView(props) {
         className={screenshotMode ? "screenshot-mode" : ""}
       >
         {(showExpiredGate || showAuthGate) ? null : (
-          <>
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
               <div className="lg:col-span-4 flex flex-col gap-4 min-w-0 order-2 lg:order-1">
                 {screenshotMode ? (
                   <div className="flex items-start justify-between gap-4">
@@ -120,24 +127,32 @@ export function DashboardView(props) {
                     </div>
                   </div>
                 ) : null}
-                {isLocalMode ? <MacAppBanner todayTokens={summaryTotalTokensRaw} isSyncing={usageLoadingState} /> : null}
+                {isLocalMode ? (
+                  <MacAppBanner
+                    todayTokens={summaryTotalTokensRaw}
+                    isSyncing={usageLoadingState}
+                    enterDelay={nextLeft()}
+                  />
+                ) : null}
 
-                <StatsPanel
-                  title={copy("dashboard.identity.title")}
-                  subtitle={copy("dashboard.identity.subtitle")}
-                  period={period}
-                  rankLabel={identityStartDate ?? copy("identity_card.rank_placeholder")}
-                  streakDays={activeDays}
-                  subscriptions={identitySubscriptions}
-                  periodConversations={summaryConversationsValue}
-                  rolling={rollingUsage}
-                  topModels={topModels}
-                />
+                <FadeIn delay={nextLeft()}>
+                  <StatsPanel
+                    title={copy("dashboard.identity.title")}
+                    subtitle={copy("dashboard.identity.subtitle")}
+                    period={period}
+                    rankLabel={identityStartDate ?? copy("identity_card.rank_placeholder")}
+                    streakDays={activeDays}
+                    subscriptions={identitySubscriptions}
+                    periodConversations={summaryConversationsValue}
+                    rolling={rollingUsage}
+                    topModels={topModels}
+                  />
+                </FadeIn>
 
-                {isLocalMode ? <WidgetOnboardingCard /> : null}
+                {isLocalMode ? <WidgetOnboardingCard enterDelay={nextLeft()} /> : null}
 
                 {shouldShowInstall ? (
-                  <FadeIn delay={0.25}>
+                  <FadeIn delay={nextLeft()}>
                     <div className="rounded-xl border border-oai-gray-200 dark:border-oai-gray-800 bg-white dark:bg-oai-gray-900 p-3">
                       <div className="text-xs text-oai-gray-500 dark:text-oai-gray-300 mb-1.5">{installPrompt}</div>
                       <motion.button
@@ -161,20 +176,22 @@ export function DashboardView(props) {
                 ) : null}
 
                 {activityHeatmapBlock && (
-                  <FadeIn delay={0.4}>
+                  <FadeIn delay={nextLeft()}>
                     {activityHeatmapBlock}
                   </FadeIn>
                 )}
 
                 {!screenshotMode ? (
-                  <TrendMonitor
-                    rows={trendRowsForDisplay}
-                    from={trendFromForDisplay}
-                    to={trendToForDisplay}
-                    period={period}
-                    timeZoneLabel={trendTimeZoneLabel}
-                    showTimeZoneLabel={false}
-                  />
+                  <FadeIn delay={nextLeft()}>
+                    <TrendMonitor
+                      rows={trendRowsForDisplay}
+                      from={trendFromForDisplay}
+                      to={trendToForDisplay}
+                      period={period}
+                      timeZoneLabel={trendTimeZoneLabel}
+                      showTimeZoneLabel={false}
+                    />
+                  </FadeIn>
                 ) : null}
                 {screenshotMode ? (
                   <div
@@ -199,61 +216,62 @@ export function DashboardView(props) {
               </div>
 
               <div className="lg:col-span-8 flex flex-col gap-4 min-w-0 order-1 lg:order-2">
-                <UsageOverview
-                  period={period}
-                  periods={periodsForDisplay}
-                  onPeriodChange={setSelectedPeriod}
-                  summaryLabel={summaryLabel}
-                  summaryValue={summaryValue}
-                  summaryCostValue={summaryCostValue}
-                  onCostInfo={costInfoEnabled ? openCostModal : null}
-                  fleetData={fleetData}
-                  onRefresh={screenshotMode ? null : refreshAll}
-                  loading={usageLoadingState}
-                  onOpenShare={screenshotMode ? null : onOpenShare}
-                  customFrom={customFrom}
-                  customTo={customTo}
-                  onCustomRangeApply={onCustomRangeApply}
-                  customRangeOpen={customRangeOpen}
-                  onCustomRangeOpenChange={onCustomRangeOpenChange}
-                />
+                <FadeIn delay={D_USAGE_OVERVIEW}>
+                  <UsageOverview
+                    period={period}
+                    periods={periodsForDisplay}
+                    onPeriodChange={setSelectedPeriod}
+                    summaryLabel={summaryLabel}
+                    summaryValue={summaryValue}
+                    summaryCostValue={summaryCostValue}
+                    onCostInfo={costInfoEnabled ? openCostModal : null}
+                    fleetData={fleetData}
+                    onRefresh={screenshotMode ? null : refreshAll}
+                    loading={usageLoadingState}
+                    onOpenShare={screenshotMode ? null : onOpenShare}
+                    customFrom={customFrom}
+                    customTo={customTo}
+                    onCustomRangeApply={onCustomRangeApply}
+                    customRangeOpen={customRangeOpen}
+                    onCustomRangeOpenChange={onCustomRangeOpenChange}
+                  />
+                </FadeIn>
 
                 {!screenshotMode ? (
-                  <FadeIn delay={0.5}>
+                  <FadeIn delay={D_DATA_DETAILS}>
                     <DataDetails
-                    projectEntries={projectUsageEntries}
-                    projectLimit={projectUsageLimit}
-                    onProjectLimitChange={setProjectUsageLimit}
-                    copy={copy}
-                    hasDetailsActual={hasDetailsActual}
-                    dailyEmptyPrefix={dailyEmptyPrefix}
-                    installSyncCmd={installSyncCmd}
-                    dailyEmptySuffix={dailyEmptySuffix}
-                    detailsColumns={detailsColumns}
-                    ariaSortFor={ariaSortFor}
-                    toggleSort={toggleSort}
-                    sortIconFor={sortIconFor}
-                    pagedDetails={pagedDetails}
-                    dailyBreakdownRows={dailyBreakdownRows}
-                    dailyBreakdownColumns={dailyBreakdownColumns}
-                    dailyBreakdownAriaSortFor={dailyBreakdownAriaSortFor}
-                    dailyBreakdownSortIconFor={dailyBreakdownSortIconFor}
-                    dailyBreakdownDateKey={dailyBreakdownDateKey}
-                    detailsDateKey={detailsDateKey}
-                    renderDetailDate={renderDetailDate}
-                    renderDailyBreakdownDate={renderDailyBreakdownDate}
-                    renderDetailCell={renderDetailCell}
-                    DETAILS_PAGED_PERIODS={DETAILS_PAGED_PERIODS}
-                    period={period}
-                    detailsPageCount={detailsPageCount}
-                    detailsPage={detailsPage}
-                    setDetailsPage={setDetailsPage}
-                  />
+                      projectEntries={projectUsageEntries}
+                      projectLimit={projectUsageLimit}
+                      onProjectLimitChange={setProjectUsageLimit}
+                      copy={copy}
+                      hasDetailsActual={hasDetailsActual}
+                      dailyEmptyPrefix={dailyEmptyPrefix}
+                      installSyncCmd={installSyncCmd}
+                      dailyEmptySuffix={dailyEmptySuffix}
+                      detailsColumns={detailsColumns}
+                      ariaSortFor={ariaSortFor}
+                      toggleSort={toggleSort}
+                      sortIconFor={sortIconFor}
+                      pagedDetails={pagedDetails}
+                      dailyBreakdownRows={dailyBreakdownRows}
+                      dailyBreakdownColumns={dailyBreakdownColumns}
+                      dailyBreakdownAriaSortFor={dailyBreakdownAriaSortFor}
+                      dailyBreakdownSortIconFor={dailyBreakdownSortIconFor}
+                      dailyBreakdownDateKey={dailyBreakdownDateKey}
+                      detailsDateKey={detailsDateKey}
+                      renderDetailDate={renderDetailDate}
+                      renderDailyBreakdownDate={renderDailyBreakdownDate}
+                      renderDetailCell={renderDetailCell}
+                      DETAILS_PAGED_PERIODS={DETAILS_PAGED_PERIODS}
+                      period={period}
+                      detailsPageCount={detailsPageCount}
+                      detailsPage={detailsPage}
+                      setDetailsPage={setDetailsPage}
+                    />
                   </FadeIn>
                 ) : null}
               </div>
-            </div>
-          </>
+          </div>
         )}
       </Shell>
       <CostAnalysisModal isOpen={costModalOpen} onClose={closeCostModal} fleetData={fleetData} />
