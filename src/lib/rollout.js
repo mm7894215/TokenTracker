@@ -4479,7 +4479,6 @@ function resolveOmpHome(env = process.env) {
 }
 
 function resolveOmpAgentDir(env = process.env) {
-  if (env.PI_CODING_AGENT_DIR) return env.PI_CODING_AGENT_DIR;
   return path.join(resolveOmpHome(env), "agent");
 }
 
@@ -4684,6 +4683,231 @@ async function parseOmpIncremental({
   cursors.hourly = hourlyState;
   cursors.omp = {
     ...ompState,
+    seenIds: cappedSeen,
+    fileOffsets,
+    updatedAt,
+  };
+
+  return { recordsProcessed, eventsAggregated, bucketsQueued };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// pi (@mariozechner/pi-coding-agent) — passive JSONL reader
+// (~/.pi/agent/sessions/**/*.jsonl)
+//
+// Same on-disk session format as oh-my-pi (omp): one JSONL file per session,
+// first line type:"session" header, then a tree of message/model_change/etc.
+// records. Token usage lives on type:"message" entries with role:"assistant"
+// under message.usage. Honors PI_CODING_AGENT_DIR to override the agent dir
+// (matches pi's own getAgentDir()).
+// ─────────────────────────────────────────────────────────────────────────────
+
+function resolvePiHome(env = process.env) {
+  const home = env.HOME || require("node:os").homedir();
+  return path.join(home, ".pi");
+}
+
+function resolvePiAgentDir(env = process.env) {
+  if (env.PI_CODING_AGENT_DIR) {
+    const dir = env.PI_CODING_AGENT_DIR;
+    if (dir.startsWith("~/")) {
+      return path.join(env.HOME || require("node:os").homedir(), dir.slice(2));
+    }
+    return dir;
+  }
+  return path.join(resolvePiHome(env), "agent");
+}
+
+function resolvePiSessionFiles(env = process.env) {
+  const sessionsDir = path.join(resolvePiAgentDir(env), "sessions");
+  if (!fssync.existsSync(sessionsDir)) return [];
+  const files = [];
+  try {
+    for (const cwdDir of fssync.readdirSync(sessionsDir)) {
+      const cwdPath = path.join(sessionsDir, cwdDir);
+      let stat;
+      try { stat = fssync.statSync(cwdPath); } catch { continue; }
+      if (!stat.isDirectory()) continue;
+      let entries;
+      try { entries = fssync.readdirSync(cwdPath); } catch { continue; }
+      for (const entry of entries) {
+        if (!entry.endsWith(".jsonl")) continue;
+        files.push(path.join(cwdPath, entry));
+      }
+    }
+  } catch {
+    // ignore — return what we have
+  }
+  files.sort((a, b) => a.localeCompare(b));
+  return files;
+}
+
+function resolvePiDefaultModel() {
+  // pi has no global default model; model is per-message.
+  return "pi-unknown";
+}
+
+async function parsePiIncremental({
+  sessionFiles,
+  cursors,
+  queuePath,
+  onProgress,
+  env,
+  defaultModel,
+} = {}) {
+  await ensureDir(path.dirname(queuePath));
+  const piState = cursors.pi && typeof cursors.pi === "object" ? cursors.pi : {};
+  const seenIds = new Set(Array.isArray(piState.seenIds) ? piState.seenIds : []);
+  const fileOffsets =
+    piState.fileOffsets && typeof piState.fileOffsets === "object"
+      ? { ...piState.fileOffsets }
+      : {};
+
+  const files = Array.isArray(sessionFiles)
+    ? sessionFiles
+    : resolvePiSessionFiles(env || process.env);
+  const fallbackModel = defaultModel || resolvePiDefaultModel();
+
+  if (files.length === 0) {
+    cursors.pi = {
+      ...piState,
+      seenIds: Array.from(seenIds),
+      fileOffsets,
+      updatedAt: new Date().toISOString(),
+    };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
+
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const touchedBuckets = new Set();
+  const cb = typeof onProgress === "function" ? onProgress : null;
+  let recordsProcessed = 0;
+  let eventsAggregated = 0;
+
+  for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+    const filePath = files[fileIdx];
+    let stat;
+    try { stat = fssync.statSync(filePath); } catch { continue; }
+
+    const prevEntry = fileOffsets[filePath] || {};
+    const prevSize = Number(prevEntry.size) || 0;
+    const prevIno = prevEntry.ino;
+    const inodeChanged = typeof prevIno === "number" && prevIno !== stat.ino;
+    const startOffset = stat.size < prevSize || inodeChanged ? 0 : prevSize;
+    if (stat.size <= startOffset) continue;
+
+    let stream;
+    try {
+      stream = fssync.createReadStream(filePath, {
+        encoding: "utf8",
+        start: startOffset,
+      });
+    } catch { continue; }
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+    for await (const line of rl) {
+      if (!line || !line.trim()) continue;
+      let entry;
+      try { entry = JSON.parse(line); } catch { continue; }
+
+      if (!entry || entry.type !== "message") continue;
+
+      const msg = entry.message;
+      if (!msg || msg.role !== "assistant") continue;
+
+      const usage = msg.usage;
+      if (!usage || typeof usage !== "object") continue;
+
+      const entryId = typeof entry.id === "string" && entry.id ? entry.id : null;
+      if (!entryId) continue;
+      if (seenIds.has(entryId)) continue;
+
+      recordsProcessed++;
+
+      const input = toNonNegativeInt(usage.input);
+      const output = toNonNegativeInt(usage.output);
+      const cacheRead = toNonNegativeInt(usage.cacheRead);
+      const cacheWrite = toNonNegativeInt(usage.cacheWrite);
+      const reasoningTokens = toNonNegativeInt(usage.reasoningTokens);
+
+      if (input === 0 && output === 0 && cacheRead === 0 && cacheWrite === 0) {
+        seenIds.add(entryId);
+        continue;
+      }
+
+      let tsMs = null;
+      if (Number.isFinite(Number(msg.timestamp)) && Number(msg.timestamp) > 0) {
+        tsMs = Number(msg.timestamp);
+      } else if (typeof entry.timestamp === "string" && entry.timestamp) {
+        const parsed = Date.parse(entry.timestamp);
+        if (Number.isFinite(parsed) && parsed > 0) tsMs = parsed;
+      }
+      if (tsMs == null) {
+        seenIds.add(entryId);
+        continue;
+      }
+
+      const tsIso = new Date(tsMs).toISOString();
+      const bucketStart = toUtcHalfHourStart(tsIso);
+      if (!bucketStart) continue;
+
+      const totalTokens =
+        Number.isFinite(Number(usage.totalTokens)) && Number(usage.totalTokens) > 0
+          ? toNonNegativeInt(usage.totalTokens)
+          : input + output + cacheRead + cacheWrite + reasoningTokens;
+
+      const model = normalizeModelInput(msg.model) || fallbackModel;
+
+      const delta = {
+        input_tokens: input,
+        cached_input_tokens: cacheRead,
+        cache_creation_input_tokens: cacheWrite,
+        output_tokens: output,
+        reasoning_output_tokens: reasoningTokens,
+        total_tokens: totalTokens,
+        conversation_count: 1,
+      };
+
+      const bucket = getHourlyBucket(hourlyState, "pi", model, bucketStart);
+      addTotals(bucket.totals, delta);
+      touchedBuckets.add(bucketKey("pi", model, bucketStart));
+      seenIds.add(entryId);
+      eventsAggregated++;
+
+      if (cb) {
+        cb({
+          index: fileIdx + 1,
+          total: files.length,
+          recordsProcessed,
+          eventsAggregated,
+          bucketsQueued: touchedBuckets.size,
+        });
+      }
+    }
+
+    let postStat = stat;
+    try { postStat = fssync.statSync(filePath); } catch {}
+    fileOffsets[filePath] = {
+      size: postStat.size,
+      mtimeMs: postStat.mtimeMs,
+      ino: postStat.ino,
+    };
+  }
+
+  const seenArr = Array.from(seenIds);
+  const cappedSeen =
+    seenArr.length > 10_000 ? seenArr.slice(seenArr.length - 10_000) : seenArr;
+
+  const bucketsQueued = await enqueueTouchedBuckets({
+    queuePath,
+    hourlyState,
+    touchedBuckets,
+  });
+  const updatedAt = new Date().toISOString();
+  hourlyState.updatedAt = updatedAt;
+  cursors.hourly = hourlyState;
+  cursors.pi = {
+    ...piState,
     seenIds: cappedSeen,
     fileOffsets,
     updatedAt,
@@ -5248,6 +5472,11 @@ module.exports = {
   resolveOmpSessionFiles,
   resolveOmpDefaultModel,
   parseOmpIncremental,
+  resolvePiHome,
+  resolvePiAgentDir,
+  resolvePiSessionFiles,
+  resolvePiDefaultModel,
+  parsePiIncremental,
   resolveCraftConfigDir,
   resolveCraftWorkspaceRoots,
   resolveCraftSessionFiles,

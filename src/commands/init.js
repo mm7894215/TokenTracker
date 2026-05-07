@@ -44,6 +44,7 @@ const {
   probeOpenclawSessionPluginState,
 } = require("../lib/openclaw-session-plugin");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
+const { resolvePiAgentDir } = require("../lib/rollout");
 const { resolveRuntimeConfig, DEFAULT_BASE_URL } = require("../lib/runtime-config");
 const {
   BOLD,
@@ -430,10 +431,18 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
   {
     const ompHome = process.env.OMP_HOME ||
       (process.env.PI_CONFIG_DIR ? path.join(home, process.env.PI_CONFIG_DIR) : path.join(home, ".omp"));
-    const ompAgentDir = process.env.PI_CODING_AGENT_DIR || path.join(ompHome, "agent");
-    const ompSessions = path.join(ompAgentDir, "sessions");
+    const ompSessions = path.join(ompHome, "agent", "sessions");
     if (fssync.existsSync(ompSessions)) {
       summary.push({ label: "oh-my-pi", status: "detected", detail: "Passive reader (no hook needed)" });
+    }
+  }
+
+  // pi (@mariozechner/pi-coding-agent): passive reader — no hook installation needed.
+  // TokenTracker reads ~/.pi/agent/sessions/**/*.jsonl directly.
+  {
+    const piSessions = path.join(resolvePiAgentDir(process.env), "sessions");
+    if (fssync.existsSync(piSessions)) {
+      summary.push({ label: "pi", status: "detected", detail: "Passive reader (no hook needed)" });
     }
   }
 

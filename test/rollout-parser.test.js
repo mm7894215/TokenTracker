@@ -20,6 +20,8 @@ const {
   resolveCodebuddyProjectFiles,
   parseOmpIncremental,
   resolveOmpSessionFiles,
+  parsePiIncremental,
+  resolvePiSessionFiles,
   parseCraftIncremental,
   resolveCraftSessionFiles,
   resolveCraftWorkspaceRoots,
@@ -4108,6 +4110,112 @@ test("parseOmpIncremental computes totalTokens fallback when usage.totalTokens m
     assert.equal(queued[0].total_tokens, 98);
     assert.equal(queued[0].cached_input_tokens, 10);
     assert.equal(queued[0].cache_creation_input_tokens, 5);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+// ─── pi (@mariozechner/pi-coding-agent) tests — same on-disk format as omp ───
+
+test("parsePiIncremental parses a single session and queues with source 'pi'", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-pi-"));
+  try {
+    const sessionsDir = path.join(tmp, "sessions", "--test--");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const filePath = path.join(sessionsDir, "session.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const ts = Date.UTC(2026, 3, 5, 14, 10, 0);
+    const lines = [
+      buildOmpSessionHeader(),
+      buildOmpAssistantLine({ id: "msg-1", model: "mimo-v2.5-pro", input: 100, output: 20, cacheRead: 0, cacheWrite: 0, timestamp: ts, totalTokens: 120 }),
+    ];
+    await fs.writeFile(filePath, lines.join("\n") + "\n", "utf8");
+
+    const res = await parsePiIncremental({ sessionFiles: [filePath], cursors, queuePath });
+    assert.equal(res.eventsAggregated, 1);
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].source, "pi");
+    assert.equal(queued[0].model, "mimo-v2.5-pro");
+    assert.equal(queued[0].input_tokens, 100);
+    assert.equal(queued[0].output_tokens, 20);
+    assert.equal(queued[0].total_tokens, 120);
+    assert.equal(queued[0].hour_start, "2026-04-05T14:00:00.000Z");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parsePiIncremental dedupes by entry id across two runs (state under cursors.pi)", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-pi-"));
+  try {
+    const sessionsDir = path.join(tmp, "sessions", "--test--");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const filePath = path.join(sessionsDir, "session.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const ts1 = Date.UTC(2026, 3, 5, 14, 0, 0);
+    const ts2 = Date.UTC(2026, 3, 5, 14, 35, 0);
+    const lines = [
+      buildOmpSessionHeader(),
+      buildOmpAssistantLine({ id: "aaaaaaaa", model: "mimo-v2.5-pro", input: 10, output: 10, timestamp: ts1, totalTokens: 20 }),
+      buildOmpAssistantLine({ id: "bbbbbbbb", model: "mimo-v2.5-pro", input: 20, output: 20, timestamp: ts2, totalTokens: 40 }),
+      buildOmpAssistantLine({ id: "aaaaaaaa", model: "mimo-v2.5-pro", input: 10, output: 10, timestamp: ts1, totalTokens: 20 }),
+    ];
+    await fs.writeFile(filePath, lines.join("\n") + "\n", "utf8");
+
+    const res1 = await parsePiIncremental({ sessionFiles: [filePath], cursors, queuePath });
+    assert.equal(res1.eventsAggregated, 2);
+    assert.ok(cursors.pi.seenIds.includes("aaaaaaaa"));
+    assert.ok(cursors.pi.seenIds.includes("bbbbbbbb"));
+
+    const res2 = await parsePiIncremental({ sessionFiles: [filePath], cursors, queuePath });
+    assert.equal(res2.eventsAggregated, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolvePiSessionFiles returns empty when ~/.pi/agent/sessions missing", async () => {
+  const result = resolvePiSessionFiles({ HOME: path.join(os.tmpdir(), "no-such-pi-home") });
+  assert.deepEqual(result, []);
+});
+
+test("PI_CODING_AGENT_DIR env override redirects discovery", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-pi-"));
+  try {
+    const sessionsDir = path.join(tmp, "sessions", "--myproject--");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const filePath = path.join(sessionsDir, "session.jsonl");
+    await fs.writeFile(filePath, buildOmpSessionHeader() + "\n", "utf8");
+
+    const result = resolvePiSessionFiles({ PI_CODING_AGENT_DIR: tmp });
+    assert.equal(result.length, 1);
+    assert.ok(result[0].endsWith(".jsonl"));
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+// PI_CODING_AGENT_DIR belongs to pi-coding-agent only; omp must not claim it,
+// otherwise a pi user would have their sessions double-counted under both
+// sources.
+test("PI_CODING_AGENT_DIR does not redirect omp discovery", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-collision-"));
+  try {
+    const sessionsDir = path.join(tmp, "sessions", "--myproject--");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    await fs.writeFile(path.join(sessionsDir, "session.jsonl"), buildOmpSessionHeader() + "\n", "utf8");
+
+    const ompResult = resolveOmpSessionFiles({
+      PI_CODING_AGENT_DIR: tmp,
+      OMP_HOME: path.join(os.tmpdir(), "no-such-omp"),
+    });
+    assert.deepEqual(ompResult, []);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
