@@ -70,14 +70,14 @@ landing.meta.title,landing,LandingPage,Meta,title,"Token Tracker — Token Usage
 landing.meta.description,landing,LandingPage,Meta,description,"Automatically monitor token usage across Claude Code, Cursor, Codex, and more. Local-first, privacy-focused, and zero manual configuration.",,active
 landing.meta.og_site_name,landing,LandingPage,Meta,og_site_name,"Token Tracker",,active
 landing.meta.og_type,landing,LandingPage,Meta,og_type,"website",,active
-landing.meta.og_image,landing,LandingPage,Meta,og_image,"https://www.tokentracker.cc/og-image.jpg",,active
+landing.meta.og_image,landing,LandingPage,Meta,og_image,"https://www.tokentracker.cc/dashboard-dark.png",,active
 landing.meta.og_url,landing,LandingPage,Meta,og_url,"https://www.tokentracker.cc/",,active
 landing.meta.twitter_card,landing,LandingPage,Meta,twitter_card,"summary_large_image",,active
 share.meta.title,share,SharePage,Meta,title,"Token Tracker Share",,active
 share.meta.description,share,SharePage,Meta,description,"Share a Token Tracker dashboard snapshot with token usage insights across models, projects, and time windows.",,active
 share.meta.og_site_name,share,SharePage,Meta,og_site_name,"Token Tracker",,active
 share.meta.og_type,share,SharePage,Meta,og_type,"website",,active
-share.meta.og_image,share,SharePage,Meta,og_image,"https://www.tokentracker.cc/share-dashboard.jpg",,active
+share.meta.og_image,share,SharePage,Meta,og_image,"https://www.tokentracker.cc/dashboard-dark.png",,active
 share.meta.og_url,share,SharePage,Meta,og_url,"https://www.tokentracker.cc/share",,active
 share.meta.twitter_card,share,SharePage,Meta,twitter_card,"summary_large_image",,active
 landing.seo.point1,landing,LandingPage,LandingPage,seo_point_1,"Auto-track AI CLI token usage with zero manual steps.",,active
