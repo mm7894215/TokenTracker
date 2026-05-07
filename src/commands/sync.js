@@ -29,6 +29,8 @@ const {
   parseKimiIncremental,
   resolveOmpSessionFiles,
   parseOmpIncremental,
+  resolvePiSessionFiles,
+  parsePiIncremental,
   resolveCraftSessionFiles,
   parseCraftIncremental,
   resolveCodebuddyProjectFiles,
@@ -473,6 +475,28 @@ async function cmdSync(argv) {
       });
     }
 
+    // ── pi (@mariozechner/pi-coding-agent) — passive ~/.pi/agent/sessions/**/*.jsonl reader ──
+    let piResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    const piFiles = resolvePiSessionFiles(process.env);
+    if (piFiles.length > 0) {
+      if (progress?.enabled) {
+        progress.start(`Parsing pi ${renderBar(0)} | buckets 0`);
+      }
+      piResult = await parsePiIncremental({
+        sessionFiles: piFiles,
+        cursors,
+        queuePath,
+        env: process.env,
+        onProgress: (p) => {
+          if (!progress?.enabled) return;
+          const pct = p.total > 0 ? p.index / p.total : 1;
+          progress.update(
+            `Parsing pi ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} files | buckets ${formatNumber(p.bucketsQueued)}`,
+          );
+        },
+      });
+    }
+
     // ── Craft Agents (passive ~/.craft-agent + workspaces session.jsonl reader) ──
     let craftResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     const craftFiles = resolveCraftSessionFiles(process.env);
@@ -615,6 +639,7 @@ async function cmdSync(argv) {
         kimiResult.recordsProcessed +
         codebuddyResult.recordsProcessed +
         ompResult.recordsProcessed +
+        piResult.recordsProcessed +
         craftResult.recordsProcessed +
         copilotResult.recordsProcessed;
       const totalBuckets =
@@ -630,6 +655,7 @@ async function cmdSync(argv) {
         kimiResult.bucketsQueued +
         codebuddyResult.bucketsQueued +
         ompResult.bucketsQueued +
+        piResult.bucketsQueued +
         craftResult.bucketsQueued +
         copilotResult.bucketsQueued;
       process.stdout.write(
