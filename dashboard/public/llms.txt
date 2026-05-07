@@ -1,6 +1,8 @@
 # Token Tracker LLMs Index
 
-Token Tracker tracks token usage across AI coding agent clients (Claude Code, Codex, Cursor, Kiro, Gemini, OpenCode, OpenClaw, Every Code).
+Token Tracker is a free, open-source, local-first token usage tracker for 13 AI coding
+agent CLIs: Claude Code, Codex CLI, Cursor IDE, Gemini CLI, OpenCode, OpenClaw, Every Code,
+Kiro, Hermes Agent, GitHub Copilot, Kimi Code, oh-my-pi (omp), and CodeBuddy.
 
 ## Canonical URL
 - [Homepage](https://www.tokentracker.cc/)
@@ -8,15 +10,44 @@ Token Tracker tracks token usage across AI coding agent clients (Claude Code, Co
 ## Priority URLs
 - [Homepage](https://www.tokentracker.cc/)
 - [Leaderboard](https://www.tokentracker.cc/leaderboard)
+- [Claude IP check](https://www.tokentracker.cc/ip-check)
+
+## Post-install (local) views
+After running `npx tokentracker-cli`, these views are available at http://localhost:7680
+on the user's own machine — they are not public URLs:
+- Usage dashboard, cost analysis, usage limits panel
+- Project attribution, activity heatmap, trend charts
+- Skills browser, widget gallery, settings
 
 ## Product
 - Install command: `npx tokentracker-cli`
-- [NPM package](https://www.npmjs.com/package/tokentracker-cli)
+- macOS app: `brew install --cask mm7894215/tokentracker/tokentracker`
+- [npm package](https://www.npmjs.com/package/tokentracker-cli)
 - [Source repository](https://github.com/mm7894215/TokenTracker)
+- [Homebrew tap](https://github.com/mm7894215/homebrew-tokentracker)
+
+## Supported AI coding agent CLIs (13)
+- Claude Code (Anthropic) — SessionEnd hook
+- Codex CLI (OpenAI) — TOML notify array
+- Cursor IDE — local SQLite + CSV API
+- Gemini CLI (Google) — SessionEnd hook
+- OpenCode — plugin + SQLite audit
+- OpenClaw — session plugin
+- Every Code — TOML notify array
+- Kiro — SQLite + JSONL hybrid
+- Hermes Agent — SQLite sessions table (~/.hermes/state.db)
+- GitHub Copilot — OpenTelemetry file exporter
+- Kimi Code — passive wire.jsonl reader
+- oh-my-pi (omp) — passive JSONL reader
+- CodeBuddy (Tencent) — SessionEnd hook (Claude Code fork)
 
 ## Policy and Discovery
 - [llms.txt](https://www.tokentracker.cc/llms.txt)
+- [sitemap.xml](https://www.tokentracker.cc/sitemap.xml)
+- [feed.xml](https://www.tokentracker.cc/feed.xml)
+- [robots.txt](https://www.tokentracker.cc/robots.txt)
 - Data principle: token counts only, never prompts or conversation content.
+- Local-first: all parsing, aggregation, and dashboard rendering happen on-device. Cloud sync is optional.
 
 ## Contact
 - [GitHub issues](https://github.com/mm7894215/TokenTracker/issues)

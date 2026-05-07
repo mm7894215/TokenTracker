@@ -80,7 +80,10 @@
             "name": "Token Tracker",
             "url": "https://www.tokentracker.cc/",
             "logo": "https://www.tokentracker.cc/icon-512.png",
-            "sameAs": ["https://github.com/anthropics/tokentracker"]
+            "sameAs": [
+              "https://github.com/mm7894215/TokenTracker",
+              "https://www.npmjs.com/package/tokentracker-cli"
+            ]
           },
           {
             "@type": "SoftwareApplication",
@@ -88,20 +91,68 @@
             "applicationCategory": "DeveloperApplication",
             "operatingSystem": "macOS, Linux, Windows",
             "url": "https://www.tokentracker.cc/",
-            "downloadUrl": "https://www.npmjs.com/package/tokentracker",
-            "description": "Track token usage across AI coding agent clients including Codex, Claude Code, OpenCode, Gemini, and OpenClaw."
+            "downloadUrl": "https://www.npmjs.com/package/tokentracker-cli",
+            "installUrl": "https://www.npmjs.com/package/tokentracker-cli",
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "USD"
+            },
+            "description": "Local-first token usage tracker for 13 AI coding agent CLIs: Claude Code, Codex, Cursor, Gemini, OpenCode, OpenClaw, Kiro, Hermes, GitHub Copilot, Kimi Code, oh-my-pi, CodeBuddy, and Every Code."
           },
           {
             "@type": "WebSite",
             "name": "Token Tracker",
             "url": "https://www.tokentracker.cc/",
-            "description": "Track token usage across AI coding agent clients with auditable metrics."
+            "description": "Track token usage across AI coding agent CLIs with auditable, privacy-respecting metrics."
           },
           {
             "@type": "WebPage",
             "name": "Token Tracker Homepage",
             "url": "https://www.tokentracker.cc/",
-            "description": "Install Token Tracker in one command and monitor token usage across AI coding agent clients."
+            "description": "Install Token Tracker in one command and monitor token usage across AI coding agent CLIs."
+          },
+          {
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+              {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "Home",
+                "item": "https://www.tokentracker.cc/"
+              },
+              {
+                "@type": "ListItem",
+                "position": 2,
+                "name": "Leaderboard",
+                "item": "https://www.tokentracker.cc/leaderboard"
+              },
+              {
+                "@type": "ListItem",
+                "position": 3,
+                "name": "Claude IP Check",
+                "item": "https://www.tokentracker.cc/ip-check"
+              }
+            ]
+          },
+          {
+            "@type": "ItemList",
+            "name": "Supported AI coding agent CLIs",
+            "itemListElement": [
+              { "@type": "ListItem", "position": 1, "name": "Claude Code" },
+              { "@type": "ListItem", "position": 2, "name": "Codex CLI" },
+              { "@type": "ListItem", "position": 3, "name": "Cursor IDE" },
+              { "@type": "ListItem", "position": 4, "name": "Gemini CLI" },
+              { "@type": "ListItem", "position": 5, "name": "OpenCode" },
+              { "@type": "ListItem", "position": 6, "name": "OpenClaw" },
+              { "@type": "ListItem", "position": 7, "name": "Every Code" },
+              { "@type": "ListItem", "position": 8, "name": "Kiro" },
+              { "@type": "ListItem", "position": 9, "name": "Hermes Agent" },
+              { "@type": "ListItem", "position": 10, "name": "GitHub Copilot" },
+              { "@type": "ListItem", "position": 11, "name": "Kimi Code" },
+              { "@type": "ListItem", "position": 12, "name": "oh-my-pi" },
+              { "@type": "ListItem", "position": 13, "name": "CodeBuddy" }
+            ]
           },
           {
             "@type": "FAQPage",
@@ -111,15 +162,31 @@
                 "name": "How do I install Token Tracker?",
                 "acceptedAnswer": {
                   "@type": "Answer",
-                  "text": "Run npx tokentracker init in your terminal, then connect your account to start syncing usage."
+                  "text": "Run npx tokentracker-cli in your terminal. The CLI auto-detects installed AI coding tools, installs hooks, and starts a local dashboard at http://localhost:7680."
                 }
               },
               {
                 "@type": "Question",
-                "name": "Which AI coding clients are supported?",
+                "name": "Which AI coding CLIs does Token Tracker support?",
                 "acceptedAnswer": {
                   "@type": "Answer",
-                  "text": "Token Tracker supports Codex, Claude Code, OpenCode, Gemini, and OpenClaw."
+                  "text": "Token Tracker supports 13 AI coding agent CLIs: Claude Code, Codex CLI, Cursor IDE, Gemini CLI, OpenCode, OpenClaw, Every Code, Kiro, Hermes Agent, GitHub Copilot, Kimi Code, oh-my-pi (omp), and CodeBuddy."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Is Token Tracker free and open source?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Yes. Token Tracker is free and open source on GitHub at https://github.com/mm7894215/TokenTracker and published on npm as tokentracker-cli. The macOS menu bar app is also available via Homebrew tap mm7894215/tokentracker."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Does Token Tracker collect my prompts or conversations?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "No. Token Tracker only records token counts, model names, timestamps, and project attribution. It never reads, stores, or uploads prompts, completions, or conversation content."
                 }
               },
               {
@@ -127,7 +194,15 @@
                 "name": "What does Token Tracker track?",
                 "acceptedAnswer": {
                   "@type": "Answer",
-                  "text": "Token Tracker tracks token usage and usage trends across models, projects, and time while emphasizing minimal data collection and auditable metrics."
+                  "text": "Token Tracker tracks input, output, cached, and cache-creation tokens per model, project, and time window. It also detects rate limits and subscription status for Claude, Codex, Cursor, Gemini, Kiro, and Antigravity."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Does Token Tracker work offline?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Yes. Token Tracker is local-first. All parsing, aggregation, and dashboard rendering happens on your machine. Cloud sync is optional and used only for the public leaderboard."
                 }
               }
             ]
@@ -138,68 +213,114 @@
   </head>
   <body>
     <main class="aeo-seed-content" aria-label="Token Tracker AI-readable summary">
-      <h1>Token Tracker: Token usage tracker for AI agent CLIs</h1>
+      <h1>Token Tracker: Token usage tracker for AI coding agent CLIs</h1>
       <p>
-        Token Tracker helps developers measure token usage across Codex, Claude Code, OpenCode, Gemini, and
-        OpenClaw in one dashboard. It focuses on minimal data collection, auditable metrics, and clear
-        visibility into model and project usage.
+        Token Tracker is a free, open-source, local-first dashboard that automatically tracks token usage
+        across 13 AI coding agent CLIs in one place: Claude Code, Codex CLI, Cursor IDE, Gemini CLI, OpenCode,
+        OpenClaw, Every Code, Kiro, Hermes Agent, GitHub Copilot, Kimi Code, oh-my-pi (omp), and CodeBuddy.
+        It focuses on minimal data collection, auditable metrics, and clear visibility into model and project
+        usage. Token counts only — never prompts or conversation content.
       </p>
 
       <h2>Install in one command</h2>
-      <p><code>npx tokentracker init</code></p>
+      <p><code>npx tokentracker-cli</code></p>
       <p>
-        After initialization, connect your account and start syncing usage data from supported AI coding
-        clients.
+        On first run, the CLI auto-detects installed AI coding tools, installs the appropriate hooks
+        (SessionEnd hooks, TOML notify arrays, plugins, or passive log readers depending on the tool), and
+        starts a local dashboard at <code>http://localhost:7680</code>. macOS users can also install the
+        native menu bar app via <code>brew install --cask mm7894215/tokentracker/tokentracker</code>.
       </p>
 
-      <h2>What Token Tracker provides</h2>
+      <h2>What you get after installing</h2>
+      <p>
+        Token Tracker runs entirely on your machine. After <code>npx tokentracker-cli</code>, a local
+        dashboard at <code>http://localhost:7680</code> exposes the following views — none of them require an
+        account, and your data never leaves your device unless you opt into cloud sync.
+      </p>
       <ul>
-        <li>Unified token usage tracking across multiple AI coding tools.</li>
-        <li>Leaderboard and project-level usage comparisons.</li>
-        <li>Structured visibility into model, daily, and monthly consumption.</li>
+        <li><strong>Unified usage dashboard</strong> — input, output, cached, and cache-creation tokens across all 13 AI coding tools.</li>
+        <li><strong>Cost analysis</strong> — per-model pricing breakdown across 70+ models.</li>
+        <li><strong>Usage limits view</strong> — live rate-limit and subscription status for Claude, Codex, Cursor, Gemini, Kiro, and Antigravity.</li>
+        <li><strong>Project attribution</strong> — see which repository or workspace consumed which tokens.</li>
+        <li><strong>Activity heatmap & trend charts</strong> — GitHub-style contribution calendar plus day / week / month / total / custom-range charts.</li>
+        <li><strong>Skills browser</strong> — discover and install agent skills from the open ecosystem.</li>
+        <li><strong>macOS menu bar app & desktop widget</strong> — at-a-glance usage without opening the dashboard.</li>
+      </ul>
+      <p><em>Privacy by design</em>: token counts only, never prompts or conversation content. Local-first; cloud sync is optional and powers only the public leaderboard.</p>
+
+      <h2>Supported AI coding agent CLIs</h2>
+      <ul>
+        <li><strong>Claude Code</strong> — Anthropic's official coding agent CLI; integrated via SessionEnd hook.</li>
+        <li><strong>Codex CLI</strong> — OpenAI Codex command-line agent; integrated via TOML notify array in <code>~/.codex/config.toml</code>.</li>
+        <li><strong>Cursor IDE</strong> — Cursor editor; usage fetched via local SQLite auth + CSV API.</li>
+        <li><strong>Gemini CLI</strong> — Google Gemini coding CLI; SessionEnd hook integration.</li>
+        <li><strong>OpenCode</strong> — open-source coding agent; plugin + SQLite audit.</li>
+        <li><strong>OpenClaw</strong> — modern session plugin integration.</li>
+        <li><strong>Every Code</strong> — Codex-compatible TOML notify hook.</li>
+        <li><strong>Kiro</strong> — SQLite + JSONL hybrid log reader.</li>
+        <li><strong>Hermes Agent</strong> — SQLite sessions table at <code>~/.hermes/state.db</code>.</li>
+        <li><strong>GitHub Copilot</strong> — OpenTelemetry file exporter integration (<code>COPILOT_OTEL_FILE_EXPORTER_PATH</code>).</li>
+        <li><strong>Kimi Code</strong> — passive <code>wire.jsonl</code> reader.</li>
+        <li><strong>oh-my-pi (omp)</strong> — passive JSONL session reader.</li>
+        <li><strong>CodeBuddy (Tencent)</strong> — Claude-Code fork; SessionEnd hook in <code>~/.codebuddy/settings.json</code>.</li>
       </ul>
 
       <h2>Who should use Token Tracker</h2>
       <p>
-        Token Tracker is designed for developers, founders, and engineering teams who rely on multiple AI coding
+        Token Tracker is built for developers, founders, and engineering teams who rely on multiple AI coding
         assistants and need a single place to understand token consumption. Instead of checking each tool
         separately, you can compare usage trends by model, project, and time window in one dashboard.
       </p>
       <p>
-        Teams use Token Tracker to answer practical questions: which model is consuming the most budget, whether
-        a new workflow increases cost, and how token usage shifts over days or weeks. This makes budgeting,
-        optimization, and reporting easier without introducing heavy tracking overhead.
+        Teams use Token Tracker to answer practical questions: which model is consuming the most budget,
+        whether a new workflow increases cost, how a Pro plan is tracking against rate limits, and how token
+        usage shifts over days or weeks. This makes budgeting, optimization, and reporting easier without
+        introducing heavy tracking overhead.
       </p>
+
+      <h2>How it works</h2>
       <p>
-        Token Tracker focuses on minimal data collection and auditable metrics so that usage visibility stays clear
-        and trustworthy. The default install flow is command-line first, and the dashboard is built for fast
-        scanning, comparison, and sharing of usage snapshots.
+        Each supported tool emits usage data when a session ends. Token Tracker's parser
+        (<code>src/lib/rollout.js</code>) normalizes 9 distinct log formats into a unified schema: half-hour
+        UTC buckets keyed by <code>(source, model, hour_start)</code>. Aggregated buckets are written to
+        <code>queue.jsonl</code> and served from a local HTTP API on port 7680. The React dashboard reads
+        from those endpoints; cloud sync (optional) uploads bucketed counts to InsForge for the public
+        leaderboard.
       </p>
 
       <h2>Frequently asked questions</h2>
       <h3>How do I install Token Tracker?</h3>
-      <p>Run <code>npx tokentracker init</code>, then connect your account and start syncing usage.</p>
+      <p>Run <code>npx tokentracker-cli</code>. The CLI auto-detects your AI coding tools, installs hooks, and opens the dashboard.</p>
 
-      <h3>Which AI coding clients are supported?</h3>
-      <p>Token Tracker supports Codex, Claude Code, OpenCode, Gemini, and OpenClaw.</p>
+      <h3>Which AI coding CLIs does Token Tracker support?</h3>
+      <p>Claude Code, Codex CLI, Cursor IDE, Gemini CLI, OpenCode, OpenClaw, Every Code, Kiro, Hermes Agent, GitHub Copilot, Kimi Code, oh-my-pi (omp), and CodeBuddy — 13 in total.</p>
+
+      <h3>Is Token Tracker free and open source?</h3>
+      <p>Yes. Source on GitHub at <a href="https://github.com/mm7894215/TokenTracker">github.com/mm7894215/TokenTracker</a>; npm package <code>tokentracker-cli</code>.</p>
+
+      <h3>Does Token Tracker collect my prompts or conversations?</h3>
+      <p>No. Only token counts, model names, timestamps, and project attribution are recorded. Prompts and completions are never read or uploaded.</p>
 
       <h3>What does Token Tracker track?</h3>
-      <p>
-        It tracks token usage and trends by model, project, and time window, then visualizes insights in a
-        unified dashboard and leaderboard.
-      </p>
+      <p>Input, output, cached, and cache-creation tokens per model, project, and time window. It also surfaces rate limits and subscription status for Claude Pro, ChatGPT plans, Cursor, Gemini, Kiro, and Antigravity.</p>
 
-      <h3>Important resources</h3>
+      <h3>Does Token Tracker work offline?</h3>
+      <p>Yes. Token Tracker is local-first. All parsing, aggregation, and dashboard rendering happen on your machine. Cloud sync is optional and powers only the public leaderboard.</p>
+
+      <h2>Resources</h2>
       <ul>
-        <li><a href="/share">Share dashboard view</a></li>
-        <li><a href="/share.html">Share static page</a></li>
-        <li><a href="/index.html">Homepage static page</a></li>
-        <li><a href="/share?mode=public">Public share mode</a></li>
-        <li><a href="/share?mode=snapshot">Snapshot share mode</a></li>
-        <li><a href="/?section=install">Install section</a></li>
-        <li><a href="https://www.npmjs.com/package/tokentracker">NPM package</a></li>
-        <li><a href="https://github.com/anthropics/tokentracker">GitHub repository</a></li>
+        <li><a href="https://www.tokentracker.cc/">Homepage and install instructions</a></li>
+        <li><a href="https://www.tokentracker.cc/leaderboard">Public token usage leaderboard</a></li>
+        <li><a href="https://www.tokentracker.cc/ip-check">Claude IP region checker</a></li>
+        <li><a href="https://www.npmjs.com/package/tokentracker-cli">npm: tokentracker-cli</a></li>
+        <li><a href="https://github.com/mm7894215/TokenTracker">GitHub: mm7894215/TokenTracker</a></li>
+        <li><a href="https://github.com/mm7894215/TokenTracker/issues">Report an issue</a></li>
       </ul>
+      <p>
+        <strong>Note:</strong> The usage dashboard, rate-limit panel, project attribution, skills browser,
+        and widget previews are part of the local app at <code>http://localhost:7680</code> after install —
+        they are not standalone public URLs.
+      </p>
     </main>
 
     <div id="root"></div>
