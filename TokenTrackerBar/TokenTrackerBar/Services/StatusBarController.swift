@@ -12,6 +12,22 @@ enum MenuBarDisplayMetric: String, CaseIterable {
     case claude7d
     case codex5h
     case codex7d
+    case cursorPlan
+    case cursorAuto
+    case cursorAPI
+    case geminiPro
+    case geminiFlash
+    case geminiLite
+    case kimiWeekly
+    case kimi5h
+    case kimiTotal
+    case kiroMonth
+    case kiroBonus
+    case copilotPremium
+    case copilotChat
+    case antigravityClaude
+    case antigravityGPro
+    case antigravityFlash
 
     var menuLabel: String {
         switch self {
@@ -24,6 +40,22 @@ enum MenuBarDisplayMetric: String, CaseIterable {
         case .claude7d: return "Cl 7d"
         case .codex5h: return "Cx 5h"
         case .codex7d: return "Cx 7d"
+        case .cursorPlan: return "Cu Plan"
+        case .cursorAuto: return "Cu Auto"
+        case .cursorAPI: return "Cu API"
+        case .geminiPro: return "Gm Pro"
+        case .geminiFlash: return "Gm Flash"
+        case .geminiLite: return "Gm Lite"
+        case .kimiWeekly: return "Km Wk"
+        case .kimi5h: return "Km 5h"
+        case .kimiTotal: return "Km Tot"
+        case .kiroMonth: return "Kr Mo"
+        case .kiroBonus: return "Kr Bn"
+        case .copilotPremium: return "Co Prem"
+        case .copilotChat: return "Co Chat"
+        case .antigravityClaude: return "Ag Cl"
+        case .antigravityGPro: return "Ag GPro"
+        case .antigravityFlash: return "Ag Fl"
         }
     }
 
@@ -38,6 +70,22 @@ enum MenuBarDisplayMetric: String, CaseIterable {
         case .claude7d: return "Claude 7d Limit"
         case .codex5h: return "Codex 5h Limit"
         case .codex7d: return "Codex 7d Limit"
+        case .cursorPlan: return "Cursor Plan Limit"
+        case .cursorAuto: return "Cursor Auto Limit"
+        case .cursorAPI: return "Cursor API Limit"
+        case .geminiPro: return "Gemini Pro Limit"
+        case .geminiFlash: return "Gemini Flash Limit"
+        case .geminiLite: return "Gemini Lite Limit"
+        case .kimiWeekly: return "Kimi Weekly Limit"
+        case .kimi5h: return "Kimi 5h Limit"
+        case .kimiTotal: return "Kimi Total Limit"
+        case .kiroMonth: return "Kiro Monthly Limit"
+        case .kiroBonus: return "Kiro Bonus Limit"
+        case .copilotPremium: return "Copilot Premium Limit"
+        case .copilotChat: return "Copilot Chat Limit"
+        case .antigravityClaude: return "Antigravity Claude Limit"
+        case .antigravityGPro: return "Antigravity Gemini Pro Limit"
+        case .antigravityFlash: return "Antigravity Flash Limit"
         }
     }
 
@@ -47,7 +95,13 @@ enum MenuBarDisplayMetric: String, CaseIterable {
             return "tokens"
         case .todayCost, .totalCost:
             return "cost"
-        case .claude5h, .claude7d, .codex5h, .codex7d:
+        case .claude5h, .claude7d, .codex5h, .codex7d,
+             .cursorPlan, .cursorAuto, .cursorAPI,
+             .geminiPro, .geminiFlash, .geminiLite,
+             .kimiWeekly, .kimi5h, .kimiTotal,
+             .kiroMonth, .kiroBonus,
+             .copilotPremium, .copilotChat,
+             .antigravityClaude, .antigravityGPro, .antigravityFlash:
             return "limits"
         }
     }
@@ -332,28 +386,107 @@ final class StatusBarController: NSObject {
                 guard let window = viewModel.usageLimits?.claude.fiveHour,
                       viewModel.usageLimits?.claude.configured == true,
                       viewModel.usageLimits?.claude.error == nil else { return nil }
-                return MenuBarDisplayValue(id: id, label: metric.menuLabel, value: formatLimitPercent(window.utilization))
+                return MenuBarDisplayValue(id: id, label: metric.menuLabel, value: formatLimitWithReset(window.utilization, resetIso: window.resetsAt))
             case .claude7d:
                 guard let window = viewModel.usageLimits?.claude.sevenDay,
                       viewModel.usageLimits?.claude.configured == true,
                       viewModel.usageLimits?.claude.error == nil else { return nil }
-                return MenuBarDisplayValue(id: id, label: metric.menuLabel, value: formatLimitPercent(window.utilization))
+                return MenuBarDisplayValue(id: id, label: metric.menuLabel, value: formatLimitWithReset(window.utilization, resetIso: window.resetsAt))
             case .codex5h:
                 guard let window = viewModel.usageLimits?.codex.primaryWindow,
                       viewModel.usageLimits?.codex.configured == true,
                       viewModel.usageLimits?.codex.error == nil else { return nil }
-                return MenuBarDisplayValue(id: id, label: metric.menuLabel, value: "\(window.usedPercent)%")
+                return MenuBarDisplayValue(id: id, label: metric.menuLabel, value: formatIntPercentWithReset(window.usedPercent, resetEpoch: window.resetAt))
             case .codex7d:
                 guard let window = viewModel.usageLimits?.codex.secondaryWindow,
                       viewModel.usageLimits?.codex.configured == true,
                       viewModel.usageLimits?.codex.error == nil else { return nil }
-                return MenuBarDisplayValue(id: id, label: metric.menuLabel, value: "\(window.usedPercent)%")
+                return MenuBarDisplayValue(id: id, label: metric.menuLabel, value: formatIntPercentWithReset(window.usedPercent, resetEpoch: window.resetAt))
+            case .cursorPlan:
+                return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.cursor.configured, error: viewModel.usageLimits?.cursor.error, window: viewModel.usageLimits?.cursor.primaryWindow)
+            case .cursorAuto:
+                return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.cursor.configured, error: viewModel.usageLimits?.cursor.error, window: viewModel.usageLimits?.cursor.secondaryWindow)
+            case .cursorAPI:
+                return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.cursor.configured, error: viewModel.usageLimits?.cursor.error, window: viewModel.usageLimits?.cursor.tertiaryWindow)
+            case .geminiPro:
+                return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.gemini.configured, error: viewModel.usageLimits?.gemini.error, window: viewModel.usageLimits?.gemini.primaryWindow)
+            case .geminiFlash:
+                return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.gemini.configured, error: viewModel.usageLimits?.gemini.error, window: viewModel.usageLimits?.gemini.secondaryWindow)
+            case .geminiLite:
+                return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.gemini.configured, error: viewModel.usageLimits?.gemini.error, window: viewModel.usageLimits?.gemini.tertiaryWindow)
+            case .kimiWeekly:
+                return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.kimi?.configured, error: viewModel.usageLimits?.kimi?.error, window: viewModel.usageLimits?.kimi?.primaryWindow)
+            case .kimi5h:
+                return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.kimi?.configured, error: viewModel.usageLimits?.kimi?.error, window: viewModel.usageLimits?.kimi?.secondaryWindow)
+            case .kimiTotal:
+                return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.kimi?.configured, error: viewModel.usageLimits?.kimi?.error, window: viewModel.usageLimits?.kimi?.tertiaryWindow)
+            case .kiroMonth:
+                return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.kiro.configured, error: viewModel.usageLimits?.kiro.error, window: viewModel.usageLimits?.kiro.primaryWindow)
+            case .kiroBonus:
+                return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.kiro.configured, error: viewModel.usageLimits?.kiro.error, window: viewModel.usageLimits?.kiro.secondaryWindow)
+            case .copilotPremium:
+                return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.copilot?.configured, error: viewModel.usageLimits?.copilot?.error, window: viewModel.usageLimits?.copilot?.primaryWindow)
+            case .copilotChat:
+                return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.copilot?.configured, error: viewModel.usageLimits?.copilot?.error, window: viewModel.usageLimits?.copilot?.secondaryWindow)
+            case .antigravityClaude:
+                return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.antigravity.configured, error: viewModel.usageLimits?.antigravity.error, window: viewModel.usageLimits?.antigravity.primaryWindow)
+            case .antigravityGPro:
+                return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.antigravity.configured, error: viewModel.usageLimits?.antigravity.error, window: viewModel.usageLimits?.antigravity.secondaryWindow)
+            case .antigravityFlash:
+                return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.antigravity.configured, error: viewModel.usageLimits?.antigravity.error, window: viewModel.usageLimits?.antigravity.tertiaryWindow)
             }
         }
     }
 
+    private func genericLimitValue(id: String, metric: MenuBarDisplayMetric, configured: Bool?, error: String?, window: GenericLimitWindow?) -> MenuBarDisplayValue? {
+        guard configured == true, error == nil, let window else { return nil }
+        return MenuBarDisplayValue(id: id, label: metric.menuLabel, value: formatLimitWithReset(window.usedPercent, resetIso: window.resetAt))
+    }
+
     private func formatLimitPercent(_ value: Double) -> String {
         "\(Int(min(max(value, 0), 100).rounded()))%"
+    }
+
+    private func formatResetTime(iso: String?) -> String? {
+        guard let iso else { return nil }
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = fmt.date(from: iso) ?? {
+            fmt.formatOptions = [.withInternetDateTime]
+            return fmt.date(from: iso)
+        }()
+        guard let date else { return nil }
+        let s = date.timeIntervalSince(Date())
+        guard s > 0 else { return "now" }
+        let d = Int(s) / 86400
+        if d > 0 { return "\(d)d" }
+        let h = Int(s) / 3600
+        if h > 0 { return "\(h)h" }
+        return "\(Int(s) / 60)m"
+    }
+
+    private func formatLimitWithReset(_ utilization: Double, resetIso: String?) -> String {
+        let pct = formatLimitPercent(utilization)
+        guard let reset = formatResetTime(iso: resetIso) else { return pct }
+        return "\(pct) · \(reset)"
+    }
+
+    private func formatResetTime(epoch: Int?) -> String? {
+        guard let epoch else { return nil }
+        let date = Date(timeIntervalSince1970: TimeInterval(epoch))
+        let s = date.timeIntervalSince(Date())
+        guard s > 0 else { return "now" }
+        let d = Int(s) / 86400
+        if d > 0 { return "\(d)d" }
+        let h = Int(s) / 3600
+        if h > 0 { return "\(h)h" }
+        return "\(Int(s) / 60)m"
+    }
+
+    private func formatIntPercentWithReset(_ usedPercent: Int, resetEpoch: Int?) -> String {
+        let pct = "\(usedPercent)%"
+        guard let reset = formatResetTime(epoch: resetEpoch) else { return pct }
+        return "\(pct) · \(reset)"
     }
 
     private func makeDisplayMenuBarImage(icon: NSImage?, items: [MenuBarDisplayValue]) -> NSImage {
