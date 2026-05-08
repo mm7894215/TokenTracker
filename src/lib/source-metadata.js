@@ -14,16 +14,18 @@ function isAccountLevelSource(source) {
 
 function normalizeUsageScope(value) {
   const raw = String(value || "").trim().toLowerCase();
-  return raw === "all" || raw === "raw" ? "all" : "personal";
+  if (!raw || raw === "all" || raw === "raw") return "all";
+  if (raw === "personal" || raw === "local") return "personal";
+  return "all";
 }
 
-function filterRowsByUsageScope(rows, scope = "personal") {
+function filterRowsByUsageScope(rows, scope = "all") {
   const normalizedScope = normalizeUsageScope(scope);
   if (normalizedScope === "all") return Array.isArray(rows) ? rows : [];
   return (Array.isArray(rows) ? rows : []).filter((row) => !isAccountLevelSource(row?.source));
 }
 
-function listExcludedSources(rows, scope = "personal") {
+function listExcludedSources(rows, scope = "all") {
   const normalizedScope = normalizeUsageScope(scope);
   if (normalizedScope === "all") return [];
   const seen = new Set();

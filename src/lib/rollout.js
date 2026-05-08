@@ -10,6 +10,9 @@ const { ensureDir } = require("./fs");
 const DEFAULT_SOURCE = "codex";
 const DEFAULT_MODEL = "unknown";
 const BUCKET_SEPARATOR = "|";
+const CLAUDE_MEM_OBSERVER_PATH_SEGMENT = "--claude-mem-observer-sessions";
+const CLAUDE_MEM_OBSERVER_PROJECT_REF =
+  "https://local.tokentracker/claude-mem/observer-sessions";
 
 async function listRolloutFiles(sessionsDir) {
   const out = [];
@@ -1819,6 +1822,12 @@ function normalizeModelInput(value) {
 async function resolveProjectMetaForPath(startDir, cache) {
   if (!startDir || typeof startDir !== "string") return null;
   if (cache && cache.has(startDir)) return cache.get(startDir);
+
+  if (startDir.includes(CLAUDE_MEM_OBSERVER_PATH_SEGMENT)) {
+    const meta = { projectRef: CLAUDE_MEM_OBSERVER_PROJECT_REF, repoRoot: startDir };
+    if (cache) cache.set(startDir, meta);
+    return meta;
+  }
 
   const visited = [];
   let current = startDir;

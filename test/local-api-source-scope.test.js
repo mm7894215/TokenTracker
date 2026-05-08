@@ -35,7 +35,7 @@ async function callEndpoint(queuePath, endpoint) {
   return JSON.parse(chunks.join(""));
 }
 
-test("usage-summary defaults to personal scope and excludes account-level Cursor usage", async () => {
+test("usage-summary defaults to all scope and includes account-level Cursor usage", async () => {
   const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), "tt-localapi-source-scope-"));
   try {
     const queuePath = path.join(tmp, "queue.jsonl");
@@ -66,9 +66,17 @@ test("usage-summary defaults to personal scope and excludes account-level Cursor
       },
     ]);
 
-    const personal = await callEndpoint(
+    const defaultScope = await callEndpoint(
       queuePath,
       "/functions/tokentracker-usage-summary?from=2026-04-20&to=2026-04-20&tz=UTC",
+    );
+    assert.equal(defaultScope.scope, "all");
+    assert.equal(defaultScope.totals.total_tokens, 1020);
+    assert.deepEqual(defaultScope.excluded_sources, []);
+
+    const personal = await callEndpoint(
+      queuePath,
+      "/functions/tokentracker-usage-summary?from=2026-04-20&to=2026-04-20&tz=UTC&scope=personal",
     );
     assert.equal(personal.scope, "personal");
     assert.equal(personal.totals.total_tokens, 120);
@@ -88,7 +96,7 @@ test("usage-summary defaults to personal scope and excludes account-level Cursor
   }
 });
 
-test("usage-model-breakdown marks account-level sources and excludes them by default", async () => {
+test("usage-model-breakdown defaults to all scope and can explicitly exclude account sources", async () => {
   const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), "tt-localapi-breakdown-scope-"));
   try {
     const queuePath = path.join(tmp, "queue.jsonl");
@@ -119,9 +127,17 @@ test("usage-model-breakdown marks account-level sources and excludes them by def
       },
     ]);
 
-    const personal = await callEndpoint(
+    const defaultScope = await callEndpoint(
       queuePath,
       "/functions/tokentracker-usage-model-breakdown?from=2026-04-20&to=2026-04-20&tz=UTC",
+    );
+    assert.equal(defaultScope.scope, "all");
+    assert.deepEqual(defaultScope.excluded_sources, []);
+    assert.ok(defaultScope.sources.find((entry) => entry.source === "cursor"));
+
+    const personal = await callEndpoint(
+      queuePath,
+      "/functions/tokentracker-usage-model-breakdown?from=2026-04-20&to=2026-04-20&tz=UTC&scope=personal",
     );
     assert.equal(personal.scope, "personal");
     assert.deepEqual(personal.sources.map((entry) => entry.source), ["codex"]);

@@ -3,6 +3,7 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const fssync = require("node:fs");
 const cp = require("node:child_process");
+const readline = require("node:readline");
 
 const { ensureDir, readJson, writeJson, openLock } = require("../lib/fs");
 const {
@@ -57,6 +58,8 @@ const { resolveRuntimeConfig } = require("../lib/runtime-config");
 
 const CURSOR_UNKNOWN_MIGRATION_KEY = "cursorUnknownPurge_2026_04";
 const ROLLOUT_CUMULATIVE_DELTA_MIGRATION_KEY = "rolloutCumulativeDeltaReparse_2026_05";
+const CLAUDE_MEM_OBSERVER_REINCLUDE_KEY = "claudeMemObserverReinclude_2026_05_v3";
+const CLAUDE_MEM_OBSERVER_PATH_SEGMENT = "--claude-mem-observer-sessions";
 
 async function cmdSync(argv) {
   const opts = parseArgs(argv);
@@ -171,6 +174,7 @@ async function cmdSync(argv) {
     openclawResult.bucketsQueued += openclawFallback.bucketsQueued;
 
     const claudeFiles = await listClaudeProjectFiles(claudeProjectsDir);
+    await reincludeClaudeMemObserverFiles({ cursors, claudeFiles, queuePath });
     let claudeResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (claudeFiles.length > 0) {
       if (progress?.enabled) {
@@ -680,8 +684,10 @@ module.exports = {
   cmdSync,
   migrateCursorUnknownBuckets,
   migrateRolloutCumulativeDeltaBuckets,
+  reincludeClaudeMemObserverFiles,
   CURSOR_UNKNOWN_MIGRATION_KEY,
   ROLLOUT_CUMULATIVE_DELTA_MIGRATION_KEY,
+  CLAUDE_MEM_OBSERVER_REINCLUDE_KEY,
 };
 
 function normalizeString(value) {
@@ -959,8 +965,6 @@ async function writeOpenclawSignal(trackerDir) {
 const AUTO_RETRY_FILENAME = "auto.retry.json";
 const AUTO_RETRY_MAX_DELAY_MS = 2 * 60 * 60 * 1000;
 
-const readline = require("node:readline");
-
 const INGEST_SLUG = "tokentracker-ingest";
 const MAX_INGEST_BUCKETS = 500;
 
@@ -1158,4 +1162,120 @@ async function migrateRolloutCumulativeDeltaBuckets({ cursors, queuePath, rollou
   }
 
   cursors.migrations[ROLLOUT_CUMULATIVE_DELTA_MIGRATION_KEY] = new Date().toISOString();
+}
+
+async function reincludeClaudeMemObserverFiles({ cursors, claudeFiles, queuePath }) {
+  if (!cursors || typeof cursors !== "object") return false;
+  const migrations = (cursors.migrations ||= {});
+  if (migrations[CLAUDE_MEM_OBSERVER_REINCLUDE_KEY]) return false;
+
+  const observerPaths = (Array.isArray(claudeFiles) ? claudeFiles : [])
+    .map((entry) => (typeof entry === "string" ? entry : entry?.path))
+    .filter((p) => typeof p === "string" && p.includes(CLAUDE_MEM_OBSERVER_PATH_SEGMENT));
+
+  if (!cursors.files || typeof cursors.files !== "object") {
+    cursors.files = {};
+  }
+
+  let filesReset = 0;
+  for (const filePath of observerPaths) {
+    if (cursors.files[filePath]) {
+      delete cursors.files[filePath];
+      filesReset += 1;
+    }
+  }
+
+  const hashesToRemove = observerPaths.length > 0
+    ? await collectClaudeMessageHashes(observerPaths)
+    : new Set();
+  let hashesRemoved = 0;
+  if (Array.isArray(cursors.claudeHashes) && hashesToRemove.size > 0) {
+    const nextHashes = [];
+    for (const hash of cursors.claudeHashes) {
+      if (hashesToRemove.has(hash)) {
+        hashesRemoved += 1;
+        continue;
+      }
+      nextHashes.push(hash);
+    }
+    cursors.claudeHashes = nextHashes;
+  }
+
+  const queueRowsRelabeled = typeof queuePath === "string" && queuePath
+    ? await relabelClaudeMemQueueRows(queuePath)
+    : 0;
+
+  migrations[CLAUDE_MEM_OBSERVER_REINCLUDE_KEY] = {
+    appliedAt: new Date().toISOString(),
+    filesReset,
+    hashesRemoved,
+    queueRowsRelabeled,
+  };
+  return filesReset > 0 || hashesRemoved > 0 || queueRowsRelabeled > 0;
+}
+
+async function relabelClaudeMemQueueRows(queuePath) {
+  let raw;
+  try {
+    raw = await fs.readFile(queuePath, "utf8");
+  } catch (_e) {
+    return 0;
+  }
+  if (!raw || !raw.includes('"claude-mem"')) return 0;
+
+  const lines = raw.split("\n");
+  const out = [];
+  let relabeled = 0;
+  for (const line of lines) {
+    if (!line) {
+      out.push(line);
+      continue;
+    }
+    let obj;
+    try {
+      obj = JSON.parse(line);
+    } catch (_e) {
+      out.push(line);
+      continue;
+    }
+    if (obj && obj.source === "claude-mem") {
+      obj.source = "claude";
+      relabeled += 1;
+      out.push(JSON.stringify(obj));
+    } else {
+      out.push(line);
+    }
+  }
+  if (relabeled === 0) return 0;
+
+  await fs.writeFile(queuePath, out.join("\n"), "utf8");
+  return relabeled;
+}
+
+async function collectClaudeMessageHashes(filePaths) {
+  const hashes = new Set();
+  for (const filePath of filePaths) {
+    let stream;
+    try {
+      stream = fssync.createReadStream(filePath, { encoding: "utf8" });
+    } catch (_e) {
+      continue;
+    }
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+    for await (const line of rl) {
+      if (!line.includes('"usage"')) continue;
+      let obj;
+      try {
+        obj = JSON.parse(line);
+      } catch (_e) {
+        continue;
+      }
+      const msgId = obj?.message?.id;
+      const reqId = obj?.requestId;
+      if (msgId && reqId) hashes.add(`${msgId}:${reqId}`);
+    }
+    rl.close();
+    stream.close?.();
+  }
+  return hashes;
 }
