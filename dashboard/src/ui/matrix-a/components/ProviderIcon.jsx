@@ -158,6 +158,16 @@ function OmpIcon({ size = 16, className = "" }) {
   );
 }
 
+function PiIcon({ size = 16, className = "" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 120 90" fill="currentColor" className={className}>
+      <rect x="10" y="8" width="100" height="12" rx="2" />
+      <rect x="25" y="20" width="12" height="62" rx="2" />
+      <rect x="83" y="20" width="12" height="62" rx="2" />
+    </svg>
+  );
+}
+
 const PROVIDER_ICON_MAP = {
   CLAUDE: ClaudeIcon,
   CODEBUDDY: CodeBuddyIcon,
@@ -172,6 +182,7 @@ const PROVIDER_ICON_MAP = {
   KIRO: KiroIcon,
   OPENCODE: OpenCodeIcon,
   OMP: OmpIcon,
+  PI: PiIcon,
 };
 
 // Multi-color brand SVG assets in /public/brand-logos/. Only logos that have

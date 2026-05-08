@@ -22,6 +22,8 @@ const {
   resolveOmpSessionFiles,
   parsePiIncremental,
   resolvePiSessionFiles,
+  resolvePiAgentDir,
+  piAgentDirCollidesWithOmp,
   parseCraftIncremental,
   resolveCraftSessionFiles,
   resolveCraftWorkspaceRoots,
@@ -4185,39 +4187,161 @@ test("resolvePiSessionFiles returns empty when ~/.pi/agent/sessions missing", as
   assert.deepEqual(result, []);
 });
 
-test("PI_CODING_AGENT_DIR env override redirects discovery", async () => {
+// PI_CODING_AGENT_DIR is documented by both pi-coding-agent and oh-my-pi.
+// Routing is decided by the install-signal disambiguator: ~/.pi present → pi,
+// otherwise omp (back-compat).
+
+test("PI_CODING_AGENT_DIR redirects pi discovery when ~/.pi install signal exists", async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "tt-pi-home-"));
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-pi-"));
   try {
+    await fs.mkdir(path.join(home, ".pi"), { recursive: true });
     const sessionsDir = path.join(tmp, "sessions", "--myproject--");
     await fs.mkdir(sessionsDir, { recursive: true });
     const filePath = path.join(sessionsDir, "session.jsonl");
     await fs.writeFile(filePath, buildOmpSessionHeader() + "\n", "utf8");
 
-    const result = resolvePiSessionFiles({ PI_CODING_AGENT_DIR: tmp });
+    const result = resolvePiSessionFiles({ HOME: home, PI_CODING_AGENT_DIR: tmp });
     assert.equal(result.length, 1);
     assert.ok(result[0].endsWith(".jsonl"));
   } finally {
+    await fs.rm(home, { recursive: true, force: true });
     await fs.rm(tmp, { recursive: true, force: true });
   }
 });
 
-// PI_CODING_AGENT_DIR belongs to pi-coding-agent only; omp must not claim it,
-// otherwise a pi user would have their sessions double-counted under both
-// sources.
-test("PI_CODING_AGENT_DIR does not redirect omp discovery", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-collision-"));
+test("PI_CODING_AGENT_DIR redirects omp discovery when no ~/.pi install signal exists", async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-home-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-"));
   try {
     const sessionsDir = path.join(tmp, "sessions", "--myproject--");
     await fs.mkdir(sessionsDir, { recursive: true });
     await fs.writeFile(path.join(sessionsDir, "session.jsonl"), buildOmpSessionHeader() + "\n", "utf8");
 
-    const ompResult = resolveOmpSessionFiles({
-      PI_CODING_AGENT_DIR: tmp,
-      OMP_HOME: path.join(os.tmpdir(), "no-such-omp"),
-    });
+    const ompResult = resolveOmpSessionFiles({ HOME: home, PI_CODING_AGENT_DIR: tmp });
+    assert.equal(ompResult.length, 1);
+    assert.ok(ompResult[0].endsWith(".jsonl"));
+  } finally {
+    await fs.rm(home, { recursive: true, force: true });
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("PI_CODING_AGENT_DIR is owned by pi when ~/.pi exists; omp falls back to default", async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "tt-both-home-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-shared-"));
+  try {
+    await fs.mkdir(path.join(home, ".pi"), { recursive: true });
+    const sessionsDir = path.join(tmp, "sessions", "--proj--");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    await fs.writeFile(path.join(sessionsDir, "session.jsonl"), buildOmpSessionHeader() + "\n", "utf8");
+
+    const piResult = resolvePiSessionFiles({ HOME: home, PI_CODING_AGENT_DIR: tmp });
+    const ompResult = resolveOmpSessionFiles({ HOME: home, PI_CODING_AGENT_DIR: tmp });
+    assert.equal(piResult.length, 1);
     assert.deepEqual(ompResult, []);
   } finally {
+    await fs.rm(home, { recursive: true, force: true });
     await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("TOKENTRACKER_PI_AGENT_DIR overrides PI_CODING_AGENT_DIR and the default for pi", async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "tt-pi-tt-home-"));
+  const ttPiTmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-pi-explicit-"));
+  const sharedTmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-pi-shared-"));
+  try {
+    const sessionsDir = path.join(ttPiTmp, "sessions", "--proj--");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    await fs.writeFile(path.join(sessionsDir, "session.jsonl"), buildOmpSessionHeader() + "\n", "utf8");
+
+    const result = resolvePiSessionFiles({
+      HOME: home,
+      PI_CODING_AGENT_DIR: sharedTmp,
+      TOKENTRACKER_PI_AGENT_DIR: ttPiTmp,
+    });
+    assert.equal(result.length, 1);
+    assert.ok(result[0].startsWith(ttPiTmp));
+  } finally {
+    await fs.rm(home, { recursive: true, force: true });
+    await fs.rm(ttPiTmp, { recursive: true, force: true });
+    await fs.rm(sharedTmp, { recursive: true, force: true });
+  }
+});
+
+test("TOKENTRACKER_PI_AGENT_DIR expands a bare '~' to HOME", () => {
+  const home = "/tmp/tt-tilde-home";
+  const dir = resolvePiAgentDir({ HOME: home, TOKENTRACKER_PI_AGENT_DIR: "~" });
+  assert.equal(dir, home);
+  const sub = resolvePiAgentDir({ HOME: home, TOKENTRACKER_PI_AGENT_DIR: "~/relocated" });
+  assert.equal(sub, path.join(home, "relocated"));
+});
+
+test("decidePiCodingAgentDirOwner ignores a stray FILE at ~/.pi", async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "tt-stray-home-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-stray-omp-"));
+  try {
+    await fs.writeFile(path.join(home, ".pi"), "not a dir", "utf8");
+    const ompSessions = path.join(tmp, "sessions", "--proj--");
+    await fs.mkdir(ompSessions, { recursive: true });
+    await fs.writeFile(path.join(ompSessions, "session.jsonl"), buildOmpSessionHeader() + "\n", "utf8");
+
+    const ompResult = resolveOmpSessionFiles({ HOME: home, PI_CODING_AGENT_DIR: tmp });
+    assert.equal(ompResult.length, 1, "stray file at ~/.pi must not steal PI_CODING_AGENT_DIR from omp");
+  } finally {
+    await fs.rm(home, { recursive: true, force: true });
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("piAgentDirCollidesWithOmp detects shared explicit overrides", () => {
+  const home = "/tmp/tt-collision-home";
+  const shared = "/tmp/tt-shared";
+  assert.equal(
+    piAgentDirCollidesWithOmp({
+      HOME: home,
+      TOKENTRACKER_OMP_AGENT_DIR: shared,
+      TOKENTRACKER_PI_AGENT_DIR: shared,
+    }),
+    true,
+  );
+  assert.equal(
+    piAgentDirCollidesWithOmp({ HOME: home }),
+    false,
+  );
+});
+
+test("TOKENTRACKER_OMP_AGENT_DIR forces omp ownership even when ~/.pi exists", async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "tt-force-home-"));
+  const ompTmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-explicit-"));
+  const sharedTmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-shared-explicit-"));
+  try {
+    await fs.mkdir(path.join(home, ".pi"), { recursive: true });
+    const ompSessions = path.join(ompTmp, "sessions", "--proj--");
+    await fs.mkdir(ompSessions, { recursive: true });
+    await fs.writeFile(path.join(ompSessions, "session.jsonl"), buildOmpSessionHeader() + "\n", "utf8");
+    const sharedSessions = path.join(sharedTmp, "sessions", "--proj--");
+    await fs.mkdir(sharedSessions, { recursive: true });
+    await fs.writeFile(path.join(sharedSessions, "session.jsonl"), buildOmpSessionHeader() + "\n", "utf8");
+
+    const ompResult = resolveOmpSessionFiles({
+      HOME: home,
+      PI_CODING_AGENT_DIR: sharedTmp,
+      TOKENTRACKER_OMP_AGENT_DIR: ompTmp,
+    });
+    const piResult = resolvePiSessionFiles({
+      HOME: home,
+      PI_CODING_AGENT_DIR: sharedTmp,
+      TOKENTRACKER_OMP_AGENT_DIR: ompTmp,
+    });
+    assert.equal(ompResult.length, 1);
+    assert.ok(ompResult[0].startsWith(ompTmp));
+    assert.equal(piResult.length, 1);
+    assert.ok(piResult[0].startsWith(sharedTmp));
+  } finally {
+    await fs.rm(home, { recursive: true, force: true });
+    await fs.rm(ompTmp, { recursive: true, force: true });
+    await fs.rm(sharedTmp, { recursive: true, force: true });
   }
 });
 

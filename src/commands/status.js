@@ -43,6 +43,7 @@ const {
   resolveOmpAgentDir,
   resolvePiSessionFiles,
   resolvePiAgentDir,
+  piAgentDirCollidesWithOmp,
   resolveCraftSessionFiles,
   resolveCraftConfigDir,
 } = require("../lib/rollout");
@@ -188,8 +189,10 @@ async function cmdStatus(argv = []) {
   const ompFiles = ompInstalled ? resolveOmpSessionFiles(process.env) : [];
 
   // pi (@mariozechner/pi-coding-agent) — passive scan only (no hooks).
+  // Skip when its agent dir collides with omp's; sync would dedupe anyway.
+  const piCollides = piAgentDirCollidesWithOmp(process.env);
   const piAgentDir = resolvePiAgentDir(process.env);
-  const piInstalled = fssync.existsSync(path.join(piAgentDir, "sessions"));
+  const piInstalled = !piCollides && fssync.existsSync(path.join(piAgentDir, "sessions"));
   const piFiles = piInstalled ? resolvePiSessionFiles(process.env) : [];
 
   // Craft Agents — passive scan only (no hooks).

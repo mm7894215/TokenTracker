@@ -4478,7 +4478,40 @@ function resolveOmpHome(env = process.env) {
   return path.join(home, ".omp");
 }
 
+// PI_CODING_AGENT_DIR is documented by both pi-coding-agent and oh-my-pi as
+// their agent directory override. When set, attribute it to whichever tool the
+// user actually has installed: ~/.pi present → "pi", otherwise "omp" (the
+// historical default in this codebase, preserved for back-compat).
+//
+// Users with both tools installed can disambiguate explicitly with
+// TOKENTRACKER_PI_AGENT_DIR / TOKENTRACKER_OMP_AGENT_DIR, which take
+// precedence in their respective resolvers.
+function decidePiCodingAgentDirOwner(env = process.env) {
+  const home = env.HOME || require("node:os").homedir();
+  // Require an actual directory — a stray file (lockfile, junk) at ~/.pi
+  // shouldn't reroute an existing oh-my-pi user's PI_CODING_AGENT_DIR override.
+  try {
+    if (fssync.statSync(path.join(home, ".pi")).isDirectory()) return "pi";
+  } catch {
+    // ENOENT or EACCES — treat as "no pi install signal".
+  }
+  return "omp";
+}
+
+function expandHomePath(dir, env = process.env) {
+  if (typeof dir !== "string" || !dir) return dir;
+  if (dir !== "~" && !dir.startsWith("~/")) return dir;
+  const home = env.HOME || require("node:os").homedir();
+  return dir === "~" ? home : path.join(home, dir.slice(2));
+}
+
 function resolveOmpAgentDir(env = process.env) {
+  if (env.TOKENTRACKER_OMP_AGENT_DIR) {
+    return expandHomePath(env.TOKENTRACKER_OMP_AGENT_DIR, env);
+  }
+  if (env.PI_CODING_AGENT_DIR && decidePiCodingAgentDirOwner(env) === "omp") {
+    return expandHomePath(env.PI_CODING_AGENT_DIR, env);
+  }
   return path.join(resolveOmpHome(env), "agent");
 }
 
@@ -4698,8 +4731,12 @@ async function parseOmpIncremental({
 // Same on-disk session format as oh-my-pi (omp): one JSONL file per session,
 // first line type:"session" header, then a tree of message/model_change/etc.
 // records. Token usage lives on type:"message" entries with role:"assistant"
-// under message.usage. Honors PI_CODING_AGENT_DIR to override the agent dir
-// (matches pi's own getAgentDir()).
+// under message.usage.
+//
+// PI_CODING_AGENT_DIR is shared with omp (both upstream tools document it).
+// resolvePiAgentDir / resolveOmpAgentDir use decidePiCodingAgentDirOwner to
+// route the override to exactly one provider so the same sessions dir is
+// never scanned twice.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function resolvePiHome(env = process.env) {
@@ -4708,14 +4745,22 @@ function resolvePiHome(env = process.env) {
 }
 
 function resolvePiAgentDir(env = process.env) {
-  if (env.PI_CODING_AGENT_DIR) {
-    const dir = env.PI_CODING_AGENT_DIR;
-    if (dir.startsWith("~/")) {
-      return path.join(env.HOME || require("node:os").homedir(), dir.slice(2));
-    }
-    return dir;
+  if (env.TOKENTRACKER_PI_AGENT_DIR) {
+    return expandHomePath(env.TOKENTRACKER_PI_AGENT_DIR, env);
+  }
+  if (env.PI_CODING_AGENT_DIR && decidePiCodingAgentDirOwner(env) === "pi") {
+    return expandHomePath(env.PI_CODING_AGENT_DIR, env);
   }
   return path.join(resolvePiHome(env), "agent");
+}
+
+// Defense in depth for invariant 2 (no double-count). Two explicit overrides
+// pointing at the same path (e.g. TOKENTRACKER_OMP_AGENT_DIR === TOKENTRACKER_PI_AGENT_DIR,
+// or TOKENTRACKER_OMP_AGENT_DIR === PI_CODING_AGENT_DIR with ~/.pi present) bypass
+// the install-signal disambiguator and would otherwise have both providers scan
+// the same sessions directory under different `source` tags.
+function piAgentDirCollidesWithOmp(env = process.env) {
+  return path.resolve(resolvePiAgentDir(env)) === path.resolve(resolveOmpAgentDir(env));
 }
 
 function resolvePiSessionFiles(env = process.env) {
@@ -5477,6 +5522,7 @@ module.exports = {
   resolvePiSessionFiles,
   resolvePiDefaultModel,
   parsePiIncremental,
+  piAgentDirCollidesWithOmp,
   resolveCraftConfigDir,
   resolveCraftWorkspaceRoots,
   resolveCraftSessionFiles,

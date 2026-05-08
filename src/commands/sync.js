@@ -31,6 +31,7 @@ const {
   parseOmpIncremental,
   resolvePiSessionFiles,
   parsePiIncremental,
+  piAgentDirCollidesWithOmp,
   resolveCraftSessionFiles,
   parseCraftIncremental,
   resolveCodebuddyProjectFiles,
@@ -476,8 +477,13 @@ async function cmdSync(argv) {
     }
 
     // ── pi (@mariozechner/pi-coding-agent) — passive ~/.pi/agent/sessions/**/*.jsonl reader ──
+    // Skip pi parse if its agent dir resolves to the same path as omp's. This
+    // prevents double-counting when explicit overrides (TOKENTRACKER_OMP_AGENT_DIR /
+    // TOKENTRACKER_PI_AGENT_DIR) bypass the install-signal disambiguator.
     let piResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const piFiles = resolvePiSessionFiles(process.env);
+    const piFiles = piAgentDirCollidesWithOmp(process.env)
+      ? []
+      : resolvePiSessionFiles(process.env);
     if (piFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing pi ${renderBar(0)} | buckets 0`);
