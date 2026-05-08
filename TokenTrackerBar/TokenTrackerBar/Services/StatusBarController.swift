@@ -142,6 +142,7 @@ final class StatusBarController: NSObject {
     private let menuBarHeight: CGFloat = 22
     private let menuBarIconSize = NSSize(width: 22, height: 22)
     private let emptyAttributedTitle = NSAttributedString(string: "")
+    private var isUpdatingDisplay = false
 
     private static let showStatsKey = "MenuBarShowStats"
     private var showStats: Bool {
@@ -260,6 +261,9 @@ final class StatusBarController: NSObject {
     }
 
     private func updateStatsDisplay() {
+        guard !isUpdatingDisplay else { return }
+        isUpdatingDisplay = true
+        defer { isUpdatingDisplay = false }
         guard let button = statusItem.button else { return }
         let displayItems = buildMenuBarDisplayValues()
 
