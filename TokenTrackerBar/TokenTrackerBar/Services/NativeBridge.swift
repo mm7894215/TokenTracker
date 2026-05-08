@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import ServiceManagement
 import WebKit
 import WidgetKit
@@ -22,12 +23,45 @@ final class NativeBridge {
     weak var webView: WKWebView?
     private weak var viewModel: DashboardViewModel?
     private weak var launchAtLoginManager: LaunchAtLoginManager?
+    private var cancellables = Set<AnyCancellable>()
 
     private init() {}
 
     func configure(viewModel: DashboardViewModel, launchAtLoginManager: LaunchAtLoginManager) {
         self.viewModel = viewModel
         self.launchAtLoginManager = launchAtLoginManager
+
+        cancellables.removeAll()
+        // Re-push settings whenever provider availability changes so the dropdown
+        // reflects newly-configured providers (or hides ones that started erroring)
+        // without requiring a page reload.
+        viewModel.$usageLimits
+            .map { Self.availabilityFingerprint(for: $0) }
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.pushSettings() }
+            .store(in: &cancellables)
+    }
+
+    /// Compact "configured && error==nil" snapshot per provider — collapses
+    /// utilization/reset-time updates to a single bool per provider so we
+    /// only re-push when a provider's *availability* flips, not on every poll.
+    private static func availabilityFingerprint(for limits: UsageLimitsResponse?) -> String {
+        guard let limits else { return "" }
+        func flag(_ configured: Bool, _ error: String?) -> String {
+            (configured && error == nil) ? "1" : "0"
+        }
+        return [
+            flag(limits.claude.configured, limits.claude.error),
+            flag(limits.codex.configured, limits.codex.error),
+            flag(limits.cursor.configured, limits.cursor.error),
+            flag(limits.gemini.configured, limits.gemini.error),
+            flag(limits.kimi?.configured ?? false, limits.kimi?.error),
+            flag(limits.kiro.configured, limits.kiro.error),
+            flag(limits.copilot?.configured ?? false, limits.copilot?.error),
+            flag(limits.antigravity.configured, limits.antigravity.error),
+        ].joined()
     }
 
     // MARK: - Message dispatch
@@ -85,7 +119,10 @@ final class NativeBridge {
         let payload: [String: Any] = [
             "showStats": UserDefaults.standard.object(forKey: "MenuBarShowStats") as? Bool ?? true,
             "menuBarItems": MenuBarDisplayPreferences.read(),
-            "menuBarAvailableItems": MenuBarDisplayPreferences.availableItemsPayload,
+            "menuBarAvailableItems": MenuBarDisplayPreferences.availableItemsPayload(
+                for: viewModel?.usageLimits,
+                keepingSelected: MenuBarDisplayPreferences.read()
+            ),
             "menuBarMaxItems": MenuBarDisplayPreferences.maxVisibleItems,
             "animatedIcon": UserDefaults.standard.object(forKey: "MenuBarAnimationEnabled") as? Bool ?? true,
             "launchAtLogin": launchAtLoginValue,

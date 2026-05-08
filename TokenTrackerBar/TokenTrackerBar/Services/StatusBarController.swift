@@ -105,6 +105,42 @@ enum MenuBarDisplayMetric: String, CaseIterable {
             return "limits"
         }
     }
+
+    /// Provider this metric is sourced from. `nil` for token/cost metrics that
+    /// always have data. Used to filter the dropdown so users only see slots
+    /// for providers they've configured.
+    var providerKey: String? {
+        switch self {
+        case .todayTokens, .todayCost, .last7dTokens, .totalTokens, .totalCost:
+            return nil
+        case .claude5h, .claude7d: return "claude"
+        case .codex5h, .codex7d: return "codex"
+        case .cursorPlan, .cursorAuto, .cursorAPI: return "cursor"
+        case .geminiPro, .geminiFlash, .geminiLite: return "gemini"
+        case .kimiWeekly, .kimi5h, .kimiTotal: return "kimi"
+        case .kiroMonth, .kiroBonus: return "kiro"
+        case .copilotPremium, .copilotChat: return "copilot"
+        case .antigravityClaude, .antigravityGPro, .antigravityFlash: return "antigravity"
+        }
+    }
+}
+
+private extension UsageLimitsResponse {
+    /// Whether a provider is currently usable (configured with no error).
+    /// Optional providers (kimi, copilot) treated as unavailable when nil.
+    func isProviderAvailable(_ key: String) -> Bool {
+        switch key {
+        case "claude": return claude.configured && claude.error == nil
+        case "codex": return codex.configured && codex.error == nil
+        case "cursor": return cursor.configured && cursor.error == nil
+        case "gemini": return gemini.configured && gemini.error == nil
+        case "kimi": return (kimi?.configured == true) && (kimi?.error == nil)
+        case "kiro": return kiro.configured && kiro.error == nil
+        case "copilot": return (copilot?.configured == true) && (copilot?.error == nil)
+        case "antigravity": return antigravity.configured && antigravity.error == nil
+        default: return false
+        }
+    }
 }
 
 enum MenuBarDisplayPreferences {
@@ -112,15 +148,33 @@ enum MenuBarDisplayPreferences {
     static let defaultIDs = [MenuBarDisplayMetric.todayTokens.rawValue, MenuBarDisplayMetric.todayCost.rawValue]
     static let maxVisibleItems = 2
 
-    static var availableItemsPayload: [[String: String]] {
-        MenuBarDisplayMetric.allCases.map {
-            [
-                "id": $0.rawValue,
-                "label": $0.settingsTitle,
-                "shortLabel": $0.menuLabel,
-                "category": $0.settingsCategory,
-            ]
-        }
+    /// Payload of selectable metrics for the dashboard dropdown.
+    /// When `limits` is provided, limit slots whose provider is unconfigured or
+    /// reporting an error are filtered out so users only see options that have
+    /// data. Token/cost metrics are always included. Currently-selected ids are
+    /// kept regardless so users don't lose their selection during a transient
+    /// error (the rendered menu bar already hides those slots via compactMap).
+    /// When `limits` is nil (loading state), all metrics are returned.
+    static func availableItemsPayload(
+        for limits: UsageLimitsResponse? = nil,
+        keepingSelected selected: [String] = []
+    ) -> [[String: String]] {
+        let selectedSet = Set(selected)
+        return MenuBarDisplayMetric.allCases
+            .filter { metric in
+                guard let provider = metric.providerKey else { return true }
+                if selectedSet.contains(metric.rawValue) { return true }
+                guard let limits else { return true }
+                return limits.isProviderAvailable(provider)
+            }
+            .map {
+                [
+                    "id": $0.rawValue,
+                    "label": $0.settingsTitle,
+                    "shortLabel": $0.menuLabel,
+                    "category": $0.settingsCategory,
+                ]
+            }
     }
 
     static func read(from defaults: UserDefaults = .standard) -> [String] {
