@@ -69,9 +69,21 @@ const CLAUDE_MEM_OBSERVER_REINCLUDE_KEY = "claudeMemObserverReinclude_2026_05_v3
 const CLAUDE_MEM_OBSERVER_PATH_SEGMENT = "--claude-mem-observer-sessions";
 // v1 had a cursor-format bug (wrote plain integer instead of {inode, offset,
 // updatedAt}), which made parseClaudeIncremental reread every jsonl from
-// byte 0 on the next sync and double everything. v2 fixes the format and
-// re-runs the repair regardless of whether v1 already applied.
-const CLAUDE_GROUND_TRUTH_REPAIR_KEY = "claudeGroundTruthRepair_2026_05_v2";
+// byte 0 on the next sync and double everything. v2 fixed the format.
+// v3 fixes two latent issues caught by adversarial review:
+//   (a) v2 wrote `cursors.hourly.groupQueued[claude|<hour>]` for every
+//       repaired bucket. enqueueTouchedBuckets uses presence of that key
+//       as the legacy-group marker, so any later sync that touched a
+//       claude hour (even just a user-message conv-count++) would re-emit
+//       the entire hour as one aggregate row under model=DEFAULT_MODEL,
+//       causing a different inflation path. v3 leaves groupQueued alone.
+//   (b) v2 only repaired the main queue.jsonl. project.queue.jsonl still
+//       carried historical claude-mem observer rows (project_key=
+//       "claude-mem/observer-sessions") and the project totals on the
+//       Project Usage panel stayed inflated. v3 drops every claude /
+//       claude-mem row from project.queue.jsonl too, and resets the
+//       matching cursors.projectHourly + project.queue.state offset.
+const CLAUDE_GROUND_TRUTH_REPAIR_KEY = "claudeGroundTruthRepair_2026_05_v3";
 
 async function cmdSync(argv) {
   const opts = parseArgs(argv);
@@ -187,7 +199,13 @@ async function cmdSync(argv) {
 
     const claudeFiles = await listClaudeProjectFiles(claudeProjectsDir);
     await reincludeClaudeMemObserverFiles({ cursors, claudeFiles, queuePath });
-    await repairClaudeQueueFromGroundTruth({ cursors, queuePath, queueStatePath });
+    await repairClaudeQueueFromGroundTruth({
+      cursors,
+      queuePath,
+      queueStatePath,
+      projectQueuePath,
+      projectQueueStatePath,
+    });
     let claudeResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (claudeFiles.length > 0) {
       if (progress?.enabled) {
@@ -1216,7 +1234,13 @@ async function migrateRolloutCumulativeDeltaBuckets({ cursors, queuePath, rollou
 // in sync, and reset the cloud upload offset so the corrected rows actually
 // reach the cloud (the ingest endpoint upserts by (source, model,
 // hour_start), so re-uploading other sources is idempotent).
-async function repairClaudeQueueFromGroundTruth({ cursors, queuePath, queueStatePath = null }) {
+async function repairClaudeQueueFromGroundTruth({
+  cursors,
+  queuePath,
+  queueStatePath = null,
+  projectQueuePath = null,
+  projectQueueStatePath = null,
+}) {
   if (!cursors || typeof cursors !== "object") return false;
   const migrations = (cursors.migrations ||= {});
   if (migrations[CLAUDE_GROUND_TRUTH_REPAIR_KEY]) return false;
@@ -1296,12 +1320,22 @@ async function repairClaudeQueueFromGroundTruth({ cursors, queuePath, queueState
       bucketsCleared += 1;
     }
   }
+  // Clear stale claude entries from groupQueued (left over by v2 repair).
+  // After v3 we never repopulate it for claude, so nothing should be added
+  // back during the per-model write loop below.
   for (const k of Object.keys(hourly.groupQueued)) {
     if (k.startsWith("claude|") || k.startsWith("claude-mem|")) {
       delete hourly.groupQueued[k];
     }
   }
 
+  // Per-model claude buckets: set queuedKey but DO NOT touch
+  // hourly.groupQueued. groupQueued is used by enqueueTouchedBuckets to
+  // mark a (source, hour) as legacy-aggregate state; writing claude hours
+  // there would force every later sync to re-emit the hour as a single
+  // model=DEFAULT_MODEL aggregate row instead of touching only the bucket
+  // that actually changed. The original v2 release did write groupQueued
+  // here and was the cause of an unknown-bucket inflation regression.
   for (const r of rows) {
     const totals = {
       input_tokens: r.input_tokens,
@@ -1320,7 +1354,6 @@ async function repairClaudeQueueFromGroundTruth({ cursors, queuePath, queueState
       source: "claude",
       hour_start: r.hour_start,
     };
-    hourly.groupQueued[groupBucketKey("claude", r.hour_start)] = totalsKey(totals);
   }
 
   // 3. Reset per-file cursors so future incremental sync only reads genuinely
@@ -1361,8 +1394,76 @@ async function repairClaudeQueueFromGroundTruth({ cursors, queuePath, queueState
     }
     uploadState.offset = 0;
     uploadState.updatedAt = new Date().toISOString();
-    uploadState.note = "reset_after_claude_repair_2026_05_v1";
+    uploadState.note = "reset_after_claude_repair_2026_05_v3";
     await fs.writeFile(queueStatePath, JSON.stringify(uploadState));
+  }
+
+  // 5. Repair project queue. Historical claude rows in project.queue.jsonl
+  //    were uniformly mis-attributed to project_key=
+  //    "claude-mem/observer-sessions" (left over from the observer
+  //    relabel migration). We can't reconstruct the true cwd-based
+  //    project_key for each historical message reliably, so we drop every
+  //    claude/claude-mem row from project.queue.jsonl and reset the
+  //    matching cursors.projectHourly state. New claude usage will
+  //    accumulate to the correct cwd-derived project_key going forward.
+  let projectRowsRemoved = 0;
+  let projectBucketsCleared = 0;
+  if (typeof projectQueuePath === "string" && projectQueuePath) {
+    let projRaw = "";
+    try {
+      projRaw = await fs.readFile(projectQueuePath, "utf8");
+    } catch (e) {
+      if (e?.code !== "ENOENT") throw e;
+    }
+    if (projRaw) {
+      const projKept = [];
+      for (const line of projRaw.split("\n")) {
+        if (!line.trim()) continue;
+        let row;
+        try {
+          row = JSON.parse(line);
+        } catch (_e) {
+          projKept.push(line);
+          continue;
+        }
+        if (row?.source === "claude" || row?.source === "claude-mem") {
+          projectRowsRemoved += 1;
+          continue;
+        }
+        projKept.push(line);
+      }
+      await ensureDir(path.dirname(projectQueuePath));
+      const tmp = `${projectQueuePath}.tmp.${process.pid}.${Date.now()}`;
+      await fs.writeFile(tmp, projKept.join("\n") + "\n", "utf8");
+      await fs.rename(tmp, projectQueuePath);
+    }
+
+    // Clear matching projectHourly state so the claude project buckets
+    // start fresh.
+    const projHourly = (cursors.projectHourly ||= { buckets: {} });
+    projHourly.buckets ||= {};
+    for (const k of Object.keys(projHourly.buckets)) {
+      const v = projHourly.buckets[k];
+      const src = v?.source || "";
+      if (src === "claude" || src === "claude-mem") {
+        delete projHourly.buckets[k];
+        projectBucketsCleared += 1;
+      }
+    }
+
+    // Reset project upload offset.
+    if (typeof projectQueueStatePath === "string" && projectQueueStatePath) {
+      let st = {};
+      try {
+        st = JSON.parse(await fs.readFile(projectQueueStatePath, "utf8"));
+      } catch (_e) {
+        st = {};
+      }
+      st.offset = 0;
+      st.updatedAt = new Date().toISOString();
+      st.note = "reset_after_claude_repair_2026_05_v3";
+      await fs.writeFile(projectQueueStatePath, JSON.stringify(st));
+    }
   }
 
   migrations[CLAUDE_GROUND_TRUTH_REPAIR_KEY] = {
@@ -1373,6 +1474,8 @@ async function repairClaudeQueueFromGroundTruth({ cursors, queuePath, queueState
     filesReset,
     hashesRetained: seenHashes.length,
     uploadOffsetReset: typeof queueStatePath === "string" && !!queueStatePath,
+    projectRowsRemoved,
+    projectBucketsCleared,
   };
   return true;
 }
