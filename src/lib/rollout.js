@@ -5542,4 +5542,9 @@ module.exports = {
   normalizeOpencodeTokens,
   sameGeminiTotals,
   diffGeminiTotals,
+  // Exposed so the queue-repair migration can mutate cursors state in the
+  // same key format sync uses elsewhere.
+  bucketKey,
+  totalsKey,
+  groupBucketKey,
 };

@@ -234,6 +234,8 @@ export function DashboardView(props) {
                     onCustomRangeApply={onCustomRangeApply}
                     customRangeOpen={customRangeOpen}
                     onCustomRangeOpenChange={onCustomRangeOpenChange}
+                    from={trendFromForDisplay}
+                    to={trendToForDisplay}
                   />
                 </FadeIn>
 

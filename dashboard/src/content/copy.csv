@@ -744,3 +744,17 @@ settings.appearance.language.hint,ui,SettingsPage,SettingsPage,language_hint,Use
 settings.appearance.language.system,ui,SettingsPage,SettingsPage,language_system,System,,active
 settings.appearance.language.english,ui,SettingsPage,SettingsPage,language_english,English,,active
 settings.appearance.language.chinese,ui,SettingsPage,SettingsPage,language_chinese,Simplified Chinese,,active
+dashboard.context_breakdown.title,dashboard,DashboardPage,ContextBreakdownPanel,title,"Context Breakdown",,active
+dashboard.context_breakdown.empty,dashboard,DashboardPage,ContextBreakdownPanel,empty,"No Claude Code activity in the selected period.",,active
+dashboard.context_breakdown.error,dashboard,DashboardPage,ContextBreakdownPanel,error,"Couldn't read Claude Code logs for this view.",,active
+dashboard.context_breakdown.session_count,dashboard,DashboardPage,ContextBreakdownPanel,session_count,"{{sessions}} sessions · {{messages}} messages",,active
+dashboard.context_breakdown.bar_aria,dashboard,DashboardPage,ContextBreakdownPanel,bar_aria,"Token distribution: {{summary}}",,active
+dashboard.context_breakdown.system_prefix_tooltip,dashboard,DashboardPage,ContextBreakdownPanel,tooltip,"System prompt, tools schema, skills, rules, and MCP descriptions are cached together as one prefix and can't be separated from the logs.",,active
+dashboard.context_breakdown.footnote,dashboard,DashboardPage,ContextBreakdownPanel,footnote,"Approximate: cache reads accumulate across turns, so conversation history dominates over time. Only Claude Code logs expose the per-message detail this view requires.",,active
+dashboard.context_breakdown.category.system_prompt,dashboard,DashboardPage,ContextBreakdownPanel,cat,"System prompt",,active
+dashboard.context_breakdown.category.messages,dashboard,DashboardPage,ContextBreakdownPanel,cat,"Messages",,active
+dashboard.context_breakdown.category.tool_calls,dashboard,DashboardPage,ContextBreakdownPanel,cat,"Tool calls",,active
+dashboard.context_breakdown.category.custom_agents,dashboard,DashboardPage,ContextBreakdownPanel,cat,"Custom agents",,active
+dashboard.context_breakdown.category.reasoning,dashboard,DashboardPage,ContextBreakdownPanel,cat,"Reasoning",,active
+dashboard.context_breakdown.loading_aria,dashboard,DashboardPage,ContextBreakdownPanel,loading_aria,"Loading context breakdown",,active
+dashboard.context_breakdown.loading_hint,dashboard,DashboardPage,ContextBreakdownPanel,loading_hint,"Scanning Claude Code session logs…",,active

@@ -28,6 +28,11 @@ const {
   ensurePricingLoaded,
 } = require("./pricing");
 
+const {
+  computeClaudeCategoryBreakdown,
+  unsupportedSourcePayload: unsupportedCategoryPayload,
+} = require("./claude-categorizer");
+
 // ---------------------------------------------------------------------------
 // Queue data helpers
 // ---------------------------------------------------------------------------
@@ -994,6 +999,30 @@ function createLocalApiHandler({ queuePath }) {
         from, to, days: 0, scope, excluded_sources: excludedSources, sources,
         pricing: { model: "per-model", pricing_mode: "per_token_type", source: "litellm", effective_from: new Date().toISOString().slice(0, 10) },
       });
+      return true;
+    }
+
+    // --- usage-category-breakdown (Claude Code only) ---
+    // Splits historical Claude usage into seven semantic categories that
+    // mirror the Claude Code /context view: system_prefix /
+    // conversation_history / user_input / tool_calls / subagents /
+    // reasoning / assistant_response. Other sources don't carry the
+    // per-message role data this requires, so they return scope:unsupported.
+    if (p === "/functions/tokentracker-usage-category-breakdown") {
+      const from = url.searchParams.get("from") || "";
+      const to = url.searchParams.get("to") || "";
+      const requestedSource = (url.searchParams.get("source") || "claude").trim().toLowerCase();
+      if (requestedSource !== "claude") {
+        json(res, { from, to, ...unsupportedCategoryPayload(requestedSource) });
+        return true;
+      }
+      try {
+        const result = await computeClaudeCategoryBreakdown({ from, to, projectDir: process.cwd() });
+        json(res, { from, to, ...result });
+      } catch (e) {
+        console.error("[LocalAPI] usage-category-breakdown:", e?.message || e);
+        json(res, { from, to, ...unsupportedCategoryPayload("claude"), error: "compute_failed" }, 500);
+      }
       return true;
     }
 

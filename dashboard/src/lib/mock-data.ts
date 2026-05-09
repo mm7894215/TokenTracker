@@ -722,3 +722,92 @@ export function getMockUsageModelBreakdown({ from, to, seed }: AnyRecord = {}) {
     },
   };
 }
+
+export function getMockUsageCategoryBreakdown({ from, to, source = "claude" }: AnyRecord = {}) {
+  if (source !== "claude") {
+    return {
+      from,
+      to,
+      source,
+      scope: "unsupported",
+      totals: {
+        input_tokens: 0,
+        cached_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        output_tokens: 0,
+        reasoning_output_tokens: 0,
+        total_tokens: 0,
+      },
+      categories: [
+        "system_prefix",
+        "conversation_history",
+        "user_input",
+        "tool_calls",
+        "subagents",
+        "reasoning",
+        "assistant_response",
+      ].map((key) => ({
+        key,
+        totals: {
+          input_tokens: 0,
+          cached_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+          output_tokens: 0,
+          reasoning_output_tokens: 0,
+          total_tokens: 0,
+        },
+        percent: 0,
+      })),
+      session_count: 0,
+      message_count: 0,
+    };
+  }
+
+  const buckets: Array<{ key: string; total: number }> = [
+    { key: "system_prefix", total: 12_896_539 },
+    { key: "conversation_history", total: 320_207_200 },
+    { key: "user_input", total: 998_025 },
+    { key: "tool_calls", total: 4_808_739 },
+    { key: "subagents", total: 1_022_828 },
+    { key: "reasoning", total: 11_073_118 },
+    { key: "assistant_response", total: 1_289_174 },
+  ];
+  const grandTotal = buckets.reduce((a, b) => a + b.total, 0);
+  const categories = buckets.map(({ key, total }) => ({
+    key,
+    totals: {
+      input_tokens: key === "user_input" ? total : 0,
+      cached_input_tokens: key === "conversation_history" ? Math.round(total * 0.95) : 0,
+      cache_creation_input_tokens:
+        key === "system_prefix"
+          ? total
+          : key === "conversation_history"
+          ? Math.round(total * 0.05)
+          : 0,
+      output_tokens: ["tool_calls", "subagents", "reasoning", "assistant_response"].includes(key)
+        ? total
+        : 0,
+      reasoning_output_tokens: key === "reasoning" ? total : 0,
+      total_tokens: total,
+    },
+    percent: Number(((total / grandTotal) * 100).toFixed(2)),
+  }));
+
+  return {
+    from,
+    to,
+    source: "claude",
+    scope: "supported",
+    totals: {
+      input_tokens: 998_025,
+      cached_input_tokens: Math.round(320_207_200 * 0.95),
+      cache_creation_input_tokens: 12_896_539 + Math.round(320_207_200 * 0.05),
+      output_tokens: 4_808_739 + 1_022_828 + 11_073_118 + 1_289_174,
+      reasoning_output_tokens: 11_073_118,
+      total_tokens: grandTotal,
+    },
+    categories,
+    session_count: 312,
+    message_count: 12_046,
+  };
+}

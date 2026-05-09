@@ -649,6 +649,36 @@ async function handleLocalApi(req, res, url) {
     return true;
   }
 
+  // 处理 usage-category-breakdown — Claude Code only
+  // Reuse the CLI's claude-categorizer module so dev server returns the
+  // same shape as the production endpoint.
+  if (pathname === "/functions/tokentracker-usage-category-breakdown") {
+    const from = url.searchParams.get("from") || "";
+    const to = url.searchParams.get("to") || "";
+    const requestedSource = (url.searchParams.get("source") || "claude").trim().toLowerCase();
+    try {
+      const categorizerPath = path.join(ROOT_DIR, "..", "src", "lib", "claude-categorizer");
+      // Bust the require cache so dev edits to the categorizer module
+      // surface without restarting the vite server.
+      const resolved = __viteRequire.resolve(categorizerPath);
+      delete __viteRequire.cache[resolved];
+      const { computeClaudeCategoryBreakdown, unsupportedSourcePayload } = __viteRequire(categorizerPath);
+      if (requestedSource !== "claude") {
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ from, to, ...unsupportedSourcePayload(requestedSource) }));
+        return true;
+      }
+      const result = await computeClaudeCategoryBreakdown({ from, to, projectDir: process.cwd() });
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ from, to, ...result }));
+    } catch (e) {
+      console.warn("[vite-mock] usage-category-breakdown failed:", e?.message || e);
+      res.statusCode = 500;
+      res.end(JSON.stringify({ error: e?.message || "compute_failed" }));
+    }
+    return true;
+  }
+
   // 处理 project-usage-summary
   if (pathname === "/functions/tokentracker-project-usage-summary") {
     // 优先读 ~/.tokentracker/tracker/project.queue.jsonl（与 7680 真实归因一致）

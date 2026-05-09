@@ -40,7 +40,11 @@ const {
   resolveKiroCliSessionFiles,
   resolveKiroCliDbPath,
   parseKiroCliIncremental,
+  bucketKey,
+  totalsKey,
+  groupBucketKey,
 } = require("../lib/rollout");
+const { computeClaudeGroundTruthBuckets } = require("../lib/claude-categorizer");
 const { createProgress, renderBar, formatNumber, formatBytes } = require("../lib/progress");
 const {
   normalizeState: normalizeUploadState,
@@ -63,6 +67,7 @@ const CURSOR_UNKNOWN_MIGRATION_KEY = "cursorUnknownPurge_2026_04";
 const ROLLOUT_CUMULATIVE_DELTA_MIGRATION_KEY = "rolloutCumulativeDeltaReparse_2026_05";
 const CLAUDE_MEM_OBSERVER_REINCLUDE_KEY = "claudeMemObserverReinclude_2026_05_v3";
 const CLAUDE_MEM_OBSERVER_PATH_SEGMENT = "--claude-mem-observer-sessions";
+const CLAUDE_GROUND_TRUTH_REPAIR_KEY = "claudeGroundTruthRepair_2026_05_v1";
 
 async function cmdSync(argv) {
   const opts = parseArgs(argv);
@@ -178,6 +183,7 @@ async function cmdSync(argv) {
 
     const claudeFiles = await listClaudeProjectFiles(claudeProjectsDir);
     await reincludeClaudeMemObserverFiles({ cursors, claudeFiles, queuePath });
+    await repairClaudeQueueFromGroundTruth({ cursors, queuePath, queueStatePath });
     let claudeResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (claudeFiles.length > 0) {
       if (progress?.enabled) {
@@ -1194,6 +1200,167 @@ async function migrateRolloutCumulativeDeltaBuckets({ cursors, queuePath, rollou
   }
 
   cursors.migrations[ROLLOUT_CUMULATIVE_DELTA_MIGRATION_KEY] = new Date().toISOString();
+}
+
+// One-time repair migration: rebuild source=claude rows in queue.jsonl from
+// the actual jsonl files using ccusage's algorithm (msgId+reqId global
+// dedup). Earlier `reincludeClaudeMemObserverFiles` versions (v1/v2/v3) each
+// reset the hash set and re-read observer jsonls, which silently inflated
+// queue.jsonl's claude totals by ~40%. We do an atomic rewrite — keep all
+// non-claude rows verbatim, replace every claude/claude-mem row with the
+// ground-truth set — then reset cursors so the next incremental sync stays
+// in sync, and reset the cloud upload offset so the corrected rows actually
+// reach the cloud (the ingest endpoint upserts by (source, model,
+// hour_start), so re-uploading other sources is idempotent).
+async function repairClaudeQueueFromGroundTruth({ cursors, queuePath, queueStatePath = null }) {
+  if (!cursors || typeof cursors !== "object") return false;
+  const migrations = (cursors.migrations ||= {});
+  if (migrations[CLAUDE_GROUND_TRUTH_REPAIR_KEY]) return false;
+
+  let result;
+  try {
+    result = await computeClaudeGroundTruthBuckets();
+  } catch (e) {
+    console.error("[sync] claude ground-truth repair: scan failed:", e?.message || e);
+    return false;
+  }
+  const { rows, seenHashes, fileList } = result;
+
+  // 1. Atomic rewrite of queue.jsonl: keep non-claude rows, drop existing
+  //    claude/claude-mem rows, append truth rows. Atomic via tmp + rename.
+  let claudeRowsRemoved = 0;
+  if (typeof queuePath === "string" && queuePath) {
+    let raw = "";
+    try {
+      raw = await fs.readFile(queuePath, "utf8");
+    } catch (e) {
+      if (e?.code !== "ENOENT") throw e;
+    }
+    const keptLines = [];
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      let row;
+      try {
+        row = JSON.parse(line);
+      } catch (_e) {
+        // Preserve unparseable lines verbatim — operator may want to
+        // recover them later.
+        keptLines.push(line);
+        continue;
+      }
+      if (row?.source === "claude" || row?.source === "claude-mem") {
+        claudeRowsRemoved += 1;
+        continue;
+      }
+      keptLines.push(line);
+    }
+
+    const truthLines = rows.map((r) =>
+      JSON.stringify({
+        source: "claude",
+        model: r.model,
+        hour_start: r.hour_start,
+        input_tokens: r.input_tokens,
+        cached_input_tokens: r.cached_input_tokens,
+        cache_creation_input_tokens: r.cache_creation_input_tokens,
+        output_tokens: r.output_tokens,
+        reasoning_output_tokens: r.reasoning_output_tokens,
+        total_tokens: r.total_tokens,
+        billable_total_tokens: r.billable_total_tokens,
+        conversation_count: r.conversation_count,
+      }),
+    );
+
+    await ensureDir(path.dirname(queuePath));
+    const out = keptLines.concat(truthLines).join("\n") + "\n";
+    const tmp = `${queuePath}.tmp.${process.pid}.${Date.now()}`;
+    await fs.writeFile(tmp, out, "utf8");
+    await fs.rename(tmp, queuePath);
+  }
+
+  // 2. Reset cursors.hourly.buckets / groupQueued for source=claude (and the
+  //    dead source=claude-mem buckets) so incremental sync's in-memory state
+  //    matches the truth.
+  const hourly = (cursors.hourly ||= { buckets: {}, groupQueued: {} });
+  hourly.buckets ||= {};
+  hourly.groupQueued ||= {};
+
+  let bucketsCleared = 0;
+  for (const k of Object.keys(hourly.buckets)) {
+    if (k.startsWith("claude|") || k.startsWith("claude-mem|")) {
+      delete hourly.buckets[k];
+      bucketsCleared += 1;
+    }
+  }
+  for (const k of Object.keys(hourly.groupQueued)) {
+    if (k.startsWith("claude|") || k.startsWith("claude-mem|")) {
+      delete hourly.groupQueued[k];
+    }
+  }
+
+  for (const r of rows) {
+    const totals = {
+      input_tokens: r.input_tokens,
+      cached_input_tokens: r.cached_input_tokens,
+      cache_creation_input_tokens: r.cache_creation_input_tokens,
+      output_tokens: r.output_tokens,
+      reasoning_output_tokens: r.reasoning_output_tokens,
+      total_tokens: r.total_tokens,
+      billable_total_tokens: r.billable_total_tokens,
+      conversation_count: r.conversation_count,
+    };
+    const key = bucketKey("claude", r.model, r.hour_start);
+    hourly.buckets[key] = {
+      totals,
+      queuedKey: totalsKey(totals),
+      source: "claude",
+      hour_start: r.hour_start,
+    };
+    hourly.groupQueued[groupBucketKey("claude", r.hour_start)] = totalsKey(totals);
+  }
+
+  // 3. Reset per-file cursors so future incremental sync only reads genuinely
+  //    new tail content.
+  cursors.files ||= {};
+  let filesReset = 0;
+  for (const fp of fileList) {
+    let size = 0;
+    try {
+      size = fssync.statSync(fp).size;
+    } catch (_e) {
+      continue;
+    }
+    cursors.files[fp] = size;
+    filesReset += 1;
+  }
+  cursors.claudeHashes = seenHashes;
+
+  // 4. Reset cloud-upload offset so the corrected rows are re-sent. Other
+  //    sources are upserted idempotently by the ingest endpoint, so this is
+  //    safe — just costs one extra round of bandwidth.
+  if (typeof queueStatePath === "string" && queueStatePath) {
+    let uploadState = {};
+    try {
+      uploadState = JSON.parse(await fs.readFile(queueStatePath, "utf8"));
+    } catch (_e) {
+      uploadState = {};
+    }
+    uploadState.offset = 0;
+    uploadState.updatedAt = new Date().toISOString();
+    uploadState.note = "reset_after_claude_repair_2026_05_v1";
+    await fs.writeFile(queueStatePath, JSON.stringify(uploadState));
+  }
+
+  migrations[CLAUDE_GROUND_TRUTH_REPAIR_KEY] = {
+    appliedAt: new Date().toISOString(),
+    bucketsWritten: rows.length,
+    bucketsCleared,
+    rowsRemoved: claudeRowsRemoved,
+    filesReset,
+    hashesRetained: seenHashes.length,
+    uploadOffsetReset: typeof queueStatePath === "string" && !!queueStatePath,
+  };
+  return true;
 }
 
 async function reincludeClaudeMemObserverFiles({ cursors, claudeFiles, queuePath }) {

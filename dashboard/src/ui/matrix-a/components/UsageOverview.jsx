@@ -8,6 +8,7 @@ import { copy } from "../../../lib/copy";
 import { DateRangePopover, formatDateShort } from "./DateRangePopover.jsx";
 import { ProviderIcon } from "./ProviderIcon.jsx";
 import { formatCompactNumber, formatUsdCurrency } from "../../../lib/format";
+import { ContextBreakdownPanel } from "./ContextBreakdownPanel.jsx";
 
 function formatTokens(value) {
   if (!Number.isFinite(Number(value))) return null;
@@ -115,6 +116,8 @@ export function UsageOverview({
   customRangeOpen,
   onCustomRangeOpenChange,
   onOpenShare,
+  from,
+  to,
 }) {
   const tabs = normalizePeriods(periods);
   const summaryCounterValue = parseAnimatedCounterValue(String(summaryValue ?? ""));
@@ -357,6 +360,16 @@ export function UsageOverview({
                           <ProviderIcon provider={provider.label} size={14} color={color} className="shrink-0" />
                           <span className="text-sm font-medium text-oai-black dark:text-oai-white">{provider.label}</span>
                         </div>
+
+                        {/* Claude-only: Context Breakdown drill-down. Lives
+                            inside the Claude expansion because no other
+                            provider's logs carry the per-message role data
+                            this requires. */}
+                        {provider.label === "CLAUDE" ? (
+                          <div className="mb-4 pb-4 border-b border-oai-gray-200 dark:border-oai-gray-700">
+                            <ContextBreakdownPanel from={from} to={to} />
+                          </div>
+                        ) : null}
 
                         {/* Model rows — text line + thin muted bar as visual rhythm */}
                         <div className="space-y-3">

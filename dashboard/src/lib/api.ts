@@ -5,6 +5,7 @@ import {
   getMockUsageHeatmap,
   getMockUsageMonthly,
   getMockUsageModelBreakdown,
+  getMockUsageCategoryBreakdown,
   getMockUsageSummary,
   getMockProjectUsageSummary,
   getMockLeaderboard,
@@ -23,6 +24,7 @@ const PATHS = {
   usageMonthly: "tokentracker-usage-monthly",
   usageHeatmap: "tokentracker-usage-heatmap",
   usageModelBreakdown: "tokentracker-usage-model-breakdown",
+  usageCategoryBreakdown: "tokentracker-usage-category-breakdown",
   projectUsageSummary: "tokentracker-project-usage-summary",
   userStatus: "tokentracker-user-status",
   localSync: "tokentracker-local-sync",
@@ -299,6 +301,17 @@ export async function getUsageModelBreakdown({
   const tzParams = buildTimeZoneParams({ timeZone, tzOffsetMinutes });
   const filterParams = buildFilterParams({ source });
   return fetchLocalJson(PATHS.usageModelBreakdown, { from, to, ...filterParams, ...tzParams });
+}
+
+export async function getUsageCategoryBreakdown({
+  from,
+  to,
+  source = "claude",
+}: AnyRecord = {}) {
+  if (isMockEnabled()) {
+    return getMockUsageCategoryBreakdown({ from, to, source });
+  }
+  return fetchLocalJson(PATHS.usageCategoryBreakdown, { from, to, source });
 }
 
 export async function getUsageDaily({
