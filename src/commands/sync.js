@@ -67,7 +67,11 @@ const CURSOR_UNKNOWN_MIGRATION_KEY = "cursorUnknownPurge_2026_04";
 const ROLLOUT_CUMULATIVE_DELTA_MIGRATION_KEY = "rolloutCumulativeDeltaReparse_2026_05";
 const CLAUDE_MEM_OBSERVER_REINCLUDE_KEY = "claudeMemObserverReinclude_2026_05_v3";
 const CLAUDE_MEM_OBSERVER_PATH_SEGMENT = "--claude-mem-observer-sessions";
-const CLAUDE_GROUND_TRUTH_REPAIR_KEY = "claudeGroundTruthRepair_2026_05_v1";
+// v1 had a cursor-format bug (wrote plain integer instead of {inode, offset,
+// updatedAt}), which made parseClaudeIncremental reread every jsonl from
+// byte 0 on the next sync and double everything. v2 fixes the format and
+// re-runs the repair regardless of whether v1 already applied.
+const CLAUDE_GROUND_TRUTH_REPAIR_KEY = "claudeGroundTruthRepair_2026_05_v2";
 
 async function cmdSync(argv) {
   const opts = parseArgs(argv);
@@ -1320,17 +1324,27 @@ async function repairClaudeQueueFromGroundTruth({ cursors, queuePath, queueState
   }
 
   // 3. Reset per-file cursors so future incremental sync only reads genuinely
-  //    new tail content.
+  //    new tail content. Format must match what rollout.js expects:
+  //    { inode, offset, updatedAt }. Setting a plain integer here breaks
+  //    the inode-equality check inside parseClaudeFile, which would treat
+  //    the file as untracked and re-read it from byte 0 — silently doubling
+  //    everything. (That was the actual cause of the regression after the
+  //    first repair attempt.)
   cursors.files ||= {};
   let filesReset = 0;
+  const nowIso = new Date().toISOString();
   for (const fp of fileList) {
-    let size = 0;
+    let st;
     try {
-      size = fssync.statSync(fp).size;
+      st = fssync.statSync(fp);
     } catch (_e) {
       continue;
     }
-    cursors.files[fp] = size;
+    cursors.files[fp] = {
+      inode: st.ino || 0,
+      offset: st.size,
+      updatedAt: nowIso,
+    };
     filesReset += 1;
   }
   cursors.claudeHashes = seenHashes;
