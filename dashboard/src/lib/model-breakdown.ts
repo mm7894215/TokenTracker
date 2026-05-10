@@ -72,6 +72,7 @@ export function buildFleetData(modelBreakdown: any, { copyFn }: AnyRecord = {}) 
         })
         .filter(Boolean);
       return {
+        source: entry.source,
         label,
         totalPercent: String(totalPercent),
         usd: entry.totalCost,

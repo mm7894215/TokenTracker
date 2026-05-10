@@ -33,6 +33,8 @@ const {
   unsupportedSourcePayload: unsupportedCategoryPayload,
 } = require("./claude-categorizer");
 
+const { computeCodexContextBreakdown } = require("./codex-context-breakdown");
+
 // ---------------------------------------------------------------------------
 // Queue data helpers
 // ---------------------------------------------------------------------------
@@ -175,6 +177,101 @@ function aggregateByDay(rows, timeZoneContext = null) {
     a.conversation_count += row.conversation_count || 0;
   }
   return Array.from(byDay.values()).sort((a, b) => a.day.localeCompare(b.day));
+}
+
+function buildCodexCategoryFallbackFromQueue(queueRows, { from, to, timeZoneContext }) {
+  const totals = {
+    input_tokens: 0,
+    cached_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+    output_tokens: 0,
+    reasoning_output_tokens: 0,
+    total_tokens: 0,
+  };
+  let conversationCount = 0;
+
+  for (const row of queueRows || []) {
+    if ((row?.source || "") !== "codex") continue;
+    if (!row.hour_start) continue;
+    const day = rowDayKey(row, timeZoneContext);
+    if (from && day < from) continue;
+    if (to && day > to) continue;
+    totals.input_tokens += Number(row.input_tokens || 0);
+    totals.cached_input_tokens += Number(row.cached_input_tokens || 0);
+    totals.cache_creation_input_tokens += Number(row.cache_creation_input_tokens || 0);
+    totals.output_tokens += Number(row.output_tokens || 0);
+    totals.reasoning_output_tokens += Number(row.reasoning_output_tokens || 0);
+    totals.total_tokens += Number(row.total_tokens || 0);
+    conversationCount += Number(row.conversation_count || 0);
+  }
+
+  return {
+    source: "codex",
+    scope: "supported",
+    breakdown_status: "queue_fallback",
+    totals,
+    session_count: 0,
+    message_count: conversationCount,
+    fallback: "queue_totals",
+    message_breakdown: {
+      categories: [
+        {
+          key: "user_input",
+          name: "User input",
+          totals: {
+            input_tokens: totals.input_tokens,
+            cached_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+            output_tokens: 0,
+            reasoning_output_tokens: 0,
+            total_tokens: totals.input_tokens,
+          },
+        },
+        {
+          key: "conversation_history",
+          name: "Conversation history",
+          totals: {
+            input_tokens: 0,
+            cached_input_tokens: totals.cached_input_tokens,
+            cache_creation_input_tokens: totals.cache_creation_input_tokens,
+            output_tokens: 0,
+            reasoning_output_tokens: 0,
+            total_tokens: totals.cached_input_tokens + totals.cache_creation_input_tokens,
+          },
+        },
+        {
+          key: "assistant_response",
+          name: "Assistant response",
+          totals: {
+            input_tokens: 0,
+            cached_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+            output_tokens: Math.max(0, totals.output_tokens - totals.reasoning_output_tokens),
+            reasoning_output_tokens: 0,
+            total_tokens: Math.max(0, totals.output_tokens - totals.reasoning_output_tokens),
+          },
+        },
+      ].sort((a, b) => Number(b.totals.total_tokens || 0) - Number(a.totals.total_tokens || 0)),
+      privacy: {
+        includes_content: false,
+        note: "Queue fallback includes aggregated token categories only; message text is never returned.",
+      },
+    },
+    tool_calls_breakdown: {
+      total_calls: 0,
+      tools: [],
+      categories: [],
+      tools_total: 0,
+      privacy: {
+        includes_inputs: false,
+        note: "Codex rollout sessions were unavailable; totals come from TokenTracker queue rows.",
+      },
+    },
+    exec_command_breakdown: {
+      by_type: [],
+      by_exit: [],
+    },
+  };
 }
 
 function getRequestedUsageScope(url) {
@@ -1002,27 +1099,53 @@ function createLocalApiHandler({ queuePath }) {
       return true;
     }
 
-    // --- usage-category-breakdown (Claude Code only) ---
-    // Splits historical Claude usage into seven semantic categories that
-    // mirror the Claude Code /context view: system_prefix /
-    // conversation_history / user_input / tool_calls / subagents /
-    // reasoning / assistant_response. Other sources don't carry the
-    // per-message role data this requires, so they return scope:unsupported.
+    // --- usage-category-breakdown (Claude + Codex) ---
+    // Claude: splits historical Claude usage into seven semantic categories
+    // mirroring Claude Code's /context view (approx).
+    // Codex: provides a tool-oriented breakdown, attributing per-turn token
+    // deltas to observed tool calls (heuristic).
     if (p === "/functions/tokentracker-usage-category-breakdown") {
       const from = url.searchParams.get("from") || "";
       const to = url.searchParams.get("to") || "";
       const requestedSource = (url.searchParams.get("source") || "claude").trim().toLowerCase();
-      if (requestedSource !== "claude") {
-        json(res, { from, to, ...unsupportedCategoryPayload(requestedSource) });
+      if (requestedSource === "claude") {
+        try {
+          const result = await computeClaudeCategoryBreakdown({ from, to, projectDir: process.cwd() });
+          json(res, { from, to, ...result });
+        } catch (e) {
+          console.error("[LocalAPI] usage-category-breakdown:", e?.message || e);
+          json(res, { from, to, ...unsupportedCategoryPayload("claude"), error: "compute_failed" }, 500);
+        }
         return true;
       }
-      try {
-        const result = await computeClaudeCategoryBreakdown({ from, to, projectDir: process.cwd() });
-        json(res, { from, to, ...result });
-      } catch (e) {
-        console.error("[LocalAPI] usage-category-breakdown:", e?.message || e);
-        json(res, { from, to, ...unsupportedCategoryPayload("claude"), error: "compute_failed" }, 500);
+
+      if (requestedSource === "codex") {
+        try {
+          const timeZoneContext = getTimeZoneContext(url);
+          const result = await computeCodexContextBreakdown({
+            from,
+            to,
+            top: 50,
+            timeZoneContext,
+          });
+          if (!Number(result?.totals?.total_tokens || 0)) {
+            const fallback = buildCodexCategoryFallbackFromQueue(readQueueData(qp), {
+              from,
+              to,
+              timeZoneContext,
+            });
+            json(res, { from, to, ...fallback });
+            return true;
+          }
+          json(res, { from, to, ...result });
+        } catch (e) {
+          console.error("[LocalAPI] usage-category-breakdown(codex):", e?.message || e);
+          json(res, { from, to, ...unsupportedCategoryPayload("codex"), error: "compute_failed" }, 500);
+        }
+        return true;
       }
+
+      json(res, { from, to, ...unsupportedCategoryPayload(requestedSource) });
       return true;
     }
 

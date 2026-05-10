@@ -307,11 +307,14 @@ export async function getUsageCategoryBreakdown({
   from,
   to,
   source = "claude",
+  timeZone,
+  tzOffsetMinutes,
 }: AnyRecord = {}) {
   if (isMockEnabled()) {
     return getMockUsageCategoryBreakdown({ from, to, source });
   }
-  return fetchLocalJson(PATHS.usageCategoryBreakdown, { from, to, source });
+  const tzParams = buildTimeZoneParams({ timeZone, tzOffsetMinutes });
+  return fetchLocalJson(PATHS.usageCategoryBreakdown, { from, to, source, ...tzParams });
 }
 
 export async function getUsageDaily({
