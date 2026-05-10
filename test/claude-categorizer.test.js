@@ -214,6 +214,34 @@ test("computeClaudeCategoryBreakdown: end-to-end on synthetic project dir, total
     // Total equals expected sum.
     const expectedTotal = 90_000 + 800 + 60_000 + 50 + 200 + 400 + 100;
     assert.equal(result.totals.total_tokens, expectedTotal);
+
+    const messageBreakdown = result.message_breakdown.categories;
+    assert.equal(
+      messageBreakdown.find((c) => c.key === "conversation_history").totals.total_tokens,
+      60_800,
+    );
+    assert.equal(messageBreakdown.find((c) => c.key === "user_input").totals.total_tokens, 50);
+    assert.equal(messageBreakdown.find((c) => c.key === "assistant_response").totals.total_tokens, 0);
+
+    const toolBreakdown = result.tool_calls_breakdown.tool_calls.categories.find(
+      (c) => c.name === "File Ops",
+    );
+    assert.ok(toolBreakdown, "expected File Ops tool breakdown");
+    const readTool = toolBreakdown.tools.find((t) => t.name === "Read");
+    assert.ok(readTool, "expected Read tool row");
+    assert.equal(readTool.totals.cache_creation_input_tokens, 30_000);
+    assert.equal(readTool.totals.output_tokens, 100);
+
+    const subagentBreakdown = result.tool_calls_breakdown.subagents.categories.find(
+      (c) => c.name === "Agent",
+    );
+    assert.ok(subagentBreakdown, "expected Agent subagent breakdown");
+    const agentTool = subagentBreakdown.tools.find((t) => t.name === "Agent");
+    assert.ok(agentTool, "expected Agent tool row");
+    assert.equal(agentTool.totals.input_tokens, 50);
+    assert.equal(agentTool.totals.cached_input_tokens, 60_000);
+    assert.equal(agentTool.totals.cache_creation_input_tokens, 800);
+    assert.equal(agentTool.totals.output_tokens, 400);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
@@ -240,6 +268,70 @@ test("computeClaudeCategoryBreakdown: deduplicates by msgId+requestId", async ()
     assert.equal(result.message_count, 1);
     const sys = result.categories.find((c) => c.key === "system_prefix").totals;
     assert.equal(sys.cache_creation_input_tokens, 1000);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("computeClaudeCategoryBreakdown: exposes explicit Skill tool calls", async () => {
+  const dir = await makeTmpDir("ttcat-skills");
+  try {
+    const file = path.join(dir, "s.jsonl");
+    await writeJsonl(file, [
+      {
+        type: "assistant",
+        timestamp: isoDaysAgo(1),
+        requestId: "r1",
+        message: {
+          id: "m1",
+          usage: {
+            input_tokens: 25,
+            cache_creation_input_tokens: 1000,
+            cache_read_input_tokens: 100,
+            output_tokens: 50,
+          },
+          content: [{ type: "tool_use", name: "Skill", input: { skill: "frontend-design" } }],
+        },
+      },
+    ]);
+
+    const result = await computeClaudeCategoryBreakdown({ rootDir: dir });
+    assert.equal(result.skills_breakdown.total_calls, 1);
+    assert.equal(result.skills_breakdown.skills[0].name, "frontend-design");
+    assert.equal(result.skills_breakdown.skills[0].totals.total_tokens, 1175);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("computeClaudeCategoryBreakdown: groups Bash commands for execution drill-down", async () => {
+  const dir = await makeTmpDir("ttcat-exec");
+  try {
+    const file = path.join(dir, "s.jsonl");
+    await writeJsonl(file, [
+      {
+        type: "assistant",
+        timestamp: isoDaysAgo(1),
+        requestId: "r1",
+        message: {
+          id: "m1",
+          usage: {
+            input_tokens: 25,
+            cache_creation_input_tokens: 1000,
+            cache_read_input_tokens: 100,
+            output_tokens: 50,
+          },
+          content: [{ type: "tool_use", name: "Bash", input: { command: "npm test -- --run unit" } }],
+        },
+      },
+    ]);
+
+    const result = await computeClaudeCategoryBreakdown({ rootDir: dir });
+    assert.equal(result.exec_command_breakdown.total_calls, 1);
+    assert.equal(result.exec_command_breakdown.by_type[0].name, "test");
+    assert.equal(result.exec_command_breakdown.by_executable[0].name, "npm");
+    assert.equal(result.exec_command_breakdown.by_command[0].name, "npm test");
+    assert.equal(result.exec_command_breakdown.by_type[0].totals.total_tokens, 1175);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

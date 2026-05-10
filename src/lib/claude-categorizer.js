@@ -27,6 +27,129 @@ const CATEGORY_KEYS = [
 
 const SUBAGENT_TOOL_NAMES = new Set(["Agent", "Task"]);
 
+// Token-saver-compatible tool categorization.
+function categorizeTool(name) {
+  if (name === "text_response") return "Text Response";
+  if (name === "Malformed") return "Malformed";
+
+  if (name.startsWith("mcp__")) {
+    const parts = name.split("__");
+    if (parts.length >= 3) {
+      const serverRaw = parts[1];
+      let server;
+      const pluginMatch = serverRaw.match(/^plugin_(.+)$/);
+      if (pluginMatch) {
+        const inner = pluginMatch[1];
+        const segments = inner.split("_");
+        const half = Math.floor(segments.length / 2);
+        const firstHalf = segments.slice(0, half).join("_");
+        const secondHalf = segments.slice(half).join("_");
+        if (firstHalf && firstHalf === secondHalf) {
+          server = firstHalf;
+        } else {
+          server = inner;
+        }
+      } else {
+        server = serverRaw;
+      }
+      server = server.replace(/_/g, "-");
+      return `MCP: ${server}`;
+    }
+    return "MCP: Unknown";
+  }
+
+  if (/^Task(Create|Update|Get|List|Output|Stop)$/.test(name)) return "Task Mgmt";
+  if (/^Todo/.test(name)) return "Task Mgmt";
+  if (/Plan/.test(name)) return "Planning";
+  if (name === "Agent") return "Agent";
+  if (/^Web(Fetch|Search)$/.test(name)) return "Web";
+  if (name === "Skill") return "Skill";
+  if (name === "LSP") return "IDE";
+  if (name === "AskUserQuestion") return "Interaction";
+
+  if (name === "exec_command" || name === "write_stdin") return "Execution";
+  if (name === "update_plan") return "Planning";
+  if (/_agent$/.test(name)) return "Agent";
+  if (/^list_mcp/.test(name)) return "MCP Mgmt";
+  if (
+    /^(navigate_page|click|select_page|new_page|take_snapshot|take_screenshot|evaluate_script|list_pages|list_console_messages|view_image|emulate|resize_page|wait_for|close_page|get_console_message|get_network_request|list_network_requests|performance_)/.test(
+      name,
+    )
+  )
+    return "Browser";
+
+  if (/^(Read|Write|Edit|Glob)$/.test(name)) return "File Ops";
+  if (name === "Grep") return "Search";
+  if (name === "Bash") return "Execution";
+
+  if (name.includes("<tool_call>") || name.includes("<arg_")) return "Malformed";
+
+  return "Other";
+}
+
+function inferExecCommandKind(command) {
+  const cmd = String(command || "").trim();
+  if (/^(npm|yarn|pnpm)\s+(run\s+)?(build|build:|.*:build\b)/.test(cmd)) return "build";
+  if (/^(npm|yarn|pnpm)\s+(test|run\s+test\b|run\s+.*test\b)/.test(cmd)) return "test";
+  if (/^(npm|yarn|pnpm)\s+run\s+typecheck\b/.test(cmd)) return "typecheck";
+  if (/^(npm|yarn|pnpm)\s+(install|add|ci)\b/.test(cmd)) return "dependency";
+  if (/^(npm|yarn|pnpm)\s+(pack|publish|version)\b/.test(cmd)) return "package";
+  if (/^(npm|yarn|pnpm)\s+run\s+(dev|serve|start|.*dev.*)\b/.test(cmd)) return "dev_server";
+  if (/^node\s+--check\b/.test(cmd) || /\bnode\s+--check\b/.test(cmd)) return "syntax_check";
+  if (/^node\s+--input-type=module\s+-e\b/.test(cmd) || /^node\s+-e\b/.test(cmd)) return "node_eval";
+  if (/^node\s+.*\b(query|analyze|report)\b/.test(cmd)) return "node_cli";
+  if (/^git\s+status\b/.test(cmd)) return "git_status";
+  if (/^git\s+(push|pull|fetch|clone)\b/.test(cmd) || /\bgit\s+(push|pull|fetch|clone)\b/.test(cmd)) return "git_remote";
+  if (/^git\s+(add|commit|branch|config|remote|restore)\b/.test(cmd) || /\bgit\s+(add|commit|branch|config|remote|restore)\b/.test(cmd)) return "git_local";
+  if (/^(curl|wget)\b/.test(cmd) || /\b(curl|wget)\b/.test(cmd)) return "http";
+  if (/^(ps|pgrep|pkill|kill|lsof)\b/.test(cmd)) return "process";
+  if (/^tmux\b/.test(cmd)) return "terminal";
+  if (/^(open|osascript)\b/.test(cmd)) return "browser_control";
+  if (/^(rm|mkdir|touch|chmod|cp|mv)\b/.test(cmd)) return "file_mutation";
+  if (/^(pwd|ls|test)\b/.test(cmd) || /^(pwd|ls)\s*[;&|]/.test(cmd)) return "shell_inspect";
+  if (/[;&|]{1,2}/.test(cmd)) return "compound";
+  return "unknown";
+}
+
+function shellWords(command) {
+  const out = [];
+  const re = /"([^"\\]*(?:\\.[^"\\]*)*)"|'([^']*)'|(\S+)/g;
+  let match;
+  while ((match = re.exec(String(command || ""))) !== null) {
+    out.push(match[1] ?? match[2] ?? match[3] ?? "");
+  }
+  return out.filter(Boolean);
+}
+
+function unwrapShellCommand(words) {
+  if (words.length >= 3 && /^(bash|sh|zsh|fish)$/.test(words[0]) && words[1] === "-lc") {
+    return shellWords(words.slice(2).join(" "));
+  }
+  if (words.length >= 3 && /^(rtk|env|command|xcrun)$/.test(words[0])) {
+    return unwrapShellCommand(words.slice(1));
+  }
+  return words;
+}
+
+function sanitizeCommandSignature(command) {
+  const words = unwrapShellCommand(shellWords(command));
+  if (words.length === 0) return "unknown";
+  const executable = path.basename(words[0] || "unknown");
+  const subcommand = words.find((word, idx) => {
+    if (idx === 0) return false;
+    if (!word || word.startsWith("-")) return false;
+    if (/^[A-Z_][A-Z0-9_]*=/.test(word)) return false;
+    return true;
+  });
+  return subcommand ? `${executable} ${subcommand}` : executable;
+}
+
+function getExecutableName(command) {
+  const words = unwrapShellCommand(shellWords(command));
+  if (words.length === 0) return "unknown";
+  return path.basename(words[0] || "unknown") || "unknown";
+}
+
 function emptyTotals() {
   return {
     input_tokens: 0,
@@ -38,10 +161,29 @@ function emptyTotals() {
   };
 }
 
+function emptyToolBreakdown() {
+  return {
+    total_calls: 0,
+    tools: [],
+  };
+}
+
 function emptyCategoryMap() {
   const out = {};
   for (const key of CATEGORY_KEYS) out[key] = emptyTotals();
   return out;
+}
+
+function buildExecStatsEntry() {
+  return {
+    calls: 0,
+    failures: 0,
+    duration_ms: 0,
+    max_duration_ms: 0,
+    output_chars: 0,
+    output_lines: 0,
+    totals: emptyTotals(),
+  };
 }
 
 function addInto(target, source) {
@@ -51,6 +193,291 @@ function addInto(target, source) {
   target.output_tokens += source.output_tokens || 0;
   target.reasoning_output_tokens += source.reasoning_output_tokens || 0;
   target.total_tokens += source.total_tokens || 0;
+}
+
+function extractExecCommands(content) {
+  const commands = [];
+  for (const block of Array.isArray(content) ? content : []) {
+    if (!block || typeof block !== "object") continue;
+    if (block.type !== "tool_use") continue;
+    if (block.name !== "Bash" && block.name !== "exec_command") continue;
+    const input = block.input || {};
+    const command =
+      typeof input.command === "string" ? input.command
+      : typeof input.cmd === "string" ? input.cmd
+      : "";
+    if (command.trim()) commands.push(command.trim());
+  }
+  return commands;
+}
+
+function ensureExecRow(map, key) {
+  const safeKey = key || "unknown";
+  if (!map.has(safeKey)) map.set(safeKey, { name: safeKey, ...buildExecStatsEntry() });
+  return map.get(safeKey);
+}
+
+function addExecTotals(row, totals) {
+  row.calls += 1;
+  addInto(row.totals, totals || {});
+}
+
+function recordExecCommandUsage(execLedger, commands, totals) {
+  if (!execLedger || !Array.isArray(commands) || commands.length === 0) return;
+  const perCommandRows = new Map();
+  for (const command of commands) {
+    if (!perCommandRows.has(command)) perCommandRows.set(command, { calls: 0 });
+    perCommandRows.get(command).calls += 1;
+  }
+  const totalsByCommand = allocateTotalsAcrossRows(totals, perCommandRows);
+
+  for (const [command, row] of perCommandRows.entries()) {
+    const commandTotals = totalsByCommand.get(command) || {};
+    const kind = inferExecCommandKind(command);
+    const executable = getExecutableName(command);
+    const signature = sanitizeCommandSignature(command);
+    const exitKey = "unknown:unknown";
+
+    const targets = [
+      [execLedger.by_type, kind],
+      [execLedger.by_executable, executable],
+      [execLedger.by_command, signature],
+      [execLedger.by_exit, exitKey],
+    ];
+    for (const [map, key] of targets) {
+      const target = ensureExecRow(map, key);
+      target.calls += Math.max(1, Number(row.calls || 0));
+      addInto(target.totals, commandTotals);
+    }
+    execLedger.total_calls += Math.max(1, Number(row.calls || 0));
+  }
+}
+
+function allocateTotalsAcrossRows(totals, rows) {
+  const entries = Array.from(rows?.entries?.() || []);
+  if (entries.length === 0) return new Map();
+  const weights = {};
+  const order = entries.map(([name]) => name).sort();
+  for (const name of order) {
+    const row = rows.get(name) || {};
+    weights[name] = Math.max(0, Number(row.output_tokens || row.calls || 0));
+  }
+  if (order.every((name) => !weights[name])) {
+    for (const name of order) weights[name] = 1;
+  }
+  const out = new Map();
+  for (const name of order) out.set(name, emptyTotals());
+  for (const key of [
+    "input_tokens",
+    "cached_input_tokens",
+    "cache_creation_input_tokens",
+    "output_tokens",
+    "reasoning_output_tokens",
+    "total_tokens",
+  ]) {
+    const alloc = allocateByLargestRemainder(Math.max(0, Number(totals?.[key] || 0)), weights, order);
+    for (const name of order) {
+      out.get(name)[key] = alloc[name] || 0;
+    }
+  }
+  return out;
+}
+
+function roundTotals(totals) {
+  return {
+    input_tokens: Math.round(totals?.input_tokens || 0),
+    cached_input_tokens: Math.round(totals?.cached_input_tokens || 0),
+    cache_creation_input_tokens: Math.round(totals?.cache_creation_input_tokens || 0),
+    output_tokens: Math.round(totals?.output_tokens || 0),
+    reasoning_output_tokens: Math.round(totals?.reasoning_output_tokens || 0),
+    total_tokens: Math.round(totals?.total_tokens || 0),
+  };
+}
+
+function extractSkillNames(content) {
+  const names = [];
+  for (const block of Array.isArray(content) ? content : []) {
+    if (!block || typeof block !== "object") continue;
+    if (block.type !== "tool_use" || block.name !== "Skill") continue;
+    const skill = typeof block.input?.skill === "string" ? block.input.skill.trim() : "";
+    if (skill) names.push(skill);
+  }
+  return names;
+}
+
+function recordSkillUsage(skillLedger, skillNames, totals) {
+  if (!skillLedger || !Array.isArray(skillNames) || skillNames.length === 0) return;
+  const perMessageRows = new Map();
+  for (const name of skillNames) {
+    if (!perMessageRows.has(name)) perMessageRows.set(name, { calls: 0 });
+    perMessageRows.get(name).calls += 1;
+  }
+  const totalsByName = allocateTotalsAcrossRows(totals, perMessageRows);
+  for (const [name, row] of perMessageRows.entries()) {
+    if (!skillLedger.by_name.has(name)) {
+      skillLedger.by_name.set(name, { name, calls: 0, totals: emptyTotals() });
+    }
+    const target = skillLedger.by_name.get(name);
+    target.calls += row.calls || 0;
+    addInto(target.totals, totalsByName.get(name) || {});
+  }
+  skillLedger.total_calls += skillNames.length;
+}
+
+function allocateByLargestRemainder(total, weights, order) {
+  const out = {};
+  if (!Number.isFinite(total) || total <= 0) {
+    for (const key of order) out[key] = 0;
+    return out;
+  }
+
+  let totalWeight = 0;
+  for (const key of order) {
+    const w = Number(weights[key] || 0);
+    if (Number.isFinite(w) && w > 0) totalWeight += w;
+  }
+
+  if (totalWeight <= 0) {
+    for (const key of order) out[key] = 0;
+    return out;
+  }
+
+  const exact = order.map((key) => (Number(weights[key] || 0) / totalWeight) * total);
+  const floored = exact.map((x) => Math.floor(x));
+  const remainder = total - floored.reduce((a, b) => a + b, 0);
+  const remainders = exact
+    .map((x, i) => ({ i, frac: x - Math.floor(x) }))
+    .sort((a, b) => b.frac - a.frac);
+  for (let k = 0; k < remainder; k++) floored[remainders[k % order.length].i] += 1;
+
+  for (let i = 0; i < order.length; i++) out[order[i]] = floored[i];
+  return out;
+}
+
+function computeOutputTokenBreakdown(usage, content) {
+  const total = Math.max(0, Number(usage.output_tokens || 0));
+  const reasoningExplicit = Math.max(0, Number(usage.reasoning_output_tokens || 0));
+  const blocks = Array.isArray(content) ? content : [];
+
+  if (total === 0) {
+    return {
+      bucket_tokens: { reasoning: 0, tool_calls: 0, subagents: 0, assistant_response: 0 },
+      tool_calls: { total_calls: 0, by_name: new Map() },
+      subagents: { total_calls: 0, by_name: new Map() },
+    };
+  }
+
+  const bucketChars = { reasoning: 0, tool_calls: 0, subagents: 0, assistant_response: 0 };
+  const toolCallChars = new Map();
+  const subagentChars = new Map();
+  const toolCallCounts = new Map();
+  const subagentCounts = new Map();
+
+  let totalChars = 0;
+  for (const block of blocks) {
+    if (!block || typeof block !== "object") continue;
+    const type = block.type;
+    let chars = 0;
+
+    if (type === "thinking") {
+      chars = String(block.thinking || block.text || "").length || 1;
+      bucketChars.reasoning += chars;
+    } else if (type === "text") {
+      chars = String(block.text || "").length || 1;
+      bucketChars.assistant_response += chars;
+    } else if (type === "tool_use") {
+      const inputJson = block.input ? JSON.stringify(block.input) : "";
+      chars = (block.name || "").length + inputJson.length + 1;
+      if (SUBAGENT_TOOL_NAMES.has(block.name)) {
+        bucketChars.subagents += chars;
+        subagentChars.set(block.name, (subagentChars.get(block.name) || 0) + chars);
+        subagentCounts.set(block.name, (subagentCounts.get(block.name) || 0) + 1);
+      } else {
+        bucketChars.tool_calls += chars;
+        toolCallChars.set(block.name, (toolCallChars.get(block.name) || 0) + chars);
+        toolCallCounts.set(block.name, (toolCallCounts.get(block.name) || 0) + 1);
+      }
+    } else {
+      continue;
+    }
+
+    totalChars += chars;
+  }
+
+  if (totalChars === 0) {
+    return {
+      bucket_tokens: { reasoning: 0, tool_calls: 0, subagents: 0, assistant_response: total },
+      tool_calls: { total_calls: 0, by_name: new Map() },
+      subagents: { total_calls: 0, by_name: new Map() },
+    };
+  }
+
+  const explicitReasoning = reasoningExplicit > 0 ? Math.min(reasoningExplicit, total) : 0;
+  const nonReasoningOutput = total - explicitReasoning;
+
+  const allocChars = { ...bucketChars };
+  let allocTotalChars = totalChars;
+  if (explicitReasoning > 0) {
+    allocTotalChars -= allocChars.reasoning;
+    allocChars.reasoning = 0;
+  }
+
+  const order = ["reasoning", "tool_calls", "subagents", "assistant_response"];
+  const prorated = allocateByLargestRemainder(Math.max(0, nonReasoningOutput), allocChars, order);
+
+  const bucketTokens = {
+    reasoning: explicitReasoning + (prorated.reasoning || 0),
+    tool_calls: prorated.tool_calls || 0,
+    subagents: prorated.subagents || 0,
+    assistant_response: prorated.assistant_response || 0,
+  };
+
+  if (allocTotalChars <= 0 && nonReasoningOutput > 0) {
+    bucketTokens.reasoning = explicitReasoning;
+    bucketTokens.tool_calls = 0;
+    bucketTokens.subagents = 0;
+    bucketTokens.assistant_response = nonReasoningOutput;
+  }
+
+  const toolTokensByName = new Map();
+  if (bucketTokens.tool_calls > 0 && toolCallChars.size > 0) {
+    const keys = [...toolCallChars.keys()].sort();
+    const weights = {};
+    for (const k of keys) weights[k] = toolCallChars.get(k) || 0;
+    const alloc = allocateByLargestRemainder(bucketTokens.tool_calls, weights, keys);
+    for (const k of keys) toolTokensByName.set(k, alloc[k] || 0);
+  }
+
+  const subagentTokensByName = new Map();
+  if (bucketTokens.subagents > 0 && subagentChars.size > 0) {
+    const keys = [...subagentChars.keys()].sort();
+    const weights = {};
+    for (const k of keys) weights[k] = subagentChars.get(k) || 0;
+    const alloc = allocateByLargestRemainder(bucketTokens.subagents, weights, keys);
+    for (const k of keys) subagentTokensByName.set(k, alloc[k] || 0);
+  }
+
+  return {
+    bucket_tokens: bucketTokens,
+    tool_calls: {
+      total_calls: [...toolCallCounts.values()].reduce((a, b) => a + b, 0),
+      by_name: new Map(
+        [...toolCallCounts.entries()].map(([name, calls]) => [
+          name,
+          { name, calls, output_tokens: toolTokensByName.get(name) || 0 },
+        ]),
+      ),
+    },
+    subagents: {
+      total_calls: [...subagentCounts.values()].reduce((a, b) => a + b, 0),
+      by_name: new Map(
+        [...subagentCounts.entries()].map(([name, calls]) => [
+          name,
+          { name, calls, output_tokens: subagentTokensByName.get(name) || 0 },
+        ]),
+      ),
+    },
+  };
 }
 
 function defaultClaudeProjectsDir() {
@@ -86,71 +513,9 @@ function listSessionFiles(rootDir) {
 // assistant_response. If reasoning_output_tokens is reported separately, use
 // that exact figure for reasoning instead of pro-rating.
 function splitOutputByContent(usage, content, breakdown) {
-  const total = Math.max(0, Number(usage.output_tokens || 0));
-  const reasoningExplicit = Math.max(0, Number(usage.reasoning_output_tokens || 0));
-  if (total === 0) return;
-
-  const blocks = Array.isArray(content) ? content : [];
-  const buckets = { reasoning: 0, tool_calls: 0, subagents: 0, assistant_response: 0 };
-  let totalChars = 0;
-
-  for (const block of blocks) {
-    if (!block || typeof block !== "object") continue;
-    const type = block.type;
-    let chars = 0;
-    if (type === "thinking") {
-      chars = String(block.thinking || block.text || "").length || 1;
-      buckets.reasoning += chars;
-    } else if (type === "text") {
-      chars = String(block.text || "").length || 1;
-      buckets.assistant_response += chars;
-    } else if (type === "tool_use") {
-      const inputJson = block.input ? JSON.stringify(block.input) : "";
-      chars = (block.name || "").length + inputJson.length + 1;
-      if (SUBAGENT_TOOL_NAMES.has(block.name)) buckets.subagents += chars;
-      else buckets.tool_calls += chars;
-    } else {
-      continue;
-    }
-    totalChars += chars;
-  }
-
-  if (totalChars === 0) {
-    breakdown.assistant_response.output_tokens += total;
-    breakdown.assistant_response.total_tokens += total;
-    return;
-  }
-
-  // If the API reported reasoning tokens explicitly, peel them off first
-  // and pro-rate the rest of the output across the remaining buckets.
-  let nonReasoningOutput = total;
-  if (reasoningExplicit > 0) {
-    const reasoningShare = Math.min(reasoningExplicit, total);
-    breakdown.reasoning.output_tokens += reasoningShare;
-    breakdown.reasoning.reasoning_output_tokens += reasoningShare;
-    breakdown.reasoning.total_tokens += reasoningShare;
-    nonReasoningOutput = total - reasoningShare;
-    // Drop the thinking-char contribution; it was just paid for.
-    totalChars -= buckets.reasoning;
-    buckets.reasoning = 0;
-  }
-
-  if (nonReasoningOutput <= 0 || totalChars <= 0) return;
-
-  // Largest-remainder rounding so the four sub-buckets sum exactly to
-  // nonReasoningOutput (no off-by-one drift across thousands of messages).
-  const order = ["reasoning", "tool_calls", "subagents", "assistant_response"];
-  const exact = order.map((k) => (buckets[k] / totalChars) * nonReasoningOutput);
-  const floored = exact.map((x) => Math.floor(x));
-  const remainder = nonReasoningOutput - floored.reduce((a, b) => a + b, 0);
-  const remainders = exact
-    .map((x, i) => ({ i, frac: x - Math.floor(x) }))
-    .sort((a, b) => b.frac - a.frac);
-  for (let k = 0; k < remainder; k++) floored[remainders[k % order.length].i] += 1;
-
-  for (let i = 0; i < order.length; i++) {
-    const key = order[i];
-    const tok = floored[i];
+  const out = computeOutputTokenBreakdown(usage, content);
+  for (const key of ["reasoning", "tool_calls", "subagents", "assistant_response"]) {
+    const tok = out.bucket_tokens[key] || 0;
     if (tok === 0) continue;
     breakdown[key].output_tokens += tok;
     breakdown[key].total_tokens += tok;
@@ -161,7 +526,7 @@ function splitOutputByContent(usage, content, breakdown) {
 // Per-session state lets us pick out the *first* meaningful cache_creation
 // chunk and call that the system_prefix. Subsequent cache_creations are
 // incremental — we attribute them to conversation_history.
-function classifyOneMessage(obj, sessionState, breakdown) {
+function classifyOneMessage(obj, sessionState, breakdown, toolLedger = null, skillLedger = null, execLedger = null) {
   const usage = obj?.message?.usage;
   if (!usage || typeof usage !== "object") return;
 
@@ -195,18 +560,90 @@ function classifyOneMessage(obj, sessionState, breakdown) {
     }
   }
 
+  recordSkillUsage(
+    skillLedger,
+    extractSkillNames(obj?.message?.content),
+    {
+      input_tokens: inputNonCached,
+      cached_input_tokens: cacheRead,
+      cache_creation_input_tokens: cacheCreate,
+      output_tokens: output,
+      reasoning_output_tokens: 0,
+      total_tokens: inputNonCached + cacheRead + cacheCreate + output,
+    },
+  );
+
   // Split output across reasoning / tool_calls / subagents / assistant_response.
   if (output > 0) {
-    splitOutputByContent(
+    const out = computeOutputTokenBreakdown(
       { output_tokens: output, reasoning_output_tokens: usage.reasoning_output_tokens },
       obj?.message?.content,
-      breakdown,
     );
+    for (const key of ["reasoning", "tool_calls", "subagents", "assistant_response"]) {
+      const tok = out.bucket_tokens[key] || 0;
+      if (tok === 0) continue;
+      breakdown[key].output_tokens += tok;
+      breakdown[key].total_tokens += tok;
+      if (key === "reasoning") breakdown[key].reasoning_output_tokens += tok;
+    }
+
+    recordExecCommandUsage(
+      execLedger,
+      extractExecCommands(obj?.message?.content),
+      {
+        input_tokens: inputNonCached,
+        cached_input_tokens: cacheRead,
+        cache_creation_input_tokens: cacheCreate,
+        output_tokens: out.bucket_tokens.tool_calls || 0,
+        reasoning_output_tokens: 0,
+        total_tokens: inputNonCached + cacheRead + cacheCreate + (out.bucket_tokens.tool_calls || 0),
+      },
+    );
+
+    if (toolLedger) {
+      const ledgerTotals = {
+        input_tokens: inputNonCached,
+        cached_input_tokens: cacheRead,
+        cache_creation_input_tokens: cacheCreate,
+        output_tokens: out.bucket_tokens.tool_calls || 0,
+        reasoning_output_tokens: 0,
+        total_tokens: inputNonCached + cacheRead + cacheCreate + (out.bucket_tokens.tool_calls || 0),
+      };
+      const toolTotalsByName = allocateTotalsAcrossRows(ledgerTotals, out.tool_calls.by_name);
+      for (const [name, row] of out.tool_calls.by_name.entries()) {
+        if (!toolLedger.tool_calls.by_name.has(name)) {
+          toolLedger.tool_calls.by_name.set(name, { name, calls: 0, totals: emptyTotals() });
+        }
+        const target = toolLedger.tool_calls.by_name.get(name);
+        target.calls += row.calls || 0;
+        addInto(target.totals, toolTotalsByName.get(name) || {});
+      }
+      toolLedger.tool_calls.total_calls += out.tool_calls.total_calls || 0;
+
+      const subagentTotals = {
+        input_tokens: inputNonCached,
+        cached_input_tokens: cacheRead,
+        cache_creation_input_tokens: cacheCreate,
+        output_tokens: out.bucket_tokens.subagents || 0,
+        reasoning_output_tokens: 0,
+        total_tokens: inputNonCached + cacheRead + cacheCreate + (out.bucket_tokens.subagents || 0),
+      };
+      const subagentTotalsByName = allocateTotalsAcrossRows(subagentTotals, out.subagents.by_name);
+      for (const [name, row] of out.subagents.by_name.entries()) {
+        if (!toolLedger.subagents.by_name.has(name)) {
+          toolLedger.subagents.by_name.set(name, { name, calls: 0, totals: emptyTotals() });
+        }
+        const target = toolLedger.subagents.by_name.get(name);
+        target.calls += row.calls || 0;
+        addInto(target.totals, subagentTotalsByName.get(name) || {});
+      }
+      toolLedger.subagents.total_calls += out.subagents.total_calls || 0;
+    }
   }
 }
 
 // Read one session jsonl streaming, in timestamp range, dedup by msgId+reqId.
-async function categorizeSessionFile(filePath, { fromIso, toIso, seenHashes }, breakdown) {
+async function categorizeSessionFile(filePath, { fromIso, toIso, seenHashes }, breakdown, toolLedger = null, skillLedger = null, execLedger = null) {
   let stream;
   try {
     stream = fssync.createReadStream(filePath, { encoding: "utf8" });
@@ -238,7 +675,7 @@ async function categorizeSessionFile(filePath, { fromIso, toIso, seenHashes }, b
       seenHashes.add(hash);
     }
 
-    classifyOneMessage(obj, sessionState, breakdown);
+    classifyOneMessage(obj, sessionState, breakdown, toolLedger, skillLedger, execLedger);
     counted += 1;
   }
   rl.close();
@@ -271,6 +708,7 @@ function dayKeyToIsoBounds(from, to) {
 // case the watcher misses something.
 const CACHE = new Map();
 const CACHE_TTL_MS = 60_000;
+const CACHE_SCHEMA_VERSION = "skills-exec-v2";
 
 function maxMtimeMs(files) {
   let max = 0;
@@ -303,7 +741,7 @@ async function computeClaudeCategoryBreakdown({ from = null, to = null, rootDir 
     };
   }
 
-  const cacheKey = `${root}|${from || ""}|${to || ""}|${files.length}|${maxMtimeMs(files)}`;
+  const cacheKey = `${CACHE_SCHEMA_VERSION}|${root}|${from || ""}|${to || ""}|${files.length}|${maxMtimeMs(files)}`;
   const cached = CACHE.get(cacheKey);
   if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
     return cached.value;
@@ -314,12 +752,27 @@ async function computeClaudeCategoryBreakdown({ from = null, to = null, rootDir 
   const seenHashes = new Set();
   let messageCount = 0;
   let sessionCount = 0;
+  const toolLedger = {
+    tool_calls: { total_calls: 0, by_name: new Map() },
+    subagents: { total_calls: 0, by_name: new Map() },
+  };
+  const skillLedger = { total_calls: 0, by_name: new Map() };
+  const execLedger = {
+    total_calls: 0,
+    by_type: new Map(),
+    by_executable: new Map(),
+    by_command: new Map(),
+    by_exit: new Map(),
+  };
 
   for (const fp of files) {
     const counted = await categorizeSessionFile(
       fp,
       { fromIso, toIso, seenHashes },
       breakdown,
+      toolLedger,
+      skillLedger,
+      execLedger,
     );
     if (counted > 0) sessionCount += 1;
     messageCount += counted;
@@ -341,6 +794,11 @@ async function computeClaudeCategoryBreakdown({ from = null, to = null, rootDir 
     }),
     session_count: sessionCount,
     message_count: messageCount,
+    message_breakdown: buildMessageBreakdown(breakdown),
+    tool_calls_breakdown: buildToolCallsBreakdown(toolLedger),
+    skills_breakdown: buildSkillsBreakdown(skillLedger),
+    exec_command_breakdown: buildExecCommandBreakdown(execLedger),
+    configured_resources: getConfiguredResources({ projectDir }),
   };
 
   CACHE.set(cacheKey, { at: Date.now(), value: result });
@@ -350,6 +808,194 @@ async function computeClaudeCategoryBreakdown({ from = null, to = null, rootDir 
     if (oldest) CACHE.delete(oldest[0]);
   }
   return result;
+}
+
+function buildToolCallsBreakdown(toolLedger) {
+  if (!toolLedger || !toolLedger.tool_calls || !toolLedger.subagents) {
+    return {
+      tool_calls: emptyToolBreakdown(),
+      subagents: emptyToolBreakdown(),
+    };
+  }
+
+  function mapToSortedRows(map) {
+    const rows = Array.from(map.values()).map((row) => ({
+      name: row.name,
+      calls: row.calls,
+      totals: row.totals || {
+        ...emptyTotals(),
+        output_tokens: row.output_tokens || 0,
+        total_tokens: row.total_tokens || row.output_tokens || 0,
+      },
+    }));
+    rows.sort((a, b) => (b.totals?.total_tokens || 0) - (a.totals?.total_tokens || 0));
+    return rows;
+  }
+
+  const toolCallsRows = mapToSortedRows(toolLedger.tool_calls.by_name || new Map());
+  const subagentRows = mapToSortedRows(toolLedger.subagents.by_name || new Map());
+
+  function groupIntoCategories(rows) {
+    const byCategory = new Map(); // name -> {name,calls,totals,tools:[]}
+    for (const row of rows) {
+      const toolName = String(row?.name || "");
+      if (!toolName) continue;
+      const cat = categorizeTool(toolName);
+      if (!byCategory.has(cat)) {
+        byCategory.set(cat, {
+          name: cat,
+          calls: 0,
+          totals: emptyTotals(),
+          tools: [],
+        });
+      }
+      const bucket = byCategory.get(cat);
+      bucket.calls += Number(row.calls || 0);
+      addInto(bucket.totals, row.totals || {});
+      bucket.tools.push({
+        name: toolName,
+        calls: Number(row.calls || 0),
+        totals: row.totals || emptyTotals(),
+      });
+    }
+    const categories = Array.from(byCategory.values())
+      .map((c) => ({
+        name: c.name,
+        calls: Math.round(c.calls || 0),
+        totals: {
+          input_tokens: Math.round(c.totals.input_tokens || 0),
+          cached_input_tokens: Math.round(c.totals.cached_input_tokens || 0),
+          cache_creation_input_tokens: Math.round(c.totals.cache_creation_input_tokens || 0),
+          output_tokens: Math.round(c.totals.output_tokens || 0),
+          reasoning_output_tokens: Math.round(c.totals.reasoning_output_tokens || 0),
+          total_tokens: Math.round(c.totals.total_tokens || 0),
+        },
+        tools: c.tools
+          .sort((a, b) => (b.totals?.total_tokens || 0) - (a.totals?.total_tokens || 0))
+          .map((t) => ({
+            name: t.name,
+            calls: Math.round(t.calls || 0),
+            totals: {
+              input_tokens: Math.round(t.totals.input_tokens || 0),
+              cached_input_tokens: Math.round(t.totals.cached_input_tokens || 0),
+              cache_creation_input_tokens: Math.round(t.totals.cache_creation_input_tokens || 0),
+              output_tokens: Math.round(t.totals.output_tokens || 0),
+              reasoning_output_tokens: Math.round(t.totals.reasoning_output_tokens || 0),
+              total_tokens: Math.round(t.totals.total_tokens || 0),
+            },
+          })),
+      }))
+      .sort((a, b) => (b.totals?.total_tokens || 0) - (a.totals?.total_tokens || 0));
+    return categories;
+  }
+
+  return {
+    tool_calls: {
+      total_calls: toolLedger.tool_calls.total_calls || 0,
+      tools: toolCallsRows,
+      categories: groupIntoCategories(toolCallsRows),
+    },
+    subagents: {
+      total_calls: toolLedger.subagents.total_calls || 0,
+      tools: subagentRows,
+      categories: groupIntoCategories(subagentRows),
+    },
+    privacy: {
+      includes_inputs: false,
+      note: "Aggregated tool names only; tool inputs are never recorded.",
+    },
+  };
+}
+
+function buildSkillsBreakdown(skillLedger) {
+  const rows = Array.from(skillLedger?.by_name?.values?.() || [])
+    .map((row) => ({
+      name: row.name,
+      calls: Math.round(row.calls || 0),
+      totals: roundTotals(row.totals || emptyTotals()),
+    }))
+    .sort((a, b) => (b.totals?.total_tokens || 0) - (a.totals?.total_tokens || 0));
+
+  return {
+    total_calls: Math.round(skillLedger?.total_calls || 0),
+    skills: rows,
+    privacy: {
+      includes_inputs: false,
+      note: "Aggregated skill names only; skill inputs are never returned.",
+    },
+  };
+}
+
+function serializeExecRows(map) {
+  return Array.from(map?.values?.() || [])
+    .map((row) => ({
+      name: row.name,
+      calls: Math.round(row.calls || 0),
+      failures: Math.round(row.failures || 0),
+      duration_ms: Math.round(row.duration_ms || 0),
+      max_duration_ms: Math.round(row.max_duration_ms || 0),
+      output_chars: Math.round(row.output_chars || 0),
+      output_lines: Math.round(row.output_lines || 0),
+      totals: roundTotals(row.totals || emptyTotals()),
+    }))
+    .sort((a, b) => (b.totals?.total_tokens || 0) - (a.totals?.total_tokens || 0));
+}
+
+function buildExecCommandBreakdown(execLedger) {
+  return {
+    total_calls: Math.round(execLedger?.total_calls || 0),
+    by_type: serializeExecRows(execLedger?.by_type),
+    by_executable: serializeExecRows(execLedger?.by_executable),
+    by_command: serializeExecRows(execLedger?.by_command),
+    by_duration: [],
+    by_output: [],
+    by_exit: serializeExecRows(execLedger?.by_exit),
+    privacy: {
+      includes_commands: false,
+      note: "Claude Bash commands are grouped into sanitized signatures; raw commands are not returned.",
+    },
+  };
+}
+
+function buildMessageBreakdown(breakdown) {
+  const rows = [
+    {
+      key: "user_input",
+      name: "User input",
+      totals: breakdown.user_input || emptyTotals(),
+    },
+    {
+      key: "conversation_history",
+      name: "Conversation history",
+      totals: breakdown.conversation_history || emptyTotals(),
+    },
+    {
+      key: "assistant_response",
+      name: "Assistant response",
+      totals: breakdown.assistant_response || emptyTotals(),
+    },
+  ];
+
+  return {
+    categories: rows
+      .map((row) => ({
+        key: row.key,
+        name: row.name,
+        totals: {
+          input_tokens: Math.round(row.totals.input_tokens || 0),
+          cached_input_tokens: Math.round(row.totals.cached_input_tokens || 0),
+          cache_creation_input_tokens: Math.round(row.totals.cache_creation_input_tokens || 0),
+          output_tokens: Math.round(row.totals.output_tokens || 0),
+          reasoning_output_tokens: Math.round(row.totals.reasoning_output_tokens || 0),
+          total_tokens: Math.round(row.totals.total_tokens || 0),
+        },
+      }))
+      .sort((a, b) => (b.totals?.total_tokens || 0) - (a.totals?.total_tokens || 0)),
+    privacy: {
+      includes_content: false,
+      note: "Aggregated message token categories only; prompt and assistant text are never returned.",
+    },
+  };
 }
 
 // Lightweight on-disk count of static resources Claude Code's /context UI

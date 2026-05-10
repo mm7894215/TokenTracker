@@ -1224,6 +1224,8 @@ export function DashboardPage({
       trendRowsForDisplay={trendRowsForDisplay}
       trendFromForDisplay={trendFromForDisplay}
       trendToForDisplay={trendToForDisplay}
+      usageFrom={from}
+      usageTo={to}
       period={period}
       trendTimeZoneLabel={trendTimeZoneLabel}
       activityHeatmapBlock={activityHeatmapBlock}

@@ -724,6 +724,193 @@ export function getMockUsageModelBreakdown({ from, to, seed }: AnyRecord = {}) {
 }
 
 export function getMockUsageCategoryBreakdown({ from, to, source = "claude" }: AnyRecord = {}) {
+  if (source === "codex") {
+    const totals = {
+      input_tokens: 1_420_000,
+      cached_input_tokens: 5_880_000,
+      cache_creation_input_tokens: 920_000,
+      output_tokens: 2_560_000,
+      reasoning_output_tokens: 610_000,
+      total_tokens: 10_780_000,
+    };
+    return {
+      from,
+      to,
+      source: "codex",
+      scope: "supported",
+      totals,
+      session_count: 188,
+      message_count: 5_436,
+      tool_calls_breakdown: {
+        categories: [
+          {
+            name: "Execution",
+            calls: 742,
+            totals: {
+              input_tokens: 320_000,
+              cached_input_tokens: 1_040_000,
+              cache_creation_input_tokens: 110_000,
+              output_tokens: 460_000,
+              reasoning_output_tokens: 120_000,
+              total_tokens: 1_930_000,
+            },
+            tools: [
+              {
+                name: "exec_command",
+                calls: 510,
+                totals: {
+                  input_tokens: 250_000,
+                  cached_input_tokens: 820_000,
+                  cache_creation_input_tokens: 80_000,
+                  output_tokens: 370_000,
+                  reasoning_output_tokens: 90_000,
+                  total_tokens: 1_520_000,
+                },
+              },
+              {
+                name: "write_stdin",
+                calls: 232,
+                totals: {
+                  input_tokens: 70_000,
+                  cached_input_tokens: 220_000,
+                  cache_creation_input_tokens: 30_000,
+                  output_tokens: 90_000,
+                  reasoning_output_tokens: 30_000,
+                  total_tokens: 410_000,
+                },
+              },
+            ],
+          },
+          {
+            name: "Browser",
+            calls: 406,
+            totals: {
+              input_tokens: 210_000,
+              cached_input_tokens: 880_000,
+              cache_creation_input_tokens: 90_000,
+              output_tokens: 420_000,
+              reasoning_output_tokens: 100_000,
+              total_tokens: 1_700_000,
+            },
+            tools: [
+              {
+                name: "take_snapshot",
+                calls: 180,
+                totals: {
+                  input_tokens: 100_000,
+                  cached_input_tokens: 400_000,
+                  cache_creation_input_tokens: 40_000,
+                  output_tokens: 180_000,
+                  reasoning_output_tokens: 40_000,
+                  total_tokens: 760_000,
+                },
+              },
+              {
+                name: "click",
+                calls: 126,
+                totals: {
+                  input_tokens: 60_000,
+                  cached_input_tokens: 250_000,
+                  cache_creation_input_tokens: 30_000,
+                  output_tokens: 120_000,
+                  reasoning_output_tokens: 35_000,
+                  total_tokens: 495_000,
+                },
+              },
+              {
+                name: "evaluate_script",
+                calls: 100,
+                totals: {
+                  input_tokens: 50_000,
+                  cached_input_tokens: 230_000,
+                  cache_creation_input_tokens: 20_000,
+                  output_tokens: 120_000,
+                  reasoning_output_tokens: 25_000,
+                  total_tokens: 445_000,
+                },
+              },
+            ],
+          },
+        ],
+        tools_total: 3_630_000,
+        privacy: {
+          includes_inputs: false,
+          note: "Aggregated tool names only; no tool arguments or outputs are included.",
+        },
+      },
+      exec_command_breakdown: {
+        by_type: [
+          {
+            name: "test",
+            calls: 168,
+            failures: 14,
+            duration_ms: 482_000,
+            max_duration_ms: 18_400,
+            output_chars: 450_000,
+            output_lines: 8_600,
+            totals: {
+              input_tokens: 90_000,
+              cached_input_tokens: 320_000,
+              output_tokens: 160_000,
+              reasoning_output_tokens: 42_000,
+              total_tokens: 612_000,
+            },
+          },
+          {
+            name: "build",
+            calls: 116,
+            failures: 9,
+            duration_ms: 392_000,
+            max_duration_ms: 22_100,
+            output_chars: 310_000,
+            output_lines: 5_200,
+            totals: {
+              input_tokens: 70_000,
+              cached_input_tokens: 240_000,
+              output_tokens: 130_000,
+              reasoning_output_tokens: 30_000,
+              total_tokens: 470_000,
+            },
+          },
+        ],
+        by_exit: [
+          {
+            name: "completed:0",
+            calls: 438,
+            failures: 0,
+            duration_ms: 1_040_000,
+            max_duration_ms: 22_100,
+            output_chars: 830_000,
+            output_lines: 13_100,
+            totals: {
+              input_tokens: 220_000,
+              cached_input_tokens: 780_000,
+              output_tokens: 350_000,
+              reasoning_output_tokens: 82_000,
+              total_tokens: 1_432_000,
+            },
+          },
+          {
+            name: "completed:1",
+            calls: 72,
+            failures: 72,
+            duration_ms: 155_000,
+            max_duration_ms: 11_800,
+            output_chars: 120_000,
+            output_lines: 2_300,
+            totals: {
+              input_tokens: 30_000,
+              cached_input_tokens: 110_000,
+              output_tokens: 55_000,
+              reasoning_output_tokens: 8_000,
+              total_tokens: 195_000,
+            },
+          },
+        ],
+      },
+    };
+  }
+
   if (source !== "claude") {
     return {
       from,

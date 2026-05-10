@@ -156,3 +156,115 @@ test("usage-model-breakdown defaults to all scope and can explicitly exclude acc
     await fs.promises.rm(tmp, { recursive: true, force: true });
   }
 });
+
+test("usage-category-breakdown supports codex source", async () => {
+  const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), "tt-localapi-codex-context-"));
+  const oldHome = process.env.HOME;
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    await writeQueue(queuePath, []);
+
+    const sessionsRoot = path.join(tmp, ".codex", "sessions", "2026", "05", "08");
+    await fs.promises.mkdir(sessionsRoot, { recursive: true });
+    await fs.promises.writeFile(
+      path.join(sessionsRoot, "rollout-a.jsonl"),
+      [
+        JSON.stringify({
+          timestamp: "2026-05-08T10:00:00.000Z",
+          type: "session_meta",
+          payload: { id: "s1", cwd: "/tmp/project", model_provider: "openai", cli_version: "1.0.0" },
+        }),
+        JSON.stringify({
+          timestamp: "2026-05-08T10:00:01.000Z",
+          type: "response_item",
+          payload: { type: "function_call", name: "exec_command", call_id: "call-1", arguments: "{\"cmd\":\"npm test\"}" },
+        }),
+        JSON.stringify({
+          timestamp: "2026-05-08T10:00:02.000Z",
+          type: "event_msg",
+          payload: {
+            type: "exec_command_end",
+            command: ["bash", "-lc", "npm test"],
+            status: "completed",
+            exit_code: 0,
+            duration: { secs: 1, nanos: 0 },
+            aggregated_output: "ok\n",
+          },
+        }),
+        JSON.stringify({
+          timestamp: "2026-05-08T10:00:03.000Z",
+          type: "event_msg",
+          payload: {
+            type: "token_count",
+            info: {
+              total_token_usage: {
+                input_tokens: 100,
+                cached_input_tokens: 20,
+                cache_creation_input_tokens: 10,
+                output_tokens: 60,
+                reasoning_output_tokens: 5,
+                total_tokens: 190,
+              },
+            },
+          },
+        }),
+      ].join("\n") + "\n",
+    );
+
+    process.env.HOME = tmp;
+    const result = await callEndpoint(
+      queuePath,
+      "/functions/tokentracker-usage-category-breakdown?from=2026-05-08&to=2026-05-08&source=codex",
+    );
+
+    assert.equal(result.source, "codex");
+    assert.equal(result.scope, "supported");
+    assert.equal(result.session_count, 1);
+    assert.ok(Array.isArray(result.tool_calls_breakdown.categories));
+    assert.ok(Array.isArray(result.exec_command_breakdown.by_type));
+    assert.ok(Array.isArray(result.exec_command_breakdown.by_exit));
+  } finally {
+    process.env.HOME = oldHome;
+    await fs.promises.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("usage-category-breakdown falls back to codex queue totals when rollout sessions are unavailable", async () => {
+  const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), "tt-localapi-codex-context-fallback-"));
+  const oldHome = process.env.HOME;
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    await writeQueue(queuePath, [
+      {
+        source: "codex",
+        model: "gpt-5.5",
+        hour_start: "2026-05-08T16:00:00.000Z",
+        input_tokens: 100,
+        cached_input_tokens: 200,
+        cache_creation_input_tokens: 0,
+        output_tokens: 50,
+        reasoning_output_tokens: 10,
+        total_tokens: 350,
+        conversation_count: 2,
+      },
+    ]);
+
+    process.env.HOME = tmp;
+    const result = await callEndpoint(
+      queuePath,
+      "/functions/tokentracker-usage-category-breakdown?from=2026-05-09&to=2026-05-09&source=codex&tz=Asia/Shanghai",
+    );
+
+    assert.equal(result.source, "codex");
+    assert.equal(result.scope, "supported");
+    assert.equal(result.breakdown_status, "queue_fallback");
+    assert.equal(result.fallback, "queue_totals");
+    assert.equal(result.totals.total_tokens, 350);
+    assert.equal(result.totals.input_tokens, 100);
+    assert.equal(result.totals.cached_input_tokens, 200);
+    assert.equal(result.message_count, 2);
+  } finally {
+    process.env.HOME = oldHome;
+    await fs.promises.rm(tmp, { recursive: true, force: true });
+  }
+});

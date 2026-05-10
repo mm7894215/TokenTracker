@@ -56,6 +56,14 @@ function getProviderColor(label, index) {
   return PROVIDER_COLORS[normalized] || `hsl(${150 + index * 40}, 60%, 45%)`;
 }
 
+function resolveContextBreakdownSource(provider) {
+  const source = String(provider?.source || "").trim().toLowerCase();
+  const label = String(provider?.label || "").trim().toLowerCase();
+  if (source === "claude" || label === "claude") return "claude";
+  if (source === "codex" || label === "codex") return "codex";
+  return null;
+}
+
 const PERIOD_COPY_KEYS = {
   day: "usage.period.day",
   week: "usage.period.week",
@@ -349,6 +357,7 @@ export function UsageOverview({
                   .filter((p) => p.label === expandedProvider)
                   .map((provider) => {
                     const color = getProviderColor(provider.label, 0);
+                    const contextSource = resolveContextBreakdownSource(provider);
                     const sortedModels = [...provider.models].sort(
                       (a, b) => (b.share || 0) - (a.share || 0)
                     );
@@ -361,13 +370,17 @@ export function UsageOverview({
                           <span className="text-sm font-medium text-oai-black dark:text-oai-white">{provider.label}</span>
                         </div>
 
-                        {/* Claude-only: Context Breakdown drill-down. Lives
-                            inside the Claude expansion because no other
-                            provider's logs carry the per-message role data
-                            this requires. */}
-                        {provider.label === "CLAUDE" ? (
+                        {/* Context Breakdown drill-down.
+                            Claude: category-based (approx /context).
+                            Codex: tool-oriented breakdown. */}
+                        {contextSource ? (
                           <div className="mb-4 pb-4 border-b border-oai-gray-200 dark:border-oai-gray-700">
-                            <ContextBreakdownPanel from={from} to={to} />
+                            <ContextBreakdownPanel
+                              from={from}
+                              to={to}
+                              source={contextSource}
+                              referenceTotalTokens={provider.usage}
+                            />
                           </div>
                         ) : null}
 

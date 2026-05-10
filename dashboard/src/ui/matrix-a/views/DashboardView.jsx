@@ -39,6 +39,8 @@ export function DashboardView(props) {
     trendRowsForDisplay,
     trendFromForDisplay,
     trendToForDisplay,
+    usageFrom,
+    usageTo,
     period,
     trendTimeZoneLabel,
     activityHeatmapBlock,
@@ -234,8 +236,8 @@ export function DashboardView(props) {
                     onCustomRangeApply={onCustomRangeApply}
                     customRangeOpen={customRangeOpen}
                     onCustomRangeOpenChange={onCustomRangeOpenChange}
-                    from={trendFromForDisplay}
-                    to={trendToForDisplay}
+                    from={usageFrom}
+                    to={usageTo}
                   />
                 </FadeIn>
 

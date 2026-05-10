@@ -746,11 +746,14 @@ settings.appearance.language.english,ui,SettingsPage,SettingsPage,language_engli
 settings.appearance.language.chinese,ui,SettingsPage,SettingsPage,language_chinese,Simplified Chinese,,active
 dashboard.context_breakdown.title,dashboard,DashboardPage,ContextBreakdownPanel,title,"Context Breakdown",,active
 dashboard.context_breakdown.empty,dashboard,DashboardPage,ContextBreakdownPanel,empty,"No Claude Code activity in the selected period.",,active
+dashboard.context_breakdown.empty_codex,dashboard,DashboardPage,ContextBreakdownPanel,empty_codex,"No Codex activity in the selected period.",,active
 dashboard.context_breakdown.error,dashboard,DashboardPage,ContextBreakdownPanel,error,"Couldn't read Claude Code logs for this view.",,active
+dashboard.context_breakdown.error_codex,dashboard,DashboardPage,ContextBreakdownPanel,error_codex,"Couldn't read Codex logs for this view.",,active
 dashboard.context_breakdown.session_count,dashboard,DashboardPage,ContextBreakdownPanel,session_count,"{{sessions}} sessions · {{messages}} messages",,active
 dashboard.context_breakdown.bar_aria,dashboard,DashboardPage,ContextBreakdownPanel,bar_aria,"Token distribution: {{summary}}",,active
 dashboard.context_breakdown.system_prefix_tooltip,dashboard,DashboardPage,ContextBreakdownPanel,tooltip,"System prompt, tools schema, skills, rules, and MCP descriptions are cached together as one prefix and can't be separated from the logs.",,active
 dashboard.context_breakdown.footnote,dashboard,DashboardPage,ContextBreakdownPanel,footnote,"Approximate: cache reads accumulate across turns, so conversation history dominates over time. Only Claude Code logs expose the per-message detail this view requires.",,active
+dashboard.context_breakdown.footnote_codex,dashboard,DashboardPage,ContextBreakdownPanel,footnote_codex,"Codex uses non-overlapping token buckets here. Tool and exec drill-downs are separate heuristic attributions over the same turns.",,active
 dashboard.context_breakdown.category.system_prompt,dashboard,DashboardPage,ContextBreakdownPanel,cat,"System prompt",,active
 dashboard.context_breakdown.category.messages,dashboard,DashboardPage,ContextBreakdownPanel,cat,"Messages",,active
 dashboard.context_breakdown.category.tool_calls,dashboard,DashboardPage,ContextBreakdownPanel,cat,"Tool calls",,active
@@ -758,3 +761,41 @@ dashboard.context_breakdown.category.custom_agents,dashboard,DashboardPage,Conte
 dashboard.context_breakdown.category.reasoning,dashboard,DashboardPage,ContextBreakdownPanel,cat,"Reasoning",,active
 dashboard.context_breakdown.loading_aria,dashboard,DashboardPage,ContextBreakdownPanel,loading_aria,"Loading context breakdown",,active
 dashboard.context_breakdown.loading_hint,dashboard,DashboardPage,ContextBreakdownPanel,loading_hint,"Scanning Claude Code session logs…",,active
+dashboard.context_breakdown.tool_details.title,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_title,"Tool details",,active
+dashboard.context_breakdown.tool_details.total_calls,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_total_calls,"{{calls}} calls",,active
+dashboard.context_breakdown.tool_details.output_tokens,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_output_tokens,"Output",,active
+dashboard.context_breakdown.tool_details.close,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_close,"Close",,active
+dashboard.context_breakdown.tool_details.tool_column,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_tool_column,"Tool",,active
+dashboard.context_breakdown.tool_details.category_column,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_category_column,"Category",,active
+dashboard.context_breakdown.tool_details.calls_column,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_calls_column,"Calls",,active
+dashboard.context_breakdown.tool_details.input_column,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_input_column,"Input",,active
+dashboard.context_breakdown.tool_details.cache_column,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_cache_column,"Cache",,active
+dashboard.context_breakdown.tool_details.total_column,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_total_column,"Total",,active
+dashboard.context_breakdown.tool_details.unavailable_codex,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_unavailable_codex,"Tool-level Codex details are unavailable for this period; showing queue totals only.",,active
+dashboard.context_breakdown.skills_details.title,dashboard,DashboardPage,ContextBreakdownPanel,skills_details_title,"Skills used",,active
+dashboard.context_breakdown.skills_details.total_calls,dashboard,DashboardPage,ContextBreakdownPanel,skills_details_total_calls,"{{calls}} skill calls",,active
+dashboard.context_breakdown.message_details.title,dashboard,DashboardPage,ContextBreakdownPanel,message_details_title,"Message details",,active
+dashboard.context_breakdown.message_details.note,dashboard,DashboardPage,ContextBreakdownPanel,message_details_note,"Aggregated only — message text is not stored.",,active
+dashboard.context_breakdown.message_details.category_column,dashboard,DashboardPage,ContextBreakdownPanel,message_details_category_column,"Category",,active
+dashboard.context_breakdown.message_details.user_input,dashboard,DashboardPage,ContextBreakdownPanel,message_details_user_input,"User input",,active
+dashboard.context_breakdown.message_details.conversation_history,dashboard,DashboardPage,ContextBreakdownPanel,message_details_conversation_history,"Conversation history",,active
+dashboard.context_breakdown.message_details.assistant_response,dashboard,DashboardPage,ContextBreakdownPanel,message_details_assistant_response,"Assistant response",,active
+dashboard.context_breakdown.source_label.claude,dashboard,DashboardPage,ContextBreakdownPanel,source_label,"Claude",,active
+dashboard.context_breakdown.source_label.codex,dashboard,DashboardPage,ContextBreakdownPanel,source_label,"Codex",,active
+dashboard.context_breakdown.tool_details.tools_count,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_tools_count,"{{count}} tools",,active
+dashboard.context_breakdown.tool_details.tools_count_parens,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_tools_count_parens,"({{count}} tools)",,active
+dashboard.context_breakdown.exec_details.open,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_open,"Exec command details",,active
+dashboard.context_breakdown.exec_details.title,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_title,"Exec command details",,active
+dashboard.context_breakdown.exec_details.note,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_note,"Aggregated only — command text and outputs are not stored.",,active
+dashboard.context_breakdown.exec_details.kind_column,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_kind_column,"Type",,active
+dashboard.context_breakdown.exec_details.calls_column,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_calls_column,"Calls",,active
+dashboard.context_breakdown.exec_details.failures_column,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_failures_column,"Fail",,active
+dashboard.context_breakdown.exec_details.duration_column,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_duration_column,"Duration",,active
+dashboard.context_breakdown.exec_details.max_duration_column,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_max_duration_column,"Max",,active
+dashboard.context_breakdown.exec_details.output_column,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_output_column,"Lines",,active
+dashboard.context_breakdown.exec_details.group_by_type,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_group_by_type,"By type",,active
+dashboard.context_breakdown.exec_details.group_by_executable,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_group_by_executable,"Executable",,active
+dashboard.context_breakdown.exec_details.group_by_command,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_group_by_command,"Command",,active
+dashboard.context_breakdown.exec_details.group_by_duration,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_group_by_duration,"Duration",,active
+dashboard.context_breakdown.exec_details.group_by_output,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_group_by_output,"Output",,active
+dashboard.context_breakdown.exec_details.group_by_exit,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_group_by_exit,"By exit",,active
