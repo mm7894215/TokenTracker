@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
-import { motion } from "motion/react";
-import { Info, Loader2 } from "lucide-react";
-import { Dialog } from "@base-ui/react/dialog";
+import { AnimatePresence, motion } from "motion/react";
+import { ChevronRight, Info } from "lucide-react";
 import { copy } from "../../../lib/copy";
 import { formatCompactNumber } from "../../../lib/format";
 import { getUsageCategoryBreakdown } from "../../../lib/api";
@@ -27,10 +26,6 @@ const CODEX_DISPLAY_GROUPS = [
   { key: "reasoning", color: "#06b6d4" },
 ];
 
-const TOOL_TABLE_GRID =
-  "grid grid-cols-[132px_minmax(220px,1fr)_64px_82px_82px_82px_82px] gap-3";
-const MESSAGE_TABLE_GRID =
-  "grid grid-cols-[minmax(190px,1fr)_82px_82px_82px_82px] gap-3";
 const EXEC_DETAIL_TABS = [
   ["by_type", "dashboard.context_breakdown.exec_details.group_by_type"],
   ["by_executable", "dashboard.context_breakdown.exec_details.group_by_executable"],
@@ -39,6 +34,12 @@ const EXEC_DETAIL_TABS = [
   ["by_output", "dashboard.context_breakdown.exec_details.group_by_output"],
   ["by_exit", "dashboard.context_breakdown.exec_details.group_by_exit"],
 ];
+
+// Shared animation config for all disclosure panels
+const DISCLOSURE_TRANSITION = { duration: 0.18, ease: [0.4, 0, 0.2, 1] };
+const DISCLOSURE_INITIAL = { height: 0, opacity: 0 };
+const DISCLOSURE_ANIMATE = { height: "auto", opacity: 1 };
+const DISCLOSURE_EXIT = { height: 0, opacity: 0 };
 
 function toPositiveNumber(value) {
   const n = Number(value || 0);
@@ -299,13 +300,13 @@ function formatDuration(ms) {
   return `${Math.round(n / 1000)}s`;
 }
 
-function selectedExecRows(execDetails, selectedExecKey) {
+function selectedExecRows(execDetails, selectedExecTab) {
   if (!execDetails) return [];
-  if (selectedExecKey === "by_executable") return execDetails.by_executable || [];
-  if (selectedExecKey === "by_command") return execDetails.by_command || [];
-  if (selectedExecKey === "by_duration") return execDetails.by_duration || [];
-  if (selectedExecKey === "by_output") return execDetails.by_output || [];
-  if (selectedExecKey === "by_exit") return execDetails.by_exit || [];
+  if (selectedExecTab === "by_executable") return execDetails.by_executable || [];
+  if (selectedExecTab === "by_command") return execDetails.by_command || [];
+  if (selectedExecTab === "by_duration") return execDetails.by_duration || [];
+  if (selectedExecTab === "by_output") return execDetails.by_output || [];
+  if (selectedExecTab === "by_exit") return execDetails.by_exit || [];
   return execDetails.by_type || [];
 }
 
@@ -325,19 +326,293 @@ function sourceFootnoteCopyKey(source) {
   return source === "codex" ? "dashboard.context_breakdown.footnote_codex" : "dashboard.context_breakdown.footnote";
 }
 
+// Row — unified grid-aligned row primitive used at every level of the panel.
+// Three columns: [label area | tokens (right-aligned) | percent (right-aligned)].
+// All rows left-align to the same X — the leading icon slot (color square /
+// transparent spacer) is fixed-width so labels at every depth line up. Depth
+// is communicated by colorSquare presence and font weight, not indentation.
+const ICON_SLOT_PX = 10; // 8px square + 2px breathing room before label gap
+
+function Row({
+  level = 0, // kept for legacy callers; visual depth comes from colorSquare/tone, not padding
+  colorSquare = null,
+  label,
+  labelSuffix = null,
+  labelTone = "default",
+  hasChevron = false,
+  open = false,
+  onToggle,
+  tokens,
+  percent = null,
+  children,
+}) {
+  const labelClass =
+    labelTone === "accent"
+      ? "text-oai-brand truncate"
+      : labelTone === "muted"
+      ? "text-oai-gray-500 dark:text-oai-gray-400 truncate"
+      : labelTone === "strong"
+      ? "font-medium text-oai-black dark:text-oai-white truncate"
+      : "text-oai-gray-700 dark:text-oai-gray-300 truncate";
+
+  // Icon slot is always the same width — colorSquare or a transparent spacer.
+  const iconSlot = (
+    <span
+      className="shrink-0 flex items-center justify-start"
+      style={{ width: ICON_SLOT_PX }}
+      aria-hidden={!colorSquare}
+    >
+      {colorSquare}
+    </span>
+  );
+
+  const labelInner = (
+    <>
+      {iconSlot}
+      <span className={labelClass}>{label}</span>
+      {labelSuffix}
+      {hasChevron && (
+        <motion.span
+          animate={{ rotate: open ? 90 : 0 }}
+          transition={{ duration: 0.15 }}
+          className="shrink-0 text-oai-gray-400 dark:text-oai-gray-500 flex items-center"
+          aria-hidden="true"
+        >
+          <ChevronRight size={11} />
+        </motion.span>
+      )}
+    </>
+  );
+
+  return (
+    <li className="min-w-0">
+      <div className="grid grid-cols-[minmax(0,1fr)_64px_48px] items-center gap-2 text-xs py-0.5">
+        {hasChevron ? (
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={open}
+            className="flex items-center gap-1.5 min-w-0 text-left cursor-pointer hover:opacity-90 focus-visible:outline-none focus-visible:ring-inset focus-visible:ring-2 focus-visible:ring-oai-brand/40 rounded-sm"
+          >
+            {labelInner}
+          </button>
+        ) : (
+          <div className="flex items-center gap-1.5 min-w-0">{labelInner}</div>
+        )}
+        <span className="text-right tabular-nums text-oai-gray-500 dark:text-oai-gray-400">
+          {tokens || ""}
+        </span>
+        <span className="text-right tabular-nums text-oai-black dark:text-oai-white font-medium">
+          {percent || ""}
+        </span>
+      </div>
+      {hasChevron && children ? (
+        <AnimatePresence initial={false}>
+          {open && (
+            <motion.div
+              key="content"
+              initial={DISCLOSURE_INITIAL}
+              animate={DISCLOSURE_ANIMATE}
+              exit={DISCLOSURE_EXIT}
+              transition={DISCLOSURE_TRANSITION}
+              style={{ overflow: "hidden" }}
+            >
+              {children}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      ) : null}
+    </li>
+  );
+}
+
+// Inline exec command drill-down — tab strip + table, no modal.
+// Claude's logs only carry the dispatched command text — exit code, duration,
+// and output size live on the Codex side. We hide those columns when
+// `source === "claude"` so the user doesn't see five "0"s for every row.
+function ExecDrillDown({ execDetails, source = "claude" }) {
+  const [activeTab, setActiveTab] = useState("by_type");
+  const rows = normalizeExecRows(selectedExecRows(execDetails, activeTab));
+  const showRuntime = source === "codex";
+  const gridCols = showRuntime
+    ? "grid-cols-[minmax(0,1fr)_48px_48px_72px_72px_60px_60px]"
+    : "grid-cols-[minmax(0,1fr)_56px_60px]";
+
+  return (
+    <div className="mt-2 ml-4">
+      {/* Tab strip */}
+      <div className="flex flex-wrap items-center gap-1 rounded-md bg-oai-gray-100 dark:bg-oai-gray-900 p-1 w-fit max-w-full">
+        {EXEC_DETAIL_TABS.map(([key, labelKey]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setActiveTab(key)}
+            className={
+              "h-7 px-2 rounded-md text-[10px] font-medium transition-colors " +
+              (activeTab === key
+                ? "bg-oai-white dark:bg-oai-gray-800 text-oai-black dark:text-oai-white shadow-sm"
+                : "text-oai-gray-600 dark:text-oai-gray-300 hover:bg-oai-white/70 dark:hover:bg-oai-gray-800/70")
+            }
+          >
+            {copy(labelKey)}
+          </button>
+        ))}
+      </div>
+
+      {/* Table */}
+      {rows.length === 0 ? (
+        <p className="mt-2 text-[10px] text-oai-gray-400 dark:text-oai-gray-500">—</p>
+      ) : (
+        <div className="mt-2 overflow-x-auto">
+          <div
+            role="table"
+            aria-label={copy("dashboard.context_breakdown.exec_details.title")}
+            className={showRuntime ? "min-w-[420px]" : "min-w-[260px]"}
+          >
+            <div
+              role="row"
+              className={`grid ${gridCols} gap-2 py-1.5 mb-1 border-b border-oai-gray-200 dark:border-oai-gray-800 text-label uppercase text-oai-gray-500 dark:text-oai-gray-400`}
+            >
+              <span role="columnheader">{copy("dashboard.context_breakdown.exec_details.kind_column")}</span>
+              <span role="columnheader" className="text-right">{copy("dashboard.context_breakdown.exec_details.calls_column")}</span>
+              {showRuntime && (
+                <>
+                  <span role="columnheader" className="text-right">{copy("dashboard.context_breakdown.exec_details.failures_column")}</span>
+                  <span role="columnheader" className="text-right">{copy("dashboard.context_breakdown.exec_details.duration_column")}</span>
+                  <span role="columnheader" className="text-right">{copy("dashboard.context_breakdown.exec_details.max_duration_column")}</span>
+                </>
+              )}
+              <span role="columnheader" className="text-right">{copy("dashboard.context_breakdown.tool_details.total_column")}</span>
+              {showRuntime && (
+                <span role="columnheader" className="text-right">{copy("dashboard.context_breakdown.exec_details.output_column")}</span>
+              )}
+            </div>
+            {rows.map((row, idx) => (
+              <motion.div
+                key={row.name}
+                role="row"
+                className={`grid ${gridCols} gap-2 py-1.5`}
+                title={row.name}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.18, delay: idx * 0.02 }}
+              >
+                <span role="cell" className="min-w-0 text-body-sm font-medium text-oai-black dark:text-oai-white truncate">{row.name}</span>
+                <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">{formatCompactNumber(row.calls || 0)}</span>
+                {showRuntime && (
+                  <>
+                    <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">{formatCompactNumber(row.failures || 0)}</span>
+                    <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">{formatDuration(row.duration_ms || 0)}</span>
+                    <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">{formatDuration(row.max_duration_ms || 0)}</span>
+                  </>
+                )}
+                <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">{formatTokens(row.totals.total_tokens || 0)}</span>
+                {showRuntime && (
+                  <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">{formatCompactNumber(row.output_lines || 0)}</span>
+                )}
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Tool calls expanded content. Renders category rows and per-tool sub-rows
+// using the shared Row primitive. All rows left-align to the same X — the
+// label-area's leading icon slot (chevron / square / spacer) keeps every
+// row's label starting on the same column regardless of depth.
+function ToolCallsExpanded({ toolSet, execDetails, source, codexQueueFallback }) {
+  const [openCats, setOpenCats] = useState({});
+  const [openExec, setOpenExec] = useState(false);
+  const categories = normalizeCategoryRows(toolSet?.categories || []);
+
+  function toggleCat(name) {
+    setOpenCats((prev) => ({ ...prev, [name]: !prev[name] }));
+  }
+
+  if (categories.length === 0) {
+    return (
+      <p className="text-[11px] text-oai-gray-400 dark:text-oai-gray-500 py-0.5">
+        {source === "codex" && codexQueueFallback
+          ? copy("dashboard.context_breakdown.tool_details.unavailable_codex")
+          : copy(sourceEmptyCopyKey(source))}
+      </p>
+    );
+  }
+
+  return (
+    <ul className="mt-0.5 mb-0.5 space-y-0.5">
+      {categories.map((cat) => {
+        const hasTools = cat.toolCount > 0;
+        const isExecCategory = cat.name === "Execution" && execDetails;
+        const hasExecTool = isExecCategory && cat.tools.some((t) => isExecToolName(t.name));
+        const catOpen = Boolean(openCats[cat.name]);
+
+        return (
+          <Row
+            key={cat.name}
+            level={1}
+            label={cat.name}
+            labelTone="strong"
+            hasChevron={hasTools || (isExecCategory && !hasExecTool)}
+            open={catOpen || (isExecCategory && !hasExecTool && openExec)}
+            onToggle={() => {
+              if (hasTools) toggleCat(cat.name);
+              else if (isExecCategory && !hasExecTool) setOpenExec((v) => !v);
+            }}
+            tokens={formatTokens(cat.totals.total_tokens || 0)}
+            percent={null}
+          >
+            {hasTools && (
+              <ul className="space-y-0.5">
+                {cat.tools.map((tool) => {
+                  const isExec = isExecCategory && isExecToolName(tool.name);
+                  return (
+                    <Row
+                      key={tool.name}
+                      level={2}
+                      label={tool.name}
+                      labelTone={isExec ? "accent" : "default"}
+                      hasChevron={isExec}
+                      open={openExec}
+                      onToggle={() => setOpenExec((v) => !v)}
+                      tokens={formatTokens(tool.total_tokens || 0)}
+                      percent={null}
+                    >
+                      {isExec && <ExecDrillDown execDetails={execDetails} source={source} />}
+                    </Row>
+                  );
+                })}
+              </ul>
+            )}
+
+            {isExecCategory && !hasExecTool && <ExecDrillDown execDetails={execDetails} source={source} />}
+          </Row>
+        );
+      })}
+    </ul>
+  );
+}
+
 // Inline Context Breakdown for Claude Code only. Renders bare (no Card
 // wrapper) so it can drop into the UsageOverview expanded provider section.
-export function ContextBreakdownPanel({ from, to, source = "claude", referenceTotalTokens = null }) {
+export function ContextBreakdownPanel({ from, to, source = "claude", referenceTotalTokens = null, onLoadingChange = null }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [selectedToolKey, setSelectedToolKey] = useState(null); // "tool_calls" | "subagents"
-  const [selectedExecKey, setSelectedExecKey] = useState(null); // "by_type" | "by_exit"
-  const [messageDetailsOpen, setMessageDetailsOpen] = useState(false);
+  // Track which top-level disclosure rows are open
+  const [openRows, setOpenRows] = useState({});
+
+  function toggleRow(key) {
+    setOpenRows((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    onLoadingChange?.(true);
     setError(null);
     getUsageCategoryBreakdown({
       from,
@@ -353,36 +628,24 @@ export function ContextBreakdownPanel({ from, to, source = "claude", referenceTo
         if (!cancelled) setError(e?.message || String(e));
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          onLoadingChange?.(false);
+        }
       });
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to, source]);
 
-  const title = copy("dashboard.context_breakdown.title");
-  const sourceLabel = copy(`dashboard.context_breakdown.source_label.${source}`);
-
-  const Header = (
-    <div className="flex items-center gap-2 mb-3">
-      <h4 className="text-sm font-medium text-oai-black dark:text-oai-white">{title}</h4>
-      <span className="text-[10px] px-1.5 py-0.5 rounded-md border border-oai-gray-200 dark:border-oai-gray-700 text-oai-gray-500 dark:text-oai-gray-400 uppercase tracking-wide">
-        {sourceLabel}
-      </span>
-      {loading ? (
-        <Loader2
-          size={12}
-          className="text-oai-gray-400 dark:text-oai-gray-500 animate-spin"
-          aria-label={copy("dashboard.context_breakdown.loading_aria")}
-        />
-      ) : null}
-    </div>
-  );
+  // No internal header — the parent (UsageOverview) renders the title and
+  // receives loading state via onLoadingChange so the spinner sits inline
+  // next to the title instead of taking its own row.
 
   if (loading && !data) {
     return (
       <div>
-        {Header}
         <div className="h-1 w-full bg-oai-gray-100 dark:bg-oai-gray-800 rounded-full overflow-hidden animate-pulse" />
         <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
           {[0, 1, 2, 3, 4].map((i) => (
@@ -402,23 +665,17 @@ export function ContextBreakdownPanel({ from, to, source = "claude", referenceTo
 
   if (error) {
     return (
-      <div>
-        {Header}
-        <p className="text-xs text-oai-gray-500 dark:text-oai-gray-400">
-          {copy(sourceErrorCopyKey(source))}
-        </p>
-      </div>
+      <p className="text-xs text-oai-gray-500 dark:text-oai-gray-400">
+        {copy(sourceErrorCopyKey(source))}
+      </p>
     );
   }
 
   if (!data || data.scope !== "supported" || !data.totals?.total_tokens) {
     return (
-      <div>
-        {Header}
-        <p className="text-xs text-oai-gray-500 dark:text-oai-gray-400">
-          {copy(sourceEmptyCopyKey(source))}
-        </p>
-      </div>
+      <p className="text-xs text-oai-gray-500 dark:text-oai-gray-400">
+        {copy(sourceEmptyCopyKey(source))}
+      </p>
     );
   }
 
@@ -432,141 +689,31 @@ export function ContextBreakdownPanel({ from, to, source = "claude", referenceTo
   const configuredResources = data.configured_resources || null;
   const execDetails = data.exec_command_breakdown || null;
   const skillRows = normalizeSkillRows(skillsDetails?.skills || []);
-
-  const selectedToolSet =
-    selectedToolKey === "tool_calls"
-      ? toolDetails?.tool_calls || toolDetails
-      : selectedToolKey === "subagents"
-      ? toolDetails?.subagents
-      : null;
-  const codexQueueFallback = source === "codex" && (data?.breakdown_status === "queue_fallback" || data?.fallback === "queue_totals");
-  const selectedToolCategories = normalizeCategoryRows(selectedToolSet?.categories || []);
   const messageRows = normalizeMessageRows(messageDetails?.categories || []);
-  const toolDetailsRows = [];
-  for (const cat of selectedToolCategories) {
-    const toolCount = cat.toolCount || 0;
-    const isExecCategory = selectedToolKey === "tool_calls" && cat.name === "Execution" && execDetails;
-    const hasExecToolRow =
-      isExecCategory && (cat.tools || []).some((t) => {
-        return isExecToolName(t?.name);
-      });
+  const codexQueueFallback = source === "codex" && (data?.breakdown_status === "queue_fallback" || data?.fallback === "queue_totals");
 
-    toolDetailsRows.push(
-      <div
-        key={`${cat.name}::cat`}
-        role="row"
-        className={`${TOOL_TABLE_GRID} py-2`}
-        title={cat.name}
-      >
-        <span role="cell" className="min-w-0 text-body-sm font-medium text-oai-black dark:text-oai-white truncate">
-          {cat.name}
-        </span>
-        <span role="cell" className="min-w-0 text-body-sm text-oai-gray-500 dark:text-oai-gray-400 truncate">
-          {toolCount === 1
-            ? cat.tools?.[0]?.name || ""
-            : copy("dashboard.context_breakdown.tool_details.tools_count_parens", { count: toolCount })}
-        </span>
-        <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">
-          {formatCompactNumber(cat.calls || 0)}
-        </span>
-        <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">
-          {formatTokens(cat.totals.input_tokens || 0)}
-        </span>
-        <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">
-          {formatTokens(cat.totals.output_tokens || 0)}
-        </span>
-        <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">
-          {formatTokens(
-            Number(cat.totals.cached_input_tokens || 0) +
-              Number(cat.totals.cache_creation_input_tokens || 0),
-          )}
-        </span>
-        <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">
-          {formatTokens(cat.totals.total_tokens || 0)}
-        </span>
-      </div>,
-    );
+  // The tool set for the top-level "tool_calls" row
+  const toolCallsSet = source === "claude"
+    ? toolDetails?.tool_calls || null
+    : toolDetails || null;
+  // The tool set for the "custom_agents" row
+  const subagentsSet = source === "claude"
+    ? toolDetails?.subagents || null
+    : null;
 
-    if (toolCount > 0) {
-      for (const row of cat.tools) {
-        const isExecTool = isExecCategory && isExecToolName(row.name);
-        toolDetailsRows.push(
-          <div
-            key={`${cat.name}::${row.name}`}
-            role="row"
-            className={`${TOOL_TABLE_GRID} py-2`}
-            title={row.name}
-          >
-            <span role="cell" />
-            <span role="cell" className="min-w-0 text-body-sm font-medium text-oai-black dark:text-oai-white truncate">
-              {isExecTool ? (
-                <button
-                  type="button"
-                  onClick={() => setSelectedExecKey("by_type")}
-                  className="text-left text-oai-brand hover:text-oai-brand/80 underline decoration-oai-brand/30 underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand/40 rounded-sm truncate"
-                >
-                  {"└─ "}
-                  {row.name}
-                </button>
-              ) : (
-                <>
-                  {"└─ "}
-                  {row.name}
-                </>
-              )}
-            </span>
-            <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">
-              {formatCompactNumber(row.calls || 0)}
-            </span>
-            <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">
-              {formatTokens(row.input_tokens || 0)}
-            </span>
-            <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">
-              {formatTokens(row.output_tokens || 0)}
-            </span>
-            <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">
-              {formatTokens((row.cache_read || 0) + (row.cache_creation || 0))}
-            </span>
-            <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">
-              {formatTokens(row.total_tokens || 0)}
-            </span>
-          </div>,
-        );
-      }
-    }
+  const hasCustomAgents =
+    (subagentsSet?.categories?.length > 0) ||
+    ((configuredResources?.custom_agents_count || 0) > 0);
 
-    if (isExecCategory && !hasExecToolRow) {
-      toolDetailsRows.push(
-        <div key={`${cat.name}::exec-link`} className="mt-2 mb-1">
-          <button
-            type="button"
-            onClick={() => setSelectedExecKey("by_type")}
-            className="text-xs font-medium text-oai-brand hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand/40 rounded-sm"
-          >
-            {copy("dashboard.context_breakdown.exec_details.open")}
-          </button>
-        </div>,
-      );
-    }
-  }
+  // Sort top-level rows by total_tokens descending (matches Claude /context
+  // visual rhythm: largest buckets float to the top).
+  const orderedCats = [...categories].sort(
+    (a, b) => (b.totals?.total_tokens || 0) - (a.totals?.total_tokens || 0),
+  );
 
   return (
     <div>
-      <div className="flex items-baseline justify-between gap-3 mb-3">
-        <div className="flex items-center gap-2 min-w-0">
-          <h4 className="text-sm font-medium text-oai-black dark:text-oai-white">{title}</h4>
-          <span className="text-[10px] px-1.5 py-0.5 rounded-md border border-oai-gray-200 dark:border-oai-gray-700 text-oai-gray-500 dark:text-oai-gray-400 uppercase tracking-wide shrink-0">
-            {sourceLabel}
-          </span>
-        </div>
-        <div className="text-[11px] text-oai-gray-400 dark:text-oai-gray-500 tabular-nums shrink-0">
-          {copy("dashboard.context_breakdown.session_count", {
-            sessions: data.session_count || 0,
-            messages: data.message_count || 0,
-          })}
-        </div>
-      </div>
-
+      {/* Segmented progress bar */}
       <div
         role="img"
         aria-label={copy("dashboard.context_breakdown.bar_aria", {
@@ -579,7 +726,6 @@ export function ContextBreakdownPanel({ from, to, source = "claude", referenceTo
       >
         {categories.map((cat, idx) => {
           if (!cat.percent || cat.percent <= 0) return null;
-          const color = cat.color;
           return (
             <motion.div
               key={cat.key}
@@ -587,84 +733,144 @@ export function ContextBreakdownPanel({ from, to, source = "claude", referenceTo
               animate={{ width: `${cat.percent}%` }}
               transition={{ duration: 0.5, delay: 0.1 + idx * 0.04, ease: [0.16, 1, 0.3, 1] }}
               className="h-full"
-              style={{ backgroundColor: color }}
+              style={{ backgroundColor: cat.color }}
               title={`${categoryLabel(cat.key)}: ${cat.percent}%`}
             />
           );
         })}
       </div>
 
-      <ul className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
-        {categories.map((cat) => {
-          const color = cat.color;
+      {/* Inline category list with disclosures */}
+      <ul className="mt-3 space-y-1">
+        {orderedCats.map((cat) => {
           const isSystemPrefix = cat.key === "system_prompt";
-          const isClickable = cat.key === "messages" || cat.key === "tool_calls" || cat.key === "custom_agents";
-          return (
-            <li
-              key={cat.key}
-              className="flex items-center justify-between gap-2 text-xs min-w-0"
-            >
-              <button
-                type="button"
-                onClick={() => {
-                  if (!isClickable) return;
-                  if (cat.key === "messages") {
-                    setMessageDetailsOpen(true);
-                    return;
-                  }
-                  setSelectedToolKey(cat.key === "tool_calls" ? "tool_calls" : "subagents");
-                }}
-                className={
-                  "flex items-center gap-1.5 min-w-0 text-left group " +
-                  (isClickable
-                    ? "cursor-pointer hover:opacity-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand/40 rounded-sm"
-                    : "cursor-default")
-                }
-                aria-label={
-                  cat.key === "messages"
-                    ? copy("dashboard.context_breakdown.message_details.title")
-                    : isClickable
-                    ? copy("dashboard.context_breakdown.tool_details.title")
-                    : undefined
-                }
+          const isMessages = cat.key === "messages";
+          const isToolCalls = cat.key === "tool_calls";
+          const isCustomAgents = cat.key === "custom_agents";
+          const isReasoning = cat.key === "reasoning";
+
+          const hasChevron =
+            (isMessages && messageRows.length > 0) ||
+            (isToolCalls && (toolCallsSet?.categories?.length > 0 || codexQueueFallback)) ||
+            (isCustomAgents && hasCustomAgents && subagentsSet);
+
+          const rowOpen = Boolean(openRows[cat.key]);
+
+          const colorSquare = (
+            <span
+              className="h-2 w-2 rounded-sm shrink-0"
+              style={{ backgroundColor: cat.color }}
+              aria-hidden="true"
+            />
+          );
+
+          const labelSuffix = isSystemPrefix ? (
+            <span className="relative inline-flex shrink-0 group">
+              <Info
+                size={11}
+                className="text-oai-gray-400 dark:text-oai-gray-500 cursor-help"
+                aria-hidden="true"
+              />
+              <span
+                role="tooltip"
+                className="pointer-events-none absolute left-1/2 bottom-full z-20 mb-1.5 -translate-x-1/2 w-64 rounded-md border border-oai-gray-200 dark:border-oai-gray-700 bg-oai-white dark:bg-oai-gray-900 px-2.5 py-1.5 text-[11px] leading-snug text-oai-gray-700 dark:text-oai-gray-200 shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
               >
-                <span
-                  className="h-2 w-2 rounded-sm shrink-0"
-                  style={{ backgroundColor: color }}
-                  aria-hidden="true"
-                />
-                <span className="text-oai-gray-700 dark:text-oai-gray-300 truncate">
-                  {categoryLabel(cat.key)}
-                </span>
-                {isSystemPrefix ? (
-                  <span className="relative inline-flex shrink-0 group">
-                    <Info
-                      size={11}
-                      className="text-oai-gray-400 dark:text-oai-gray-500 cursor-help"
-                      aria-hidden="true"
+                {copy("dashboard.context_breakdown.system_prefix_tooltip")}
+              </span>
+            </span>
+          ) : null;
+
+          const percentStr = cat.percent > 0
+            ? `${cat.percent.toFixed(cat.percent < 0.1 && cat.percent > 0 ? 2 : 1)}%`
+            : "0.0%";
+
+          return (
+            <Row
+              key={cat.key}
+              level={0}
+              colorSquare={colorSquare}
+              label={categoryLabel(cat.key)}
+              labelSuffix={labelSuffix}
+              tokens={formatTokens(cat.totals?.total_tokens || 0)}
+              percent={percentStr}
+              hasChevron={hasChevron}
+              open={rowOpen}
+              onToggle={() => toggleRow(cat.key)}
+            >
+              {/* Messages disclosure content */}
+              {isMessages && (
+                <ul className="space-y-0.5">
+                  {messageRows.map((row) => (
+                    <Row
+                      key={row.key || row.name}
+                      level={1}
+                      label={messageLabel(row)}
+                      tokens={formatTokens(row.totals.total_tokens || 0)}
+                      percent={null}
                     />
-                    <span
-                      role="tooltip"
-                      className="pointer-events-none absolute left-1/2 bottom-full z-20 mb-1.5 -translate-x-1/2 w-64 rounded-md border border-oai-gray-200 dark:border-oai-gray-700 bg-oai-white dark:bg-oai-gray-900 px-2.5 py-1.5 text-[11px] leading-snug text-oai-gray-700 dark:text-oai-gray-200 shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      {copy("dashboard.context_breakdown.system_prefix_tooltip")}
-                    </span>
-                  </span>
-                ) : null}
-              </button>
-              <div className="flex items-baseline gap-1.5 tabular-nums shrink-0">
-                <span className="text-oai-gray-500 dark:text-oai-gray-400">
-                  {formatTokens(cat.totals?.total_tokens || 0)}
-                </span>
-                <span className="text-oai-black dark:text-oai-white font-medium w-10 text-right">
-                  {cat.percent.toFixed(cat.percent < 0.1 && cat.percent > 0 ? 2 : 1)}%
-                </span>
-              </div>
-            </li>
+                  ))}
+                </ul>
+              )}
+
+              {/* Tool calls disclosure content */}
+              {isToolCalls && toolCallsSet && (
+                <ToolCallsExpanded
+                  toolSet={toolCallsSet}
+                  execDetails={execDetails}
+                  source={source}
+                  codexQueueFallback={codexQueueFallback}
+                />
+              )}
+              {isToolCalls && codexQueueFallback && !toolCallsSet && (
+                <p className="text-[11px] text-oai-gray-400 dark:text-oai-gray-500 py-0.5">
+                  {copy("dashboard.context_breakdown.tool_details.unavailable_codex")}
+                </p>
+              )}
+
+              {/* Custom agents disclosure content */}
+              {isCustomAgents && subagentsSet && (
+                <ToolCallsExpanded
+                  toolSet={subagentsSet}
+                  execDetails={null}
+                  source={source}
+                  codexQueueFallback={false}
+                />
+              )}
+            </Row>
           );
         })}
+
+        {/* Skills row — shown separately (not in DISPLAY_GROUPS, no token total in bar) */}
+        {skillRows.length > 0 && (
+          <Row
+            level={0}
+            colorSquare={
+              <span className="h-2 w-2 rounded-sm shrink-0 bg-oai-gray-300 dark:bg-oai-gray-600" aria-hidden="true" />
+            }
+            label={copy("dashboard.context_breakdown.category.skills")}
+            tokens={formatTokens(skillRows.reduce((a, r) => a + (r.total_tokens || 0), 0))}
+            percent={null}
+            hasChevron={true}
+            open={Boolean(openRows["skills"])}
+            onToggle={() => toggleRow("skills")}
+          >
+            <ul className="space-y-0.5">
+              {skillRows.slice(0, 12).map((skill) => (
+                <Row
+                  key={skill.name}
+                  level={1}
+                  label={skill.name}
+                  tokens={formatTokens(skill.total_tokens)}
+                  percent={null}
+                />
+              ))}
+            </ul>
+          </Row>
+        )}
+
       </ul>
 
+      {/* Footnote */}
       <p className="mt-2 text-[10px] text-oai-gray-400 dark:text-oai-gray-500">
         {copy(sourceFootnoteCopyKey(source))}
       </p>
@@ -674,336 +880,15 @@ export function ContextBreakdownPanel({ from, to, source = "claude", referenceTo
         </p>
       ) : null}
 
-      <Dialog.Root
-        open={messageDetailsOpen}
-        onOpenChange={(open) => {
-          setMessageDetailsOpen(open);
-        }}
-      >
-        <Dialog.Portal>
-          <Dialog.Backdrop className="fixed inset-0 z-[102] bg-black/40 backdrop-blur-[1px]" />
-          <Dialog.Viewport className="fixed inset-0 z-[103] flex items-center justify-center p-4">
-            <Dialog.Popup className="relative w-full max-w-[min(94vw,760px)] max-h-[calc(100vh-2rem)] rounded-2xl bg-oai-white dark:bg-oai-gray-950 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.25)] dark:shadow-[0_20px_60px_-10px_rgba(0,0,0,0.65)] ring-1 ring-oai-gray-200 dark:ring-oai-gray-800 overflow-hidden">
-              <Dialog.Title render={<h2 className="sr-only" />}>
-                {copy("dashboard.context_breakdown.message_details.title")}
-              </Dialog.Title>
-
-              <div className="px-4 py-3 border-b border-oai-gray-200 dark:border-oai-gray-800 flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-oai-black dark:text-oai-white truncate">
-                    {copy("dashboard.context_breakdown.message_details.title")}
-                  </p>
-                  <p className="text-[11px] text-oai-gray-500 dark:text-oai-gray-400 tabular-nums">
-                    {copy("dashboard.context_breakdown.message_details.note")}
-                  </p>
-                </div>
-                <Dialog.Close
-                  type="button"
-                  className="shrink-0 h-9 px-3 rounded-md text-xs font-medium text-oai-gray-700 dark:text-oai-gray-200 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand/40 transition-colors"
-                  aria-label={copy("dashboard.context_breakdown.tool_details.close")}
-                >
-                  {copy("dashboard.context_breakdown.tool_details.close")}
-                </Dialog.Close>
-              </div>
-
-              <div className="px-4 py-3 max-h-[calc(100vh-9rem)] overflow-y-auto oai-scrollbar">
-                {messageRows.length === 0 ? (
-                  <p className="text-xs text-oai-gray-500 dark:text-oai-gray-400">
-                    {copy(sourceEmptyCopyKey(source))}
-                  </p>
-                ) : (
-                  <div className="overflow-x-auto oai-scrollbar">
-                    <div role="table" aria-label={copy("dashboard.context_breakdown.message_details.title")} className="min-w-[640px]">
-                      <div
-                        role="row"
-                        className={`${MESSAGE_TABLE_GRID} py-2 mb-2 border-b border-oai-gray-200 dark:border-oai-gray-800 text-label uppercase text-oai-gray-500 dark:text-oai-gray-400`}
-                      >
-                        <span role="columnheader">{copy("dashboard.context_breakdown.message_details.category_column")}</span>
-                        <span role="columnheader" className="text-right">
-                          {copy("dashboard.context_breakdown.tool_details.input_column")}
-                        </span>
-                        <span role="columnheader" className="text-right">
-                          {copy("dashboard.context_breakdown.tool_details.output_tokens")}
-                        </span>
-                        <span role="columnheader" className="text-right">
-                          {copy("dashboard.context_breakdown.tool_details.cache_column")}
-                        </span>
-                        <span role="columnheader" className="text-right">
-                          {copy("dashboard.context_breakdown.tool_details.total_column")}
-                        </span>
-                      </div>
-                      {messageRows.map((row) => (
-                          <div
-                            key={row.key || row.name}
-                            role="row"
-                            className={`${MESSAGE_TABLE_GRID} py-2`}
-                            title={messageLabel(row)}
-                          >
-                            <span role="cell" className="min-w-0 text-body-sm font-medium text-oai-black dark:text-oai-white truncate">
-                              {messageLabel(row)}
-                            </span>
-                            <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">
-                              {formatTokens(row.totals.input_tokens || 0)}
-                            </span>
-                            <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">
-                              {formatTokens(row.totals.output_tokens || 0)}
-                            </span>
-                            <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">
-                              {formatTokens(
-                                Number(row.totals.cached_input_tokens || 0) +
-                                  Number(row.totals.cache_creation_input_tokens || 0),
-                              )}
-                            </span>
-                            <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">
-                              {formatTokens(row.totals.total_tokens || 0)}
-                            </span>
-                          </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </Dialog.Popup>
-          </Dialog.Viewport>
-        </Dialog.Portal>
-      </Dialog.Root>
-
-      <Dialog.Root
-        open={Boolean(selectedToolKey)}
-        onOpenChange={(open) => {
-          if (!open) setSelectedToolKey(null);
-        }}
-      >
-        <Dialog.Portal>
-          <Dialog.Backdrop className="fixed inset-0 z-[102] bg-black/40 backdrop-blur-[1px]" />
-          <Dialog.Viewport className="fixed inset-0 z-[103] flex items-center justify-center p-4">
-            <Dialog.Popup className="relative w-full max-w-[min(96vw,980px)] max-h-[calc(100vh-2rem)] rounded-2xl bg-oai-white dark:bg-oai-gray-950 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.25)] dark:shadow-[0_20px_60px_-10px_rgba(0,0,0,0.65)] ring-1 ring-oai-gray-200 dark:ring-oai-gray-800 overflow-hidden">
-              <Dialog.Title render={<h2 className="sr-only" />}>
-                {copy("dashboard.context_breakdown.tool_details.title")}
-              </Dialog.Title>
-
-              <div className="px-4 py-3 border-b border-oai-gray-200 dark:border-oai-gray-800 flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-oai-black dark:text-oai-white truncate">
-                    {copy("dashboard.context_breakdown.tool_details.title")}
-                  </p>
-                  <p className="text-[11px] text-oai-gray-500 dark:text-oai-gray-400 tabular-nums">
-                    {copy("dashboard.context_breakdown.tool_details.total_calls", {
-                      calls: selectedToolSet?.total_calls || 0,
-                    })}
-                  </p>
-                </div>
-                <Dialog.Close
-                  type="button"
-                  className="shrink-0 h-9 px-3 rounded-md text-xs font-medium text-oai-gray-700 dark:text-oai-gray-200 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand/40 transition-colors"
-                  aria-label={copy("dashboard.context_breakdown.tool_details.close")}
-                >
-                  {copy("dashboard.context_breakdown.tool_details.close")}
-                </Dialog.Close>
-              </div>
-
-              <div className="px-4 py-3 max-h-[calc(100vh-9rem)] overflow-y-auto oai-scrollbar">
-                {selectedToolCategories.length === 0 ? (
-                  <p className="text-xs text-oai-gray-500 dark:text-oai-gray-400">
-                    {source === "codex" && codexQueueFallback
-                      ? copy("dashboard.context_breakdown.tool_details.unavailable_codex")
-                      : copy(sourceEmptyCopyKey(source))}
-                  </p>
-                ) : (
-                  <div className="overflow-x-auto oai-scrollbar">
-                  <div role="table" aria-label={copy("dashboard.context_breakdown.tool_details.title")} className="min-w-[720px]">
-                    <div
-                      role="row"
-                      className={`${TOOL_TABLE_GRID} py-2 mb-2 border-b border-oai-gray-200 dark:border-oai-gray-800 text-label uppercase text-oai-gray-500 dark:text-oai-gray-400`}
-                    >
-                      <span role="columnheader">{copy("dashboard.context_breakdown.tool_details.category_column")}</span>
-                      <span role="columnheader">{copy("dashboard.context_breakdown.tool_details.tool_column")}</span>
-                      <span role="columnheader" className="text-right">
-                        {copy("dashboard.context_breakdown.tool_details.calls_column")}
-                      </span>
-                      <span role="columnheader" className="text-right">
-                        {copy("dashboard.context_breakdown.tool_details.input_column")}
-                      </span>
-                      <span role="columnheader" className="text-right">
-                        {copy("dashboard.context_breakdown.tool_details.output_tokens")}
-                      </span>
-                      <span role="columnheader" className="text-right">
-                        {copy("dashboard.context_breakdown.tool_details.cache_column")}
-                      </span>
-                      <span role="columnheader" className="text-right">
-                        {copy("dashboard.context_breakdown.tool_details.total_column")}
-                      </span>
-                    </div>
-                    {toolDetailsRows}
-                  </div>
-                  </div>
-                )}
-
-                {skillRows.length ? (
-                  <div className="mt-4 pt-3 border-t border-oai-gray-200 dark:border-oai-gray-800">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-[11px] font-medium uppercase text-oai-gray-500 dark:text-oai-gray-400">
-                        {copy("dashboard.context_breakdown.skills_details.title")}
-                      </p>
-                      <p className="text-[11px] text-oai-gray-500 dark:text-oai-gray-400 tabular-nums">
-                        {copy("dashboard.context_breakdown.skills_details.total_calls", {
-                          calls: skillsDetails?.total_calls || skillRows.length,
-                        })}
-                      </p>
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {skillRows.slice(0, 12).map((skill) => (
-                        <span
-                          key={skill.name}
-                          className="inline-flex max-w-full items-center gap-1 rounded-md border border-oai-gray-200 dark:border-oai-gray-800 px-2 py-1 text-[11px] text-oai-gray-700 dark:text-oai-gray-200"
-                          title={skill.name}
-                        >
-                          <span className="truncate max-w-[180px]">{skill.name}</span>
-                          <span className="text-oai-gray-400 dark:text-oai-gray-500 tabular-nums">
-                            {formatTokens(skill.total_tokens)}
-                          </span>
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {configuredResources ? (
-                  <div className="mt-4 pt-3 border-t border-oai-gray-200 dark:border-oai-gray-800">
-                    <p className="text-[11px] text-oai-gray-500 dark:text-oai-gray-400">
-                      {formatCompactNumber(configuredResources.skills_count || 0)} skills ·{" "}
-                      {formatCompactNumber(configuredResources.mcp_servers_count || 0)} MCP servers ·{" "}
-                      {formatCompactNumber(configuredResources.custom_agents_count || 0)} agents ·{" "}
-                      {formatCompactNumber(configuredResources.memory_files_count || 0)} memory files
-                    </p>
-                  </div>
-                ) : null}
-              </div>
-            </Dialog.Popup>
-          </Dialog.Viewport>
-        </Dialog.Portal>
-      </Dialog.Root>
-
-      <Dialog.Root
-        open={Boolean(selectedExecKey)}
-        onOpenChange={(open) => {
-          if (!open) setSelectedExecKey(null);
-        }}
-      >
-        <Dialog.Portal>
-          <Dialog.Backdrop className="fixed inset-0 z-[104] bg-black/40 backdrop-blur-[1px]" />
-          <Dialog.Viewport className="fixed inset-0 z-[105] flex items-center justify-center p-4">
-            <Dialog.Popup className="relative w-full max-w-[720px] max-h-[calc(100vh-2rem)] rounded-2xl bg-oai-white dark:bg-oai-gray-950 shadow-lg dark:shadow-2xl ring-1 ring-oai-gray-200 dark:ring-oai-gray-800 overflow-hidden">
-              <Dialog.Title render={<h2 className="sr-only" />}>
-                {copy("dashboard.context_breakdown.exec_details.title")}
-              </Dialog.Title>
-
-              <div className="px-4 py-3 border-b border-oai-gray-200 dark:border-oai-gray-800 flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-oai-black dark:text-oai-white truncate">
-                    {copy("dashboard.context_breakdown.exec_details.title")}
-                  </p>
-                  <p className="text-[11px] text-oai-gray-500 dark:text-oai-gray-400 tabular-nums">
-                    {copy("dashboard.context_breakdown.exec_details.note")}
-                  </p>
-                </div>
-                {execDetails ? (
-                  <div className="flex max-w-[min(62vw,560px)] flex-wrap items-center gap-1 rounded-md bg-oai-gray-100 dark:bg-oai-gray-900 p-1">
-                    {EXEC_DETAIL_TABS.map(([key, labelKey]) => (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => setSelectedExecKey(key)}
-                        className={
-                          "h-8 px-2.5 rounded-md text-xs font-medium transition-colors " +
-                          (selectedExecKey === key
-                            ? "bg-oai-white dark:bg-oai-gray-800 text-oai-black dark:text-oai-white shadow-sm"
-                            : "text-oai-gray-600 dark:text-oai-gray-300 hover:bg-oai-white/70 dark:hover:bg-oai-gray-800/70")
-                        }
-                      >
-                        {copy(labelKey)}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                <Dialog.Close
-                  type="button"
-                  className="shrink-0 h-9 px-3 rounded-md text-xs font-medium text-oai-gray-700 dark:text-oai-gray-200 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand/40 transition-colors"
-                  aria-label={copy("dashboard.context_breakdown.tool_details.close")}
-                >
-                  {copy("dashboard.context_breakdown.tool_details.close")}
-                </Dialog.Close>
-              </div>
-
-              <div className="px-4 py-3 max-h-[calc(100vh-9rem)] overflow-y-auto oai-scrollbar">
-                {!execDetails ? (
-                  <p className="text-xs text-oai-gray-500 dark:text-oai-gray-400">
-                    {copy(sourceEmptyCopyKey(source))}
-                  </p>
-                ) : (
-                  <div role="table" aria-label={copy("dashboard.context_breakdown.exec_details.title")}>
-                    <div
-                      role="row"
-                      className="grid grid-cols-[minmax(0,1fr)_64px_64px_96px_96px_88px_88px] gap-3 py-2 mb-2 border-b border-oai-gray-200 dark:border-oai-gray-800 text-label uppercase text-oai-gray-500 dark:text-oai-gray-400"
-                    >
-                      <span role="columnheader">{copy("dashboard.context_breakdown.exec_details.kind_column")}</span>
-                      <span role="columnheader" className="text-right">
-                        {copy("dashboard.context_breakdown.exec_details.calls_column")}
-                      </span>
-                      <span role="columnheader" className="text-right">
-                        {copy("dashboard.context_breakdown.exec_details.failures_column")}
-                      </span>
-                      <span role="columnheader" className="text-right">
-                        {copy("dashboard.context_breakdown.exec_details.duration_column")}
-                      </span>
-                      <span role="columnheader" className="text-right">
-                        {copy("dashboard.context_breakdown.exec_details.max_duration_column")}
-                      </span>
-                      <span role="columnheader" className="text-right">
-                        {copy("dashboard.context_breakdown.tool_details.total_column")}
-                      </span>
-                      <span role="columnheader" className="text-right">
-                        {copy("dashboard.context_breakdown.exec_details.output_column")}
-                      </span>
-                    </div>
-
-                    {normalizeExecRows(selectedExecRows(execDetails, selectedExecKey)).map((row) => (
-                      <div
-                        key={row.name}
-                        role="row"
-                        className="grid grid-cols-[minmax(0,1fr)_64px_64px_96px_96px_88px_88px] gap-3 py-2"
-                        title={row.name}
-                      >
-                        <span role="cell" className="min-w-0 text-body-sm font-medium text-oai-black dark:text-oai-white truncate">
-                          {row.name}
-                        </span>
-                        <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">
-                          {formatCompactNumber(row.calls || 0)}
-                        </span>
-                        <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">
-                          {formatCompactNumber(row.failures || 0)}
-                        </span>
-                        <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">
-                          {formatDuration(row.duration_ms || 0)}
-                        </span>
-                        <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">
-                          {formatDuration(row.max_duration_ms || 0)}
-                        </span>
-                        <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">
-                          {formatTokens(row.totals.total_tokens || 0)}
-                        </span>
-                        <span role="cell" className="text-right text-body-sm tabular-nums text-oai-gray-700 dark:text-oai-gray-300">
-                          {formatCompactNumber(row.output_lines || 0)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </Dialog.Popup>
-          </Dialog.Viewport>
-        </Dialog.Portal>
-      </Dialog.Root>
+      {/* Configured resources footer */}
+      {configuredResources ? (
+        <p className="mt-2 text-[10px] text-oai-gray-400 dark:text-oai-gray-500">
+          {formatCompactNumber(configuredResources.skills_count || 0)} skills ·{" "}
+          {formatCompactNumber(configuredResources.mcp_servers_count || 0)} MCP servers ·{" "}
+          {formatCompactNumber(configuredResources.custom_agents_count || 0)} agents ·{" "}
+          {formatCompactNumber(configuredResources.memory_files_count || 0)} memory files
+        </p>
+      ) : null}
     </div>
   );
 }

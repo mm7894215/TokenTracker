@@ -759,6 +759,7 @@ dashboard.context_breakdown.category.messages,dashboard,DashboardPage,ContextBre
 dashboard.context_breakdown.category.tool_calls,dashboard,DashboardPage,ContextBreakdownPanel,cat,"Tool calls",,active
 dashboard.context_breakdown.category.custom_agents,dashboard,DashboardPage,ContextBreakdownPanel,cat,"Custom agents",,active
 dashboard.context_breakdown.category.reasoning,dashboard,DashboardPage,ContextBreakdownPanel,cat,"Reasoning",,active
+dashboard.context_breakdown.category.skills,dashboard,DashboardPage,ContextBreakdownPanel,cat,"Skills",,active
 dashboard.context_breakdown.loading_aria,dashboard,DashboardPage,ContextBreakdownPanel,loading_aria,"Loading context breakdown",,active
 dashboard.context_breakdown.loading_hint,dashboard,DashboardPage,ContextBreakdownPanel,loading_hint,"Scanning Claude Code session logs…",,active
 dashboard.context_breakdown.tool_details.title,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_title,"Tool details",,active

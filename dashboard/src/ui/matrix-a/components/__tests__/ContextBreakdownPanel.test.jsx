@@ -157,7 +157,7 @@ describe("ContextBreakdownPanel", () => {
     ).toBeInTheDocument();
   });
 
-  it("opens message details for Claude messages", async () => {
+  it("expands Messages row inline to show message sub-categories", async () => {
     getUsageCategoryBreakdown.mockResolvedValueOnce({
       source: "claude",
       scope: "supported",
@@ -254,15 +254,23 @@ describe("ContextBreakdownPanel", () => {
 
     render(<ContextBreakdownPanel from="2026-05-09" to="2026-05-09" source="claude" />);
 
+    // Wait for data to load
     await screen.findByText(copy("dashboard.context_breakdown.category.messages"));
-    fireEvent.click(screen.getByRole("button", { name: copy("dashboard.context_breakdown.message_details.title") }));
 
+    // Click the Messages disclosure button (has aria-expanded)
+    const messagesBtn = screen.getByRole("button", { name: copy("dashboard.context_breakdown.category.messages") });
+    fireEvent.click(messagesBtn);
+
+    // Sub-rows appear inline (no modal)
     expect(await screen.findByText(copy("dashboard.context_breakdown.message_details.conversation_history"))).toBeInTheDocument();
     expect(screen.getByText(copy("dashboard.context_breakdown.message_details.user_input"))).toBeInTheDocument();
     expect(screen.getByText(copy("dashboard.context_breakdown.message_details.assistant_response"))).toBeInTheDocument();
+
+    // Confirm no dialog/modal is present
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("shows short Codex MCP tool names in tool details", async () => {
+  it("shows short Codex MCP tool names in tool details inline", async () => {
     getUsageCategoryBreakdown.mockResolvedValueOnce({
       source: "codex",
       scope: "supported",
@@ -314,13 +322,20 @@ describe("ContextBreakdownPanel", () => {
     render(<ContextBreakdownPanel from="2026-05-09" to="2026-05-09" source="codex" />);
 
     await screen.findByText(copy("dashboard.context_breakdown.category.tool_calls"));
-    fireEvent.click(screen.getByText(copy("dashboard.context_breakdown.category.tool_calls")).closest("button"));
+    // Click the tool calls disclosure button
+    fireEvent.click(screen.getByRole("button", { name: copy("dashboard.context_breakdown.category.tool_calls") }));
 
-    expect(await screen.findByText("emulate")).toBeInTheDocument();
+    // MCP category appears
+    expect(await screen.findByText("MCP: chrome-devtools")).toBeInTheDocument();
+
+    // Expand the category to see the tool
+    fireEvent.click(screen.getByRole("button", { name: "MCP: chrome-devtools" }));
+
+    expect(await screen.findByText(/emulate/)).toBeInTheDocument();
     expect(screen.queryByText("chrome-devtools/emulate")).not.toBeInTheDocument();
   });
 
-  it("shows skills in tool details when the breakdown includes them", async () => {
+  it("shows skills disclosure row when the breakdown includes them", async () => {
     getUsageCategoryBreakdown.mockResolvedValueOnce({
       source: "codex",
       scope: "supported",
@@ -367,14 +382,18 @@ describe("ContextBreakdownPanel", () => {
 
     render(<ContextBreakdownPanel from="2026-05-09" to="2026-05-09" source="codex" />);
 
-    await screen.findByText(copy("dashboard.context_breakdown.category.tool_calls"));
-    fireEvent.click(screen.getByText(copy("dashboard.context_breakdown.category.tool_calls")).closest("button"));
+    // Skills disclosure row should be present
+    const skillsLabel = await screen.findByText(copy("dashboard.context_breakdown.category.skills"));
+    expect(skillsLabel).toBeInTheDocument();
 
-    expect(await screen.findByText(copy("dashboard.context_breakdown.skills_details.title"))).toBeInTheDocument();
-    expect(screen.getByText("frontend-design")).toBeInTheDocument();
+    // Click to expand it
+    fireEvent.click(screen.getByRole("button", { name: copy("dashboard.context_breakdown.category.skills") }));
+
+    // Skill name appears inline
+    expect(await screen.findByText("frontend-design")).toBeInTheDocument();
   });
 
-  it("shows short Claude MCP tool names in tool details", async () => {
+  it("shows short Claude MCP tool names in inline tool details", async () => {
     getUsageCategoryBreakdown.mockResolvedValueOnce({
       source: "claude",
       scope: "supported",
@@ -441,13 +460,17 @@ describe("ContextBreakdownPanel", () => {
     render(<ContextBreakdownPanel from="2026-05-09" to="2026-05-09" source="claude" />);
 
     await screen.findByText(copy("dashboard.context_breakdown.category.tool_calls"));
-    fireEvent.click(screen.getByText(copy("dashboard.context_breakdown.category.tool_calls")).closest("button"));
+    // Expand tool calls
+    fireEvent.click(screen.getByRole("button", { name: copy("dashboard.context_breakdown.category.tool_calls") }));
 
-    expect(await screen.findByText("emulate")).toBeInTheDocument();
+    // Expand the MCP category
+    fireEvent.click(await screen.findByRole("button", { name: "MCP: chrome-devtools" }));
+
+    expect(await screen.findByText(/emulate/)).toBeInTheDocument();
     expect(screen.queryByText("mcp__chrome-devtools__emulate")).not.toBeInTheDocument();
   });
 
-  it("opens Claude execution drill-down when Bash details are available", async () => {
+  it("shows Claude execution drill-down inline when Bash tool is expanded", async () => {
     getUsageCategoryBreakdown.mockResolvedValueOnce({
       source: "claude",
       scope: "supported",
@@ -509,10 +532,18 @@ describe("ContextBreakdownPanel", () => {
     render(<ContextBreakdownPanel from="2026-05-09" to="2026-05-09" source="claude" />);
 
     await screen.findByText(copy("dashboard.context_breakdown.category.tool_calls"));
-    fireEvent.click(screen.getByText(copy("dashboard.context_breakdown.category.tool_calls")).closest("button"));
-    expect(screen.queryByText(copy("dashboard.context_breakdown.exec_details.open"))).not.toBeInTheDocument();
+
+    // Expand tool calls
+    fireEvent.click(screen.getByRole("button", { name: copy("dashboard.context_breakdown.category.tool_calls") }));
+
+    // Expand the Execution category
+    fireEvent.click(await screen.findByRole("button", { name: "Execution" }));
+
+    // Click the Bash disclosure button to open exec drill-down
     fireEvent.click(await screen.findByRole("button", { name: /Bash/ }));
 
+    // Exec drill-down data appears inline (no modal)
     expect(await screen.findByText("test")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

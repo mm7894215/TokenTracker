@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
-import { Info, SquareArrowOutUpRight } from "lucide-react";
+import { Info, Loader2, SquareArrowOutUpRight } from "lucide-react";
 import { Popover } from "@base-ui/react/popover";
 import { Card, Button, Counter } from "../../openai/components";
 import { useTheme } from "../../../hooks/useTheme.js";
@@ -362,12 +362,53 @@ export function UsageOverview({
                       (a, b) => (b.share || 0) - (a.share || 0)
                     );
 
+                    const providerHeading = contextSource
+                      ? `${contextSource === "claude" ? "Claude" : "Codex"} Context Breakdown`
+                      : provider.label;
                     return (
-                      <div key={provider.label}>
-                        {/* Section header — provider identity only, nothing else */}
+                      <ProviderExpandedSection
+                        key={provider.label}
+                        provider={provider}
+                        color={color}
+                        providerHeading={providerHeading}
+                        contextSource={contextSource}
+                        from={from}
+                        to={to}
+                        sortedModels={sortedModels}
+                      />
+                    );
+                  })}
+              </div>
+            )}
+
+          </div>
+        )}
+      </Card>
+  );
+}
+
+// Renders a single expanded provider section. Hosts loading state for the
+// inline Context Breakdown so the spinner can sit next to the heading instead
+// of taking its own row.
+function ProviderExpandedSection({ provider, color, providerHeading, contextSource, from, to, sortedModels }) {
+  const [breakdownLoading, setBreakdownLoading] = useState(false);
+
+  return (
+                      <div>
+                        {/* Section header — provider identity. When the provider supports
+                            Context Breakdown we replace the bare label with the panel title
+                            so we don't render a redundant double heading. The panel's
+                            loading spinner sits inline at the right of the heading. */}
                         <div className="flex items-center gap-1.5 mb-3">
                           <ProviderIcon provider={provider.label} size={14} color={color} className="shrink-0" />
-                          <span className="text-sm font-medium text-oai-black dark:text-oai-white">{provider.label}</span>
+                          <span className="text-sm font-medium text-oai-black dark:text-oai-white">{providerHeading}</span>
+                          {contextSource && breakdownLoading && (
+                            <Loader2
+                              size={12}
+                              className="text-oai-gray-400 dark:text-oai-gray-500 animate-spin shrink-0"
+                              aria-label={copy("dashboard.context_breakdown.loading_aria")}
+                            />
+                          )}
                         </div>
 
                         {/* Context Breakdown drill-down.
@@ -380,6 +421,7 @@ export function UsageOverview({
                               to={to}
                               source={contextSource}
                               referenceTotalTokens={provider.usage}
+                              onLoadingChange={setBreakdownLoading}
                             />
                           </div>
                         ) : null}
@@ -430,13 +472,5 @@ export function UsageOverview({
                           })}
                         </div>
                       </div>
-                    );
-                  })}
-              </div>
-            )}
-
-          </div>
-        )}
-      </Card>
   );
 }
