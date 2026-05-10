@@ -1,12 +1,12 @@
 {
-  "generatedAt": "2026-05-10T11:11:09.437Z",
+  "generatedAt": "2026-05-10T13:53:14.652Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
     "rawText": "JSX text nodes containing letters or digits"
   },
   "totals": {
-    "colors": 207,
+    "colors": 200,
     "rawText": 80
   },
   "files": {
@@ -169,15 +169,15 @@
       "rawTextTokens": []
     },
     "dashboard/src/ui/matrix-a/components/ContextBreakdownPanel.jsx": {
-      "colors": 9,
+      "colors": 0,
       "rawText": 7,
       "rawTextTokens": [
         "(b.totals?.total_tokens || 0) - (a.totals?.total_tokens || 0), ); return (",
         "); const labelInner = (",
         "); const labelSuffix = isSystemPrefix ? (",
-        "); return (",
         "0 && (",
-        "0 || codexQueueFallback)) || (isCustomAgents && hasCustomAgents && subagentsSet); const rowOpen = Boolean(openRows[cat.key]); const colorSquare = (",
+        "0 || codexQueueFallback)) || (isCustomAgents && hasCustomAgents && subagentsSet); const rowOpen = Boolean(openRows[cat.key]); const bucketBase = bucketColor(cat.key, source); const colorSquare = (",
+        "0; const clampedShare = hasFill ? Math.max(0, Math.min(100, share)) : 0; return (",
         "isExecToolName(t.name)); const catOpen = Boolean(openCats[cat.name]); return ("
       ]
     },
@@ -243,6 +243,11 @@
       "rawTextTokens": [
         "1 && count % 2 !== 0 && index === 0; const itemClass = isFirstAndOdd ? \"md:col-span-2\" : \"\"; return ("
       ]
+    },
+    "dashboard/src/ui/matrix-a/components/ProviderIcon.jsx": {
+      "colors": 2,
+      "rawText": 0,
+      "rawTextTokens": []
     },
     "dashboard/src/ui/matrix-a/components/StatsPanel.jsx": {
       "colors": 0,

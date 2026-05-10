@@ -4,6 +4,7 @@ import { Select } from "@base-ui/react/select";
 import { copy } from "../../../lib/copy";
 import { formatCompactNumber, toDisplayNumber, toFiniteNumber } from "../../../lib/format";
 import { shouldFetchGithubStars } from "../util/should-fetch-github-stars.js";
+import { ProviderIcon } from "./ProviderIcon";
 
 const LIMIT_OPTIONS = [3, 6, 10];
 const REPO_META_CACHE = new Map();
@@ -232,16 +233,13 @@ function ProjectUsageCard({
       : formatCompactNumber(tokensRaw, tokenFormatOptions);
 
   return (
-    <a
-      href={projectRef || (repoId ? `https://github.com/${repoId}` : "#")}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="flex items-center gap-3 p-3 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700 hover:border-oai-gray-300 dark:hover:border-oai-gray-600 transition-colors"
-    >
+    <div className="flex items-center gap-3 p-3 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700">
       {avatarUrl ? (
         <img src={avatarUrl} alt="" className="w-10 h-10 rounded bg-oai-gray-100 dark:bg-oai-gray-800 object-cover" />
       ) : (
-        <div className="w-10 h-10 rounded bg-oai-gray-100 dark:bg-oai-gray-800" />
+        <div className="w-10 h-10 rounded bg-oai-gray-100 dark:bg-oai-gray-800 flex items-center justify-center">
+          <ProviderIcon provider={repoKey} size={24} />
+        </div>
       )}
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-oai-black dark:text-oai-white truncate">
@@ -252,6 +250,6 @@ function ProjectUsageCard({
           <span>{tokensCompact}</span>
         </div>
       </div>
-    </a>
+    </div>
   );
 }
