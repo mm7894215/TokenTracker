@@ -901,10 +901,10 @@ async function parseClaudeFile({
     if (seenMessageHashes) {
       const msgId = obj?.message?.id;
       const reqId = obj?.requestId;
-      if (msgId && reqId) {
-        const hash = `${msgId}:${reqId}`;
-        if (seenMessageHashes.has(hash)) continue;
-        seenMessageHashes.add(hash);
+      const dedupKey = reqId ? `${msgId}:${reqId}` : msgId;
+      if (dedupKey) {
+        if (seenMessageHashes.has(dedupKey)) continue;
+        seenMessageHashes.add(dedupKey);
       }
     }
 
