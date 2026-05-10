@@ -1,7 +1,7 @@
 import React from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { copy } from "../lib/copy";
-import { Button } from "../ui/openai/components/Button.jsx";
+import { Button } from "../ui/components/Button.jsx";
 
 export class ErrorBoundary extends React.Component {
   constructor(props) {

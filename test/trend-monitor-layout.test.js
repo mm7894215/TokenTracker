@@ -5,7 +5,7 @@ const { test } = require("node:test");
 
 test("TrendMonitor root padding matches standard panel spacing", () => {
   const src = fs.readFileSync(
-    path.join(__dirname, "../dashboard/src/ui/matrix-a/components/TrendMonitor.jsx"),
+    path.join(__dirname, "../dashboard/src/ui/dashboard/components/TrendMonitor.jsx"),
     "utf8",
   );
 

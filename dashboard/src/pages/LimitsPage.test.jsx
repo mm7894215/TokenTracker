@@ -24,7 +24,7 @@ vi.mock("../hooks/use-limits-display-prefs.js", () => ({
   }),
 }));
 
-vi.mock("../ui/matrix-a/components/UsageLimitsPanel.jsx", () => ({
+vi.mock("../ui/dashboard/components/UsageLimitsPanel.jsx", () => ({
   UsageLimitsPanel: ({ kimi }) => (
     <div data-testid="limits-panel">
       {kimi?.configured ? "Kimi connected" : "Kimi missing"}

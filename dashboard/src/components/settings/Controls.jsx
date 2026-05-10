@@ -1,6 +1,6 @@
 import React from "react";
 import { cn } from "../../lib/cn";
-import { Card } from "../../ui/openai/components";
+import { Card } from "../../ui/components";
 
 export function ToggleSwitch({ checked, onChange, disabled, ariaLabel }) {
   return (

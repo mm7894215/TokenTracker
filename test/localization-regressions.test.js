@@ -20,11 +20,6 @@ test("zh locale keeps CLI subcommands executable", () => {
     /"dashboard\.install\.cmd\.sync":\s*"npx --yes tokentracker-cli sync"/,
     "expected zh sync command to keep the sync subcommand",
   );
-  assert.match(
-    dashboardCopy,
-    /"dashboard\.upgrade_alert\.install_command":\s*"npx --yes tokentracker-cli init"/,
-    "expected zh upgrade alert command to keep the init subcommand",
-  );
   assert.doesNotMatch(dashboardCopy, /tokentracker-cli (初始化|同步)/);
 });
 
@@ -108,15 +103,11 @@ test("zh locale uses reviewed natural copy for settings and dashboard", () => {
   const core = read("dashboard/src/content/i18n/zh/core.json");
   const dashboard = read("dashboard/src/content/i18n/zh/dashboard.json");
 
-  assert.match(core, /"header\.cloud_sync\.hint":\s*"运行本地 Token Tracker 同步，将用量上传到云端。关闭后仅保留本地离线使用。"/);
   assert.match(core, /"identity_card\.rank_label":\s*"排名"/);
-  assert.match(core, /"identity_panel\.rank_label":\s*"排名"/);
   assert.match(core, /"widgets\.heatmap\.description":\s*"像 GitHub 一样，一眼看清活跃和空闲的日子。"/);
   assert.match(core, /"widgets\.topModels\.name":\s*"热门模型"/);
   assert.match(core, /"daily\.sort\.conversations\.label":\s*"对话数"/);
   assert.match(core, /"settings\.account\.githubUrl":\s*"GitHub 主页"/);
-  assert.match(dashboard, /"dashboard\.top_models\.title":\s*"热门模型"/);
-  assert.match(dashboard, /"dashboard\.public_view\.status\.disabled":\s*"关闭"/);
   assert.match(dashboard, /"dashboard\.screenshot\.title_line2":\s*"2025 年度回顾"/);
 
   assert.doesNotMatch(core, /顶级模特|转化次数|InsForge 可以摄取您的队列|斑点条纹和安静的日子一目了然/);

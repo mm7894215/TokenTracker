@@ -1,8 +1,5 @@
 key,module,page,component,slot,text,notes,status
 header.auth.sign_in_aria,shared,*,InsforgeUserHeaderControls,sign_in_aria,"Sign in",,active
-header.auth.user_fallback,shared,*,InsforgeUserHeaderControls,user_fallback,"User",,active
-header.cloud_sync.label,shared,*,InsforgeUserHeaderControls,cloud_sync_label,"Sync local usage to cloud",,active
-header.cloud_sync.hint,shared,*,InsforgeUserHeaderControls,cloud_sync_hint,"Runs local tokentracker sync so InsForge can ingest your queue. Turn off to keep usage offline only.",,active
 login.back_home,shared,LoginPage,LoginPage,back_home,"Back to home",,active
 login.cloud_only,shared,LoginPage,LoginPage,cloud_only,"Cloud sign-in is not configured. Use the local dashboard on localhost.",,active
 login.title,shared,LoginPage,LoginPage,title,"Sign in",,active
@@ -25,14 +22,10 @@ login_modal.subtitle,shared,*,LoginModal,subtitle,"Sign in to join the leaderboa
 login_modal.continue_email,shared,*,LoginModal,continue_email,"Continue with Email",,active
 login_modal.divider_email,shared,*,LoginModal,divider_email,"email",,active
 shared.placeholder.short,shared,*,*,placeholder_short,"--",,active
-shared.placeholder.anon_mark,shared,*,*,placeholder_anon_mark,"?",,active
 shared.unit.percent,shared,*,*,unit_percent,"%",,active
 shared.unit.thousand_abbrev,shared,*,*,unit_thousand_abbrev,"K",,active
 shared.unit.million_abbrev,shared,*,*,unit_million_abbrev,"M",,active
 shared.unit.billion_abbrev,shared,*,*,unit_billion_abbrev,"B",,active
-shared.button.sign_in,shared,*,MatrixButton,label,"$ sign-in",,active
-shared.button.sign_up,shared,*,MatrixButton,label,"$ sign-up",,active
-shared.range.simple,shared,*,*,label,"Range: {{range}}",,active
 shared.data_source,shared,*,*,label,"Data source: {{source}}",,active
 shared.error.prefix,shared,*,*,label,"Error: {{error}}",,active
 shared.status.unsynced,shared,*,*,status,"—",,active
@@ -44,28 +37,12 @@ error.boundary.action.reload,shared,*,ErrorBoundary,action_reload,"Reload",,acti
 
 landing.handle.default,landing,LandingPage,LandingPage,handle_default,"VIBE_USER",,active
 landing.handle.special,landing,LandingPage,LandingPage,handle_special,"VOLT",,active
-landing.hero.title_primary,landing,LandingPage,LandingPage,hero_title_primary,"TRACK YOUR",,active
-landing.hero.title_secondary,landing,LandingPage,LandingPage,hero_title_secondary,"AI TOKENS.",,active
-landing.hero.tagline,landing,LandingPage,LandingPage,hero_tagline,"UNIFIED USAGE DASHBOARD",,active
-landing.hero.subtagline,landing,LandingPage,LandingPage,hero_subtagline,"Automatically monitor token usage across Claude Code, Cursor, Codex, and more. Local-first, privacy-focused, and zero manual configuration.",,active
 landing.screenshot.alt,landing,LandingPage,LandingPage,screenshot_alt,"TokenTracker dashboard screenshot",,active
 landing.nav.login,landing,LandingPage,LandingPage,nav_login,"LOGIN",,active
 landing.nav.signup,landing,LandingPage,LandingPage,nav_signup,"SIGN UP",,active
-landing.nav.login_signup,landing,LandingPage,LandingPage,nav_login_signup,"SIGN IN / SIGN UP",,active
-landing.seo.title,landing,LandingPage,LandingPage,seo_title,"Secure Token Usage Tracking for AI Agent Clients",,active
-landing.seo.summary,landing,LandingPage,LandingPage,seo_summary,"Automatically monitor token usage across Claude Code, Cursor, Codex, and more. Local-first, privacy-focused, and zero manual configuration.",,active
-landing.install.title,landing,LandingPage,LandingPage,install_title,"INSTALL IN ONE COMMAND",,active
-landing.install.prompt,landing,LandingPage,LandingPage,install_prompt,"Run this in your terminal:",,active
 landing.install.command,landing,LandingPage,LandingPage,install_command,"npx --yes tokentracker-cli",,active
-landing.install.helper,landing,LandingPage,LandingPage,install_helper,"Then connect your account and start syncing usage.",,active
 landing.install.action.copy,landing,LandingPage,LandingPage,install_copy,"COPY COMMAND",,active
 landing.install.action.copied,landing,LandingPage,LandingPage,install_copied,"COPIED",,active
-landing.ai_agent.title,landing,LandingPage,LandingPage,ai_agent_title,"LET AI INSTALL FOR YOU",,active
-landing.ai_agent.description,landing,LandingPage,LandingPage,ai_agent_description,"Copy this guide and paste to ChatGPT, Claude, or any AI assistant. It will install TokenTracker automatically.",,active
-landing.ai_agent.command,landing,LandingPage,LandingPage,ai_agent_command,"https://github.com/mm7894215/TokenTracker/blob/main/docs/AI_AGENT_INSTALL.md",,active
-landing.ai_agent.copy_label,landing,LandingPage,LandingPage,ai_agent_copy_label,"Copy Guide Link",,active
-landing.ai_agent.helper,landing,LandingPage,LandingPage,ai_agent_helper,"Or click to open the guide and copy manually.",,active
-landing.ai_agent.guide_url,landing,LandingPage,LandingPage,ai_agent_guide_url,"https://github.com/mm7894215/TokenTracker/blob/main/docs/AI_AGENT_INSTALL.md",,active
 landing.meta.title,landing,LandingPage,Meta,title,"Token Tracker — Token Usage Tracker for AI Agent CLIs",,active
 landing.meta.description,landing,LandingPage,Meta,description,"Automatically monitor token usage across Claude Code, Cursor, Codex, and more. Local-first, privacy-focused, and zero manual configuration.",,active
 landing.meta.og_site_name,landing,LandingPage,Meta,og_site_name,"Token Tracker",,active
@@ -80,54 +57,20 @@ share.meta.og_type,share,SharePage,Meta,og_type,"website",,active
 share.meta.og_image,share,SharePage,Meta,og_image,"https://www.tokentracker.cc/dashboard-dark.png",,active
 share.meta.og_url,share,SharePage,Meta,og_url,"https://www.tokentracker.cc/share",,active
 share.meta.twitter_card,share,SharePage,Meta,twitter_card,"summary_large_image",,active
-landing.seo.point1,landing,LandingPage,LandingPage,seo_point_1,"Auto-track AI CLI token usage with zero manual steps.",,active
-landing.seo.point2,landing,LandingPage,LandingPage,seo_point_2,"Matrix-style interface that highlights the signals you care about.",,active
-landing.seo.point3,landing,LandingPage,LandingPage,seo_point_3,"Universal AI CLI leaderboard to compare usage and rank.",,active
-landing.seo.roadmap,landing,LandingPage,LandingPage,seo_roadmap,"Native support for Codex, Claude Code, and Gemini CLI.",,active
-landing.signal.identity_probe,landing,LandingPage,SignalBox,title,"Identity_Probe",,active
-landing.signal.live_sniffer,landing,LandingPage,SignalBox,title,"LIVE_SNIFFER",,active
-landing.handle.label,landing,LandingPage,LandingPage,handle_label,"Set_Handle",,active
 landing.handle.placeholder,landing,LandingPage,LandingPage,handle_placeholder,"TRY '{{handle}}'",,active
 landing.rank.expectation,landing,LandingPage,LandingPage,rank_expectation,"RANK_EXPECTATION: {{rank}}",,active
 landing.rank.singularity,landing,LandingPage,LandingPage,rank_singularity,"APEX",,active
 landing.rank.unranked,landing,LandingPage,LandingPage,rank_unranked,"UNRANKED",,active
-landing.cta.initialize,landing,LandingPage,LandingPage,cta_primary,"View Dashboard",,active
-landing.cta.subtext,landing,LandingPage,LandingPage,cta_subtext,"Connect with GitHub",,active
 landing.cta.primary,landing,LandingPage,LandingPage,cta_primary,"View Dashboard",,active
 landing.cta.secondary,landing,LandingPage,LandingPage,cta_secondary,"GITHUB SOURCE",,active
-landing.cta.login_signup,landing,LandingPage,LandingPage,cta_login_signup,"Open Dashboard",,active
-landing.footer.link.manifesto,landing,LandingPage,LandingPage,footer_link_manifesto,"Manifesto",,active
-landing.footer.link.docs,landing,LandingPage,LandingPage,footer_link_docs,"Docs",,active
-landing.footer.link.security,landing,LandingPage,LandingPage,footer_link_security,"Security",,active
-landing.footer.system_ready,landing,LandingPage,LandingPage,footer_system_ready,"System_Ready // 2024 TokenTracker OS",,active
 
 
-shell.header.title,ui,MatrixShell,MatrixShell,header_title,"VIBE USAGE",,active
-shell.header.link_active,ui,MatrixShell,MatrixShell,header_link_active,"LINK_ACTIVE",,active
-shell.footer.help,ui,MatrixShell,MatrixShell,footer_help,"[F1] Help",,active
-shell.footer.neural_index,ui,MatrixShell,MatrixShell,footer_neural_index,"CORE_INDEX: 0.942.A1",,active
 
-backend.meta.status_label,components,BackendStatus,BackendStatus,meta_status,"status",,active
-backend.meta.host_label,components,BackendStatus,BackendStatus,meta_host,"host",,active
-backend.meta.checked_label,components,BackendStatus,BackendStatus,meta_checked,"checked",,active
-backend.meta.ok_label,components,BackendStatus,BackendStatus,meta_ok,"ok",,active
-backend.meta.http_label,components,BackendStatus,BackendStatus,meta_http,"http",,active
-backend.meta.error_label,components,BackendStatus,BackendStatus,meta_error,"error",,active
-backend.meta.click_refresh,components,BackendStatus,BackendStatus,meta_click,"click=refresh",,active
 
-status.link.stable,ui,ConnectionStatus,ConnectionStatus,label,"LINK: STABLE",,active
-status.link.unstable,ui,ConnectionStatus,ConnectionStatus,label,"LINK: WEAK",,active
-status.link.lost,ui,ConnectionStatus,ConnectionStatus,label,"LINK: LOST",,active
 
-boot.ascii_art,ui,BootScreen,BootScreen,ascii,"Loading...",,active
-boot.prompt,ui,BootScreen,BootScreen,prompt,"INITIALIZING DASHBOARD...",,active
-boot.skip_hint,ui,BootScreen,BootScreen,skip_hint,"Click to skip",,active
-boot.skip_aria,ui,BootScreen,BootScreen,aria_label,"Skip boot screen",,active
 
 landing.v2.hero.title_line1,landing,LandingPage,MarketingLanding,hero_title_1,"TRACK ALL YOUR",,active
 landing.v2.hero.title_line2,landing,LandingPage,MarketingLanding,hero_title_2,"AI TOKENS",,active
-landing.v2.hero.subtitle,landing,LandingPage,MarketingLanding,hero_subtitle,"UNIFIED USAGE DASHBOARD",,active
-landing.v2.install.btn_copy,landing,LandingPage,MarketingLanding,install_btn_copy,"COPY COMMAND",,active
 landing.v2.install.mac_cta,landing,LandingPage,MarketingLanding,mac_cta,"MAC APP (DMG)",,active
 landing.v2.models.title,landing,LandingPage,MarketingLanding,models_title,"SUPPORTED AI CLI TOOLS",,active
 landing.v2.compare.kicker,landing,LandingPage,MarketingLanding,compare_kicker,"SEAMLESS TRACKING",,active
@@ -153,63 +96,33 @@ landing.v2.models.agent.openclaw,landing,LandingPage,MarketingLanding,agent_open
 landing.v2.cta.primary,landing,LandingPage,MarketingLanding,cta_primary,"Open Dashboard",,active
 landing.v2.hero.subtagline,landing,LandingPage,MarketingLanding,hero_subtagline,"Automatically monitor token usage across Claude Code, Cursor, Codex, and more. Local-first, privacy-focused, and zero manual configuration.",,active
 
-system.header.title_default,ui,SystemHeader,SystemHeader,title_default,"VIBE_OS_v9.0",,active
 
-signalbox.title_default,ui,SignalBox,SignalBox,title_default,"LINK",,active
 
-sparkline.aria_label,components,Sparkline,Sparkline,aria_label,"Daily token usage sparkline",,active
 
-identity_card.title_default,ui,IdentityCard,IdentityCard,title_default,"Identity",,active
-identity_card.name_default,ui,IdentityCard,IdentityCard,name_default,"You",,active
-identity_card.unknown,ui,IdentityCard,IdentityCard,unknown_label,"Unknown",,active
-identity_card.decrypt,ui,IdentityCard,IdentityCard,decrypt_label,"Reveal identity",,active
 identity_card.rank_label,ui,IdentityCard,IdentityCard,rank_label,"Started",,active
 identity_card.streak_label,ui,IdentityCard,IdentityCard,streak_label,"Active days",,active
 identity_card.rank_placeholder,ui,IdentityCard,IdentityCard,rank_placeholder,"—",,active
 identity_card.streak_value,ui,IdentityCard,IdentityCard,streak_value,"{{days}} DAY",,active
-identity_card.subscriptions_label,ui,IdentityCard,IdentityCard,subscriptions_label,"SUBSCRIPTIONS",,active
-identity_card.subscription_item,ui,IdentityCard,IdentityCard,subscription_item,"{{tool}} {{plan}}",,active
 
-identity_panel.badge,ui,IdentityPanel,IdentityPanel,badge,"VU",,active
-identity_panel.level,ui,IdentityPanel,IdentityPanel,level,"Level 5",,active
-identity_panel.rank_label,ui,IdentityPanel,IdentityPanel,rank_label,"START",,active
-identity_panel.streak_label,ui,IdentityPanel,IdentityPanel,streak_label,"ACTIVE",,active
-identity_panel.rank_placeholder,ui,IdentityPanel,IdentityPanel,rank_placeholder,"—",,active
-identity_panel.streak_value,ui,IdentityPanel,IdentityPanel,streak_value,"{{days}} DAY",,active
 
-usage.panel.title,ui,UsagePanel,UsagePanel,title,"Token Usage",,active
 dashboard.core_index.collapse_label,dashboard,DashboardPage,UsagePanel,toggle,"▾",,active
 dashboard.core_index.expand_label,dashboard,DashboardPage,UsagePanel,toggle,"▸",,active
 dashboard.core_index.collapse_aria,dashboard,DashboardPage,UsagePanel,toggle_aria,"Collapse model breakdown",,active
 dashboard.core_index.expand_aria,dashboard,DashboardPage,UsagePanel,toggle_aria,"Expand model breakdown",,active
-usage.summary.total_system_output,ui,UsagePanel,UsagePanel,summary_label_total_system,"Total tokens",,active
 usage.summary.total,ui,UsagePanel,UsagePanel,summary_label_total,"Total tokens",,active
 usage.metric.total,ui,UsagePanel,UsagePanel,metric_total,"Total",,active
-usage.metric.total_cost,ui,UsagePanel,UsagePanel,metric_total_cost,"Total cost (USD)",,active
 usage.metric.input,ui,UsagePanel,UsagePanel,metric_input,"Input",,active
 usage.metric.output,ui,UsagePanel,UsagePanel,metric_output,"Output",,active
 usage.metric.cached_input,ui,UsagePanel,UsagePanel,metric_cached_input,"Cached input",,active
 usage.metric.reasoning_output,ui,UsagePanel,UsagePanel,metric_reasoning_output,"Reasoning output",,active
-usage.metric.cached_short,ui,UsagePanel,UsagePanel,metric_cached_short,"Cached",,active
-usage.metric.reasoning_short,ui,UsagePanel,UsagePanel,metric_reasoning_short,"Reasoning",,active
-usage.button.loading,ui,UsagePanel,UsagePanel,button_loading,"Loading…",,active
 usage.button.refresh,ui,UsagePanel,UsagePanel,button_refresh,"Refresh",,active
-usage.cost_info.icon,ui,UsagePanel,UsagePanel,cost_info_icon,"[ KEY ]",,active
-usage.cost_info.label,ui,UsagePanel,UsagePanel,cost_info_label,"Detail",,active
-usage.range_label,ui,UsagePanel,UsagePanel,range_label,"Range: {{range}}",,active
 
 dashboard.rolling.title,ui,RollingUsagePanel,RollingUsagePanel,title,"Recent Activity",,active
 dashboard.rolling.last_7d,ui,RollingUsagePanel,RollingUsagePanel,label_last_7d,"Last 7 days",,active
 dashboard.rolling.last_30d,ui,RollingUsagePanel,RollingUsagePanel,label_last_30d,"Last 30 days",,active
 dashboard.rolling.avg_active_day,ui,RollingUsagePanel,RollingUsagePanel,label_avg_active_day,"Daily average",,active
 
-dashboard.model_breakdown.title,ui,NeuralDivergenceMap,NeuralDivergenceMap,title,"Model Breakdown",,active
-dashboard.model_breakdown.footer,ui,NeuralDivergenceMap,NeuralDivergenceMap,footer,"Multi-Engine Load Balancing // Active Session",,active
-dashboard.model_breakdown.usage_label,ui,NeuralAdaptiveFleet,NeuralAdaptiveFleet,usage_label,"USAGE: {{value}}",,active
-dashboard.top_models.title,ui,TopModelsPanel,TopModelsPanel,title,"Top Models",,active
-dashboard.top_models.subtitle,ui,TopModelsPanel,TopModelsPanel,subtitle,"By token usage",,active
 dashboard.projects.title,ui,ProjectUsagePanel,ProjectUsagePanel,title,"Project Usage",,active
-dashboard.projects.subtitle,ui,ProjectUsagePanel,ProjectUsagePanel,subtitle,"Your most active repositories",,active
 dashboard.projects.tokens_label,ui,ProjectUsagePanel,ProjectUsagePanel,tokens_label,"Tokens",,active
 dashboard.projects.stars_label,ui,ProjectUsagePanel,ProjectUsagePanel,stars_label,"STAR",,active
 dashboard.projects.limit_label,ui,ProjectUsagePanel,ProjectUsagePanel,limit_label,"Show",,active
@@ -218,28 +131,13 @@ dashboard.projects.limit_top_3,ui,ProjectUsagePanel,ProjectUsagePanel,limit_top_
 dashboard.projects.limit_top_6,ui,ProjectUsagePanel,ProjectUsagePanel,limit_top_6,"TOP 6",,active
 dashboard.projects.limit_top_10,ui,ProjectUsagePanel,ProjectUsagePanel,limit_top_10,"TOP 10",,active
 dashboard.projects.empty,ui,ProjectUsagePanel,ProjectUsagePanel,empty,"No public repositories",,active
-dashboard.upgrade_alert.title,ui,UpgradeAlertModal,UpgradeAlertModal,title,"Update available",,active
-dashboard.upgrade_alert.subtitle,ui,UpgradeAlertModal,UpgradeAlertModal,subtitle,"TokenTracker v{{required}} is now available.",,active
-dashboard.upgrade_alert.subtitle_generic,ui,UpgradeAlertModal,UpgradeAlertModal,subtitle_generic,"A new version of TokenTracker is available.",,active
-dashboard.upgrade_alert.prompt,ui,UpgradeAlertModal,UpgradeAlertModal,prompt,"$",,active
-dashboard.upgrade_alert.sparkle,ui,UpgradeAlertModal,UpgradeAlertModal,sparkle,"✨",,active
-dashboard.upgrade_alert.install_command,ui,UpgradeAlertModal,UpgradeAlertModal,install_command,"npx --yes tokentracker-cli init",,active
-dashboard.upgrade_alert.copy,ui,UpgradeAlertModal,UpgradeAlertModal,copy,"[ COPY ]",,active
-dashboard.upgrade_alert.copied,ui,UpgradeAlertModal,UpgradeAlertModal,copied,"[ COPIED ]",,active
-dashboard.upgrade_alert.ignore,ui,UpgradeAlertModal,UpgradeAlertModal,ignore,"Dismiss",,active
 dashboard.widgets.title,dashboard,DashboardPage,WidgetOnboardingCard,title,"Desktop Widgets",,active
 dashboard.widgets.hint,dashboard,DashboardPage,WidgetOnboardingCard,hint,"Right-click your desktop → Edit Widgets → search ""TokenTracker""",,active
 dashboard.widgets.dismiss_aria,dashboard,DashboardPage,WidgetOnboardingCard,dismiss_aria,"Dismiss widget intro",,active
 widgets.page.title,dashboard,WidgetsPage,WidgetsPage,title,"Widgets",,active
-widgets.page.subtitle,dashboard,WidgetsPage,WidgetsPage,subtitle,"Pin token usage to your menu bar and desktop.",,active
 widgets.cta.open_gallery,dashboard,WidgetsPage,WidgetsPage,cta_open_gallery,"Open Widget Gallery",,active
 widgets.cta.download,dashboard,WidgetsPage,WidgetsPage,cta_download,"Download Mac App",,active
 widgets.cta.macos_only,dashboard,WidgetsPage,WidgetsPage,cta_macos_only,"macOS only",,active
-widgets.hero.aria,dashboard,WidgetsPage,WidgetsPage,hero_aria,"Usage widget preview",,active
-widgets.hero.annotation,dashboard,WidgetsPage,WidgetsPage,hero_annotation,"Right-click your desktop · Edit Widgets · search ""TokenTracker""",,active
-widgets.section.more,dashboard,WidgetsPage,WidgetsPage,section_more,"Also included",,active
-widgets.menubar.name,dashboard,WidgetsPage,MenuBarDisplayCard,name,"Menu Bar",,active
-widgets.menubar.description,dashboard,WidgetsPage,MenuBarDisplayCard,description,"Choose the two live fields shown beside the menu bar icon.",,active
 widgets.menubar.section.title,dashboard,WidgetsPage,WidgetsPage,menubar_section_title,"Menu Bar",,active
 widgets.gallery.section.title,dashboard,WidgetsPage,WidgetsPage,gallery_section_title,"Desktop Widgets",,active
 widgets.summary.name,dashboard,WidgetsPage,WidgetsPage,summary_name,"Usage Summary",,active
@@ -252,55 +150,12 @@ widgets.limits.name,dashboard,WidgetsPage,WidgetsPage,limits_name,"Usage Limits"
 widgets.limits.description,dashboard,WidgetsPage,WidgetsPage,limits_desc,"Live rate-limit progress for Claude, Codex, Cursor, Gemini and more.",,active
 dashboard.cost_breakdown.title,ui,CostAnalysisModal,CostAnalysisModal,title,"Cost Breakdown",,active
 dashboard.cost_breakdown.total_label,ui,CostAnalysisModal,CostAnalysisModal,total_label,"Estimated Total Cost",,active
-dashboard.cost_breakdown.calc_prefix,ui,CostAnalysisModal,CostAnalysisModal,calc_prefix,"CALC:",,deprecated
-dashboard.cost_breakdown.calc_dynamic,ui,CostAnalysisModal,CostAnalysisModal,calc_dynamic,"DYNAMIC",,deprecated
 dashboard.cost_breakdown.close,ui,CostAnalysisModal,CostAnalysisModal,close_label,"Close",,active
-dashboard.cost_breakdown.footer,ui,CostAnalysisModal,CostAnalysisModal,footer,"Estimated based on public pricing",,active
 
-trend.chart.unit_label,ui,TrendChart,TrendChart,unit_label,"TKNS",,active
-trend.chart.left_label,ui,TrendChart,TrendChart,left_label,"T-24H",,active
-trend.chart.right_label,ui,TrendChart,TrendChart,right_label,"Realtime_Flow",,active
-trend.chart.empty,ui,TrendChart,TrendChart,empty_state,"No trend data.",,active
-trend.chart.peak,ui,TrendChart,TrendChart,peak_label,"Peak: {{value}} {{unit}}",,active
 
 trend.monitor.label,ui,TrendMonitor,TrendMonitor,label,"Usage Trend",,active
-trend.monitor.max_label,ui,TrendMonitor,TrendMonitor,max_label,"MAX: {{value}}",,active
-trend.monitor.avg_label,ui,TrendMonitor,TrendMonitor,avg_label,"AVG: {{value}}",,active
-trend.monitor.now_label,ui,TrendMonitor,TrendMonitor,now_label,"NOW",,active
-trend.monitor.fallback.hour_00,ui,TrendMonitor,TrendMonitor,x_label,"00:00",,active
-trend.monitor.fallback.hour_06,ui,TrendMonitor,TrendMonitor,x_label,"06:00",,active
-trend.monitor.fallback.hour_12,ui,TrendMonitor,TrendMonitor,x_label,"12:00",,active
-trend.monitor.fallback.hour_18,ui,TrendMonitor,TrendMonitor,x_label,"18:00",,active
-trend.monitor.fallback.hour_23,ui,TrendMonitor,TrendMonitor,x_label,"23:00",,active
-trend.monitor.fallback.tminus_24,ui,TrendMonitor,TrendMonitor,x_label,"-24H",,active
-trend.monitor.fallback.tminus_18,ui,TrendMonitor,TrendMonitor,x_label,"-18H",,active
-trend.monitor.fallback.tminus_12,ui,TrendMonitor,TrendMonitor,x_label,"-12H",,active
-trend.monitor.fallback.tminus_6,ui,TrendMonitor,TrendMonitor,x_label,"-6H",,active
-trend.monitor.tooltip.utc,ui,TrendMonitor,TrendMonitor,tooltip_utc,"UTC",,active
-trend.monitor.tooltip.tokens,ui,TrendMonitor,TrendMonitor,tooltip_tokens,"tokens",,active
-trend.monitor.tooltip.hour,ui,TrendMonitor,TrendMonitor,tooltip_hour,"{{date}} {{hour}}:00 {{tz}}",,active
-trend.monitor.tooltip.day,ui,TrendMonitor,TrendMonitor,tooltip_day,"{{date}} {{tz}}",,active
-trend.monitor.tooltip.month,ui,TrendMonitor,TrendMonitor,tooltip_month,"{{date}} {{tz}}",,active
-trend.monitor.tooltip.hour_no_tz,ui,TrendMonitor,TrendMonitor,tooltip_hour_no_tz,"{{date}} {{hour}}:00",,active
-trend.monitor.tooltip.day_no_tz,ui,TrendMonitor,TrendMonitor,tooltip_day_no_tz,"{{date}}",,active
-trend.monitor.tooltip.month_no_tz,ui,TrendMonitor,TrendMonitor,tooltip_month_no_tz,"{{date}}",,active
-trend.monitor.tooltip.value,ui,TrendMonitor,TrendMonitor,tooltip_value,"{{value}} {{unit}}",,active
-trend.monitor.month.jan,ui,TrendMonitor,TrendMonitor,month_label,"JAN",,active
-trend.monitor.month.feb,ui,TrendMonitor,TrendMonitor,month_label,"FEB",,active
-trend.monitor.month.mar,ui,TrendMonitor,TrendMonitor,month_label,"MAR",,active
-trend.monitor.month.apr,ui,TrendMonitor,TrendMonitor,month_label,"APR",,active
-trend.monitor.month.may,ui,TrendMonitor,TrendMonitor,month_label,"MAY",,active
-trend.monitor.month.jun,ui,TrendMonitor,TrendMonitor,month_label,"JUN",,active
-trend.monitor.month.jul,ui,TrendMonitor,TrendMonitor,month_label,"JUL",,active
-trend.monitor.month.aug,ui,TrendMonitor,TrendMonitor,month_label,"AUG",,active
-trend.monitor.month.sep,ui,TrendMonitor,TrendMonitor,month_label,"SEP",,active
-trend.monitor.month.oct,ui,TrendMonitor,TrendMonitor,month_label,"OCT",,active
-trend.monitor.month.nov,ui,TrendMonitor,TrendMonitor,month_label,"NOV",,active
-trend.monitor.month.dec,ui,TrendMonitor,TrendMonitor,month_label,"DEC",,active
 
 heatmap.title,ui,ActivityHeatmap,ActivityHeatmap,title,"Activity Heatmap",,active
-heatmap.subtitle,ui,ActivityHeatmap,ActivityHeatmap,subtitle,"Your AI usage over the past year",,active
-heatmap.aria_label,ui,ActivityHeatmap,ActivityHeatmap,aria_label,"Activity heatmap",,active
 heatmap.empty,ui,ActivityHeatmap,ActivityHeatmap,empty_state,"No activity data yet.",,active
 heatmap.legend.less,ui,ActivityHeatmap,ActivityHeatmap,legend_less,"Less",,active
 heatmap.legend.more,ui,ActivityHeatmap,ActivityHeatmap,legend_more,"More",,active
@@ -327,11 +182,8 @@ heatmap.day.thu,ui,ActivityHeatmap,ActivityHeatmap,day_label,"Thu",,active
 heatmap.day.fri,ui,ActivityHeatmap,ActivityHeatmap,day_label,"Fri",,active
 heatmap.day.sat,ui,ActivityHeatmap,ActivityHeatmap,day_label,"Sat",,active
 
-archive.title,ui,ArchiveHeatmap,ArchiveHeatmap,title,"Archive_Grid",,active
-archive.footer.left,ui,ArchiveHeatmap,ArchiveHeatmap,footer_left,"Yearly_Grid",,active
 
 
-daily.table.aria_label,dashboard,DashboardPage,DashboardPage,aria_label,"Daily totals table",,active
 
 daily.sort.date.label,dashboard,DashboardPage,DailyTable,sort_label,"Date",,active
 daily.sort.date.title,dashboard,DashboardPage,DailyTable,sort_title,"Sort by Date",,active
@@ -349,12 +201,9 @@ daily.sort.conversations.label,dashboard,DashboardPage,DailyTable,sort_label,"Co
 daily.sort.conversations.title,dashboard,DashboardPage,DailyTable,sort_title,"Sort by Conversations",,active
 details.pagination.prev,dashboard,DashboardPage,DailyTable,pagination_prev,"Prev",,active
 details.pagination.next,dashboard,DashboardPage,DailyTable,pagination_next,"Next",,active
-details.pagination.page,dashboard,DashboardPage,DailyTable,pagination_label,"Page {{page}}/{{total}}",,active
 
 
-leaderboard.nav.open,dashboard,DashboardPage,Header,nav_leaderboard,"$ Leaderboard",,active
 
-leaderboard.nav.back,dashboard,LeaderboardPage,Header,nav_back,"$ Dashboard",,active
 leaderboard.profile.nav.back,dashboard,LeaderboardProfilePage,Header,nav_back,"$ Leaderboard",,active
 leaderboard.title,dashboard,LeaderboardPage,LeaderboardPage,title,"Leaderboard",,active
 leaderboard.range,dashboard,LeaderboardPage,LeaderboardPage,range,"UTC {{period}} · {{from}} – {{to}}",,active
@@ -364,26 +213,12 @@ leaderboard.generated_at,dashboard,LeaderboardPage,LeaderboardPage,generated_at,
 leaderboard.period.week,dashboard,LeaderboardPage,LeaderboardPage,period_week,"Week",,active
 leaderboard.period.month,dashboard,LeaderboardPage,LeaderboardPage,period_month,"Month",,active
 leaderboard.period.total,dashboard,LeaderboardPage,LeaderboardPage,period_total,"All",,active
-leaderboard.metric.all,dashboard,LeaderboardPage,LeaderboardPage,metric_all,"All",,active
-leaderboard.metric.gpt,dashboard,LeaderboardPage,LeaderboardPage,metric_gpt,"GPT",,active
-leaderboard.metric.claude,dashboard,LeaderboardPage,LeaderboardPage,metric_claude,"Claude",,active
 
 leaderboard.me_label,dashboard,LeaderboardPage,LeaderboardPage,me_label,"You",,active
 leaderboard.anon_label,dashboard,LeaderboardPage,LeaderboardPage,anon_label,"Anonymous",,active
-leaderboard.public_profile.label,dashboard,LeaderboardPage,LeaderboardPage,public_profile_label,"Public profile",,active
-leaderboard.public_profile.status.enabled,dashboard,LeaderboardPage,LeaderboardPage,public_profile_status,"On",,active
-leaderboard.public_profile.status.disabled,dashboard,LeaderboardPage,LeaderboardPage,public_profile_status,"Off",,active
 leaderboard.error.unknown,dashboard,LeaderboardPage,LeaderboardPage,error_unknown,"Unknown error",,active
-leaderboard.me_card.title,dashboard,LeaderboardPage,AsciiBox,me_card_title,"My rank",,active
-leaderboard.me_card.subtitle,dashboard,LeaderboardPage,AsciiBox,me_card_subtitle,"Weekly",,active
 
-leaderboard.profile.card.title,dashboard,LeaderboardProfilePage,AsciiBox,card_title,"Profile",,active
-leaderboard.profile.card.subtitle,dashboard,LeaderboardProfilePage,AsciiBox,card_subtitle,"{{period}}",,active
 
-leaderboard.top10.title,dashboard,LeaderboardPage,AsciiBox,top10_title,"Top 10",,active
-leaderboard.top10.subtitle,dashboard,LeaderboardPage,AsciiBox,top10_subtitle,"Top 9 plus you",,active
-leaderboard.table.title,dashboard,LeaderboardPage,AsciiBox,table_title,"All ranks",,active
-leaderboard.table.subtitle,dashboard,LeaderboardPage,AsciiBox,table_subtitle,"By page",,active
 
 leaderboard.loading,dashboard,LeaderboardPage,LeaderboardPage,state_loading,"Loading…",,active
 leaderboard.empty,dashboard,LeaderboardPage,LeaderboardPage,state_empty,"No data",,active
@@ -401,47 +236,25 @@ leaderboard.column.hermes,dashboard,LeaderboardPage,LeaderboardPage,column_herme
 leaderboard.column.kiro,dashboard,LeaderboardPage,LeaderboardPage,column_kiro,"Kiro",,active
 leaderboard.column.copilot,dashboard,LeaderboardPage,LeaderboardPage,column_copilot,"GitHub Copilot",,active
 leaderboard.column.kimi,dashboard,LeaderboardPage,LeaderboardPage,column_kimi,"Kimi Code",,active
-leaderboard.column.codebuddy,dashboard,LeaderboardPage,LeaderboardPage,column_codebuddy,"CodeBuddy",,active
-leaderboard.column.omp,dashboard,LeaderboardPage,LeaderboardPage,column_omp,"oh-my-pi",,active
-leaderboard.column.pi,dashboard,LeaderboardPage,LeaderboardPage,column_pi,"pi",,active
 limits.copilot.otelHint.title,dashboard,LimitsPage,LimitsPage,otel_hint_title,"Track Copilot token usage",,active
 limits.copilot.otelHint.body,dashboard,LimitsPage,LimitsPage,otel_hint_body,"Limits load via your GitHub OAuth token. To also record per-token usage, enable Copilot's OpenTelemetry export and add these lines to your shell profile (~/.zshrc or ~/.bashrc):",,active
 limits.copilot.otelHint.copy,dashboard,LimitsPage,LimitsPage,otel_hint_copy,"Copy",,active
 limits.copilot.otelHint.copied,dashboard,LimitsPage,LimitsPage,otel_hint_copied,"Copied",,active
 leaderboard.column.supplemental,dashboard,LeaderboardPage,LeaderboardPage,column_supplemental,"Supplemental",,active
 
-landing.oauth.google,landing,LandingPage,MarketingLanding,oauth_google,"Continue with Google",,active
-landing.oauth.github,landing,LandingPage,MarketingLanding,oauth_github,"Continue with GitHub",,active
 
 leaderboard.pagination.prev,dashboard,LeaderboardPage,LeaderboardPage,pagination_prev,"Previous",,active
 leaderboard.pagination.next,dashboard,LeaderboardPage,LeaderboardPage,pagination_next,"Next",,active
 leaderboard.pagination.ellipsis,dashboard,LeaderboardPage,LeaderboardPage,pagination_ellipsis,"…",,active
 leaderboard.pagination.page_unknown,dashboard,LeaderboardPage,LeaderboardPage,pagination_unknown,"Page {{page}}",,active
 
-dashboard.sign_out,dashboard,DashboardPage,Header,sign_out,"Sign out",,active
-dashboard.not_signed_in,dashboard,DashboardPage,Header,not_signed_in,"Not signed in",,active
 
-dashboard.footer.active,dashboard,DashboardPage,Footer,footer_active,"{{range}} • click Refresh to reload",,active
-dashboard.footer.auth,dashboard,DashboardPage,Footer,footer_auth,"Sign in to view usage",,active
-dashboard.footer.right,dashboard,DashboardPage,Footer,footer_right,"Token Tracker dashboard",,active
 
-dashboard.auth_required.title,dashboard,DashboardPage,AsciiBox,title,"Authentication required",,active
-dashboard.auth_required.subtitle,dashboard,DashboardPage,AsciiBox,subtitle,"Sign in to continue",,active
-dashboard.auth_required.body,dashboard,DashboardPage,AsciiBox,body,"Sign in / sign up to view your daily token usage (UTC).",,active
 
-dashboard.session_expired.title,dashboard,DashboardPage,AsciiBox,title,"Session expired",,active
-dashboard.session_expired.subtitle,dashboard,DashboardPage,AsciiBox,subtitle,"Sign in again",,active
-dashboard.session_expired.body,dashboard,DashboardPage,AsciiBox,body,"Your session expired.",,active
-dashboard.session_expired.body_tail,dashboard,DashboardPage,AsciiBox,body,"Sign in again to refresh private usage data.",,active
 dashboard.session_expired.copy_label,dashboard,DashboardPage,AsciiBox,body,"run npx --yes tokentracker-cli init",,active
 dashboard.session_expired.copied,dashboard,DashboardPage,AsciiBox,body,"copied",,active
 
-dashboard.auth_optional.title,dashboard,DashboardPage,AsciiBox,title,"Connect your account",,active
-dashboard.auth_optional.subtitle,dashboard,DashboardPage,AsciiBox,subtitle,"Sync usage across devices",,active
-dashboard.auth_optional.body,dashboard,DashboardPage,AsciiBox,body,"Sign in / sign up to sync real usage.",,active
 
-dashboard.install.title,dashboard,DashboardPage,AsciiBox,title,"Install",,active
-dashboard.install.subtitle,dashboard,DashboardPage,AsciiBox,subtitle,"CLI",,active
 dashboard.install.prompt,dashboard,DashboardPage,AsciiBox,install_prompt,"Install Node.js 18+ then run:",,active
 dashboard.install.cmd.init,dashboard,DashboardPage,AsciiBox,install_cmd,"npx --yes tokentracker-cli init",,active
 dashboard.install.cmd.init_link_code,dashboard,DashboardPage,AsciiBox,install_cmd,"npx --yes tokentracker-cli init --link-code {{link_code}}",,active
@@ -452,28 +265,15 @@ dashboard.install.link_code.loading,dashboard,DashboardPage,AsciiBox,install_sta
 dashboard.install.link_code.failed,dashboard,DashboardPage,AsciiBox,install_status,"Private code unavailable",,active
 dashboard.install.cmd.sync,dashboard,DashboardPage,AsciiBox,install_cmd,"npx --yes tokentracker-cli sync",,active
 
-dashboard.public_view.title,dashboard,DashboardPage,AsciiBox,title,"Public profile",,active
-dashboard.public_view.status.enabled,dashboard,DashboardPage,AsciiBox,status,"On",,active
-dashboard.public_view.status.disabled,dashboard,DashboardPage,AsciiBox,status,"Off",,active
-dashboard.public_view.action.copy,dashboard,DashboardPage,AsciiBox,action_label,"Copy share link",,active
-dashboard.public_view.action.copied,dashboard,DashboardPage,AsciiBox,action_label,"Copied",,active
-dashboard.public_view.action.enable,dashboard,DashboardPage,AsciiBox,action_label,"Enable public profile",,active
-dashboard.public_view.action.disable,dashboard,DashboardPage,AsciiBox,action_label,"Disable public profile",,active
-dashboard.public_view.invalid.title,dashboard,DashboardPage,AsciiBox,title,"Invalid link",,active
-dashboard.public_view.invalid.body,dashboard,DashboardPage,AsciiBox,body,"This public link is invalid or has been revoked.",,active
 
-dashboard.activity.title,dashboard,DashboardPage,AsciiBox,title,"Activity",,active
-dashboard.activity.subtitle,dashboard,DashboardPage,AsciiBox,subtitle,"52 weeks, local",,active
 
 dashboard.daily.title,dashboard,DashboardPage,AsciiBox,title,"Daily Breakdown",,active
-dashboard.daily.subtitle,dashboard,DashboardPage,AsciiBox,subtitle,"Explore your usage by day",,active
 dashboard.daily.empty,dashboard,DashboardPage,AsciiBox,empty_state,"No data yet. Use your AI CLI then run {{cmd}}.",,active
 
 dashboard.identity.title,dashboard,DashboardPage,IdentityCard,title,"Your Profile",,active
 dashboard.identity.subtitle,dashboard,DashboardPage,IdentityCard,subtitle,"Track your coding journey",,active
 dashboard.identity.fallback,dashboard,DashboardPage,IdentityCard,handle_fallback,"Anonymous",,active
 
-dashboard.version.label,dashboard,App,VersionBadge,label,"Version",,active
 
 dashboard.screenshot.title_line1,dashboard,DashboardPage,ScreenshotTitle,title_line,"Coding Agent",,active
 dashboard.screenshot.title_line2,dashboard,DashboardPage,ScreenshotTitle,title_line,"2025 Wrapped",,active
@@ -482,15 +282,6 @@ dashboard.screenshot.twitter_label,dashboard,DashboardPage,ScreenshotShare,aria_
 dashboard.screenshot.twitter_hint,dashboard,DashboardPage,ScreenshotShare,helper_text,"Auto-copies image to clipboard",,active
 dashboard.screenshot.twitter_text,dashboard,DashboardPage,ScreenshotShare,share_text,"{{total_tokens}} tokens on the record.\n{{model_name}} led with {{model_percent}}%.\n\nMy AI usage, unaudited →\ntokentracker.cc",,active
 
-live_sniffer.log.system,ui,LiveSniffer,LiveSniffer,log,"[SYSTEM] KERNEL_LINK_ESTABLISHED",,active
-live_sniffer.log.socket,ui,LiveSniffer,LiveSniffer,log,"[SOCKET] LISTENING_ON_LOCAL_CLI_PIPE...",,active
-live_sniffer.event.intercepted,ui,LiveSniffer,LiveSniffer,event,"> INTERCEPTED: AI_COMPLETION_EVENT",,active
-live_sniffer.event.quantifying,ui,LiveSniffer,LiveSniffer,event,"> QUANTIFYING: +64 NEURAL_TOKENS",,active
-live_sniffer.event.analysis,ui,LiveSniffer,LiveSniffer,event,"> ANALYSIS: HIGH_VIBE_FLOW_DETECTED",,active
-live_sniffer.event.sync,ui,LiveSniffer,LiveSniffer,event,"> SYNC: UPLOADING_TO_CORE_RELAY",,active
-live_sniffer.event.batch,ui,LiveSniffer,LiveSniffer,event,"[STATUS] BATCH_TRANSMISSION_COMPLETE",,active
-live_sniffer.event.hooking,ui,LiveSniffer,LiveSniffer,event,"> HOOKING: AI_CLI_PIPE_LINK",,active
-live_sniffer.event.capture,ui,LiveSniffer,LiveSniffer,event,"> CAPTURE: +128 NEURAL_TOKENS",,active
 nav.usage,shared,*,Sidebar,nav_usage,"Tokens",,active
 nav.limits,shared,*,Sidebar,nav_limits,"Limits",,active
 nav.widgets,shared,*,Sidebar,nav_widgets,"macOS Widgets",,active
@@ -502,10 +293,6 @@ nav.close_menu,shared,*,Sidebar,nav_close_menu,"Close navigation menu",,active
 nav.aside_label,shared,*,Sidebar,aside_label,"Main navigation",,active
 nav.nav_label,shared,*,Sidebar,nav_label,"Primary",,active
 limits.page.subtitle,ui,LimitsPage,LimitsPage,subtitle,"Rate limits and quota usage across your AI tools.",,active
-limits.settings.title,ui,LimitsPage,LimitsSettingsPanel,title,"Display Settings",,active
-limits.settings.subtitle,ui,LimitsPage,LimitsSettingsPanel,subtitle,"Choose which providers to show and their order.",,active
-limits.settings.move_up,ui,LimitsPage,LimitsSettingsPanel,move_up,"Move up",,active
-limits.settings.move_down,ui,LimitsPage,LimitsSettingsPanel,move_down,"Move down",,active
 limits.settings.toggle_visible,ui,LimitsPage,LimitsSettingsPanel,toggle_visible,"Toggle visibility",,active
 limits.page.openSettings,ui,LimitsPage,LimitsPage,open_settings,"Display settings",,active
 nav.group.general,shared,*,Sidebar,group_general,"General",,active
@@ -518,7 +305,6 @@ settings.page.subtitle,ui,SettingsPage,SettingsPage,subtitle,"Manage your accoun
 settings.section.appearance,ui,SettingsPage,SettingsPage,sec_appearance,"Appearance",,active
 settings.section.account,ui,SettingsPage,SettingsPage,sec_account,"Account",,active
 settings.section.limits,ui,SettingsPage,SettingsPage,sec_limits,"Limits Display",,active
-settings.section.limitsSubtitle,ui,SettingsPage,SettingsPage,sec_limits_sub,"Reorder providers and choose which ones appear on the Limits page.",,active
 settings.appearance.theme.label,ui,SettingsPage,SettingsPage,theme_label,"Theme",,active
 settings.appearance.theme.hint,ui,SettingsPage,SettingsPage,theme_hint,"Choose how Token Tracker looks across the dashboard.",,active
 settings.appearance.theme.light,ui,SettingsPage,SettingsPage,theme_light,"Light",,active
@@ -533,8 +319,6 @@ settings.account.cloudSync,ui,SettingsPage,SettingsPage,cloud_sync,"Cloud sync",
 settings.account.cloudSyncHint,ui,SettingsPage,SettingsPage,cloud_sync_hint,"Upload local usage to your Token Tracker cloud account.",,active
 settings.account.publicProfile,ui,SettingsPage,SettingsPage,public_profile,"Public profile",,active
 settings.account.publicProfileHint,ui,SettingsPage,SettingsPage,public_profile_hint,"Show your usage on the public leaderboard.",,active
-settings.account.anonymous,ui,SettingsPage,SettingsPage,anonymous,"Anonymous",,active
-settings.account.anonymousHint,ui,SettingsPage,SettingsPage,anonymous_hint,"Hide your name and avatar from the leaderboard.",,active
 settings.account.displayNameAnonymousHint,ui,SettingsPage,SettingsPage,display_name_anon_hint,"Anonymous — your name and avatar are hidden on the leaderboard",,active
 settings.account.displayNameDisabledWhileAnon,ui,SettingsPage,SettingsPage,display_name_disabled,"Turn on the switch first to edit your name",,active
 settings.account.githubUrl,ui,SettingsPage,SettingsPage,github_url,"GitHub profile",,active
@@ -567,7 +351,6 @@ settings.account.signOut,ui,SettingsPage,SettingsPage,sign_out,"Sign out",,activ
 settings.account.signIn,ui,SettingsPage,SettingsPage,sign_in,"Sign in",,active
 settings.account.signedOutHint,ui,SettingsPage,SettingsPage,signed_out_hint,"Sign in to manage cloud sync and leaderboard preferences.",,active
 settings.section.menubar,ui,SettingsPage,SettingsPage,sec_menubar,"Menu Bar App",,active
-settings.section.menubarSubtitle,ui,SettingsPage,SettingsPage,sec_menubar_sub,"Preferences for the macOS menu bar app, mirroring the right-click menu.",,active
 settings.menubar.showStats,ui,SettingsPage,SettingsPage,mb_show_stats,"Show stats in menu bar",,active
 settings.menubar.showStatsHint,ui,SettingsPage,SettingsPage,mb_show_stats_hint,"Display today's token count and cost beside the menu bar icon.",,active
 settings.menubar.animatedIcon,ui,SettingsPage,SettingsPage,mb_anim,"Animated icon",,active
@@ -578,9 +361,7 @@ settings.menubar.syncNow,ui,SettingsPage,SettingsPage,mb_sync_now,"Sync now",,ac
 settings.menubar.syncNowHint,ui,SettingsPage,SettingsPage,mb_sync_now_hint,"Trigger an immediate parse and upload of local AI tool logs.",,active
 settings.menubar.syncing,ui,SettingsPage,SettingsPage,mb_syncing,"Syncing…",,active
 settings.menubar.updates,ui,SettingsPage,SettingsPage,mb_updates,"Updates",,active
-settings.menubar.updatesHint,ui,SettingsPage,SettingsPage,mb_updates_hint,"Check GitHub for a newer release.",,active
 settings.menubar.checkUpdates,ui,SettingsPage,SettingsPage,mb_check_updates,"Check for updates",,active
-menubar.preview.icon_only,ui,WidgetsPage,MenuBarDisplayCard,icon_only,"Icon only",,active
 menubar.slot.primary,ui,WidgetsPage,MenuBarDisplayCard,slot_primary,"Primary slot",,active
 menubar.slot.secondary,ui,WidgetsPage,MenuBarDisplayCard,slot_secondary,"Secondary slot",,active
 menubar.native_only,ui,WidgetsPage,MenuBarDisplayCard,native_only,"Open TokenTrackerBar for macOS to edit the live menu bar display.",,active
@@ -693,7 +474,6 @@ skills.page.title,ui,SkillsPage,SkillsPage,title,Skills,,active
 skills.tab.my,ui,SkillsPage,SkillsPage,tab_my,My Skills,,active
 skills.tab.browse,ui,SkillsPage,SkillsPage,tab_browse,Browse,,active
 skills.action.refresh,ui,SkillsPage,SkillsPage,action_refresh,Refresh,,active
-skills.action.view,ui,SkillsPage,SkillCard,action_view,Details,,active
 skills.action.install,ui,SkillsPage,SkillCard,action_install,Install,,active
 skills.action.install_to,ui,SkillsPage,SkillCard,action_install_to,"Install to {{count}} Agents",,active
 skills.action.choose_targets,ui,SkillsPage,SkillCard,action_choose_targets,"Choose targets",,active
@@ -710,15 +490,12 @@ skills.target.remove_title,ui,SkillsPage,InstalledSkillRow,target_remove_title,"
 skills.card.installs,ui,SkillsPage,SkillCard,installs,"{{count}} installs",,active
 skills.source.label,ui,SkillsPage,SkillsPage,source_label,Source,,active
 skills.source.all,ui,SkillsPage,SkillsPage,source_all,All repositories,,active
-skills.source.skillssh,ui,SkillsPage,SkillsPage,source_skillssh,skills.sh (search),,active
 skills.mode.repo,ui,SkillsPage,SkillsPage,mode_repo,Repositories,,active
 skills.mode.skillssh,ui,SkillsPage,SkillsPage,mode_skillssh,skills.sh,,active
 skills.browse.placeholder_all,ui,SkillsPage,SkillsPage,browse_placeholder_all,"Search across enabled repositories…",,active
 skills.browse.placeholder_repo,ui,SkillsPage,SkillsPage,browse_placeholder_repo,"Search in {{repo}}…",,active
 skills.browse.placeholder_skillssh,ui,SkillsPage,SkillsPage,browse_placeholder_skillssh,"Search the skills.sh registry…",,active
 skills.browse.empty_sources,ui,SkillsPage,SkillsPage,browse_empty_sources,"Add a GitHub repository below to start browsing skills.",,active
-skills.browse.sources_summary,ui,SkillsPage,SkillsPage,browse_sources_summary,"{{count}} sources enabled",,active
-skills.browse.sources_none,ui,SkillsPage,SkillsPage,browse_sources_none,"No sources yet",,active
 skills.browse.manage_sources,ui,SkillsPage,SkillsPage,browse_manage_sources,Manage sources,,active
 skills.browse.hint_skillssh,ui,SkillsPage,SkillsPage,browse_hint_skillssh,"Type at least 2 characters to search skills.sh.",,active
 skills.browse.loading_hint,ui,SkillsPage,SkillsPage,browse_loading_hint,"Fetching skill metadata from GitHub. First load can take up to a minute; results are cached.",,active
@@ -733,23 +510,19 @@ skills.empty.my,ui,SkillsPage,SkillsPage,empty_my,"No skills yet. Open Discover 
 skills.empty.my_cta,ui,SkillsPage,SkillsPage,empty_my_cta,"Browse",,active
 skills.empty.browse,ui,SkillsPage,SkillsPage,empty_browse,"No skills found for this source.",,active
 skills.empty.search,ui,SkillsPage,SkillsPage,empty_search,"No results. Try a different query.",,active
-skills.repo.add_title,ui,SkillsPage,SkillsPage,repo_add_title,"Add repository",,active
 skills.repo.placeholder,ui,SkillsPage,SkillsPage,repo_placeholder,"owner/repository",,active
 skills.repo.add,ui,SkillsPage,SkillsPage,repo_add,"Add repository",,active
 skills.repo.invalid,ui,SkillsPage,SkillsPage,repo_invalid,"Use owner/repository or a GitHub repository URL.",,active
-skills.repo.list_title,ui,SkillsPage,SkillsPage,repo_list_title,"Enabled repositories",,active
 skills.repo.remove,ui,SkillsPage,RepoRow,repo_remove,"Remove repository",,active
 settings.appearance.language.label,ui,SettingsPage,SettingsPage,language_label,Language,,active
 settings.appearance.language.hint,ui,SettingsPage,SettingsPage,language_hint,Use System to follow your computer language by default.,,active
 settings.appearance.language.system,ui,SettingsPage,SettingsPage,language_system,System,,active
 settings.appearance.language.english,ui,SettingsPage,SettingsPage,language_english,English,,active
 settings.appearance.language.chinese,ui,SettingsPage,SettingsPage,language_chinese,Simplified Chinese,,active
-dashboard.context_breakdown.title,dashboard,DashboardPage,ContextBreakdownPanel,title,"Context Breakdown",,active
 dashboard.context_breakdown.empty,dashboard,DashboardPage,ContextBreakdownPanel,empty,"No Claude Code activity in the selected period.",,active
 dashboard.context_breakdown.empty_codex,dashboard,DashboardPage,ContextBreakdownPanel,empty_codex,"No Codex activity in the selected period.",,active
 dashboard.context_breakdown.error,dashboard,DashboardPage,ContextBreakdownPanel,error,"Couldn't read Claude Code logs for this view.",,active
 dashboard.context_breakdown.error_codex,dashboard,DashboardPage,ContextBreakdownPanel,error_codex,"Couldn't read Codex logs for this view.",,active
-dashboard.context_breakdown.session_count,dashboard,DashboardPage,ContextBreakdownPanel,session_count,"{{sessions}} sessions · {{messages}} messages",,active
 dashboard.context_breakdown.bar_aria,dashboard,DashboardPage,ContextBreakdownPanel,bar_aria,"Token distribution: {{summary}}",,active
 dashboard.context_breakdown.system_prefix_tooltip,dashboard,DashboardPage,ContextBreakdownPanel,tooltip,"System prompt, tools schema, skills, rules, and MCP descriptions are cached together as one prefix and can't be separated from the logs.",,active
 dashboard.context_breakdown.footnote,dashboard,DashboardPage,ContextBreakdownPanel,footnote,"Approximate: cache reads accumulate across turns, so conversation history dominates over time. Only Claude Code logs expose the per-message detail this view requires.",,active
@@ -762,32 +535,15 @@ dashboard.context_breakdown.category.reasoning,dashboard,DashboardPage,ContextBr
 dashboard.context_breakdown.category.skills,dashboard,DashboardPage,ContextBreakdownPanel,cat,"Skills",,active
 dashboard.context_breakdown.loading_aria,dashboard,DashboardPage,ContextBreakdownPanel,loading_aria,"Loading context breakdown",,active
 dashboard.context_breakdown.loading_hint,dashboard,DashboardPage,ContextBreakdownPanel,loading_hint,"Scanning Claude Code session logs…",,active
-dashboard.context_breakdown.tool_details.title,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_title,"Tool details",,active
-dashboard.context_breakdown.tool_details.total_calls,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_total_calls,"{{calls}} calls",,active
-dashboard.context_breakdown.tool_details.output_tokens,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_output_tokens,"Output",,active
-dashboard.context_breakdown.tool_details.close,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_close,"Close",,active
-dashboard.context_breakdown.tool_details.tool_column,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_tool_column,"Tool",,active
-dashboard.context_breakdown.tool_details.category_column,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_category_column,"Category",,active
-dashboard.context_breakdown.tool_details.calls_column,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_calls_column,"Calls",,active
-dashboard.context_breakdown.tool_details.input_column,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_input_column,"Input",,active
-dashboard.context_breakdown.tool_details.cache_column,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_cache_column,"Cache",,active
 dashboard.context_breakdown.tool_details.total_column,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_total_column,"Total",,active
 dashboard.context_breakdown.tool_details.unavailable_codex,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_unavailable_codex,"Tool-level Codex details are unavailable for this period; showing queue totals only.",,active
-dashboard.context_breakdown.skills_details.title,dashboard,DashboardPage,ContextBreakdownPanel,skills_details_title,"Skills used",,active
-dashboard.context_breakdown.skills_details.total_calls,dashboard,DashboardPage,ContextBreakdownPanel,skills_details_total_calls,"{{calls}} skill calls",,active
 dashboard.context_breakdown.message_details.title,dashboard,DashboardPage,ContextBreakdownPanel,message_details_title,"Message details",,active
 dashboard.context_breakdown.message_details.note,dashboard,DashboardPage,ContextBreakdownPanel,message_details_note,"Aggregated only — message text is not stored.",,active
 dashboard.context_breakdown.message_details.category_column,dashboard,DashboardPage,ContextBreakdownPanel,message_details_category_column,"Category",,active
 dashboard.context_breakdown.message_details.user_input,dashboard,DashboardPage,ContextBreakdownPanel,message_details_user_input,"User input",,active
 dashboard.context_breakdown.message_details.conversation_history,dashboard,DashboardPage,ContextBreakdownPanel,message_details_conversation_history,"Conversation history",,active
 dashboard.context_breakdown.message_details.assistant_response,dashboard,DashboardPage,ContextBreakdownPanel,message_details_assistant_response,"Assistant response",,active
-dashboard.context_breakdown.source_label.claude,dashboard,DashboardPage,ContextBreakdownPanel,source_label,"Claude",,active
-dashboard.context_breakdown.source_label.codex,dashboard,DashboardPage,ContextBreakdownPanel,source_label,"Codex",,active
-dashboard.context_breakdown.tool_details.tools_count,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_tools_count,"{{count}} tools",,active
-dashboard.context_breakdown.tool_details.tools_count_parens,dashboard,DashboardPage,ContextBreakdownPanel,tool_details_tools_count_parens,"({{count}} tools)",,active
-dashboard.context_breakdown.exec_details.open,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_open,"Exec command details",,active
 dashboard.context_breakdown.exec_details.title,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_title,"Exec command details",,active
-dashboard.context_breakdown.exec_details.note,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_note,"Aggregated only — command text and outputs are not stored.",,active
 dashboard.context_breakdown.exec_details.kind_column,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_kind_column,"Type",,active
 dashboard.context_breakdown.exec_details.calls_column,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_calls_column,"Calls",,active
 dashboard.context_breakdown.exec_details.failures_column,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_failures_column,"Fail",,active

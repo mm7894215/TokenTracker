@@ -37,11 +37,9 @@ import {
   getUserStatus,
   triggerLocalSync,
 } from "../lib/api";
-import { AsciiBox } from "../ui/foundation/AsciiBox.jsx";
-import { MatrixButton } from "../ui/foundation/MatrixButton.jsx";
-import { ActivityHeatmap } from "../ui/matrix-a/components/ActivityHeatmap.jsx";
-import { ProjectUsagePanel } from "../ui/matrix-a/components/ProjectUsagePanel.jsx";
-import { DashboardView } from "../ui/matrix-a/views/DashboardView.jsx";
+import { ActivityHeatmap } from "../ui/dashboard/components/ActivityHeatmap.jsx";
+import { ProjectUsagePanel } from "../ui/dashboard/components/ProjectUsagePanel.jsx";
+import { DashboardView } from "../ui/dashboard/views/DashboardView.jsx";
 import { ShareModal } from "../ui/share/ShareModal";
 import { useShareCardData } from "../ui/share/use-share-card-data";
 

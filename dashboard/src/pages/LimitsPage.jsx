@@ -5,7 +5,7 @@ import { useUsageLimits } from "../hooks/use-usage-limits";
 import { useLimitsDisplayPrefs } from "../hooks/use-limits-display-prefs.js";
 import { copy } from "../lib/copy";
 import { LimitsPageSkeleton } from "../components/LimitsPageSkeleton.jsx";
-import { UsageLimitsPanel } from "../ui/matrix-a/components/UsageLimitsPanel.jsx";
+import { UsageLimitsPanel } from "../ui/dashboard/components/UsageLimitsPanel.jsx";
 
 export function LimitsPage() {
   const { data: usageLimits, error, isLoading } = useUsageLimits({ initialRefresh: true });

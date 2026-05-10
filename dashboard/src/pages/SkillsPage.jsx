@@ -12,8 +12,8 @@ import {
   Search,
   Trash2,
 } from "lucide-react";
-import { Button, Card, ConfirmModal, Input } from "../ui/openai/components";
-import { ProviderIcon } from "../ui/matrix-a/components/ProviderIcon.jsx";
+import { Button, Card, ConfirmModal, Input } from "../ui/components";
+import { ProviderIcon } from "../ui/dashboard/components/ProviderIcon.jsx";
 import { copy } from "../lib/copy";
 import { cn } from "../lib/cn";
 import {

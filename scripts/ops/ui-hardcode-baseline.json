@@ -1,13 +1,13 @@
 {
-  "generatedAt": "2026-05-10T13:53:14.652Z",
+  "generatedAt": "2026-05-10T14:41:00.327Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
     "rawText": "JSX text nodes containing letters or digits"
   },
   "totals": {
-    "colors": 200,
-    "rawText": 80
+    "colors": 112,
+    "rawText": 76
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -29,13 +29,6 @@
       "colors": 4,
       "rawText": 0,
       "rawTextTokens": []
-    },
-    "dashboard/src/components/Sparkline.jsx": {
-      "colors": 2,
-      "rawText": 1,
-      "rawTextTokens": [
-        "typeof n === \"number\"); if (values.length"
-      ]
     },
     "dashboard/src/components/settings/AccountSection.jsx": {
       "colors": 0,
@@ -100,37 +93,142 @@
         "tokens · 202 active days"
       ]
     },
-    "dashboard/src/ui/foundation/CelebrationBadge.jsx": {
-      "colors": 4,
+    "dashboard/src/ui/components/ConfirmModal.jsx": {
+      "colors": 2,
+      "rawText": 0,
+      "rawTextTokens": []
+    },
+    "dashboard/src/ui/components/Counter.jsx": {
+      "colors": 1,
       "rawText": 1,
       "rawTextTokens": [
-        "= 7; // Use inline SVG instead of emoji return ("
+        "/\\d/.test(char) && (decimalIndex === -1 || index"
       ]
     },
-    "dashboard/src/ui/foundation/HoverCard.jsx": {
+    "dashboard/src/ui/components/HeaderGithubStar.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        "Star"
+      ]
+    },
+    "dashboard/src/ui/components/Shell.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        "Token Tracker"
+      ]
+    },
+    "dashboard/src/ui/components/Sidebar.jsx": {
+      "colors": 0,
+      "rawText": 3,
+      "rawTextTokens": [
+        "Star",
+        "Token Tracker",
+        "getNavGroups(), [resolvedLocale]); return ("
+      ]
+    },
+    "dashboard/src/ui/dashboard/components/ActivityHeatmap.jsx": {
+      "colors": 10,
+      "rawText": 0,
+      "rawTextTokens": []
+    },
+    "dashboard/src/ui/dashboard/components/ContextBreakdownPanel.jsx": {
+      "colors": 0,
+      "rawText": 7,
+      "rawTextTokens": [
+        "(b.totals?.total_tokens || 0) - (a.totals?.total_tokens || 0), ); return (",
+        "); const labelInner = (",
+        "); const labelSuffix = isSystemPrefix ? (",
+        "0 && (",
+        "0 || codexQueueFallback)) || (isCustomAgents && hasCustomAgents && subagentsSet); const rowOpen = Boolean(openRows[cat.key]); const bucketBase = bucketColor(cat.key, source); const colorSquare = (",
+        "0; const clampedShare = hasFill ? Math.max(0, Math.min(100, share)) : 0; return (",
+        "isExecToolName(t.name)); const catOpen = Boolean(openCats[cat.name]); return ("
+      ]
+    },
+    "dashboard/src/ui/dashboard/components/CostAnalysisModal.jsx": {
+      "colors": 2,
+      "rawText": 3,
+      "rawTextTokens": [
+        "Cost",
+        "Model",
+        "No spend recorded."
+      ]
+    },
+    "dashboard/src/ui/dashboard/components/DataDetails.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        "1 ? ("
+      ]
+    },
+    "dashboard/src/ui/dashboard/components/DateRangePopover.jsx": {
+      "colors": 0,
+      "rawText": 2,
+      "rawTextTokens": [
+        "Apply",
+        "Cancel"
+      ]
+    },
+    "dashboard/src/ui/dashboard/components/ProviderIcon.jsx": {
       "colors": 2,
       "rawText": 0,
       "rawTextTokens": []
     },
-    "dashboard/src/ui/foundation/MatrixAvatar.jsx": {
-      "colors": 6,
-      "rawText": 0,
-      "rawTextTokens": []
+    "dashboard/src/ui/dashboard/components/StatsPanel.jsx": {
+      "colors": 0,
+      "rawText": 5,
+      "rawTextTokens": [
+        "0 && (",
+        "30d",
+        "7d",
+        "avg"
+      ]
     },
-    "dashboard/src/ui/foundation/MatrixShell.jsx": {
-      "colors": 2,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/foundation/SignalBox.jsx": {
-      "colors": 5,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/foundation/SpotlightCard.jsx": {
+    "dashboard/src/ui/dashboard/components/TrendMonitor.jsx": {
       "colors": 1,
-      "rawText": 0,
-      "rawTextTokens": []
+      "rawText": 1,
+      "rawTextTokens": [
+        "No data yet"
+      ]
+    },
+    "dashboard/src/ui/dashboard/components/UsageLimitsPanel.jsx": {
+      "colors": 0,
+      "rawText": 10,
+      "rawTextTokens": [
+        "); case \"antigravity\": return (",
+        "); case \"codex\": return (",
+        "); case \"copilot\": return (",
+        "); case \"cursor\": return (",
+        "); case \"gemini\": return (",
+        "); case \"kimi\": return (",
+        "); case \"kiro\": return (",
+        "0 && rounded === 0 ? \"",
+        "0 ? groups :",
+        "renderProviderGroup(id, dataById[id])) .filter(Boolean); return ("
+      ]
+    },
+    "dashboard/src/ui/dashboard/components/UsageLimitsPanel.test.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        ", ); expect(screen.getByText(\"Kimi\")).toBeInTheDocument(); expect(screen.getByText(\"Weekly\")).toBeInTheDocument(); expect(screen.getByText(\"5h\")).toBeInTheDocument(); expect(screen.getByText(\"Total\")).toBeInTheDocument(); expect(screen.getByText(\"Parallel: 20\")).toBeInTheDocument(); expect(screen.getByText(\"64%\")).toBeInTheDocument(); expect(screen.getByText(\"4%\")).toBeInTheDocument(); expect(screen.getByText(\"1%\")).toBeInTheDocument(); rerender("
+      ]
+    },
+    "dashboard/src/ui/dashboard/components/UsageOverview.jsx": {
+      "colors": 8,
+      "rawText": 2,
+      "rawTextTokens": [
+        "0 && (",
+        "0); return ("
+      ]
+    },
+    "dashboard/src/ui/dashboard/views/DashboardView.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        "D_LEFT_BASE + STEP * leftIdx++; const D_DATA_DETAILS = D_LEFT_BASE + STEP * 5; // 留给右列底部 return ("
+      ]
     },
     "dashboard/src/ui/foundation/__tests__/LocaleProvider.test.jsx": {
       "colors": 0,
@@ -157,212 +255,6 @@
       "colors": 1,
       "rawText": 0,
       "rawTextTokens": []
-    },
-    "dashboard/src/ui/matrix-a/components/ActivityHeatmap.jsx": {
-      "colors": 10,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/matrix-a/components/ClientLogos.jsx": {
-      "colors": 16,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/matrix-a/components/ContextBreakdownPanel.jsx": {
-      "colors": 0,
-      "rawText": 7,
-      "rawTextTokens": [
-        "(b.totals?.total_tokens || 0) - (a.totals?.total_tokens || 0), ); return (",
-        "); const labelInner = (",
-        "); const labelSuffix = isSystemPrefix ? (",
-        "0 && (",
-        "0 || codexQueueFallback)) || (isCustomAgents && hasCustomAgents && subagentsSet); const rowOpen = Boolean(openRows[cat.key]); const bucketBase = bucketColor(cat.key, source); const colorSquare = (",
-        "0; const clampedShare = hasFill ? Math.max(0, Math.min(100, share)) : 0; return (",
-        "isExecToolName(t.name)); const catOpen = Boolean(openCats[cat.name]); return ("
-      ]
-    },
-    "dashboard/src/ui/matrix-a/components/CostAnalysisModal.jsx": {
-      "colors": 2,
-      "rawText": 3,
-      "rawTextTokens": [
-        "Cost",
-        "Model",
-        "No spend recorded."
-      ]
-    },
-    "dashboard/src/ui/matrix-a/components/DataDetails.jsx": {
-      "colors": 0,
-      "rawText": 1,
-      "rawTextTokens": [
-        "1 ? ("
-      ]
-    },
-    "dashboard/src/ui/matrix-a/components/DateRangePopover.jsx": {
-      "colors": 0,
-      "rawText": 2,
-      "rawTextTokens": [
-        "Apply",
-        "Cancel"
-      ]
-    },
-    "dashboard/src/ui/matrix-a/components/GithubStar.jsx": {
-      "colors": 1,
-      "rawText": 1,
-      "rawTextTokens": [
-        "STAR"
-      ]
-    },
-    "dashboard/src/ui/matrix-a/components/IdentityPanel.jsx": {
-      "colors": 1,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/matrix-a/components/LiveSniffer.jsx": {
-      "colors": 1,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/matrix-a/components/MatrixConstants.ts": {
-      "colors": 3,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/matrix-a/components/MatrixRain.jsx": {
-      "colors": 2,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/matrix-a/components/NeuralAdaptiveFleet.jsx": {
-      "colors": 35,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/matrix-a/components/NeuralDivergenceMap.jsx": {
-      "colors": 0,
-      "rawText": 1,
-      "rawTextTokens": [
-        "1 && count % 2 !== 0 && index === 0; const itemClass = isFirstAndOdd ? \"md:col-span-2\" : \"\"; return ("
-      ]
-    },
-    "dashboard/src/ui/matrix-a/components/ProviderIcon.jsx": {
-      "colors": 2,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/matrix-a/components/StatsPanel.jsx": {
-      "colors": 0,
-      "rawText": 5,
-      "rawTextTokens": [
-        "0 && (",
-        "30d",
-        "7d",
-        "avg"
-      ]
-    },
-    "dashboard/src/ui/matrix-a/components/SystemHeader.jsx": {
-      "colors": 1,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/matrix-a/components/TrendChart.jsx": {
-      "colors": 1,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/matrix-a/components/TrendMonitor.jsx": {
-      "colors": 1,
-      "rawText": 1,
-      "rawTextTokens": [
-        "No data yet"
-      ]
-    },
-    "dashboard/src/ui/matrix-a/components/UpgradeAlertModal.jsx": {
-      "colors": 2,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/matrix-a/components/UsageLimitsPanel.jsx": {
-      "colors": 0,
-      "rawText": 10,
-      "rawTextTokens": [
-        "); case \"antigravity\": return (",
-        "); case \"codex\": return (",
-        "); case \"copilot\": return (",
-        "); case \"cursor\": return (",
-        "); case \"gemini\": return (",
-        "); case \"kimi\": return (",
-        "); case \"kiro\": return (",
-        "0 && rounded === 0 ? \"",
-        "0 ? groups :",
-        "renderProviderGroup(id, dataById[id])) .filter(Boolean); return ("
-      ]
-    },
-    "dashboard/src/ui/matrix-a/components/UsageLimitsPanel.test.jsx": {
-      "colors": 0,
-      "rawText": 1,
-      "rawTextTokens": [
-        ", ); expect(screen.getByText(\"Kimi\")).toBeInTheDocument(); expect(screen.getByText(\"Weekly\")).toBeInTheDocument(); expect(screen.getByText(\"5h\")).toBeInTheDocument(); expect(screen.getByText(\"Total\")).toBeInTheDocument(); expect(screen.getByText(\"Parallel: 20\")).toBeInTheDocument(); expect(screen.getByText(\"64%\")).toBeInTheDocument(); expect(screen.getByText(\"4%\")).toBeInTheDocument(); expect(screen.getByText(\"1%\")).toBeInTheDocument(); rerender("
-      ]
-    },
-    "dashboard/src/ui/matrix-a/components/UsageOverview.jsx": {
-      "colors": 8,
-      "rawText": 2,
-      "rawTextTokens": [
-        "0 && (",
-        "0); return ("
-      ]
-    },
-    "dashboard/src/ui/matrix-a/components/UsagePanel.jsx": {
-      "colors": 2,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/matrix-a/components/VersionBadge.jsx": {
-      "colors": 1,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/matrix-a/views/DashboardView.jsx": {
-      "colors": 0,
-      "rawText": 1,
-      "rawTextTokens": [
-        "D_LEFT_BASE + STEP * leftIdx++; const D_DATA_DETAILS = D_LEFT_BASE + STEP * 5; // 留给右列底部 return ("
-      ]
-    },
-    "dashboard/src/ui/openai/components/ConfirmModal.jsx": {
-      "colors": 2,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/openai/components/Counter.jsx": {
-      "colors": 1,
-      "rawText": 1,
-      "rawTextTokens": [
-        "/\\d/.test(char) && (decimalIndex === -1 || index"
-      ]
-    },
-    "dashboard/src/ui/openai/components/HeaderGithubStar.jsx": {
-      "colors": 0,
-      "rawText": 1,
-      "rawTextTokens": [
-        "Star"
-      ]
-    },
-    "dashboard/src/ui/openai/components/Shell.jsx": {
-      "colors": 0,
-      "rawText": 1,
-      "rawTextTokens": [
-        "Token Tracker"
-      ]
-    },
-    "dashboard/src/ui/openai/components/Sidebar.jsx": {
-      "colors": 0,
-      "rawText": 3,
-      "rawTextTokens": [
-        "Star",
-        "Token Tracker",
-        "getNavGroups(), [resolvedLocale]); return ("
-      ]
     },
     "dashboard/src/ui/share/HeatmapStrip.jsx": {
       "colors": 5,

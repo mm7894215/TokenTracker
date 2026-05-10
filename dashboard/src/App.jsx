@@ -22,7 +22,7 @@ import { LoginPage } from "./pages/LoginPage.jsx";
 import { NativeAuthCallbackPage } from "./pages/NativeAuthCallbackPage.jsx";
 import { SettingsPage } from "./pages/SettingsPage.jsx";
 import { SkillsPage } from "./pages/SkillsPage.jsx";
-import { AppLayout } from "./ui/openai/components/Sidebar.jsx";
+import { AppLayout } from "./ui/components/Sidebar.jsx";
 import { WidgetsPage } from "./pages/WidgetsPage.jsx";
 
 export default function App() {

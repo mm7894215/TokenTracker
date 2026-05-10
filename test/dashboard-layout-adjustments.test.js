@@ -10,7 +10,7 @@ const viewPath = path.join(
   "dashboard",
   "src",
   "ui",
-  "matrix-a",
+  "dashboard",
   "views",
   "DashboardView.jsx",
 );
@@ -21,7 +21,7 @@ const projectUsagePath = path.join(
   "dashboard",
   "src",
   "ui",
-  "matrix-a",
+  "dashboard",
   "components",
   "ProjectUsagePanel.jsx",
 );
@@ -167,7 +167,7 @@ test("TrendMonitor root does not force full height", () => {
       "dashboard",
       "src",
       "ui",
-      "matrix-a",
+      "dashboard",
       "components",
       "TrendMonitor.jsx",
     ),

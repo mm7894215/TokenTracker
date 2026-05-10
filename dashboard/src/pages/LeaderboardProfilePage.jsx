@@ -8,7 +8,7 @@ import { getLeaderboardBaseUrl } from "../lib/config";
 import { isMockEnabled } from "../lib/mock-data";
 import { getLeaderboardProfile } from "../lib/api";
 import { InsforgeUserHeaderControls } from "../components/InsforgeUserHeaderControls.jsx";
-import { HeaderGithubStar } from "../ui/openai/components/HeaderGithubStar.jsx";
+import { HeaderGithubStar } from "../ui/components/HeaderGithubStar.jsx";
 import { LeaderboardAvatar } from "../components/LeaderboardAvatar.jsx";
 import { LeaderboardProviderColumnHeader } from "../components/LeaderboardProviderColumnHeader.jsx";
 import { useTheme } from "../hooks/useTheme.js";
