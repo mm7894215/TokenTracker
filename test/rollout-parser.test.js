@@ -2215,6 +2215,191 @@ test("parseClaudeIncremental computes total from all components ignoring JSONL t
   }
 });
 
+// Regression: issue #64 — DeepSeek / Kimi / Mimo / Claude thinking sub-agent
+// jsonl entries omit the top-level `requestId` field. Prior dedup used
+// `if (msgId && reqId)` which short-circuited dedup entirely, multiplying
+// every (msgId-repeated) entry into the bucket. msgId alone is globally
+// unique per the Anthropic message protocol and must be sufficient as a
+// dedup key.
+test("parseClaudeIncremental dedups by msgId alone when requestId is missing", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibescore-claude-"));
+  try {
+    const claudePath = path.join(tmp, "agent-deepseek.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    // DeepSeek-style: same msgId written 4 times within seconds (no requestId).
+    // Current bug summed all 4; fix should dedup to 1.
+    const model = "deepseek-v4-flash";
+    const msgId = "4cc7ba29-8399-4791-b928-c334122ceaff";
+    const lines = [
+      buildClaudeUsageLine({
+        ts: "2026-05-12T01:00:00.000Z",
+        msgId,
+        model,
+        input: 465,
+        cacheRead: 78592,
+        output: 371,
+      }),
+      buildClaudeUsageLine({
+        ts: "2026-05-12T01:00:00.300Z",
+        msgId,
+        model,
+        input: 465,
+        cacheRead: 78592,
+        output: 371,
+      }),
+      buildClaudeUsageLine({
+        ts: "2026-05-12T01:00:00.700Z",
+        msgId,
+        model,
+        input: 465,
+        cacheRead: 78592,
+        output: 371,
+      }),
+      buildClaudeUsageLine({
+        ts: "2026-05-12T01:00:01.500Z",
+        msgId,
+        model,
+        input: 465,
+        cacheRead: 78592,
+        output: 371,
+      }),
+    ];
+    await fs.writeFile(claudePath, lines.join("\n") + "\n", "utf8");
+
+    const res = await parseClaudeIncremental({
+      projectFiles: [{ path: claudePath, source: "claude" }],
+      cursors,
+      queuePath,
+    });
+    assert.equal(res.eventsAggregated, 1, "should aggregate only 1 of the 4 duplicates");
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].input_tokens, 465);
+    assert.equal(queued[0].cached_input_tokens, 78592);
+    assert.equal(queued[0].output_tokens, 371);
+    assert.equal(queued[0].total_tokens, 465 + 78592 + 371);
+    assert.equal(queued[0].model, model);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+// Claude-native invariant: with requestId present, the prior
+// `<msgId>:<requestId>` dedup key behavior must remain unchanged so
+// already-persisted cursors.claudeHashes entries continue to match.
+test("parseClaudeIncremental keeps msgId:requestId dedup when requestId is present", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibescore-claude-"));
+  try {
+    const claudePath = path.join(tmp, "agent-claude.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const model = "claude-opus-4-7";
+    const msgId = "msg_01Fzdy6WXwLZKsymfH1w5dJd";
+    const requestId = "req_011Ca92vRUJe";
+    const lines = [
+      buildClaudeUsageLine({
+        ts: "2026-04-17T08:33:05.681Z",
+        msgId,
+        requestId,
+        model,
+        input: 6,
+        cacheCreation: 18771,
+        output: 126,
+      }),
+      buildClaudeUsageLine({
+        ts: "2026-04-17T08:33:05.682Z",
+        msgId,
+        requestId,
+        model,
+        input: 6,
+        cacheCreation: 18771,
+        output: 126,
+      }),
+    ];
+    await fs.writeFile(claudePath, lines.join("\n") + "\n", "utf8");
+
+    const res = await parseClaudeIncremental({
+      projectFiles: [{ path: claudePath, source: "claude" }],
+      cursors,
+      queuePath,
+    });
+    assert.equal(res.eventsAggregated, 1, "duplicate (msgId, requestId) collapses to 1");
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].input_tokens, 6);
+    assert.equal(queued[0].cache_creation_input_tokens, 18771);
+    assert.equal(queued[0].output_tokens, 126);
+    // Hash list persists in legacy <msgId>:<requestId> form for back-compat.
+    assert.ok(Array.isArray(cursors.claudeHashes));
+    assert.ok(cursors.claudeHashes.includes(`${msgId}:${requestId}`));
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+// Cross-file dedup invariant: two jsonl files referencing the same msgId
+// (one with reqId, one without) must each contribute only once. This
+// covers the case where Claude Code restarts mid-stream and emits the
+// final chunk into a different session file under a third-party endpoint.
+test("parseClaudeIncremental dedups same msgId across files in mixed reqId scenarios", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibescore-claude-"));
+  try {
+    const fileA = path.join(tmp, "session-a.jsonl");
+    const fileB = path.join(tmp, "session-b.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const model = "kimi-for-coding";
+    // A: msgId-only entry from third-party endpoint.
+    await fs.writeFile(
+      fileA,
+      buildClaudeUsageLine({
+        ts: "2026-05-12T02:00:00.000Z",
+        msgId: "msg_kimi_abc",
+        model,
+        input: 100,
+        cacheRead: 200,
+        output: 10,
+      }) + "\n",
+      "utf8",
+    );
+    // B: same msgId again, simulating duplicate write into a different file.
+    await fs.writeFile(
+      fileB,
+      buildClaudeUsageLine({
+        ts: "2026-05-12T02:00:01.000Z",
+        msgId: "msg_kimi_abc",
+        model,
+        input: 100,
+        cacheRead: 200,
+        output: 10,
+      }) + "\n",
+      "utf8",
+    );
+
+    const res = await parseClaudeIncremental({
+      projectFiles: [
+        { path: fileA, source: "claude" },
+        { path: fileB, source: "claude" },
+      ],
+      cursors,
+      queuePath,
+    });
+    assert.equal(res.eventsAggregated, 1, "cross-file duplicate by msgId must dedup");
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].total_tokens, 100 + 200 + 10);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseClaudeIncremental defaults missing model to unknown", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibescore-claude-"));
   try {
@@ -2295,8 +2480,18 @@ function buildEveryCodeTokenCountLine({ ts, last, total }) {
   });
 }
 
-function buildClaudeUsageLine({ ts, input, output, model, total, cacheCreation, cacheRead }) {
-  return JSON.stringify({
+function buildClaudeUsageLine({
+  ts,
+  input,
+  output,
+  model,
+  total,
+  cacheCreation,
+  cacheRead,
+  msgId,
+  requestId,
+}) {
+  const obj = {
     timestamp: ts,
     message: {
       model,
@@ -2308,7 +2503,10 @@ function buildClaudeUsageLine({ ts, input, output, model, total, cacheCreation, 
         total_tokens: typeof total === "number" ? total : undefined,
       },
     },
-  });
+  };
+  if (typeof msgId === "string") obj.message.id = msgId;
+  if (typeof requestId === "string") obj.requestId = requestId;
+  return JSON.stringify(obj);
 }
 
 function buildGeminiSession({ messages }) {

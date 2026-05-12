@@ -43,6 +43,7 @@ const {
   bucketKey,
   totalsKey,
   groupBucketKey,
+  claudeMessageDedupKey,
 } = require("../lib/rollout");
 const { computeClaudeGroundTruthBuckets } = require("../lib/claude-categorizer");
 const { createProgress, renderBar, formatNumber, formatBytes } = require("../lib/progress");
@@ -83,7 +84,16 @@ const CLAUDE_MEM_OBSERVER_PATH_SEGMENT = "--claude-mem-observer-sessions";
 //       Project Usage panel stayed inflated. v3 drops every claude /
 //       claude-mem row from project.queue.jsonl too, and resets the
 //       matching cursors.projectHourly + project.queue.state offset.
-const CLAUDE_GROUND_TRUTH_REPAIR_KEY = "claudeGroundTruthRepair_2026_05_v3";
+// v4 fixes the dedup short-circuit (issue #64): v3's ground-truth scan
+// itself used `if (msgId && reqId)` to build the dedup key, which silently
+// disabled dedup for any provider whose jsonl entries lack `requestId`
+// (DeepSeek/Kimi/Mimo/MiniMax anthropic-compatible endpoints, plus Claude
+// Code's sub-agent / thinking transport paths). The repaired ground truth
+// was therefore inflated by 1.6–3.7x on those providers — v3 left it that
+// way. v4 re-runs the same five-step atomic repair against the corrected
+// `claudeMessageDedupKey()` (msgId is globally unique on its own per the
+// Anthropic protocol, so the reqId requirement was always unnecessary).
+const CLAUDE_GROUND_TRUTH_REPAIR_KEY = "claudeGroundTruthRepair_2026_05_v4";
 
 async function cmdSync(argv) {
   const opts = parseArgs(argv);
@@ -1394,7 +1404,7 @@ async function repairClaudeQueueFromGroundTruth({
     }
     uploadState.offset = 0;
     uploadState.updatedAt = new Date().toISOString();
-    uploadState.note = "reset_after_claude_repair_2026_05_v3";
+    uploadState.note = "reset_after_claude_repair_2026_05_v4";
     await fs.writeFile(queueStatePath, JSON.stringify(uploadState));
   }
 
@@ -1461,7 +1471,7 @@ async function repairClaudeQueueFromGroundTruth({
       }
       st.offset = 0;
       st.updatedAt = new Date().toISOString();
-      st.note = "reset_after_claude_repair_2026_05_v3";
+      st.note = "reset_after_claude_repair_2026_05_v4";
       await fs.writeFile(projectQueueStatePath, JSON.stringify(st));
     }
   }
@@ -1586,9 +1596,8 @@ async function collectClaudeMessageHashes(filePaths) {
       } catch (_e) {
         continue;
       }
-      const msgId = obj?.message?.id;
-      const reqId = obj?.requestId;
-      if (msgId && reqId) hashes.add(`${msgId}:${reqId}`);
+      const hash = claudeMessageDedupKey(obj);
+      if (hash) hashes.add(hash);
     }
     rl.close();
     stream.close?.();
