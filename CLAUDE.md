@@ -36,7 +36,7 @@ AI CLI Tools → hooks/notify.cjs trigger sync → rollout.js parses logs → qu
 
 **Cloud backend** — InsForge Edge Functions live in a separate repo and are documented in `BACKEND_API.md`. Handles cloud authentication, leaderboard, and data sync. Not needed for local-only usage.
 
-### Supported AI Tools (13 providers)
+### Supported AI Tools (15 providers)
 
 | Tool | Hook Method | Parser |
 |------|------------|--------|
@@ -53,6 +53,8 @@ AI CLI Tools → hooks/notify.cjs trigger sync → rollout.js parses logs → qu
 | Kimi Code | Passive `wire.jsonl` reader (`~/.kimi/sessions/**/wire.jsonl`) | `parseKimiIncremental` |
 | oh-my-pi (omp) | Passive JSONL reader (`~/.omp/agent/sessions/**/*.jsonl`) | `parseOmpIncremental` |
 | CodeBuddy (Tencent) | SessionEnd hook in `~/.codebuddy/settings.json` (Claude-Code fork) | `parseCodebuddyIncremental` |
+| Kilo CLI (kilo.ai) | Passive SQLite reader (`~/.local/share/kilo/kilo.db`, OpenCode-fork schema) | `parseOpencodeDbIncremental` (`cursorKey: "kiloCli"`) |
+| Kilo Code (VS Code extension) | Passive `ui_messages.json` reader (Cursor/Code/CodeBuddy/Windsurf globalStorage) | `parseKilocodeIncremental` |
 
 ### CLI Commands
 

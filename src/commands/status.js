@@ -46,6 +46,7 @@ const {
   piAgentDirCollidesWithOmp,
   resolveCraftSessionFiles,
   resolveCraftConfigDir,
+  resolveKilocodeTaskFiles,
 } = require("../lib/rollout");
 
 async function cmdStatus(argv = []) {
@@ -200,6 +201,17 @@ async function cmdStatus(argv = []) {
   const craftInstalled = fssync.existsSync(craftConfigDir);
   const craftFiles = craftInstalled ? resolveCraftSessionFiles(process.env) : [];
 
+  // Kilo CLI (kilo.ai @kilocode/plugin) — passive scan of kilo.db.
+  const xdgDataHome = process.env.XDG_DATA_HOME || path.join(home, ".local", "share");
+  const kiloHome = process.env.KILO_HOME || path.join(xdgDataHome, "kilo");
+  const kiloDbPath = path.join(kiloHome, "kilo.db");
+  const kiloInstalled = fssync.existsSync(kiloDbPath);
+
+  // Kilo Code VS Code extension — passive scan of all VS Code-family
+  // globalStorage/kilocode.kilo-code/tasks/ ui_messages.json files.
+  const kilocodeTaskFiles = resolveKilocodeTaskFiles(process.env);
+  const kilocodeInstalled = kilocodeTaskFiles.length > 0;
+
   const copilotToken = readCopilotOauthToken({ home });
   const copilotOtel = describeCopilotOtelStatus({ home, env: process.env });
   const copilotLines = formatCopilotLines({
@@ -246,6 +258,12 @@ async function cmdStatus(argv = []) {
         : null,
       craftInstalled
         ? `- Craft Agents: passive reader (${craftFiles.length} session jsonl file${craftFiles.length !== 1 ? "s" : ""} found)`
+        : null,
+      kiloInstalled
+        ? `- Kilo CLI: passive reader (${kiloDbPath})`
+        : null,
+      kilocodeInstalled
+        ? `- Kilo Code (VS Code extension): passive reader (${kilocodeTaskFiles.length} task${kilocodeTaskFiles.length !== 1 ? "s" : ""} across ${new Set(kilocodeTaskFiles.map((t) => t.ide)).size} IDE${new Set(kilocodeTaskFiles.map((t) => t.ide)).size !== 1 ? "s" : ""})`
         : null,
       ...copilotLines,
       ...subscriptionLines,

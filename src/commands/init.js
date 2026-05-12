@@ -459,6 +459,34 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
     }
   }
 
+  // Kilo CLI (kilo.ai @kilocode/plugin): passive reader — no hook installation
+  // needed. Reuses OpenCode-fork SQLite schema at ~/.local/share/kilo/kilo.db
+  // (override via KILO_HOME).
+  {
+    const xdgDataHome = process.env.XDG_DATA_HOME || path.join(home, ".local", "share");
+    const kiloHome = process.env.KILO_HOME || path.join(xdgDataHome, "kilo");
+    const kiloDbPath = path.join(kiloHome, "kilo.db");
+    if (fssync.existsSync(kiloDbPath)) {
+      summary.push({ label: "Kilo CLI", status: "detected", detail: "Passive reader (no hook needed)" });
+    }
+  }
+
+  // Kilo Code VS Code extension (kilocode.kilo-code): passive reader — no hook
+  // installation needed. Scans ui_messages.json under every detected VS Code-
+  // family install (Code, Cursor, CodeBuddy, Windsurf, …).
+  {
+    const { resolveKilocodeTaskFiles } = require("../lib/rollout");
+    const taskFiles = resolveKilocodeTaskFiles(process.env);
+    if (taskFiles.length > 0) {
+      const ides = Array.from(new Set(taskFiles.map((t) => t.ide))).join(", ");
+      summary.push({
+        label: "Kilo Code (VS Code extension)",
+        status: "detected",
+        detail: `Passive reader · ${taskFiles.length} task${taskFiles.length !== 1 ? "s" : ""} in ${ides}`,
+      });
+    }
+  }
+
   // CodeBuddy: Claude-Code fork. Install the SessionEnd hook so finished
   // sessions trigger notify.cjs → tracker sync; passive scan still runs as a
   // safety net for sessions that don't fire SessionEnd cleanly.

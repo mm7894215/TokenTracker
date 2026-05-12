@@ -40,6 +40,8 @@ const {
   resolveKiroCliSessionFiles,
   resolveKiroCliDbPath,
   parseKiroCliIncremental,
+  resolveKilocodeTaskFiles,
+  parseKilocodeIncremental,
   bucketKey,
   totalsKey,
   groupBucketKey,
@@ -133,6 +135,7 @@ async function cmdSync(argv) {
     const xdgDataHome = process.env.XDG_DATA_HOME || path.join(home, ".local", "share");
     const opencodeHome = process.env.OPENCODE_HOME || path.join(xdgDataHome, "opencode");
     const opencodeStorageDir = path.join(opencodeHome, "storage");
+    const kiloHome = process.env.KILO_HOME || path.join(xdgDataHome, "kilo");
 
     // OpenClaw hook integration: allow a hook to request incremental parsing for a single session jsonl.
     // We still parse all regular sources so model/source attribution stays complete (e.g. Kimi sessions).
@@ -322,6 +325,63 @@ async function cmdSync(argv) {
       opencodeResult.filesProcessed += opencodeDbResult.messagesProcessed;
       opencodeResult.eventsAggregated += opencodeDbResult.eventsAggregated;
       opencodeResult.bucketsQueued += opencodeDbResult.bucketsQueued;
+    }
+
+    // ── Kilo CLI (kilo.ai @kilocode/plugin — OpenCode-fork SQLite) ──
+    // Uses the exact same `message` table schema as OpenCode v1.2+. We reuse
+    // the OpenCode DB reader/parser, just with a separate cursor namespace so
+    // the message indexes don't collide.
+    const kiloDbPath = path.join(kiloHome, "kilo.db");
+    let kiloResult = { messagesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    const kiloDbMessages = readOpencodeDbMessages(kiloDbPath);
+    if (kiloDbMessages.length > 0) {
+      if (progress?.enabled) {
+        progress.start(
+          `Parsing Kilo CLI ${renderBar(0)} 0/${formatNumber(kiloDbMessages.length)} msgs | buckets 0`,
+        );
+      }
+      kiloResult = await parseOpencodeDbIncremental({
+        dbMessages: kiloDbMessages,
+        cursors,
+        queuePath,
+        projectQueuePath,
+        onProgress: (p) => {
+          if (!progress?.enabled) return;
+          const pct = p.total > 0 ? p.index / p.total : 1;
+          progress.update(
+            `Parsing Kilo CLI ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(
+              p.total,
+            )} msgs | buckets ${formatNumber(p.bucketsQueued)}`,
+          );
+        },
+        source: "kilo-cli",
+        cursorKey: "kiloCli",
+      });
+    }
+
+    // ── Kilo Code VS Code extension (Cline-style ui_messages.json) ──
+    const kilocodeTaskFiles = resolveKilocodeTaskFiles(process.env);
+    let kilocodeResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    if (kilocodeTaskFiles.length > 0) {
+      if (progress?.enabled) {
+        progress.start(
+          `Parsing Kilo Code ${renderBar(0)} 0/${formatNumber(kilocodeTaskFiles.length)} tasks | buckets 0`,
+        );
+      }
+      kilocodeResult = await parseKilocodeIncremental({
+        taskFiles: kilocodeTaskFiles,
+        cursors,
+        queuePath,
+        onProgress: (p) => {
+          if (!progress?.enabled) return;
+          const pct = p.total > 0 ? p.index / p.total : 1;
+          progress.update(
+            `Parsing Kilo Code ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(
+              p.total,
+            )} tasks | buckets ${formatNumber(p.bucketsQueued)}`,
+          );
+        },
+      });
     }
 
     // ── Cursor (API-based) ──
@@ -689,7 +749,9 @@ async function cmdSync(argv) {
         ompResult.recordsProcessed +
         piResult.recordsProcessed +
         craftResult.recordsProcessed +
-        copilotResult.recordsProcessed;
+        copilotResult.recordsProcessed +
+        kiloResult.messagesProcessed +
+        kilocodeResult.recordsProcessed;
       const totalBuckets =
         parseResult.bucketsQueued +
         openclawResult.bucketsQueued +
@@ -705,7 +767,9 @@ async function cmdSync(argv) {
         ompResult.bucketsQueued +
         piResult.bucketsQueued +
         craftResult.bucketsQueued +
-        copilotResult.bucketsQueued;
+        copilotResult.bucketsQueued +
+        kiloResult.bucketsQueued +
+        kilocodeResult.bucketsQueued;
       process.stdout.write(
         [
           "Sync finished:",

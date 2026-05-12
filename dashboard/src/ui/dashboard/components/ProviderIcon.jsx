@@ -194,6 +194,8 @@ const PROVIDER_LOGO_MAP = {
   CODEX: "/brand-logos/codex.svg",
   GEMINI: "/brand-logos/gemini.svg",
   HERMES: "/brand-logos/hermes.svg",
+  "KILO-CLI": "/brand-logos/kilo.svg",
+  "KILO-CODE": "/brand-logos/kilo.svg",
   OPENCLAW: "/brand-logos/openclaw.svg",
   OPENCODE: "/brand-logos/opencode.svg",
 };

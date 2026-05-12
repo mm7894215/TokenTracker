@@ -102,3 +102,6 @@ build/
 .roo
 .trae
 .windsurf
+
+# Kilo CLI per-project plans/state (used during development)
+.kilo/
