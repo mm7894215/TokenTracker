@@ -899,10 +899,8 @@ async function parseClaudeFile({
     if (!usage || typeof usage !== "object") continue;
 
     if (seenMessageHashes) {
-      const msgId = obj?.message?.id;
-      const reqId = obj?.requestId;
-      if (msgId && reqId) {
-        const hash = `${msgId}:${reqId}`;
+      const hash = claudeMessageDedupKey(obj);
+      if (hash) {
         if (seenMessageHashes.has(hash)) continue;
         seenMessageHashes.add(hash);
       }
@@ -2258,6 +2256,24 @@ function normalizeUsage(u) {
   // our schema's non_cached + cached + output + 0 (cache_creation=0 here).
   out.input_tokens = Math.max(0, out.input_tokens - out.cached_input_tokens);
   return out;
+}
+
+// Stable dedup key for one Claude jsonl entry. Anthropic's official protocol
+// guarantees `message.id` is globally unique per response, so msgId alone is a
+// valid dedup key. Older code required both msgId AND requestId, which short-
+// circuited dedup entirely for jsonl entries where `requestId` is absent
+// (DeepSeek/Kimi/Mimo/MiniMax anthropic-compatible endpoints don't return the
+// `request-id` HTTP header, and Claude Code's sub-agent / thinking transport
+// paths drop the field too). The short-circuit caused 1.6–3.7x overcounting on
+// every affected provider — see issue #64. Falling back to msgId-only keeps
+// backward compatibility for the (msgId, reqId) format already persisted in
+// cursors.claudeHashes (msgId strings don't contain `:`, so the two formats
+// share the same Set without collision).
+function claudeMessageDedupKey(obj) {
+  const msgId = typeof obj?.message?.id === "string" && obj.message.id ? obj.message.id : null;
+  if (!msgId) return null;
+  const reqId = typeof obj?.requestId === "string" && obj.requestId ? obj.requestId : null;
+  return reqId ? `${msgId}:${reqId}` : msgId;
 }
 
 function normalizeClaudeUsage(u) {
@@ -5546,5 +5562,6 @@ module.exports = {
   // same key format sync uses elsewhere.
   bucketKey,
   totalsKey,
+  claudeMessageDedupKey,
   groupBucketKey,
 };

@@ -26,6 +26,7 @@ const {
   buildExecStatsEntry,
   allocateByLargestRemainder,
 } = require("./categorizer-utils");
+const { claudeMessageDedupKey } = require("./rollout");
 
 const CATEGORY_KEYS = [
   "system_prefix",
@@ -478,10 +479,8 @@ async function categorizeSessionFile(filePath, { fromIso, toIso, seenHashes }, b
     if (fromIso && ts < fromIso) continue;
     if (toIso && ts > toIso) continue;
 
-    const msgId = obj?.message?.id;
-    const reqId = obj?.requestId;
-    if (msgId && reqId) {
-      const hash = `${msgId}:${reqId}`;
+    const hash = claudeMessageDedupKey(obj);
+    if (hash) {
       if (seenHashes.has(hash)) continue;
       seenHashes.add(hash);
     }
@@ -1133,10 +1132,8 @@ async function computeClaudeGroundTruthBuckets({ rootDir = null } = {}) {
       const usage = obj?.message?.usage;
       if (!usage || typeof usage !== "object") continue;
 
-      const msgId = obj?.message?.id;
-      const reqId = obj?.requestId;
-      if (msgId && reqId) {
-        const hash = `${msgId}:${reqId}`;
+      const hash = claudeMessageDedupKey(obj);
+      if (hash) {
         if (seenHashes.has(hash)) continue;
         seenHashes.add(hash);
       }
