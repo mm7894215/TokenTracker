@@ -1871,7 +1871,10 @@ function deriveProjectKeyFromRef(projectRef) {
     const parsed = new URL(projectRef);
     const segments = parsed.pathname.split("/").filter(Boolean);
     if (segments.length < 2) return null;
-    return `${segments[0]}/${segments[1]}`;
+    // GitHub paths are always owner/repo, but GitLab supports nested groups
+    // (group/subgroup/.../repo). Preserve the full path so nested-group repos
+    // don't collapse to the first two segments.
+    return segments.join("/");
   } catch (_e) {
     return null;
   }
@@ -5944,4 +5947,7 @@ module.exports = {
   totalsKey,
   claudeMessageDedupKey,
   groupBucketKey,
+  // Exposed for regression tests covering nested-group remote URLs.
+  canonicalizeProjectRef,
+  deriveProjectKeyFromRef,
 };
