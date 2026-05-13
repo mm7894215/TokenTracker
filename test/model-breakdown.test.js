@@ -136,6 +136,48 @@ test("buildTopModels computes percent using billable tokens across all models", 
   assert.equal(topModels[0].percent, "80.0");
 });
 
+test("Cursor display data falls back to total tokens when billable tokens are zero", async () => {
+  const mod = await loadDashboardModule("dashboard/src/lib/model-breakdown.ts");
+  const { buildFleetData, buildTopModels, resolveDisplayTokens } = mod;
+
+  const modelBreakdown = {
+    sources: [
+      {
+        source: "cursor",
+        totals: {
+          total_tokens: 12345,
+          billable_total_tokens: 0,
+          total_cost_usd: "0.165051",
+        },
+        models: [
+          {
+            model: "auto",
+            model_id: "auto",
+            totals: {
+              total_tokens: 12345,
+              billable_total_tokens: 0,
+            },
+          },
+        ],
+      },
+    ],
+  };
+
+  assert.equal(resolveDisplayTokens(modelBreakdown.sources[0].totals), 12345);
+
+  const fleetData = buildFleetData(modelBreakdown);
+  assert.equal(fleetData.length, 1);
+  assert.equal(fleetData[0].source, "cursor");
+  assert.equal(fleetData[0].usage, 12345);
+  assert.equal(fleetData[0].models.length, 1);
+  assert.equal(fleetData[0].models[0].usage, 12345);
+
+  const topModels = buildTopModels(modelBreakdown, { limit: 3 });
+  assert.equal(topModels.length, 1);
+  assert.equal(topModels[0].id, "auto");
+  assert.equal(topModels[0].tokens, 12345);
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TASK-007: Kiro pricing in local-api MODEL_PRICING + byte-equivalence with
 // dashboard/edge-patches/tokentracker-leaderboard-refresh.ts.

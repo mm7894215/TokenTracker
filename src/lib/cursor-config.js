@@ -42,6 +42,56 @@ function isCursorInstalled({ home, platform, env } = {}) {
 
 // ── Auth token extraction ──
 
+const CURSOR_ACCESS_TOKEN_SQL =
+  "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken';";
+
+function cursorDebugLog(message, env = process.env) {
+  const dbg = String((env && env.TOKENTRACKER_DEBUG) || "").toLowerCase();
+  if (dbg === "1" || dbg === "true") {
+    process.stderr.write(`[cursor] ${message}\n`);
+  }
+}
+
+function readCursorAccessTokenFromStateDb(stateDbPath, deps = {}) {
+  const execFileSync = deps.execFileSync || cp.execFileSync;
+  const requireFn = deps.requireFn || require;
+  const env = deps.env || process.env;
+
+  try {
+    return execFileSync("sqlite3", [stateDbPath, CURSOR_ACCESS_TOKEN_SQL], {
+      encoding: "utf8",
+      timeout: 5000,
+      stdio: ["pipe", "pipe", "pipe"],
+    }).trim();
+  } catch (sqliteCliErr) {
+    cursorDebugLog(
+      `sqlite3 CLI token read failed for ${stateDbPath}: ${sqliteCliErr?.message || sqliteCliErr}`,
+      env,
+    );
+  }
+
+  try {
+    const { DatabaseSync } = requireFn("node:sqlite");
+    if (typeof DatabaseSync !== "function") {
+      cursorDebugLog("node:sqlite DatabaseSync is unavailable", env);
+      return null;
+    }
+    const db = new DatabaseSync(stateDbPath, { readOnly: true });
+    try {
+      const row = db.prepare(CURSOR_ACCESS_TOKEN_SQL).get();
+      return typeof row?.value === "string" ? row.value.trim() : null;
+    } finally {
+      db.close();
+    }
+  } catch (nodeSqliteErr) {
+    cursorDebugLog(
+      `node:sqlite token read failed for ${stateDbPath}: ${nodeSqliteErr?.message || nodeSqliteErr}`,
+      env,
+    );
+    return null;
+  }
+}
+
 /**
  * Extract Cursor session cookie from local SQLite + cli-config.json.
  * Returns { cookie, userId } or null on failure.
@@ -50,21 +100,15 @@ function isCursorInstalled({ home, platform, env } = {}) {
  * - JWT from state.vscdb → ItemTable → cursorAuth/accessToken
  * - userId from cli-config.json → authInfo.authId → "auth0|user_XXXXX"
  */
-function extractCursorSessionToken({ home } = {}) {
+function extractCursorSessionToken({ home, deps } = {}) {
   const { stateDbPath, cliConfigPath } = resolveCursorPaths({ home });
 
   // 1. Extract JWT from SQLite
-  let jwt;
-  try {
-    jwt = cp
-      .execSync(
-        `sqlite3 "${stateDbPath}" "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken';"`,
-        { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] },
-      )
-      .trim();
-  } catch {
+  if (!fs.existsSync(stateDbPath)) {
+    cursorDebugLog(`Cursor state DB not found at ${stateDbPath}`, deps?.env);
     return null;
   }
+  const jwt = readCursorAccessTokenFromStateDb(stateDbPath, deps);
   if (!jwt || jwt.length < 10) return null;
 
   // 2. Extract userId — try cli-config.json first, fall back to JWT decode
@@ -374,6 +418,7 @@ function toFloat(s) {
 module.exports = {
   resolveCursorPaths,
   isCursorInstalled,
+  readCursorAccessTokenFromStateDb,
   extractCursorSessionToken,
   fetchCursorUsageCsv,
   fetchCursorUsageSummary,

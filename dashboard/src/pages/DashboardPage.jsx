@@ -23,7 +23,7 @@ import {
 } from "../lib/format";
 import { shouldShowInstallCard } from "../lib/install-status";
 import { getMockNow, isMockEnabled } from "../lib/mock-data";
-import { buildFleetData, buildTopModels } from "../lib/model-breakdown";
+import { buildFleetData, buildTopModels, resolveDisplayTokens } from "../lib/model-breakdown";
 import { safeWriteClipboard, safeWriteClipboardImage } from "../lib/safe-browser";
 import { isScreenshotModeEnabled } from "../lib/screenshot-mode";
 import {
@@ -69,7 +69,7 @@ function hasUsageValue(value, level) {
 
 function getBillableTotal(row) {
   if (!row) return null;
-  return row?.billable_total_tokens ?? row?.total_tokens;
+  return resolveDisplayTokens(row, null);
 }
 
 function getHeatmapValue(cell) {
@@ -908,9 +908,7 @@ export function DashboardPage({
     let topSourceTokens = 0;
 
     for (const source of sources) {
-      const tokens = toFiniteNumber(
-        source?.totals?.billable_total_tokens ?? source?.totals?.total_tokens,
-      );
+      const tokens = resolveDisplayTokens(source?.totals);
       if (!Number.isFinite(tokens) || tokens <= 0) continue;
       if (tokens > topSourceTokens) {
         topSourceTokens = tokens;
@@ -927,9 +925,7 @@ export function DashboardPage({
       const models = Array.isArray(topSource?.models) ? topSource.models : [];
       let topModelTokens = 0;
       for (const model of models) {
-        const tokens = toFiniteNumber(
-          model?.totals?.billable_total_tokens ?? model?.totals?.total_tokens,
-        );
+        const tokens = resolveDisplayTokens(model?.totals);
         if (!Number.isFinite(tokens) || tokens <= 0) continue;
         if (tokens > topModelTokens) {
           topModelTokens = tokens;

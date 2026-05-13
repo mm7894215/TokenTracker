@@ -1,4 +1,7 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const { describe, it } = require("node:test");
 
 const {
@@ -6,9 +9,16 @@ const {
   isCursorBillableKind,
   normalizeCursorUsage,
   isCursorInstalled,
+  readCursorAccessTokenFromStateDb,
   extractCursorSessionToken,
   resolveCursorPaths,
 } = require("../src/lib/cursor-config");
+
+function makeCursorJwt(userId = "user_TEST123") {
+  const header = Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ sub: `auth0|${userId}` })).toString("base64url");
+  return `${header}.${payload}.sig`;
+}
 
 // ── parseCursorCsv — new format ──
 
@@ -295,5 +305,113 @@ describe("extractCursorSessionToken", () => {
   it("returns null for non-existent home dir", () => {
     const result = extractCursorSessionToken({ home: "/tmp/nonexistent-cursor-test-home" });
     assert.equal(result, null);
+  });
+
+  it("reads the Cursor access token via sqlite3 CLI", () => {
+    const jwt = makeCursorJwt();
+    const token = readCursorAccessTokenFromStateDb("/tmp/state.vscdb", {
+      execFileSync: (cmd, args, opts) => {
+        assert.equal(cmd, "sqlite3");
+        assert.deepEqual(args, [
+          "/tmp/state.vscdb",
+          "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken';",
+        ]);
+        assert.equal(opts.encoding, "utf8");
+        return `${jwt}\n`;
+      },
+      requireFn: () => {
+        throw new Error("node:sqlite should not be used when sqlite3 works");
+      },
+      env: {},
+    });
+
+    assert.equal(token, jwt);
+  });
+
+  it("falls back to node:sqlite when sqlite3 CLI is unavailable", () => {
+    const jwt = makeCursorJwt();
+    let closed = false;
+    const token = readCursorAccessTokenFromStateDb("C:\\Users\\alice\\state.vscdb", {
+      execFileSync: () => {
+        throw new Error("spawn sqlite3 ENOENT");
+      },
+      requireFn: (name) => {
+        assert.equal(name, "node:sqlite");
+        return {
+          DatabaseSync: class FakeDatabaseSync {
+            constructor(dbPath, options) {
+              assert.equal(dbPath, "C:\\Users\\alice\\state.vscdb");
+              assert.deepEqual(options, { readOnly: true });
+            }
+
+            prepare(sql) {
+              assert.equal(sql, "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken';");
+              return {
+                get() {
+                  return { value: ` ${jwt}\n` };
+                },
+              };
+            }
+
+            close() {
+              closed = true;
+            }
+          },
+        };
+      },
+      env: {},
+    });
+
+    assert.equal(token, jwt);
+    assert.equal(closed, true);
+  });
+
+  it("returns null when neither sqlite reader can read the token", () => {
+    const token = readCursorAccessTokenFromStateDb("/tmp/state.vscdb", {
+      execFileSync: () => {
+        throw new Error("spawn sqlite3 ENOENT");
+      },
+      requireFn: () => {
+        throw new Error("No such built-in module: node:sqlite");
+      },
+      env: {},
+    });
+
+    assert.equal(token, null);
+  });
+
+  it("builds the Cursor cookie when token reading falls back to node:sqlite", () => {
+    const jwt = makeCursorJwt("user_FALLBACK");
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-cursor-home-"));
+    const { stateDbPath } = resolveCursorPaths({ home });
+    fs.mkdirSync(path.dirname(stateDbPath), { recursive: true });
+    fs.writeFileSync(stateDbPath, "", "utf8");
+    const result = extractCursorSessionToken({
+      home,
+      deps: {
+        execFileSync: () => {
+          throw new Error("spawn sqlite3 ENOENT");
+        },
+        requireFn: () => ({
+          DatabaseSync: class FakeDatabaseSync {
+            prepare() {
+              return {
+                get() {
+                  return { value: jwt };
+                },
+              };
+            }
+
+            close() {}
+          },
+        }),
+        env: {},
+      },
+    });
+
+    assert.deepEqual(result, {
+      cookie: `WorkosCursorSessionToken=user_FALLBACK%3A%3A${jwt}`,
+      userId: "user_FALLBACK",
+    });
   });
 });

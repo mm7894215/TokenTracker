@@ -33,7 +33,7 @@ Auto-collect token counts from **13 AI coding tools**, aggregate them locally, s
 
 ## ⚡ Quick Start
 
-> **Requirements**: Node.js **20+** (CLI runs on macOS / Linux / Windows; menu bar app and Cursor SQLite reader are macOS-only).
+> **Requirements**: Node.js **20+** (CLI runs on macOS / Linux / Windows; menu bar app is macOS-only. Cursor token reading uses the system `sqlite3` CLI when available and falls back to `node:sqlite` on supported Node releases).
 
 ```bash
 npx tokentracker-cli
