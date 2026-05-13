@@ -399,7 +399,7 @@ Once granted, the permission is remembered. Note that ad-hoc signed builds re-pr
 
 ## 🙏 Credits
 
-Clawd pixel art inspired by [Clawd-on-Desk](https://github.com/Angel2518975237/Clawd-on-Desk) by [@marciogranzotto](https://github.com/marciogranzotto). The Clawd character design belongs to Anthropic. This is a community project with no official affiliation with Anthropic.
+The Clawd character design belongs to Anthropic. This is a community project with no official affiliation with Anthropic.
 
 ## License
 
