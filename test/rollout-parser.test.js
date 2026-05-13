@@ -2923,6 +2923,38 @@ function writeCopilotOtelFile(filePath, spans) {
   require("node:fs").writeFileSync(filePath, lines.join("\n") + "\n", "utf8");
 }
 
+// Shared chat usage attributes. CLI Span and Chat-extension LogRecord differ on
+// envelope shape and on two key spellings (cache_write vs cache_creation,
+// reasoning.output_tokens vs reasoning_tokens) — `useShortKeys` toggles those.
+function makeCopilotChatAttrs({
+  inputTokens,
+  outputTokens,
+  cacheRead,
+  cacheCreation,
+  reasoning,
+  model,
+  responseId,
+  useShortKeys,
+}) {
+  const attrs = {
+    "gen_ai.operation.name": "chat",
+    "gen_ai.request.model": model,
+    "gen_ai.response.model": model,
+    "gen_ai.usage.input_tokens": inputTokens,
+    "gen_ai.usage.output_tokens": outputTokens,
+    "gen_ai.usage.cache_read.input_tokens": cacheRead,
+  };
+  if (responseId) attrs["gen_ai.response.id"] = responseId;
+  if (useShortKeys) {
+    attrs["gen_ai.usage.cache_creation.input_tokens"] = cacheCreation;
+    attrs["gen_ai.usage.reasoning_tokens"] = reasoning;
+  } else {
+    attrs["gen_ai.usage.cache_write.input_tokens"] = cacheCreation;
+    attrs["gen_ai.usage.reasoning.output_tokens"] = reasoning;
+  }
+  return attrs;
+}
+
 function makeCopilotChatSpan({
   traceId = "trace-a",
   spanId = "span-1",
@@ -2941,16 +2973,15 @@ function makeCopilotChatSpan({
     name: `chat ${model}`,
     startTime: [endSeconds - 4, 0],
     endTime: [endSeconds, 0],
-    attributes: {
-      "gen_ai.operation.name": "chat",
-      "gen_ai.request.model": model,
-      "gen_ai.response.model": model,
-      "gen_ai.usage.input_tokens": inputTokens,
-      "gen_ai.usage.output_tokens": outputTokens,
-      "gen_ai.usage.cache_read.input_tokens": cacheRead,
-      "gen_ai.usage.cache_write.input_tokens": cacheWrite,
-      "gen_ai.usage.reasoning.output_tokens": reasoning,
-    },
+    attributes: makeCopilotChatAttrs({
+      inputTokens,
+      outputTokens,
+      cacheRead,
+      cacheCreation: cacheWrite,
+      reasoning,
+      model,
+      useShortKeys: false,
+    }),
   };
 }
 
@@ -3030,13 +3061,515 @@ test("parseCopilotIncremental re-reads from start when file is rotated (inode ch
   }
 });
 
+// Chat extension `file` exporter writes OTEL JS SDK LogRecord-shaped entries
+// (no top-level `type:"span"`, no traceId/spanId, uses `hrTime`).
+function makeCopilotChatLogRecord({
+  responseId = "resp-1",
+  hrSeconds = 1778641563,
+  inputTokens = 1000,
+  outputTokens = 200,
+  cacheRead = 100,
+  cacheCreation = 0,
+  reasoning = 0,
+  model = "gpt-4o-mini-2024-07-18",
+} = {}) {
+  return {
+    hrTime: [hrSeconds, 0],
+    hrTimeObserved: [hrSeconds, 0],
+    resource: { _rawAttributes: [["service.name", "copilot-chat"]] },
+    instrumentationScope: { name: "copilot-chat", version: "0.47.1" },
+    attributes: {
+      "event.name": "gen_ai.client.inference.operation.details",
+      ...makeCopilotChatAttrs({
+        inputTokens,
+        outputTokens,
+        cacheRead,
+        cacheCreation,
+        reasoning,
+        model,
+        responseId,
+        useShortKeys: true,
+      }),
+    },
+    _body: `GenAI inference: ${model}`,
+  };
+}
+
+test("parseCopilotIncremental handles Chat extension LogRecord shape (hrTime + response.id dedup)", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-copilot-"));
+  try {
+    const otelPath = path.join(tmp, "vscode-chat.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+
+    writeCopilotOtelFile(otelPath, [
+      makeCopilotChatLogRecord({
+        responseId: "r1",
+        inputTokens: 1617,
+        outputTokens: 6,
+        cacheRead: 0,
+      }),
+      // Tool-call span (has spanContext, no gen_ai.operation.name=chat) — must be skipped
+      {
+        hrTime: [1778641572, 0],
+        spanContext: { traceId: "t-tool", spanId: "s-tool" },
+        attributes: { "event.name": "copilot_chat.tool.call", "gen_ai.tool.name": "manage_todo_list" },
+      },
+      // Metric record — must be skipped
+      { resource: {}, scopeMetrics: [] },
+    ]);
+
+    const result = await parseCopilotIncremental({ otelPaths: [otelPath], cursors, queuePath });
+    assert.equal(result.eventsAggregated, 1, "only the chat log record should aggregate");
+
+    const queued = await readJsonLines(queuePath);
+    const buckets = queued.filter((b) => b.source === "copilot");
+    assert.equal(buckets.length, 1);
+    assert.equal(buckets[0].input_tokens, 1617);
+    assert.equal(buckets[0].output_tokens, 6);
+    assert.equal(buckets[0].total_tokens, 1623);
+    assert.equal(buckets[0].model, "gpt-4o-mini-2024-07-18");
+
+    // Idempotent re-read: same file → 0 new events
+    const second = await parseCopilotIncremental({ otelPaths: [otelPath], cursors, queuePath });
+    assert.equal(second.eventsAggregated, 0, "re-parse should not re-count");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCopilotIncremental reads short cache_creation + reasoning_tokens keys (Chat extension)", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-copilot-"));
+  try {
+    const otelPath = path.join(tmp, "vscode-chat.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+
+    writeCopilotOtelFile(otelPath, [
+      makeCopilotChatLogRecord({
+        responseId: "r-cache",
+        inputTokens: 5000,
+        outputTokens: 300,
+        cacheRead: 1500,
+        cacheCreation: 800,
+        reasoning: 250,
+        model: "claude-sonnet-4-6",
+      }),
+    ]);
+
+    await parseCopilotIncremental({ otelPaths: [otelPath], cursors, queuePath });
+    const queued = await readJsonLines(queuePath);
+    const b = queued.find((r) => r.source === "copilot");
+    assert.ok(b, "copilot bucket present");
+    // input(5000) - cache_read(1500) = 3500
+    assert.equal(b.input_tokens, 3500);
+    assert.equal(b.cached_input_tokens, 1500);
+    assert.equal(b.cache_creation_input_tokens, 800);
+    assert.equal(b.output_tokens, 300);
+    assert.equal(b.reasoning_output_tokens, 250);
+    assert.equal(b.total_tokens, 3500 + 1500 + 800 + 300 + 250);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCopilotIncremental migration: v1 cursor with empty seenIds + non-empty fileOffsets re-reads file", async () => {
+  // Repro of the real bug: a user on v0.13.0 enabled Chat-extension OTEL output,
+  // pre-v2 parser silently rejected the LogRecord shape and pushed the cursor
+  // offset to EOF without recording any seenIds. Without migration, the
+  // post-upgrade parser would skip the file forever.
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-copilot-mig-"));
+  try {
+    const otelPath = path.join(tmp, "vscode-chat.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    writeCopilotOtelFile(otelPath, [
+      makeCopilotChatLogRecord({ responseId: "r-1", inputTokens: 500, outputTokens: 50, cacheRead: 0 }),
+      makeCopilotChatLogRecord({ responseId: "r-2", inputTokens: 800, outputTokens: 90, cacheRead: 0 }),
+    ]);
+    const fileSize = require("node:fs").statSync(otelPath).size;
+    const fileIno = require("node:fs").statSync(otelPath).ino;
+    // Simulated v1 cursor state — offset already at EOF, seenIds empty
+    const cursors = {
+      copilot: {
+        // no `version` field → treated as v1
+        seenIds: [],
+        fileOffsets: { [otelPath]: { size: fileSize, mtimeMs: Date.now(), ino: fileIno } },
+        updatedAt: new Date().toISOString(),
+      },
+    };
+
+    const result = await parseCopilotIncremental({ otelPaths: [otelPath], cursors, queuePath });
+    assert.equal(result.eventsAggregated, 2, "migration should re-read both records");
+    assert.equal(cursors.copilot.version, 2, "version should be bumped");
+
+    const queued = await readJsonLines(queuePath);
+    const b = queued.find((r) => r.source === "copilot");
+    assert.equal(b.input_tokens, 1300);
+    assert.equal(b.output_tokens, 140);
+    assert.equal(b.conversation_count, 2);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCopilotIncremental migration: preserves CLI fileOffsets (no re-read of CLI files)", async () => {
+  // Type-B upgrade path: existing CLI OTEL user. v1 already counted their spans
+  // and pushed offset to EOF. v2 migration must NOT re-read this file — even
+  // with non-empty seenIds the parser would correctly dedupe, but a heavy user
+  // with >10k spans had earlier dedup keys evicted by the seenIds cap, so a
+  // re-read would re-count those evicted spans. Skip re-reading entirely.
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-copilot-mig-b-"));
+  try {
+    const otelPath = path.join(tmp, "copilot-otel.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    writeCopilotOtelFile(otelPath, [
+      makeCopilotChatSpan({ traceId: "t-cli", spanId: "s-cli", inputTokens: 2000, outputTokens: 100 }),
+    ]);
+    const fileSize = require("node:fs").statSync(otelPath).size;
+    const fileIno = require("node:fs").statSync(otelPath).ino;
+    const cursors = {
+      copilot: {
+        seenIds: ["t-cli:s-cli"],
+        fileOffsets: { [otelPath]: { size: fileSize, mtimeMs: Date.now(), ino: fileIno } },
+        updatedAt: new Date().toISOString(),
+      },
+    };
+
+    const result = await parseCopilotIncremental({ otelPaths: [otelPath], cursors, queuePath });
+    assert.equal(result.eventsAggregated, 0, "must not re-read CLI file with intact offset");
+    assert.equal(
+      result.recordsProcessed,
+      0,
+      "CLI file should be skipped entirely (offset === size after migration)",
+    );
+    assert.equal(cursors.copilot.version, 2);
+    // Offset preserved (within tolerance for fresh stat) — confirms no full re-read happened
+    assert.equal(
+      cursors.copilot.fileOffsets[otelPath].size,
+      fileSize,
+      "CLI fileOffset size must remain at EOF",
+    );
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.filter((r) => r.source === "copilot").length, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCopilotIncremental migration: CLI file with metric record at head is NOT mistaken for v1-skipped", async () => {
+  // Codex review reproduced: real OTEL files can lead with a metric blob (no
+  // `type:"span"`) followed by CLI spans. The migration must scan past the
+  // metric header to find the spans, otherwise it resets the offset and
+  // re-counts every span beyond the seenIds cap.
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-copilot-mix-head-"));
+  try {
+    const otelPath = path.join(tmp, "copilot-otel.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const fsNode = require("node:fs");
+    const lines = [
+      // OTEL metric record — v1 rejects but doesn't stop reading
+      JSON.stringify({ resource: {}, scopeMetrics: [] }),
+    ];
+    for (let i = 0; i < 50; i++) {
+      lines.push(
+        JSON.stringify(
+          makeCopilotChatSpan({
+            traceId: `t-${i}`,
+            spanId: `s-${i}`,
+            inputTokens: 100,
+            outputTokens: 10,
+          }),
+        ),
+      );
+    }
+    fsNode.writeFileSync(otelPath, lines.join("\n") + "\n", "utf8");
+    const stat = fsNode.statSync(otelPath);
+    // Heavy user: only the last two dedup keys survive the seenIds cap
+    const cursors = {
+      copilot: {
+        seenIds: ["t-48:s-48", "t-49:s-49"],
+        fileOffsets: {
+          [otelPath]: { size: stat.size, mtimeMs: Date.now(), ino: stat.ino },
+        },
+        updatedAt: new Date().toISOString(),
+      },
+    };
+
+    const result = await parseCopilotIncremental({ otelPaths: [otelPath], cursors, queuePath });
+    assert.equal(
+      result.eventsAggregated,
+      0,
+      "metric-headed CLI file must keep its offset; otherwise 48 evicted spans double-count",
+    );
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.filter((r) => r.source === "copilot").length, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCopilotIncremental migration: CLI file with name-only chat spans (no gen_ai.operation.name) preserves offset", async () => {
+  // Codex review: v1's isCopilotChatSpan recognized CLI spans via EITHER
+  // attributes["gen_ai.operation.name"] === "chat" OR name.startsWith("chat ").
+  // The migration helper must mirror both; otherwise older CLI traces that
+  // only carry the legacy name-prefix shape look like "v1 skipped" -> reset ->
+  // re-read → double-count for users beyond the seenIds cap.
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-copilot-name-only-"));
+  try {
+    const otelPath = path.join(tmp, "copilot-otel.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const fsNode = require("node:fs");
+    const lines = [];
+    for (let i = 0; i < 50; i++) {
+      // Span shape with `name:"chat ..."` but NO gen_ai.operation.name attribute
+      lines.push(
+        JSON.stringify({
+          type: "span",
+          traceId: `t-${i}`,
+          spanId: `s-${i}`,
+          name: "chat gpt-4o",
+          startTime: [1700000000 + i, 0],
+          endTime: [1700000000 + i, 100000000],
+          attributes: {
+            "gen_ai.response.model": "gpt-4o",
+            "gen_ai.usage.input_tokens": 100,
+            "gen_ai.usage.output_tokens": 10,
+          },
+        }),
+      );
+    }
+    fsNode.writeFileSync(otelPath, lines.join("\n") + "\n", "utf8");
+    const stat = fsNode.statSync(otelPath);
+    const cursors = {
+      copilot: {
+        seenIds: ["t-48:s-48", "t-49:s-49"],
+        fileOffsets: {
+          [otelPath]: { size: stat.size, mtimeMs: Date.now(), ino: stat.ino },
+        },
+        updatedAt: new Date().toISOString(),
+      },
+    };
+
+    const result = await parseCopilotIncremental({ otelPaths: [otelPath], cursors, queuePath });
+    assert.equal(
+      result.eventsAggregated,
+      0,
+      "v1 recognized name-prefix chat spans — migration must too, otherwise 48 spans double-count",
+    );
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.filter((r) => r.source === "copilot").length, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCopilotIncremental migration: heavy CLI user (>10k spans, seenIds capped) is NOT re-read", async () => {
+  // Regression for the data-accuracy risk flagged in review: when a CLI user has
+  // historical spans beyond the 10k seenIds cap, naive offset reset would
+  // re-read records whose dedup keys were already evicted, double-counting them.
+  // The peek-based migration must keep the CLI file offset intact.
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-copilot-heavy-"));
+  try {
+    const otelPath = path.join(tmp, "copilot-otel.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const records = [];
+    for (let i = 0; i < 50; i++) {
+      records.push(
+        makeCopilotChatSpan({ traceId: `t-${i}`, spanId: `s-${i}`, inputTokens: 100, outputTokens: 10 }),
+      );
+    }
+    writeCopilotOtelFile(otelPath, records);
+    const fileSize = require("node:fs").statSync(otelPath).size;
+    const fileIno = require("node:fs").statSync(otelPath).ino;
+    // Simulate the capped state: seenIds only retains the LAST few (evicted earlier ones)
+    const cursors = {
+      copilot: {
+        seenIds: ["t-48:s-48", "t-49:s-49"],
+        fileOffsets: { [otelPath]: { size: fileSize, mtimeMs: Date.now(), ino: fileIno } },
+        updatedAt: new Date().toISOString(),
+      },
+    };
+
+    const result = await parseCopilotIncremental({ otelPaths: [otelPath], cursors, queuePath });
+    assert.equal(result.eventsAggregated, 0, "evicted-but-uncounted spans must not resurrect on migration");
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.filter((r) => r.source === "copilot").length, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCopilotIncremental migration: mixed CLI + Chat-extension files resets only the Chat-extension one", async () => {
+  // The migration must distinguish per-file: CLI keeps offset, Chat-extension resets.
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-copilot-mig-mix-"));
+  try {
+    const cliPath = path.join(tmp, "copilot-otel.jsonl");
+    const idePath = path.join(tmp, "vscode-chat.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    writeCopilotOtelFile(cliPath, [
+      makeCopilotChatSpan({ traceId: "t-old", spanId: "s-old", inputTokens: 1000, outputTokens: 50 }),
+    ]);
+    writeCopilotOtelFile(idePath, [
+      makeCopilotChatLogRecord({
+        responseId: "r-skipped",
+        inputTokens: 700,
+        outputTokens: 30,
+        cacheRead: 0,
+      }),
+    ]);
+    const cliSize = require("node:fs").statSync(cliPath).size;
+    const cliIno = require("node:fs").statSync(cliPath).ino;
+    const ideSize = require("node:fs").statSync(idePath).size;
+    const ideIno = require("node:fs").statSync(idePath).ino;
+    // v1 state: CLI was counted (seenIds non-empty), Chat-extension was rejected
+    // but offset still advanced to EOF
+    const cursors = {
+      copilot: {
+        seenIds: ["t-old:s-old"],
+        fileOffsets: {
+          [cliPath]: { size: cliSize, mtimeMs: Date.now(), ino: cliIno },
+          [idePath]: { size: ideSize, mtimeMs: Date.now(), ino: ideIno },
+        },
+        updatedAt: new Date().toISOString(),
+      },
+    };
+
+    const result = await parseCopilotIncremental({
+      otelPaths: [cliPath, idePath],
+      cursors,
+      queuePath,
+    });
+    // Only the Chat-extension record should surface; the CLI offset is preserved.
+    assert.equal(result.eventsAggregated, 1);
+    const queued = await readJsonLines(queuePath);
+    const buckets = queued.filter((b) => b.source === "copilot");
+    assert.equal(buckets.length, 1);
+    assert.equal(buckets[0].input_tokens, 700);
+    assert.equal(buckets[0].output_tokens, 30);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCopilotIncremental migration: same file mixed CLI + Chat-extension replays only skipped Chat records", async () => {
+  // Some OTEL exporters can append different record envelopes to one file. If a
+  // file contains both v1-counted CLI spans and v1-skipped Chat LogRecords, the
+  // migration must re-read the file but skip the old CLI lines, even if those
+  // CLI spans have no usable dedup key.
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-copilot-mig-same-file-"));
+  try {
+    const otelPath = path.join(tmp, "copilot-otel.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    writeCopilotOtelFile(otelPath, [
+      makeCopilotChatSpan({
+        traceId: undefined,
+        spanId: undefined,
+        inputTokens: 1000,
+        outputTokens: 50,
+      }),
+      makeCopilotChatLogRecord({
+        responseId: "r-same-file-skipped",
+        inputTokens: 700,
+        outputTokens: 30,
+        cacheRead: 0,
+      }),
+    ]);
+    const stat = require("node:fs").statSync(otelPath);
+    const cursors = {
+      copilot: {
+        seenIds: [],
+        fileOffsets: {
+          [otelPath]: { size: stat.size, mtimeMs: Date.now(), ino: stat.ino },
+        },
+        updatedAt: new Date().toISOString(),
+      },
+    };
+
+    const result = await parseCopilotIncremental({ otelPaths: [otelPath], cursors, queuePath });
+    assert.equal(result.eventsAggregated, 1, "only the v1-skipped Chat LogRecord should be replayed");
+
+    const queued = await readJsonLines(queuePath);
+    const buckets = queued.filter((b) => b.source === "copilot");
+    assert.equal(buckets.length, 1);
+    assert.equal(buckets[0].input_tokens, 700);
+    assert.equal(buckets[0].output_tokens, 30);
+    assert.equal(buckets[0].conversation_count, 1);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCopilotIncremental aggregates mixed CLI Span + Chat extension LogRecord", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-copilot-"));
+  try {
+    const cliPath = path.join(tmp, "copilot-otel.jsonl");
+    const idePath = path.join(tmp, "vscode-chat.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+
+    writeCopilotOtelFile(cliPath, [
+      makeCopilotChatSpan({
+        traceId: "t-cli",
+        spanId: "s-cli",
+        endSeconds: 1778641000,
+        inputTokens: 2000,
+        outputTokens: 100,
+        cacheRead: 200,
+        model: "gpt-4o-mini-2024-07-18",
+      }),
+    ]);
+    writeCopilotOtelFile(idePath, [
+      makeCopilotChatLogRecord({
+        responseId: "r-ide",
+        hrSeconds: 1778641100,
+        inputTokens: 3000,
+        outputTokens: 150,
+        cacheRead: 0,
+        model: "gpt-4o-mini-2024-07-18",
+      }),
+    ]);
+
+    const result = await parseCopilotIncremental({
+      otelPaths: [cliPath, idePath],
+      cursors,
+      queuePath,
+    });
+    assert.equal(result.eventsAggregated, 2);
+
+    const queued = await readJsonLines(queuePath);
+    const buckets = queued.filter((b) => b.source === "copilot");
+    // Both records fall in the same 30-min UTC bucket and share the same model
+    const merged = buckets.reduce(
+      (acc, b) => ({
+        input: acc.input + b.input_tokens,
+        output: acc.output + b.output_tokens,
+        cached: acc.cached + b.cached_input_tokens,
+        total: acc.total + b.total_tokens,
+      }),
+      { input: 0, output: 0, cached: 0, total: 0 },
+    );
+    // CLI: 2000-200=1800 input, 100 output, 200 cached. IDE: 3000 input, 150 output, 0 cached.
+    assert.equal(merged.input, 1800 + 3000);
+    assert.equal(merged.output, 100 + 150);
+    assert.equal(merged.cached, 200);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseCopilotIncremental returns zero when no OTEL files exist", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-copilot-"));
   try {
     const queuePath = path.join(tmp, "queue.jsonl");
     const cursors = { version: 1 };
 
-    const result = await parseCopilotIncremental({ otelPaths: [], cursors, queuePath, env: {} });
+    // env.HOME → tmp so resolver doesn't pick up the real user's ~/.copilot/otel
+    const result = await parseCopilotIncremental({
+      otelPaths: [],
+      cursors,
+      queuePath,
+      env: { HOME: tmp },
+    });
     assert.equal(result.recordsProcessed, 0);
     assert.equal(result.eventsAggregated, 0);
     assert.equal(result.bucketsQueued, 0);

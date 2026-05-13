@@ -5572,7 +5572,7 @@ async function parseCraftIncremental({
 // ─────────────────────────────────────────────────────────────────────────────
 
 function resolveCopilotOtelPaths(env = process.env) {
-  const home = require("node:os").homedir();
+  const home = env.HOME || require("node:os").homedir();
   const paths = new Set();
   const defaultDir = path.join(home, ".copilot", "otel");
   if (fssync.existsSync(defaultDir)) {
@@ -5590,10 +5590,17 @@ function resolveCopilotOtelPaths(env = process.env) {
 }
 
 function isCopilotChatSpan(record) {
-  if (!record || record.type !== "span") return false;
+  if (!record || typeof record !== "object") return false;
+  // Skip metric records (resource + scopeMetrics) which have no chat usage data
+  if (record.scopeMetrics) return false;
   const opName = record?.attributes?.["gen_ai.operation.name"];
+  // Both Copilot CLI (Span shape with type:"span") and Copilot Chat extension
+  // (OTEL JS SDK LogRecord shape with event.name:"gen_ai.client.inference.operation.details")
+  // mark chat completions with gen_ai.operation.name === "chat".
   if (opName === "chat") return true;
-  if (typeof record.name === "string" && record.name.startsWith("chat ")) return true;
+  if (record.type === "span" && typeof record.name === "string" && record.name.startsWith("chat ")) {
+    return true;
+  }
   return false;
 }
 
@@ -5614,20 +5621,116 @@ function pickCopilotModel(attrs) {
   return null;
 }
 
+const COPILOT_PARSER_VERSION = 2;
+
+function isCopilotV1ChatSpan(record) {
+  if (!record || record.type !== "span") return false;
+  const opName = record?.attributes?.["gen_ai.operation.name"];
+  if (opName === "chat") return true;
+  return typeof record.name === "string" && record.name.startsWith("chat ");
+}
+
+function copilotLineHash(line) {
+  return crypto.createHash("sha256").update(line).digest("hex");
+}
+
+function incrementMapCount(map, key, amount = 1) {
+  map.set(key, (map.get(key) || 0) + amount);
+}
+
+function getCopilotDedupKey(record, attrs = record?.attributes || {}) {
+  const traceId = record?.traceId || record?.spanContext?.traceId || "";
+  const spanId = record?.spanId || record?.spanContext?.spanId || "";
+  const responseId =
+    typeof attrs["gen_ai.response.id"] === "string" ? attrs["gen_ai.response.id"] : "";
+  return traceId && spanId ? `${traceId}:${spanId}` : responseId ? `resp:${responseId}` : null;
+}
+
+// Migration helper: stream the bytes v1 already saw (0 -> prevSize), classify
+// whether the file contains old CLI spans v1 processed, and whether it also
+// contains v2-only chat records v1 skipped. Mixed files must be replayed, but
+// their old CLI lines are skipped by hash so history does not double-count.
+async function scanCopilotV1MigrationFile(filePath, maxBytes) {
+  const result = {
+    v1Processed: false,
+    v2OnlyChat: false,
+    v1LineHashes: new Map(),
+  };
+  if (!maxBytes || maxBytes <= 0) return result;
+  try {
+    const stream = fssync.createReadStream(filePath, {
+      encoding: "utf8",
+      start: 0,
+      end: maxBytes - 1,
+    });
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+    try {
+      for await (const line of rl) {
+        if (!line || !line.trim()) continue;
+        let record;
+        try {
+          record = JSON.parse(line);
+        } catch (_e) {
+          continue;
+        }
+        // Must mirror v1's isCopilotChatSpan exactly: BOTH the
+        // gen_ai.operation.name path AND the legacy name-prefix fallback.
+        // Missing the second path lets metric-free files of name-only CLI spans
+        // look like "v1 skipped" -> offset reset -> re-read -> double-count.
+        if (isCopilotV1ChatSpan(record)) {
+          result.v1Processed = true;
+          incrementMapCount(result.v1LineHashes, copilotLineHash(line));
+        } else if (isCopilotChatSpan(record)) {
+          result.v2OnlyChat = true;
+        }
+      }
+    } finally {
+      rl.close();
+      stream.destroy();
+    }
+  } catch (_e) {}
+  return result;
+}
+
 async function parseCopilotIncremental({ otelPaths, cursors, queuePath, onProgress, env } = {}) {
   await ensureDir(path.dirname(queuePath));
   const copilotState = cursors.copilot && typeof cursors.copilot === "object" ? cursors.copilot : {};
   const seenIds = new Set(Array.isArray(copilotState.seenIds) ? copilotState.seenIds : []);
-  const fileOffsets =
+  const priorVersion = Number(copilotState.version) || 1;
+  const fileOffsetsRaw =
     copilotState.fileOffsets && typeof copilotState.fileOffsets === "object"
-      ? { ...copilotState.fileOffsets }
+      ? copilotState.fileOffsets
       : {};
+  const fileOffsets = { ...fileOffsetsRaw };
+  const migrationSkipLineHashes = new Map();
+  // One-shot v1->v2 migration:
+  // - pure v2-only files: clear offset and re-read all skipped Chat records
+  // - pure v1 CLI files: preserve offset to avoid replaying history beyond seenIds
+  // - mixed files: clear offset, but skip old v1 CLI lines by hash during replay
+  if (priorVersion < COPILOT_PARSER_VERSION) {
+    for (const filePath of Object.keys(fileOffsets)) {
+      const prevSize = Number(fileOffsets[filePath]?.size) || 0;
+      const scan = await scanCopilotV1MigrationFile(filePath, prevSize);
+      if (!scan.v1Processed) {
+        delete fileOffsets[filePath];
+      } else if (scan.v2OnlyChat) {
+        delete fileOffsets[filePath];
+        migrationSkipLineHashes.set(filePath, scan.v1LineHashes);
+      }
+    }
+  }
 
   const files = Array.isArray(otelPaths) && otelPaths.length > 0
     ? otelPaths
     : resolveCopilotOtelPaths(env || process.env);
   if (files.length === 0) {
-    cursors.copilot = { ...copilotState, seenIds: Array.from(seenIds), fileOffsets, updatedAt: new Date().toISOString() };
+    cursors.copilot = {
+      ...copilotState,
+      version: COPILOT_PARSER_VERSION,
+      seenIds: Array.from(seenIds),
+      fileOffsets,
+      updatedAt: new Date().toISOString(),
+    };
     return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
   }
 
@@ -5666,6 +5769,16 @@ async function parseCopilotIncremental({ otelPaths, cursors, queuePath, onProgre
 
     for await (const line of rl) {
       if (!line || !line.trim()) continue;
+      const skipLineHashes = migrationSkipLineHashes.get(filePath);
+      if (skipLineHashes && skipLineHashes.size > 0) {
+        const lineHash = copilotLineHash(line);
+        const skipCount = skipLineHashes.get(lineHash) || 0;
+        if (skipCount > 0) {
+          if (skipCount === 1) skipLineHashes.delete(lineHash);
+          else skipLineHashes.set(lineHash, skipCount - 1);
+          continue;
+        }
+      }
       let record;
       try {
         record = JSON.parse(line);
@@ -5675,25 +5788,37 @@ async function parseCopilotIncremental({ otelPaths, cursors, queuePath, onProgre
       recordsProcessed++;
       if (!isCopilotChatSpan(record)) continue;
 
-      const traceId = record?.traceId || "";
-      const spanId = record?.spanId || "";
-      const dedupKey = traceId && spanId ? `${traceId}:${spanId}` : null;
+      const attrs = record.attributes || {};
+      // Dedup: CLI puts traceId/spanId at the top level; the Chat extension
+      // file exporter writes LogRecord-shaped entries without either, but
+      // gen_ai.response.id is per-LLM-call unique.
+      const dedupKey = getCopilotDedupKey(record, attrs);
       if (dedupKey && seenIds.has(dedupKey)) continue;
 
-      const attrs = record.attributes || {};
       const inputRaw = toNonNegativeInt(attrs["gen_ai.usage.input_tokens"]);
       const output = toNonNegativeInt(attrs["gen_ai.usage.output_tokens"]);
       const cacheRead = toNonNegativeInt(attrs["gen_ai.usage.cache_read.input_tokens"]);
-      const cacheWrite = toNonNegativeInt(attrs["gen_ai.usage.cache_write.input_tokens"]);
-      const reasoning = toNonNegativeInt(attrs["gen_ai.usage.reasoning.output_tokens"]);
+      // Copilot CLI: cache_write.input_tokens; Copilot Chat extension: cache_creation.input_tokens
+      const cacheWrite = toNonNegativeInt(
+        attrs["gen_ai.usage.cache_write.input_tokens"] ??
+          attrs["gen_ai.usage.cache_creation.input_tokens"],
+      );
+      // Copilot CLI: reasoning.output_tokens; Copilot Chat extension: reasoning_tokens
+      const reasoning = toNonNegativeInt(
+        attrs["gen_ai.usage.reasoning.output_tokens"] ?? attrs["gen_ai.usage.reasoning_tokens"],
+      );
       // OTEL input_tokens INCLUDES cache_read — subtract per project convention
       const cacheReadClamped = Math.min(cacheRead, inputRaw);
       const input = Math.max(0, inputRaw - cacheReadClamped);
       const totalInteresting = input + output + cacheReadClamped + cacheWrite + reasoning;
-      // Drop empty rows unless cache-only
       if (totalInteresting === 0) continue;
 
-      const tsMs = copilotOtelTimeToMs(record.endTime) || copilotOtelTimeToMs(record.startTime);
+      // CLI Span uses endTime/startTime; Chat extension LogRecord uses hrTime/hrTimeObserved.
+      const tsMs =
+        copilotOtelTimeToMs(record.endTime) ||
+        copilotOtelTimeToMs(record.startTime) ||
+        copilotOtelTimeToMs(record.hrTime) ||
+        copilotOtelTimeToMs(record.hrTimeObserved);
       if (!tsMs) continue;
       const tsIso = new Date(tsMs).toISOString();
       const bucketStart = toUtcHalfHourStart(tsIso);
@@ -5747,7 +5872,13 @@ async function parseCopilotIncremental({ otelPaths, cursors, queuePath, onProgre
   const updatedAt = new Date().toISOString();
   hourlyState.updatedAt = updatedAt;
   cursors.hourly = hourlyState;
-  cursors.copilot = { ...copilotState, seenIds: cappedSeen, fileOffsets, updatedAt };
+  cursors.copilot = {
+    ...copilotState,
+    version: COPILOT_PARSER_VERSION,
+    seenIds: cappedSeen,
+    fileOffsets,
+    updatedAt,
+  };
 
   return { recordsProcessed, eventsAggregated, bucketsQueued };
 }
