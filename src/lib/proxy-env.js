@@ -73,9 +73,59 @@ function relaunchWithProxyEnvIfNeeded({
   });
 }
 
+function pickProxyUrl(env = process.env) {
+  return (
+    env.HTTPS_PROXY ||
+    env.https_proxy ||
+    env.HTTP_PROXY ||
+    env.http_proxy ||
+    env.ALL_PROXY ||
+    env.all_proxy ||
+    null
+  );
+}
+
+// Node's built-in NODE_USE_ENV_PROXY support only landed in v22.21 / v24.5.
+// For older runtimes (including the v22.14 we historically embedded in the
+// macOS app, and the v22.16 a community user hit on Discussion #68) the env
+// var is silently ignored and fetch() bypasses the proxy. Setting an undici
+// ProxyAgent dispatcher at startup gives us proxy support on every Node ≥ 18
+// regardless of the env-proxy flag.
+function applyUndiciProxyIfNeeded({
+  env = process.env,
+  setGlobalDispatcher,
+  ProxyAgent,
+} = {}) {
+  const proxyUrl = pickProxyUrl(env);
+  if (!proxyUrl) return null;
+
+  let setter = setGlobalDispatcher;
+  let Agent = ProxyAgent;
+  if (!setter || !Agent) {
+    try {
+      // eslint-disable-next-line global-require
+      const undici = require("undici");
+      setter = setter || undici.setGlobalDispatcher;
+      Agent = Agent || undici.ProxyAgent;
+    } catch (_e) {
+      return null;
+    }
+  }
+  if (typeof setter !== "function" || typeof Agent !== "function") return null;
+
+  try {
+    setter(new Agent(proxyUrl));
+    return proxyUrl;
+  } catch (_e) {
+    return null;
+  }
+}
+
 module.exports = {
   hasProxyEnv,
   parseMacProxyOutput,
+  pickProxyUrl,
   resolveSystemProxyEnv,
   relaunchWithProxyEnvIfNeeded,
+  applyUndiciProxyIfNeeded,
 };
