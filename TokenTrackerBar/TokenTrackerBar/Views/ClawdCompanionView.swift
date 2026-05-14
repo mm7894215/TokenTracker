@@ -84,7 +84,7 @@ struct ClawdCompanionView: View {
     // MARK: - Sync Button
 
     private var syncButton: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !syncSpinActive)) { timeline in
             Image(systemName: "arrow.triangle.2.circlepath")
                 .font(.system(size: 11))
                 .foregroundStyle(viewModel.isSyncing ? .tertiary : (hoveringSync ? .primary : .secondary))
