@@ -10,13 +10,16 @@ struct ClawdCompanionView: View {
     @State private var currentAction: CharacterAction = .none
     @State private var quipIndex = 0
     @State private var armWave = false
-    @State private var syncRotation: Double = 0
+    @State private var syncSpinActive = false
+    @State private var syncSpinStart = Date()
+    @State private var syncSpinStopTask: Task<Void, Never>?
     @State private var hoveringSync = false
     @State private var hoveringCharacter = false
     @State private var tapOverrideState: ClawdState?
     @State private var idleVariant: ClawdState = .idleLiving
 
     private let px: CGFloat = 4.0
+    private let syncSpinPeriod: TimeInterval = 0.8
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
@@ -81,31 +84,70 @@ struct ClawdCompanionView: View {
     // MARK: - Sync Button
 
     private var syncButton: some View {
-        Button {
-            Task { await viewModel.triggerSync() }
-        } label: {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
             Image(systemName: "arrow.triangle.2.circlepath")
                 .font(.system(size: 11))
                 .foregroundStyle(viewModel.isSyncing ? .tertiary : (hoveringSync ? .primary : .secondary))
-                .rotationEffect(.degrees(syncRotation))
+                .rotationEffect(.degrees(syncRotationDegrees(at: timeline.date)))
                 .scaleEffect(hoveringSync && !viewModel.isSyncing ? 1.15 : 1.0)
                 .animation(.easeOut(duration: 0.15), value: hoveringSync)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+                .onTapGesture { triggerManualSync() }
+                .onHover { h in
+                    hoveringSync = h
+                    if h { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
+                .accessibilityLabel(viewModel.isSyncing ? Strings.syncingUsageData : Strings.syncUsageData)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { triggerManualSync() }
+                .onChange(of: viewModel.isSyncing) { syncing in
+                    if syncing {
+                        startSyncSpin()
+                    } else {
+                        stopSyncSpinAfterCurrentTurn()
+                    }
+                }
+                .onDisappear {
+                    syncSpinStopTask?.cancel()
+                    syncSpinStopTask = nil
+                }
         }
-        .frame(width: 24, height: 24)
-        .contentShape(Rectangle())
-        .buttonStyle(.plain)
-        .onHover { h in
-            hoveringSync = h
-            if h { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
-        .disabled(viewModel.isSyncing)
-        .accessibilityLabel(viewModel.isSyncing ? Strings.syncingUsageData : Strings.syncUsageData)
-        .onChange(of: viewModel.isSyncing) { syncing in
-            if syncing {
-                withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) { syncRotation = 360 }
-            } else {
-                withAnimation(.default) { syncRotation = 0 }
+    }
+
+    private func triggerManualSync() {
+        guard !viewModel.isSyncing else { return }
+        Task { await viewModel.triggerSync() }
+    }
+
+    private func syncRotationDegrees(at date: Date) -> Double {
+        guard syncSpinActive else { return 0 }
+        let elapsed = max(0, date.timeIntervalSince(syncSpinStart))
+        return (elapsed / syncSpinPeriod * 360).truncatingRemainder(dividingBy: 360)
+    }
+
+    private func startSyncSpin() {
+        syncSpinStopTask?.cancel()
+        syncSpinStopTask = nil
+        syncSpinStart = Date()
+        syncSpinActive = true
+    }
+
+    private func stopSyncSpinAfterCurrentTurn() {
+        guard syncSpinActive else { return }
+        syncSpinStopTask?.cancel()
+
+        let elapsed = max(0, Date().timeIntervalSince(syncSpinStart))
+        let remainder = elapsed.truncatingRemainder(dividingBy: syncSpinPeriod)
+        let delay = remainder == 0 ? 0 : syncSpinPeriod - remainder
+
+        syncSpinStopTask = Task { @MainActor in
+            if delay > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             }
+            guard !Task.isCancelled, !viewModel.isSyncing else { return }
+            syncSpinActive = false
+            syncSpinStopTask = nil
         }
     }
 
