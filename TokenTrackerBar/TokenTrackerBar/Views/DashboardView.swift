@@ -59,7 +59,7 @@ struct DashboardView: View {
             Divider()
             FooterView()
         }
-        .background(.ultraThinMaterial)
+        .background(.regularMaterial)
         .id(localization.revision)
     }
 

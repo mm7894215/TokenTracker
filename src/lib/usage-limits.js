@@ -104,7 +104,7 @@ async function fetchClaudeUsageLimits(accessToken, { fetchImpl = fetch, maxAttem
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const res = await fetchImpl(url, { method: "GET", headers });
     if (res.status === 401) {
-      throw new Error("token_expired");
+      throw new Error("Claude token expired — run `claude` once to refresh.");
     }
     if ((res.status === 429 || res.status === 503) && attempt < maxAttempts - 1) {
       const ra = res.headers.get("retry-after");
@@ -116,7 +116,7 @@ async function fetchClaudeUsageLimits(accessToken, { fetchImpl = fetch, maxAttem
     if (!res.ok) {
       if (res.status === 429) {
         throw new Error(
-          "Claude API rate limited (429). Too many usage checks — wait ~1 minute and refresh.",
+          "Claude API rate limited (429) — wait ~1 minute and refresh.",
         );
       }
       throw new Error(`Claude API returned ${res.status}`);

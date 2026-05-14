@@ -37,10 +37,8 @@ enum DashboardBackgroundView {
             glass.setValue(NSNumber(value: 0.0), forKey: "cornerRadius")
         }
 
-        let inner = NSView()
+        let inner = DashboardGlassLegibilityView()
         inner.translatesAutoresizingMaskIntoConstraints = false
-        inner.wantsLayer = true
-        inner.layer?.backgroundColor = NSColor.clear.cgColor
         guard glass.responds(to: NSSelectorFromString("setContentView:")) else { return nil }
         glass.setValue(inner, forKey: "contentView")
 
@@ -51,5 +49,19 @@ enum DashboardBackgroundView {
             inner.bottomAnchor.constraint(equalTo: glass.bottomAnchor),
         ])
         return glass
+    }
+}
+
+private final class DashboardGlassLegibilityView: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let alpha: CGFloat = isDark ? 0.68 : 0.74
+        NSColor.windowBackgroundColor.withAlphaComponent(alpha).setFill()
+        dirtyRect.fill()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
     }
 }

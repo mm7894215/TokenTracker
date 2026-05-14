@@ -80,6 +80,26 @@ const ASCII_LOGO = [
 const DIVIDER = "----------------------------------------------";
 const DEFAULT_DASHBOARD_URL = "https://www.tokentracker.cc";
 
+// Single source of truth for the welcome screen's provider count + sample list.
+// Keep in sync with the supported-tools table in CLAUDE.md.
+const SUPPORTED_PROVIDERS = [
+  "Claude Code",
+  "Codex CLI",
+  "Cursor",
+  "Gemini CLI",
+  "OpenCode",
+  "OpenClaw",
+  "Every Code",
+  "Kiro",
+  "Hermes Agent",
+  "GitHub Copilot",
+  "Kimi Code",
+  "oh-my-pi",
+  "CodeBuddy",
+  "Kilo CLI",
+  "Kilo Code",
+];
+
 async function cmdInit(argv) {
   const opts = parseArgs(argv);
   const home = os.homedir();
@@ -163,54 +183,81 @@ async function cmdInit(argv) {
 
   renderLocalReport({ summary: setup.summary, isDryRun: false });
 
-  renderLocalSuccess();
-
+  // Run first sync inline (with a generous timeout) so we can render the
+  // *actual* token total in the success message — the aha moment. If the
+  // sync exceeds the timeout we surrender the wait but leave it running, so
+  // the dashboard still picks up data shortly after.
+  const ahaSpinner = createSpinner({ text: "Running first sync..." });
+  ahaSpinner.start();
+  let firstSync = null;
   try {
-    spawnInitSync({ trackerBinPath, packageName: "tokentracker" });
+    firstSync = await runFirstSyncAndRead({
+      trackerBinPath,
+      trackerDir,
+      packageName: "tokentracker",
+    });
   } catch (err) {
     const msg = err && err.message ? err.message : "unknown error";
-    process.stderr.write(`Initial sync spawn failed: ${msg}\n`);
+    process.stderr.write(`Initial sync issue: ${msg}\n`);
+  } finally {
+    ahaSpinner.stop();
   }
+
+  renderLocalSuccess({ firstSync });
 }
 
 function renderWelcome() {
+  const providerCount = SUPPORTED_PROVIDERS.length;
+  // Show first 5 by name for grounding, then "+N more" so the line stays one row.
+  const previewNames = SUPPORTED_PROVIDERS.slice(0, 5).join(", ");
+  const remaining = providerCount - 5;
+  const providerLine =
+    remaining > 0
+      ? `${previewNames} +${remaining} more`
+      : previewNames;
   process.stdout.write(
     [
       ASCII_LOGO,
       "",
-      `${BOLD}Welcome to Token Tracker${RESET}`,
+      `${BOLD}Token Tracker${RESET}  ${color("Local-first usage across " + providerCount + " AI CLIs", DIM)}`,
       DIVIDER,
-      `${CYAN}Privacy First: Your data stays local. Only token counts are tracked — never prompts or responses.${RESET}`,
+      `${CYAN}Nothing leaves your machine — token counts only, never prompts or responses.${RESET}`,
       DIVIDER,
       "",
-      "This tool will:",
-      "  - Detect your AI CLI tools (Codex, Claude, Gemini, OpenCode, Cursor, OpenClaw)",
-      "  - Set up lightweight hooks to track token usage",
-      "  - View your dashboard at http://localhost:7680",
-      "",
-      "(Nothing will be changed until you confirm below)",
+      `  Tracks: ${providerLine}`,
+      `  Dashboard: http://localhost:7680`,
       "",
     ].join("\n"),
   );
 }
 
-function renderLocalSuccess() {
-  process.stdout.write(
-    [
-      "",
-      `${BOLD}Setup complete!${RESET}`,
-      "",
-      "  Token data will be collected automatically via hooks.",
-      "  Launching dashboard...",
-      "",
-      // One-shot, post-success star CTA. `init` is run once per machine, so
-      // this is the only place a CLI user naturally sees the project's
-      // GitHub URL — and they're at peak satisfaction. No prompts in
-      // status/doctor/sync/etc, which run in scripts and would be noisy.
-      `  ${color("⭐ Liking it? Star us at https://github.com/mm7894215/TokenTracker", DIM)}`,
-      "",
-    ].join("\n"),
+function renderLocalSuccess({ firstSync } = {}) {
+  const lines = ["", `${BOLD}Setup complete!${RESET}`, ""];
+
+  if (firstSync && firstSync.totalTokens > 0) {
+    const tokens = firstSync.totalTokens.toLocaleString("en-US");
+    const sourceCount = firstSync.sources.length;
+    const sourceWord = sourceCount === 1 ? "provider" : "providers";
+    lines.push(
+      `  ${BOLD}${tokens}${RESET} tokens tracked across ${sourceCount} ${sourceWord}.`,
+    );
+  } else {
+    lines.push(
+      "  No usage history yet — run any AI CLI and tokens appear within a minute.",
+    );
+  }
+
+  lines.push(
+    "",
+    `  Dashboard: ${CYAN}http://localhost:7680${RESET}`,
+    "",
+    // One-shot, post-success star CTA. `init` is run once per machine, so
+    // this is the only place a CLI user naturally sees the project's GitHub
+    // URL — and they're at peak satisfaction.
+    `  ${color("⭐ Star us if useful: https://github.com/mm7894215/TokenTracker", DIM)}`,
+    "",
   );
+  process.stdout.write(lines.join("\n"));
 }
 
 function renderAccountNotLinked({ context } = {}) {
@@ -1014,25 +1061,88 @@ async function safeRealpath(p) {
   }
 }
 
-function spawnInitSync({ trackerBinPath, packageName }) {
+// Run the first sync inline so we can show the user their real token total
+// immediately. Caps wall-time at FIRST_SYNC_TIMEOUT_MS — past that we let the
+// child continue detached and surrender the wait. Returns aggregate stats
+// derived from queue.jsonl after the wait window closes.
+const FIRST_SYNC_TIMEOUT_MS = 15_000;
+
+async function runFirstSyncAndRead({ trackerBinPath, trackerDir, packageName }) {
   const fallbackPkg = packageName || "tokentracker-cli";
   const argv = ["sync", "--drain"];
   const hasLocalRuntime = typeof trackerBinPath === "string" && fssync.existsSync(trackerBinPath);
   const cmd = hasLocalRuntime
     ? [process.execPath, trackerBinPath, ...argv]
     : ["npx", "--yes", fallbackPkg, ...argv];
-  const child = cp.spawn(cmd[0], cmd.slice(1), {
-    detached: true,
-    stdio: "ignore",
-    env: process.env,
+
+  await new Promise((resolve) => {
+    let settled = false;
+    let timer = null;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve();
+    };
+    let child;
+    try {
+      child = cp.spawn(cmd[0], cmd.slice(1), {
+        // detached so we can let it keep running past our timeout — the user
+        // still gets data later via dashboard auto-refresh.
+        detached: true,
+        stdio: "ignore",
+        env: process.env,
+      });
+    } catch (err) {
+      if (isDebugEnabled()) {
+        process.stderr.write(`first-sync spawn failed: ${err?.message || err}\n`);
+      }
+      settle();
+      return;
+    }
+    child.on("error", () => settle());
+    child.on("exit", () => settle());
+    timer = setTimeout(() => {
+      try {
+        child.unref();
+      } catch (_e) {}
+      settle();
+    }, FIRST_SYNC_TIMEOUT_MS);
   });
-  child.on("error", (err) => {
-    const msg = err && err.message ? err.message : "unknown error";
-    const detail = isDebugEnabled() ? ` (${msg})` : "";
-    process.stderr.write(`Minor issue: Background sync could not start${detail}.\n`);
-    process.stderr.write("Run: npx --yes tokentracker-cli sync\n");
-  });
-  child.unref();
+
+  return readFirstSyncTotals(trackerDir);
+}
+
+function readFirstSyncTotals(trackerDir) {
+  const queuePath = path.join(trackerDir, "queue.jsonl");
+  let raw;
+  try {
+    raw = fssync.readFileSync(queuePath, "utf8");
+  } catch (_e) {
+    return { totalTokens: 0, sources: [] };
+  }
+  let totalTokens = 0;
+  const sources = new Set();
+  // Each sync appends cumulative totals per (source, model, hour_start); keep
+  // the last entry per bucket to match what the dashboard shows.
+  const latest = new Map();
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const row = JSON.parse(trimmed);
+      const key = `${row.source || ""}|${row.model || ""}|${row.hour_start || ""}`;
+      latest.set(key, row);
+    } catch {
+      // skip malformed
+    }
+  }
+  for (const row of latest.values()) {
+    const n = Number(row.total_tokens);
+    if (Number.isFinite(n) && n > 0) totalTokens += n;
+    if (row.source) sources.add(row.source);
+  }
+  return { totalTokens, sources: Array.from(sources) };
 }
 
 async function copyRuntimeDependencies({ from, to }) {
