@@ -35,7 +35,6 @@ const {
   piAgentDirCollidesWithOmp,
   resolveCraftSessionFiles,
   parseCraftIncremental,
-  resolveGrokBuildHome,
   resolveGrokBuildSessions,
   parseGrokBuildIncremental,
   appendRolloutRecords,
@@ -111,16 +110,6 @@ async function cmdSync(argv) {
     await writeOpenclawSignal(trackerDir);
   }
 
-  // Grok Build SessionEnd hook signal (written by ~/.grok/hooks/99-tokentracker-usage.json)
-  const grokSignalPath = path.join(trackerDir, "tracker", "grok-last-session.json");
-  let grokHookSignal = null;
-  if (fssync.existsSync(grokSignalPath)) {
-    try {
-      grokHookSignal = JSON.parse(fssync.readFileSync(grokSignalPath, "utf8"));
-      fssync.unlinkSync(grokSignalPath); // consume it
-    } catch {}
-  }
-
   const lockPath = path.join(trackerDir, "sync.lock");
   const lock = await openLock(lockPath, { quietIfLocked: opts.auto });
   if (!lock) return;
@@ -135,11 +124,24 @@ async function cmdSync(argv) {
     const projectQueuePath = path.join(trackerDir, "project.queue.jsonl");
     const projectQueueStatePath = path.join(trackerDir, "project.queue.state.json");
     const uploadThrottlePath = path.join(trackerDir, "upload.throttle.json");
+    const grokSignalPath = path.join(trackerDir, "grok-last-session.json");
+    const legacyGrokSignalPath = path.join(trackerDir, "tracker", "grok-last-session.json");
 
     const config = await readJson(configPath);
     const cursors = (await readJson(cursorsPath)) || { version: 1, files: {}, updatedAt: null };
     const uploadThrottle = normalizeUploadState(await readJson(uploadThrottlePath));
     let uploadThrottleState = uploadThrottle;
+    let grokHookSignal = null;
+    let grokHookSignalPath = null;
+    for (const candidate of [grokSignalPath, legacyGrokSignalPath]) {
+      const signal = await readJson(candidate);
+      if (signal && typeof signal === "object") {
+        grokHookSignal = signal;
+        grokHookSignalPath = candidate;
+        break;
+      }
+    }
+    let grokHookSignalConsumed = false;
 
     const codexHome = process.env.CODEX_HOME || path.join(home, ".codex");
     const codeHome = process.env.CODE_HOME || path.join(home, ".code");
@@ -644,7 +646,7 @@ async function cmdSync(argv) {
     // ── Grok Build (xAI) ──
     let grokResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     // If the SessionEnd hook wrote a signal, convert it immediately into a queue record
-    if (grokHookSignal && grokHookSignal.totalTokens > 0) {
+    if (grokHookSignal && typeof grokHookSignal === "object") {
       const grokState = cursors.grok && typeof cursors.grok === "object" ? cursors.grok : {};
       const seenSessions = new Set(Array.isArray(grokState.seenSessions) ? grokState.seenSessions : []);
       const hookSessionId =
@@ -652,8 +654,15 @@ async function cmdSync(argv) {
           ? grokHookSignal.sessionId.trim()
           : null;
 
-      if (!hookSessionId || !seenSessions.has(hookSessionId)) {
+      if (Number(grokHookSignal.totalTokens || 0) <= 0) {
+        grokHookSignalConsumed = true;
+      } else if (hookSessionId && seenSessions.has(hookSessionId)) {
+        grokHookSignalConsumed = true;
+      } else {
         const hourStart = new Date(grokHookSignal.lastActive || Date.now());
+        if (!Number.isFinite(hourStart.getTime())) {
+          hourStart.setTime(Date.now());
+        }
         hourStart.setUTCMinutes(0, 0, 0);
         const rec = {
           hour_start: hourStart.toISOString(),
@@ -678,6 +687,7 @@ async function cmdSync(argv) {
             updatedAt: new Date().toISOString()
           };
         }
+        grokHookSignalConsumed = true;
       }
     }
 
@@ -746,6 +756,9 @@ async function cmdSync(argv) {
 
     cursors.updatedAt = new Date().toISOString();
     await writeJson(cursorsPath, cursors);
+    if (grokHookSignalConsumed && grokHookSignalPath) {
+      await fs.unlink(grokHookSignalPath).catch(() => {});
+    }
 
     progress?.stop();
 

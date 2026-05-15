@@ -5529,3 +5529,58 @@ test("parseGrokBuildIncremental appends cumulative buckets across sessions", asy
     await fs.rm(tmp, { recursive: true, force: true });
   }
 });
+
+test("parseGrokBuildIncremental does not mark zero-token sessions as seen", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-grok-zero-"));
+  try {
+    const sessionDir = path.join(tmp, "sessions", "encoded-cwd", "grok-session-zero");
+    await fs.mkdir(sessionDir, { recursive: true });
+    const signalsPath = path.join(sessionDir, "signals.json");
+    await fs.writeFile(
+      signalsPath,
+      JSON.stringify({
+        contextTokensUsed: 0,
+        assistantMessageCount: 0,
+        primaryModelId: "grok-build",
+        lastActiveAt: "2026-04-05T14:10:00.000Z",
+      }),
+      "utf8",
+    );
+
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    const session = { sessionDir, signalsPath, summaryPath: path.join(sessionDir, "summary.json"), sessionId: "grok-session-zero" };
+
+    const firstRun = await parseGrokBuildIncremental({
+      sessions: [session],
+      cursors,
+      queuePath,
+    });
+    assert.equal(firstRun.eventsAggregated, 0);
+    assert.deepEqual(cursors.grok.seenSessions, []);
+
+    await fs.writeFile(
+      signalsPath,
+      JSON.stringify({
+        contextTokensUsed: 42,
+        assistantMessageCount: 2,
+        primaryModelId: "grok-build",
+        lastActiveAt: "2026-04-05T14:20:00.000Z",
+      }),
+      "utf8",
+    );
+
+    const secondRun = await parseGrokBuildIncremental({
+      sessions: [session],
+      cursors,
+      queuePath,
+    });
+    assert.equal(secondRun.eventsAggregated, 1);
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].total_tokens, 42);
+    assert.deepEqual(cursors.grok.seenSessions, ["grok-session-zero"]);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});

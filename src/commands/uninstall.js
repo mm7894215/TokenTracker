@@ -13,6 +13,7 @@ const {
 const { resolveOpencodeConfigDir, removeOpencodePlugin } = require("../lib/opencode-config");
 const { removeOpenclawHookConfig } = require("../lib/openclaw-hook");
 const { removeOpenclawSessionPluginConfig } = require("../lib/openclaw-session-plugin");
+const { removeGrokHook } = require("../lib/grok-hook");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
 
 async function cmdUninstall(argv) {
@@ -79,6 +80,7 @@ async function cmdUninstall(argv) {
     env: process.env,
   });
   const openclawHookRemove = await removeOpenclawHookConfig({ home, trackerDir, env: process.env });
+  const grokHookRemove = await removeGrokHook({ home, trackerDir, env: process.env });
 
   // Remove installed notify handler.
   await fs.unlink(notifyPath).catch(() => {});
@@ -147,6 +149,9 @@ async function cmdUninstall(argv) {
         : openclawHookRemove?.skippedReason === "openclaw-config-missing"
           ? "- OpenClaw hook (legacy): skipped (openclaw config not found)"
           : "- OpenClaw hook (legacy): no change",
+      grokHookRemove?.removed
+        ? `- Grok Build hook removed: ${grokHookRemove.hookPath}`
+        : "- Grok Build hook: no change",
       opts.purge ? `- Purged: ${path.join(home, ".tokentracker")}` : "- Purge: skipped (use --purge)",
       "",
     ].join("\n"),

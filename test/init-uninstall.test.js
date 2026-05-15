@@ -14,6 +14,7 @@ const {
   DEFAULT_PLUGIN_NAME,
   PLUGIN_MARKER,
 } = require("../src/lib/opencode-config");
+const { GROK_HOOK_FILENAME } = require("../src/lib/grok-hook");
 
 async function waitForFile(filePath, { timeoutMs = 1500, intervalMs = 50 } = {}) {
   const start = Date.now();
@@ -414,6 +415,53 @@ test("uninstall skips notify restore when no backup and notify not installed", a
     else process.env.CODE_HOME = prevCodeHome;
     if (prevOpencodeConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
     else process.env.OPENCODE_CONFIG_DIR = prevOpencodeConfigDir;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("uninstall removes Grok Build hook and handler", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-grok-uninstall-"));
+  const prevHome = process.env.HOME;
+  const prevGrokHome = process.env.GROK_HOME;
+  const prevWrite = process.stdout.write;
+
+  try {
+    process.env.HOME = tmp;
+    process.env.GROK_HOME = path.join(tmp, ".grok");
+    const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+    const hookPath = path.join(process.env.GROK_HOME, "hooks", GROK_HOOK_FILENAME);
+    const handlerPath = path.join(tmp, ".tokentracker", "bin", "grok-session-end-hook.cjs");
+    const legacyHandlerPath = path.join(trackerDir, "bin", "grok-session-end-hook.cjs");
+
+    await fs.mkdir(path.dirname(hookPath), { recursive: true });
+    await fs.mkdir(path.dirname(handlerPath), { recursive: true });
+    await fs.mkdir(path.dirname(legacyHandlerPath), { recursive: true });
+    await fs.writeFile(
+      hookPath,
+      JSON.stringify({
+        hooks: {
+          SessionEnd: [
+            { hooks: [{ type: "command", command: `/usr/bin/env node ${handlerPath}` }] },
+          ],
+        },
+      }) + "\n",
+      "utf8",
+    );
+    await fs.writeFile(handlerPath, "handler\n", "utf8");
+    await fs.writeFile(legacyHandlerPath, "legacy handler\n", "utf8");
+
+    process.stdout.write = () => true;
+    await cmdUninstall([]);
+
+    await assert.rejects(fs.stat(hookPath), /ENOENT/);
+    await assert.rejects(fs.stat(handlerPath), /ENOENT/);
+    await assert.rejects(fs.stat(legacyHandlerPath), /ENOENT/);
+  } finally {
+    process.stdout.write = prevWrite;
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    if (prevGrokHome === undefined) delete process.env.GROK_HOME;
+    else process.env.GROK_HOME = prevGrokHome;
     await fs.rm(tmp, { recursive: true, force: true });
   }
 });

@@ -15,6 +15,7 @@ const { resolveOpencodeConfigDir, isOpencodePluginInstalled } = require("./openc
 const { normalizeState: normalizeUploadState } = require("./upload-throttle");
 const { probeOpenclawHookState } = require("./openclaw-hook");
 const { probeOpenclawSessionPluginState } = require("./openclaw-session-plugin");
+const { probeGrokHookState } = require("./grok-hook");
 const { resolveTrackerPaths } = require("./tracker-paths");
 // TASK-011: Kiro CLI DB path inlined here to avoid pulling the ~4000-line
 // rollout module on every `tokentracker status` / `diagnostics` call.
@@ -52,6 +53,7 @@ async function collectTrackerDiagnostics({
   const geminiConfigDir = resolveGeminiConfigDir({ home, env: process.env });
   const geminiSettingsPath = resolveGeminiSettingsPath({ configDir: geminiConfigDir });
   const opencodeConfigDir = resolveOpencodeConfigDir({ home, env: process.env });
+  const grokHome = process.env.GROK_HOME || path.join(home, ".grok");
 
   const config = await readJson(configPath);
   const cursors = await readJson(cursorsPath);
@@ -94,6 +96,7 @@ async function collectTrackerDiagnostics({
     env: process.env,
   });
   const openclawHookState = await probeOpenclawHookState({ home, trackerDir, env: process.env });
+  const grokHookState = await probeGrokHookState({ home, trackerDir, env: process.env });
 
   // Kiro IDE and Kiro CLI sub-path presence — merged under one "kiro" source
   // at token/cost aggregation level; operators need visibility of both
@@ -137,6 +140,9 @@ async function collectTrackerDiagnostics({
       claude_config: redactValue(claudeConfigPath, home),
       gemini_config: redactValue(geminiSettingsPath, home),
       opencode_config: redactValue(opencodeConfigDir, home),
+      grok_home: redactValue(grokHome, home),
+      grok_hooks: redactValue(grokHookState?.grokHooksDir, home),
+      grok_handler: redactValue(grokHookState?.handlerPath, home),
       kiro_ide_dev_data: redactValue(kiroIdeDevDataDir, home),
       kiro_cli_db: redactValue(kiroCliDbPath, home),
     },
@@ -184,6 +190,10 @@ async function collectTrackerDiagnostics({
       openclaw_hook_configured: Boolean(openclawHookState?.configured),
       openclaw_hook_linked: Boolean(openclawHookState?.linked),
       openclaw_hook_enabled: Boolean(openclawHookState?.enabled),
+      grok_hook_configured: Boolean(grokHookState?.configured),
+      grok_hook_exists: Boolean(grokHookState?.hookExists),
+      grok_hook_handler_exists: Boolean(grokHookState?.handlerExists),
+      grok_sessions_dir: redactValue(grokHookState?.sessionsDir, home),
     },
     upload: {
       last_success_at: lastSuccessAt,

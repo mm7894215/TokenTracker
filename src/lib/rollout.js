@@ -6060,7 +6060,6 @@ async function parseGrokBuildIncremental({
 
     const totalTokens = Number(signals.contextTokensUsed || 0);
     if (totalTokens <= 0) {
-      seenSessions.add(sess.sessionId);
       continue;
     }
 
@@ -6070,6 +6069,9 @@ async function parseGrokBuildIncremental({
 
     const lastActive = signals.lastActiveAt || signals.updatedAt || new Date().toISOString();
     const hourStart = new Date(lastActive);
+    if (!Number.isFinite(hourStart.getTime())) {
+      hourStart.setTime(Date.now());
+    }
     hourStart.setUTCMinutes(0, 0, 0);
     const hourStartStr = hourStart.toISOString();
 

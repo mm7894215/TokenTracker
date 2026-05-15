@@ -18,6 +18,13 @@ function resolveGrokHooksDir(env = process.env) {
 
 function resolveTrackerBinDir(trackerDir) {
   if (!trackerDir) throw new Error("trackerDir is required");
+  return path.basename(trackerDir) === "tracker"
+    ? path.join(path.dirname(trackerDir), "bin")
+    : path.join(trackerDir, "bin");
+}
+
+function resolveLegacyTrackerBinDir(trackerDir) {
+  if (!trackerDir) throw new Error("trackerDir is required");
   return path.join(trackerDir, "bin");
 }
 
@@ -134,8 +141,8 @@ if (totalTokens <= 0 && messageCount <= 0) {
 }
 
 // Write a signal that the TokenTracker sync / local API can pick up
-const trackerDir = '${trackerDir.replace(/\\/g, "\\\\")}';
-const signalDir = path.join(trackerDir, 'tracker');
+const trackerDir = ${JSON.stringify(trackerDir)};
+const signalDir = trackerDir;
 try { fs.mkdirSync(signalDir, { recursive: true }); } catch {}
 
 const signal = {
@@ -166,9 +173,10 @@ async function probeGrokHookState({ home = os.homedir(), trackerDir, env = proce
   const hookPath = path.join(grokHooksDir, GROK_HOOK_FILENAME);
   const binDir = resolveTrackerBinDir(trackerDir);
   const handlerPath = path.join(binDir, "grok-session-end-hook.cjs");
+  const legacyHandlerPath = path.join(resolveLegacyTrackerBinDir(trackerDir), "grok-session-end-hook.cjs");
 
   const hookExists = fssync.existsSync(hookPath);
-  const handlerExists = fssync.existsSync(handlerPath);
+  const handlerExists = fssync.existsSync(handlerPath) || fssync.existsSync(legacyHandlerPath);
 
   let configured = false;
   if (hookExists) {
@@ -190,6 +198,7 @@ async function probeGrokHookState({ home = os.homedir(), trackerDir, env = proce
     grokHooksDir,
     hookPath,
     handlerPath,
+    legacyHandlerPath,
     hasGrokInstall: fssync.existsSync(path.join(resolveGrokHome(env), "bin", "grok")) || hasSessions,
     sessionsDir
   };
@@ -212,6 +221,7 @@ async function removeGrokHook({ home = os.homedir(), trackerDir, env = process.e
   const hookPath = path.join(grokHooksDir, GROK_HOOK_FILENAME);
   const binDir = resolveTrackerBinDir(trackerDir);
   const handlerPath = path.join(binDir, "grok-session-end-hook.cjs");
+  const legacyHandlerPath = path.join(resolveLegacyTrackerBinDir(trackerDir), "grok-session-end-hook.cjs");
 
   let removed = false;
   try {
@@ -226,8 +236,16 @@ async function removeGrokHook({ home = os.homedir(), trackerDir, env = process.e
       removed = true;
     }
   } catch {}
+  if (legacyHandlerPath !== handlerPath) {
+    try {
+      if (fssync.existsSync(legacyHandlerPath)) {
+        fssync.unlinkSync(legacyHandlerPath);
+        removed = true;
+      }
+    } catch {}
+  }
 
-  return { removed, hookPath, handlerPath };
+  return { removed, hookPath, handlerPath, legacyHandlerPath };
 }
 
 module.exports = {
