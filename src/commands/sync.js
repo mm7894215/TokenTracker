@@ -35,6 +35,10 @@ const {
   piAgentDirCollidesWithOmp,
   resolveCraftSessionFiles,
   parseCraftIncremental,
+  resolveGrokBuildHome,
+  resolveGrokBuildSessions,
+  parseGrokBuildIncremental,
+  appendRolloutRecords,
   resolveCodebuddyProjectFiles,
   parseCodebuddyIncremental,
   resolveKiroCliSessionFiles,
@@ -105,6 +109,16 @@ async function cmdSync(argv) {
   await ensureDir(trackerDir);
   if (opts.fromOpenclaw) {
     await writeOpenclawSignal(trackerDir);
+  }
+
+  // Grok Build SessionEnd hook signal (written by ~/.grok/hooks/99-tokentracker-usage.json)
+  const grokSignalPath = path.join(trackerDir, "tracker", "grok-last-session.json");
+  let grokHookSignal = null;
+  if (fssync.existsSync(grokSignalPath)) {
+    try {
+      grokHookSignal = JSON.parse(fssync.readFileSync(grokSignalPath, "utf8"));
+      fssync.unlinkSync(grokSignalPath); // consume it
+    } catch {}
   }
 
   const lockPath = path.join(trackerDir, "sync.lock");
@@ -627,6 +641,72 @@ async function cmdSync(argv) {
       });
     }
 
+    // ── Grok Build (xAI) ──
+    let grokResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    // If the SessionEnd hook wrote a signal, convert it immediately into a queue record
+    if (grokHookSignal && grokHookSignal.totalTokens > 0) {
+      const grokState = cursors.grok && typeof cursors.grok === "object" ? cursors.grok : {};
+      const seenSessions = new Set(Array.isArray(grokState.seenSessions) ? grokState.seenSessions : []);
+      const hookSessionId =
+        typeof grokHookSignal.sessionId === "string" && grokHookSignal.sessionId.trim()
+          ? grokHookSignal.sessionId.trim()
+          : null;
+
+      if (!hookSessionId || !seenSessions.has(hookSessionId)) {
+        const hourStart = new Date(grokHookSignal.lastActive || Date.now());
+        hourStart.setUTCMinutes(0, 0, 0);
+        const rec = {
+          hour_start: hourStart.toISOString(),
+          source: "grok",
+          model: grokHookSignal.model || "grok-build",
+          input_tokens: 0,
+          output_tokens: 0,
+          cached_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+          reasoning_output_tokens: 0,
+          total_tokens: grokHookSignal.totalTokens,
+          conversation_count: grokHookSignal.messageCount || 1
+        };
+        grokResult.bucketsQueued = await appendRolloutRecords(queuePath, [rec], { source: "grok" });
+        grokResult.recordsProcessed = 1;
+        grokResult.eventsAggregated = 1;
+        if (hookSessionId) {
+          seenSessions.add(hookSessionId);
+          cursors.grok = {
+            ...grokState,
+            seenSessions: Array.from(seenSessions),
+            updatedAt: new Date().toISOString()
+          };
+        }
+      }
+    }
+
+    // Full passive scan of all Grok sessions (historical + any not covered by hook)
+    const grokSessions = resolveGrokBuildSessions(process.env);
+    if (grokSessions.length > 0) {
+      if (progress?.enabled) {
+        progress.start(`Parsing Grok Build ${renderBar(0)} | buckets 0`);
+      }
+      const grokScanResult = await parseGrokBuildIncremental({
+        sessions: grokSessions,
+        cursors,
+        queuePath,
+        env: process.env,
+        onProgress: (p) => {
+          if (!progress?.enabled) return;
+          const pct = p.total > 0 ? p.index / p.total : 1;
+          progress.update(
+            `Parsing Grok Build ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} sessions | buckets ${formatNumber(p.bucketsQueued)}`,
+          );
+        },
+      });
+      grokResult = {
+        recordsProcessed: grokResult.recordsProcessed + grokScanResult.recordsProcessed,
+        eventsAggregated: grokResult.eventsAggregated + grokScanResult.eventsAggregated,
+        bucketsQueued: grokResult.bucketsQueued + grokScanResult.bucketsQueued,
+      };
+    }
+
     // ── GitHub Copilot CLI (OTEL JSONL files) ──
     let copilotResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     const copilotPaths = resolveCopilotOtelPaths(process.env);
@@ -749,6 +829,7 @@ async function cmdSync(argv) {
         ompResult.recordsProcessed +
         piResult.recordsProcessed +
         craftResult.recordsProcessed +
+        grokResult.recordsProcessed +
         copilotResult.recordsProcessed +
         kiloResult.messagesProcessed +
         kilocodeResult.recordsProcessed;
@@ -767,6 +848,7 @@ async function cmdSync(argv) {
         ompResult.bucketsQueued +
         piResult.bucketsQueued +
         craftResult.bucketsQueued +
+        grokResult.bucketsQueued +
         copilotResult.bucketsQueued +
         kiloResult.bucketsQueued +
         kilocodeResult.bucketsQueued;

@@ -43,6 +43,14 @@ const {
   installOpenclawSessionPlugin,
   probeOpenclawSessionPluginState,
 } = require("../lib/openclaw-session-plugin");
+const {
+  resolveGrokHome,
+  resolveGrokHooksDir,
+  upsertGrokHook,
+  probeGrokHookState,
+  removeGrokHook,
+  GROK_HOOK_FILENAME
+} = require("../lib/grok-hook");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
 const {
   resolveOmpAgentDir,
@@ -503,6 +511,23 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
     const craftConfigDir = process.env.CRAFT_CONFIG_DIR || path.join(home, ".craft-agent");
     if (fssync.existsSync(craftConfigDir)) {
       summary.push({ label: "Craft Agents", status: "detected", detail: "Passive reader (no hook needed)" });
+    }
+  }
+
+  // Grok Build (xAI): SessionEnd hook in ~/.grok/hooks/ + handler in ~/.tokentracker/bin/
+  {
+    try {
+      const grokState = await probeGrokHookState({ home, trackerDir, env: process.env });
+      if (grokState.hasGrokInstall) {
+        const grokRes = await upsertGrokHook({ home, trackerDir, env: process.env });
+        summary.push({
+          label: "Grok Build",
+          status: grokRes.configured ? "installed" : "detected",
+          detail: grokRes.configured ? "SessionEnd hook installed (99-tokentracker-usage.json)" : "Grok detected"
+        });
+      }
+    } catch (err) {
+      summary.push({ label: "Grok Build", status: "error", detail: String(err?.message || err) });
     }
   }
 

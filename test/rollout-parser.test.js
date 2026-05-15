@@ -27,6 +27,7 @@ const {
   parseCraftIncremental,
   resolveCraftSessionFiles,
   resolveCraftWorkspaceRoots,
+  parseGrokBuildIncremental,
 } = require("../src/lib/rollout");
 
 test("parseRolloutIncremental ignores repeated token_count records with unchanged totals", async () => {
@@ -5454,6 +5455,76 @@ test("parseCraftIncremental falls back to craft-unknown model when header.model 
     assert.equal(res.eventsAggregated, 1);
     const queued = await readJsonLines(queuePath);
     assert.equal(queued[0].model, "craft-unknown");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseGrokBuildIncremental appends cumulative buckets across sessions", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-grok-"));
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const writeSession = async ({ sessionId, totalTokens, assistantMessageCount }) => {
+      const sessionDir = path.join(tmp, "sessions", "encoded-cwd", sessionId);
+      await fs.mkdir(sessionDir, { recursive: true });
+      const signalsPath = path.join(sessionDir, "signals.json");
+      await fs.writeFile(
+        signalsPath,
+        JSON.stringify({
+          contextTokensUsed: totalTokens,
+          assistantMessageCount,
+          primaryModelId: "grok-build",
+          lastActiveAt: "2026-04-05T14:10:00.000Z",
+        }),
+        "utf8",
+      );
+      return { sessionDir, signalsPath, summaryPath: path.join(sessionDir, "summary.json"), sessionId };
+    };
+
+    const first = await writeSession({
+      sessionId: "grok-session-a",
+      totalTokens: 10,
+      assistantMessageCount: 2,
+    });
+    const second = await writeSession({
+      sessionId: "grok-session-b",
+      totalTokens: 20,
+      assistantMessageCount: 3,
+    });
+
+    const firstRun = await parseGrokBuildIncremental({
+      sessions: [first],
+      cursors,
+      queuePath,
+    });
+    assert.equal(firstRun.eventsAggregated, 1);
+    assert.equal(firstRun.bucketsQueued, 1);
+
+    const secondRun = await parseGrokBuildIncremental({
+      sessions: [first, second],
+      cursors,
+      queuePath,
+    });
+    assert.equal(secondRun.eventsAggregated, 1);
+    assert.equal(secondRun.bucketsQueued, 1);
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 2);
+    assert.equal(queued[1].source, "grok");
+    assert.equal(queued[1].model, "grok-build");
+    assert.equal(queued[1].hour_start, "2026-04-05T14:00:00.000Z");
+    assert.equal(queued[1].total_tokens, 30);
+    assert.equal(queued[1].conversation_count, 5);
+
+    const thirdRun = await parseGrokBuildIncremental({
+      sessions: [first, second],
+      cursors,
+      queuePath,
+    });
+    assert.equal(thirdRun.eventsAggregated, 0);
+    assert.equal(thirdRun.bucketsQueued, 0);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
