@@ -78,7 +78,7 @@ brew install mm7894215/tokentracker/tokentracker
 
 ## ✨ 特性
 
-- 🔌 **开箱即用支持 13 款 AI 工具** —— Claude Code、Codex CLI、Cursor、Gemini CLI、Kiro、OpenCode、OpenClaw、Every Code、Hermes Agent、GitHub Copilot、Kimi Code、CodeBuddy、oh-my-pi
+- 🔌 **开箱即用支持 14 款 AI 工具** —— Claude Code、Codex CLI、Cursor、Gemini CLI、Kiro、OpenCode、OpenClaw、Every Code、Hermes Agent、GitHub Copilot、Kimi Code、CodeBuddy、Grok Build、oh-my-pi
 - 🧩 **Skills 管理器** —— 浏览 250+ 公开 skill（来自 `anthropics/skills`、`ComposioHQ/awesome-claude-skills`、`skills.sh` 以及你自己添加的任何 GitHub 仓库），一次安装，同步到 Claude / Codex / Gemini / OpenCode / Hermes，每个 Agent 单独开关，一键撤销
 - 🏠 **100% 本地** —— Token 数据绝不离开你的机器。无账号、无 API Key
 - 🚀 **零配置** —— 首次运行自动安装所有 hook。30 秒从零到 Dashboard
@@ -157,11 +157,13 @@ brew install mm7894215/tokentracker/tokentracker
 | **Kimi Code** | ✅ 自动 | 被动读取 `wire.jsonl`（`~/.kimi/sessions/**/wire.jsonl`） |
 | **oh-my-pi (Pi Coding Agent)** | ✅ 自动 | 被动读取（`~/.omp/agent/sessions/**/*.jsonl`） |
 | **CodeBuddy** (腾讯) | ✅ 自动 | 写入 `~/.codebuddy/settings.json` 的 SessionEnd hook（Claude-Code fork） |
+| **Grok Build** (xAI) | ✅ 自动 | SessionEnd hook + 被动扫描 `signals.json`（`~/.grok/sessions/**/signals.json`） |
 
 > **需要手动装什么插件 / hook 吗？** 不需要。`tokentracker`（或 `tokentracker init`）第一次跑的时候会全部搞定：
-> - **基于 hook 的工具**（Claude Code、Codex、Gemini、Every Code）—— 我们把 SessionEnd hook 或 TOML notify 条目写入它们自己的配置文件
+> - **基于 hook 的工具**（Claude Code、Codex、Gemini、Every Code、**CodeBuddy**、**Grok Build**）—— 我们把 SessionEnd hook 或 TOML notify 条目写入它们自己的配置文件
 > - **基于插件的工具**（OpenCode、**OpenClaw**）—— 插件随 npm 包一起分发（`~/.tokentracker/app/openclaw-plugin/`），通过对应工具自己的 CLI 挂接（`openclaw plugins install --link …` + `enable`）。无需下载、无需拖拽
-> - **被动读取类**（Cursor、Kiro、Hermes、Kimi Code、Copilot、**oh-my-pi**）—— 完全不往它们里面塞东西，只读取它们自己产生的文件（SQLite DB、JSONL、OTEL 导出）
+> - **被动读取类**（Cursor、Kiro、Hermes、Kimi Code、Copilot、**Grok Build**、**oh-my-pi**）—— 完全不往它们里面塞东西，只读取它们自己产生的文件（SQLite DB、JSONL、OTEL 导出）
+> - **Grok Build 估算说明** —— Grok 当前的 `signals.json` 暴露的是 `contextTokensUsed` 快照，所以在 Grok 提供按调用粒度的遥测之前，TokenTracker 对 Grok 的用量与成本是估算值
 >
 > 任何时候都可以用 `tokentracker status` 查看每个集成的状态。如果显示 `skipped`，`detail` 列会解释原因（例如某工具 CLI 不在 `PATH` 上、config 不可读等）。
 >
@@ -175,7 +177,7 @@ brew install mm7894215/tokentracker/tokentracker
 
 |                          | **TokenTracker** | ccusage     | Cursor 自带统计 |
 |--------------------------|:---:|:---:|:---:|
-| **支持的 AI 工具数**     | **13**           | 1（Claude）  | 1（Cursor）   |
+| **支持的 AI 工具数**     | **14**           | 1（Claude）  | 1（Cursor）   |
 | **本地优先，无需账号**   | ✅               | ✅           | ❌            |
 | **原生菜单栏 App**       | ✅               | ❌           | ❌            |
 | **桌面小组件**           | ✅ 4 个小组件    | ❌           | ❌            |
@@ -187,7 +189,7 @@ brew install mm7894215/tokentracker/tokentracker
 
 ```mermaid
 flowchart LR
-    A["AI CLI 工具<br/>Claude · Codex · Cursor · Gemini · Kiro<br/>OpenCode · OpenClaw · Every Code · Hermes · Copilot · Kimi Code · CodeBuddy · oh-my-pi"]
+    A["AI CLI 工具<br/>Claude · Codex · Cursor · Gemini · Kiro<br/>OpenCode · OpenClaw · Every Code · Hermes · Copilot · Kimi Code · CodeBuddy · Grok Build · oh-my-pi"]
     A -->|hook 触发| B[Token Tracker]
     B -->|解析日志<br/>30 分钟 UTC 桶| C[(本地 SQLite)]
     C --> D[Web Dashboard]

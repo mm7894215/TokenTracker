@@ -104,6 +104,7 @@ const SUPPORTED_PROVIDERS = [
   "Kimi Code",
   "oh-my-pi",
   "CodeBuddy",
+  "Grok Build",
   "Kilo CLI",
   "Kilo Code",
 ];
