@@ -231,11 +231,9 @@ function ProjectUsageCard({
     tokensRaw == null
       ? placeholder
       : formatCompactNumber(tokensRaw, tokenFormatOptions);
-  const href = /^https?:\/\//i.test(projectRef) ? projectRef : null;
-  const cardClassName =
-    "flex items-center gap-3 p-3 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700";
-  const cardContent = (
-    <>
+
+  return (
+    <div className="flex items-center gap-3 p-3 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700">
       {avatarUrl ? (
         <img src={avatarUrl} alt="" className="w-10 h-10 rounded bg-oai-gray-100 dark:bg-oai-gray-800 object-cover" />
       ) : (
@@ -252,25 +250,6 @@ function ProjectUsageCard({
           <span>{tokensCompact}</span>
         </div>
       </div>
-    </>
-  );
-
-  if (href) {
-    return (
-      <a
-        href={href}
-        target="_blank"
-        rel="noreferrer"
-        className={`${cardClassName} hover:border-oai-gray-300 dark:hover:border-oai-gray-600 transition-colors`}
-      >
-        {cardContent}
-      </a>
-    );
-  }
-
-  return (
-    <div className={cardClassName}>
-      {cardContent}
     </div>
   );
 }

@@ -138,12 +138,17 @@ const summary = (() => {
   }
 })();
 
-const totalTokens = Number(signals.contextTokensUsed || 0);
-const messageCount = Number(signals.assistantMessageCount || signals.num_chat_messages || 0);
+function toNonNegativeFiniteNumber(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+const totalTokens = toNonNegativeFiniteNumber(signals.contextTokensUsed);
+const messageCount = toNonNegativeFiniteNumber(signals.assistantMessageCount || signals.num_chat_messages);
 const model = signals.primaryModelId || (Array.isArray(signals.modelsUsed) ? signals.modelsUsed[0] : 'grok-build');
 const lastActive = signals.lastActiveAt || summary.updated_at || new Date().toISOString();
 
-if (totalTokens <= 0 && messageCount <= 0) {
+if (totalTokens <= 0) {
   process.exit(0);
 }
 

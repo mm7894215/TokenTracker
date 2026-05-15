@@ -37,7 +37,6 @@ const {
   parseCraftIncremental,
   resolveGrokBuildSessions,
   parseGrokBuildIncremental,
-  appendRolloutRecords,
   resolveCodebuddyProjectFiles,
   parseCodebuddyIncremental,
   resolveKiroCliSessionFiles,
@@ -645,59 +644,34 @@ async function cmdSync(argv) {
 
     // ── Grok Build (xAI) ──
     let grokResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    // If the SessionEnd hook wrote a signal, convert it immediately into a queue record
+    // Full passive scan of all Grok sessions (historical + any not covered by hook)
+    const grokSessions = resolveGrokBuildSessions(process.env);
+    const grokSessionInputs = [...grokSessions];
     if (grokHookSignal && typeof grokHookSignal === "object") {
-      const grokState = cursors.grok && typeof cursors.grok === "object" ? cursors.grok : {};
-      const seenSessions = new Set(Array.isArray(grokState.seenSessions) ? grokState.seenSessions : []);
       const hookSessionId =
         typeof grokHookSignal.sessionId === "string" && grokHookSignal.sessionId.trim()
           ? grokHookSignal.sessionId.trim()
           : null;
-
-      if (Number(grokHookSignal.totalTokens || 0) <= 0) {
-        grokHookSignalConsumed = true;
-      } else if (hookSessionId && seenSessions.has(hookSessionId)) {
-        grokHookSignalConsumed = true;
-      } else {
-        const hourStart = new Date(grokHookSignal.lastActive || Date.now());
-        if (!Number.isFinite(hourStart.getTime())) {
-          hourStart.setTime(Date.now());
-        }
-        const rec = {
-          hour_start: hourStart.toISOString(),
-          source: "grok",
-          model: grokHookSignal.model || "grok-build",
-          input_tokens: 0,
-          output_tokens: 0,
-          cached_input_tokens: 0,
-          cache_creation_input_tokens: 0,
-          reasoning_output_tokens: 0,
-          total_tokens: grokHookSignal.totalTokens,
-          conversation_count: grokHookSignal.messageCount || 1
-        };
-        grokResult.bucketsQueued = await appendRolloutRecords(queuePath, [rec], { source: "grok" });
-        grokResult.recordsProcessed = 1;
-        grokResult.eventsAggregated = 1;
-        if (hookSessionId) {
-          seenSessions.add(hookSessionId);
-          cursors.grok = {
-            ...grokState,
-            seenSessions: Array.from(seenSessions),
-            updatedAt: new Date().toISOString()
-          };
-        }
-        grokHookSignalConsumed = true;
+      if (hookSessionId) {
+        grokSessionInputs.unshift({
+          sessionId: hookSessionId,
+          signals: {
+            contextTokensUsed: grokHookSignal.totalTokens,
+            assistantMessageCount: grokHookSignal.messageCount,
+            primaryModelId: grokHookSignal.model,
+            lastActiveAt: grokHookSignal.lastActive,
+          },
+          summary: { updated_at: grokHookSignal.lastActive },
+        });
       }
+      grokHookSignalConsumed = true;
     }
-
-    // Full passive scan of all Grok sessions (historical + any not covered by hook)
-    const grokSessions = resolveGrokBuildSessions(process.env);
-    if (grokSessions.length > 0) {
+    if (grokSessionInputs.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing Grok Build ${renderBar(0)} | buckets 0`);
       }
       const grokScanResult = await parseGrokBuildIncremental({
-        sessions: grokSessions,
+        sessions: grokSessionInputs,
         cursors,
         queuePath,
         env: process.env,

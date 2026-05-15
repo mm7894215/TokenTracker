@@ -5,6 +5,7 @@ const path = require("node:path");
 const { test } = require("node:test");
 
 const { createLocalApiHandler } = require("../src/lib/local-api");
+const { parseGrokBuildIncremental } = require("../src/lib/rollout");
 
 async function writeQueue(queuePath, rows) {
   await fs.promises.writeFile(queuePath, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
@@ -107,6 +108,52 @@ test("usage-model-breakdown applies the same legacy Codex normalization before p
     assert.equal(codex.totals.output_tokens, 10);
     assert.equal(codex.totals.reasoning_output_tokens, 4);
     assert.equal(codex.totals.total_cost_usd, "0.000513");
+  } finally {
+    await fs.promises.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("usage-model-breakdown prices Grok rows produced by the parser", async () => {
+  const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), "tt-localapi-grok-breakdown-"));
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    const sessionDir = path.join(tmp, "sessions", "encoded-cwd", "grok-session-cost");
+    await fs.promises.mkdir(sessionDir, { recursive: true });
+    const signalsPath = path.join(sessionDir, "signals.json");
+    await fs.promises.writeFile(
+      signalsPath,
+      JSON.stringify({
+        contextTokensUsed: 1000,
+        assistantMessageCount: 2,
+        primaryModelId: "grok-build",
+        lastActiveAt: "2026-04-20T10:15:00.000Z",
+      }),
+      "utf8",
+    );
+
+    await parseGrokBuildIncremental({
+      sessions: [{
+        sessionDir,
+        signalsPath,
+        summaryPath: path.join(sessionDir, "summary.json"),
+        sessionId: "grok-session-cost",
+      }],
+      cursors,
+      queuePath,
+    });
+
+    const body = await callEndpoint(
+      queuePath,
+      "/functions/tokentracker-usage-model-breakdown?from=2026-04-20&to=2026-04-20&tz=UTC",
+    );
+
+    const grok = body.sources.find((entry) => entry.source === "grok");
+    assert.ok(grok, "response must include the grok source");
+    assert.equal(grok.totals.total_tokens, 1000);
+    assert.equal(grok.totals.input_tokens, 800);
+    assert.equal(grok.totals.output_tokens, 200);
+    assert.notEqual(grok.totals.total_cost_usd, "0.000000");
   } finally {
     await fs.promises.rm(tmp, { recursive: true, force: true });
   }
