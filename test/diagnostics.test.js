@@ -11,12 +11,14 @@ test("diagnostics redacts device token and home paths", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-diagnostics-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
+  const prevTokenTrackerGrokHome = process.env.TOKENTRACKER_GROK_HOME;
   const prevGrokHome = process.env.GROK_HOME;
   const prevWrite = process.stdout.write;
 
   try {
     process.env.HOME = tmp;
     process.env.CODEX_HOME = path.join(tmp, ".codex");
+    delete process.env.TOKENTRACKER_GROK_HOME;
     process.env.GROK_HOME = path.join(tmp, ".grok");
 
     const trackerDir = path.join(tmp, ".tokentracker", "tracker");
@@ -115,6 +117,28 @@ test("diagnostics redacts device token and home paths", async () => {
     else process.env.HOME = prevHome;
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
+    if (prevTokenTrackerGrokHome === undefined) delete process.env.TOKENTRACKER_GROK_HOME;
+    else process.env.TOKENTRACKER_GROK_HOME = prevTokenTrackerGrokHome;
+    if (prevGrokHome === undefined) delete process.env.GROK_HOME;
+    else process.env.GROK_HOME = prevGrokHome;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("diagnostics reports TokenTracker-prefixed Grok home override", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-diagnostics-grok-"));
+  const prevTokenTrackerGrokHome = process.env.TOKENTRACKER_GROK_HOME;
+  const prevGrokHome = process.env.GROK_HOME;
+  try {
+    process.env.TOKENTRACKER_GROK_HOME = path.join(tmp, ".grok-prefixed");
+    process.env.GROK_HOME = path.join(tmp, ".grok-legacy");
+
+    const data = await collectTrackerDiagnostics({ home: tmp });
+
+    assert.equal(data.paths.grok_home, "~/.grok-prefixed");
+  } finally {
+    if (prevTokenTrackerGrokHome === undefined) delete process.env.TOKENTRACKER_GROK_HOME;
+    else process.env.TOKENTRACKER_GROK_HOME = prevTokenTrackerGrokHome;
     if (prevGrokHome === undefined) delete process.env.GROK_HOME;
     else process.env.GROK_HOME = prevGrokHome;
     await fs.rm(tmp, { recursive: true, force: true });

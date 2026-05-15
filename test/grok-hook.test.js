@@ -6,9 +6,33 @@ const { test } = require("node:test");
 
 const {
   GROK_HOOK_FILENAME,
+  buildGrokSessionEndHookJson,
   probeGrokHookState,
+  resolveGrokHome,
   upsertGrokHook,
 } = require("../src/lib/grok-hook");
+
+test("resolveGrokHome prefers TokenTracker-prefixed override", () => {
+  assert.equal(
+    resolveGrokHome({
+      TOKENTRACKER_GROK_HOME: "/tmp/tokentracker-grok",
+      GROK_HOME: "/tmp/legacy-grok",
+    }),
+    "/tmp/tokentracker-grok",
+  );
+  assert.equal(resolveGrokHome({ GROK_HOME: "/tmp/legacy-grok" }), "/tmp/legacy-grok");
+});
+
+test("buildGrokSessionEndHookJson quotes handler paths for shell command", () => {
+  const hookJson = buildGrokSessionEndHookJson({
+    notifyGrokHandlerPath: "/tmp/Token Tracker's/bin/grok-session-end-hook.cjs",
+  });
+
+  assert.equal(
+    hookJson.hooks.SessionEnd[0].hooks[0].command,
+    "/usr/bin/env node '/tmp/Token Tracker'\\''s/bin/grok-session-end-hook.cjs'",
+  );
+});
 
 test("upsertGrokHook writes handler to canonical tokentracker bin dir", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-grok-hook-"));

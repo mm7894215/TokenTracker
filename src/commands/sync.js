@@ -663,7 +663,6 @@ async function cmdSync(argv) {
         if (!Number.isFinite(hourStart.getTime())) {
           hourStart.setTime(Date.now());
         }
-        hourStart.setUTCMinutes(0, 0, 0);
         const rec = {
           hour_start: hourStart.toISOString(),
           source: "grok",

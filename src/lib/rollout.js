@@ -1447,7 +1447,7 @@ async function appendRolloutRecords(queuePath, records) {
     }
     const source = normalizeSourceInput(row.source) || DEFAULT_SOURCE;
     const model = normalizeModelInput(row.model) || DEFAULT_MODEL;
-    const hourStart = normalizeIsoHourStart(row.hour_start);
+    const hourStart = normalizeIsoHalfHourStart(row.hour_start);
     if (!hourStart) continue;
     latestByKey.set(bucketKey(source, model, hourStart), {
       source,
@@ -1471,7 +1471,7 @@ async function appendRolloutRecords(queuePath, records) {
     if (!record || typeof record !== "object") continue;
     const source = normalizeSourceInput(record.source) || DEFAULT_SOURCE;
     const model = normalizeModelInput(record.model) || DEFAULT_MODEL;
-    const hourStart = normalizeIsoHourStart(record.hour_start);
+    const hourStart = normalizeIsoHalfHourStart(record.hour_start);
     if (!hourStart) continue;
 
     const key = bucketKey(source, model, hourStart);
@@ -1853,11 +1853,8 @@ function toUtcHalfHourStart(ts) {
   return bucketStart.toISOString();
 }
 
-function normalizeIsoHourStart(ts) {
-  const dt = new Date(ts);
-  if (!Number.isFinite(dt.getTime())) return null;
-  dt.setUTCMinutes(0, 0, 0);
-  return dt.toISOString();
+function normalizeIsoHalfHourStart(ts) {
+  return toUtcHalfHourStart(ts);
 }
 
 function normalizeNonNegativeNumber(value) {
@@ -5987,7 +5984,11 @@ async function parseCopilotIncremental({ otelPaths, cursors, queuePath, onProgre
 // ─────────────────────────────────────────────────────────────────────────────
 
 function resolveGrokBuildHome(env = process.env) {
-  return env.GROK_HOME || path.join(require("node:os").homedir(), ".grok");
+  return (
+    env.TOKENTRACKER_GROK_HOME ||
+    env.GROK_HOME ||
+    path.join(require("node:os").homedir(), ".grok")
+  );
 }
 
 function resolveGrokBuildSessions(env = process.env) {
@@ -6068,12 +6069,8 @@ async function parseGrokBuildIncremental({
                   "grok-build";
 
     const lastActive = signals.lastActiveAt || signals.updatedAt || new Date().toISOString();
-    const hourStart = new Date(lastActive);
-    if (!Number.isFinite(hourStart.getTime())) {
-      hourStart.setTime(Date.now());
-    }
-    hourStart.setUTCMinutes(0, 0, 0);
-    const hourStartStr = hourStart.toISOString();
+    const hourStartStr =
+      normalizeIsoHalfHourStart(lastActive) || normalizeIsoHalfHourStart(Date.now());
 
     records.push({
       hour_start: hourStartStr,

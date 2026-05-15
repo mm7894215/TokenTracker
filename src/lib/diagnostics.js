@@ -53,7 +53,10 @@ async function collectTrackerDiagnostics({
   const geminiConfigDir = resolveGeminiConfigDir({ home, env: process.env });
   const geminiSettingsPath = resolveGeminiSettingsPath({ configDir: geminiConfigDir });
   const opencodeConfigDir = resolveOpencodeConfigDir({ home, env: process.env });
-  const grokHome = process.env.GROK_HOME || path.join(home, ".grok");
+  const grokHome =
+    process.env.TOKENTRACKER_GROK_HOME ||
+    process.env.GROK_HOME ||
+    path.join(home, ".grok");
 
   const config = await readJson(configPath);
   const cursors = await readJson(cursorsPath);

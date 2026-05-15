@@ -5480,7 +5480,12 @@ test("parseGrokBuildIncremental appends cumulative buckets across sessions", asy
         }),
         "utf8",
       );
-      return { sessionDir, signalsPath, summaryPath: path.join(sessionDir, "summary.json"), sessionId };
+      return {
+        sessionDir,
+        signalsPath,
+        summaryPath: path.join(sessionDir, "summary.json"),
+        sessionId,
+      };
     };
 
     const first = await writeSession({
@@ -5525,6 +5530,62 @@ test("parseGrokBuildIncremental appends cumulative buckets across sessions", asy
     });
     assert.equal(thirdRun.eventsAggregated, 0);
     assert.equal(thirdRun.bucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseGrokBuildIncremental buckets Grok sessions by UTC half hour", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-grok-halfhour-"));
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const writeSession = async ({ sessionId, totalTokens, lastActiveAt }) => {
+      const sessionDir = path.join(tmp, "sessions", "encoded-cwd", sessionId);
+      await fs.mkdir(sessionDir, { recursive: true });
+      const signalsPath = path.join(sessionDir, "signals.json");
+      await fs.writeFile(
+        signalsPath,
+        JSON.stringify({
+          contextTokensUsed: totalTokens,
+          assistantMessageCount: 1,
+          primaryModelId: "grok-build",
+          lastActiveAt,
+        }),
+        "utf8",
+      );
+      return {
+        sessionDir,
+        signalsPath,
+        summaryPath: path.join(sessionDir, "summary.json"),
+        sessionId,
+      };
+    };
+
+    const early = await writeSession({
+      sessionId: "grok-session-early",
+      totalTokens: 10,
+      lastActiveAt: "2026-04-05T14:10:00.000Z",
+    });
+    const late = await writeSession({
+      sessionId: "grok-session-late",
+      totalTokens: 20,
+      lastActiveAt: "2026-04-05T14:45:00.000Z",
+    });
+
+    const result = await parseGrokBuildIncremental({
+      sessions: [early, late],
+      cursors,
+      queuePath,
+    });
+    assert.equal(result.eventsAggregated, 2);
+    assert.equal(result.bucketsQueued, 2);
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 2);
+    assert.equal(queued[0].hour_start, "2026-04-05T14:00:00.000Z");
+    assert.equal(queued[1].hour_start, "2026-04-05T14:30:00.000Z");
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

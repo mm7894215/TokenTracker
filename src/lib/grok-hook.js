@@ -6,6 +6,9 @@ const fssync = require("node:fs");
 const GROK_HOOK_FILENAME = "99-tokentracker-usage.json";
 
 function resolveGrokHome(env = process.env) {
+  if (env.TOKENTRACKER_GROK_HOME && env.TOKENTRACKER_GROK_HOME.length > 0) {
+    return env.TOKENTRACKER_GROK_HOME;
+  }
   if (env.GROK_HOME && env.GROK_HOME.length > 0) {
     return env.GROK_HOME;
   }
@@ -31,7 +34,7 @@ function resolveLegacyTrackerBinDir(trackerDir) {
 function buildGrokSessionEndHookJson({ notifyGrokHandlerPath }) {
   // The command runs our dedicated handler.
   // We pass the session id and cwd via environment variables that Grok already sets.
-  const cmd = `/usr/bin/env node ${notifyGrokHandlerPath}`;
+  const cmd = `/usr/bin/env node ${shellQuote(notifyGrokHandlerPath)}`;
   return {
     hooks: {
       SessionEnd: [
@@ -47,6 +50,10 @@ function buildGrokSessionEndHookJson({ notifyGrokHandlerPath }) {
       ]
     }
   };
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
 async function ensureGrokHookFiles({
@@ -96,7 +103,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 
-const GROK_HOME = process.env.GROK_HOME || path.join(os.homedir(), '.grok');
+const GROK_HOME = process.env.TOKENTRACKER_GROK_HOME || process.env.GROK_HOME || path.join(os.homedir(), '.grok');
 const SESSION_ID = process.env.GROK_SESSION_ID;
 const WORKSPACE_ROOT = process.env.GROK_WORKSPACE_ROOT || process.cwd();
 

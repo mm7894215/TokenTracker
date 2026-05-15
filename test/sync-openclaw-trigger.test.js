@@ -58,6 +58,7 @@ test("sync keeps Grok hook signal when another sync owns the lock", async () => 
   const prevCodeHome = process.env.CODE_HOME;
   const prevGeminiHome = process.env.GEMINI_HOME;
   const prevOpencodeHome = process.env.OPENCODE_HOME;
+  const prevTokenTrackerGrokHome = process.env.TOKENTRACKER_GROK_HOME;
   const prevGrokHome = process.env.GROK_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
 
@@ -67,6 +68,7 @@ test("sync keeps Grok hook signal when another sync owns the lock", async () => 
     process.env.CODE_HOME = path.join(tmp, ".code");
     process.env.GEMINI_HOME = path.join(tmp, ".gemini");
     process.env.OPENCODE_HOME = path.join(tmp, ".opencode");
+    delete process.env.TOKENTRACKER_GROK_HOME;
     process.env.GROK_HOME = path.join(tmp, ".grok");
     delete process.env.TOKENTRACKER_DEVICE_TOKEN;
 
@@ -102,6 +104,8 @@ test("sync keeps Grok hook signal when another sync owns the lock", async () => 
     else process.env.GEMINI_HOME = prevGeminiHome;
     if (prevOpencodeHome === undefined) delete process.env.OPENCODE_HOME;
     else process.env.OPENCODE_HOME = prevOpencodeHome;
+    if (prevTokenTrackerGrokHome === undefined) delete process.env.TOKENTRACKER_GROK_HOME;
+    else process.env.TOKENTRACKER_GROK_HOME = prevTokenTrackerGrokHome;
     if (prevGrokHome === undefined) delete process.env.GROK_HOME;
     else process.env.GROK_HOME = prevGrokHome;
     if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -117,6 +121,7 @@ test("sync queues and consumes Grok hook signal after cursor persistence", async
   const prevCodeHome = process.env.CODE_HOME;
   const prevGeminiHome = process.env.GEMINI_HOME;
   const prevOpencodeHome = process.env.OPENCODE_HOME;
+  const prevTokenTrackerGrokHome = process.env.TOKENTRACKER_GROK_HOME;
   const prevGrokHome = process.env.GROK_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
 
@@ -126,6 +131,7 @@ test("sync queues and consumes Grok hook signal after cursor persistence", async
     process.env.CODE_HOME = path.join(tmp, ".code");
     process.env.GEMINI_HOME = path.join(tmp, ".gemini");
     process.env.OPENCODE_HOME = path.join(tmp, ".opencode");
+    delete process.env.TOKENTRACKER_GROK_HOME;
     process.env.GROK_HOME = path.join(tmp, ".grok");
     delete process.env.TOKENTRACKER_DEVICE_TOKEN;
 
@@ -140,7 +146,7 @@ test("sync queues and consumes Grok hook signal after cursor persistence", async
         model: "grok-build",
         totalTokens: 99,
         messageCount: 3,
-        lastActive: "2026-04-05T14:10:00.000Z",
+        lastActive: "2026-04-05T14:45:00.000Z",
       }) + "\n",
       "utf8",
     );
@@ -150,6 +156,7 @@ test("sync queues and consumes Grok hook signal after cursor persistence", async
     const rows = await readJsonl(path.join(trackerDir, "queue.jsonl"));
     assert.equal(rows.length, 1);
     assert.equal(rows[0].source, "grok");
+    assert.equal(rows[0].hour_start, "2026-04-05T14:30:00.000Z");
     assert.equal(rows[0].total_tokens, 99);
     assert.equal(rows[0].conversation_count, 3);
     await assert.rejects(fs.stat(signalPath), /ENOENT/);
@@ -167,6 +174,8 @@ test("sync queues and consumes Grok hook signal after cursor persistence", async
     else process.env.GEMINI_HOME = prevGeminiHome;
     if (prevOpencodeHome === undefined) delete process.env.OPENCODE_HOME;
     else process.env.OPENCODE_HOME = prevOpencodeHome;
+    if (prevTokenTrackerGrokHome === undefined) delete process.env.TOKENTRACKER_GROK_HOME;
+    else process.env.TOKENTRACKER_GROK_HOME = prevTokenTrackerGrokHome;
     if (prevGrokHome === undefined) delete process.env.GROK_HOME;
     else process.env.GROK_HOME = prevGrokHome;
     if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;
