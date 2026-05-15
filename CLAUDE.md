@@ -234,10 +234,20 @@ Three artifacts are published per release — npm package, macOS DMG, and Homebr
 
 ### Version Bump Rules
 
-When a feature or fix is significant enough to ship, **ask the user whether to bump the version**:
+When a feature or fix is significant enough to ship, **ask the user whether to bump the version**.
 
-- **Dashboard/CLI-only changes** (web UI, parser, API, hooks): bump `package.json` only → npm auto-publishes on push
-- **Changes that touch Swift / macOS App**: bump **both** `package.json` and `TokenTrackerBar/project.yml` `MARKETING_VERSION` → npm auto-publishes on push, then trigger DMG workflow
+**Default rule: any change under `src/` or `dashboard/` requires a full release** — bump *both* `package.json` and `TokenTrackerBar/project.yml` `MARKETING_VERSION`, push (npm auto-publishes), then `gh workflow run "release DMG" -f version=X.Y.Z`.
+
+The reason: the macOS app's `EmbeddedServer/` bundles the CLI runtime (`src/`) and the built dashboard (`dashboard/dist/`). If you bump only `package.json`, npm users get the fix but menu-bar-app users keep running the old code embedded in their installed `.app` — DMG must be rebuilt to re-bundle EmbeddedServer.
+
+| Change scope | npm bump | DMG bump | DMG workflow |
+|---|---|---|---|
+| `src/` (CLI runtime) | ✅ | ✅ | ✅ |
+| `dashboard/` (WKWebView frontend) | ✅ | ✅ | ✅ |
+| `TokenTrackerBar/` Swift only | ✅ | ✅ | ✅ |
+| `edge-patches/` / scripts / docs / CI | — | — | — |
+
+The only "npm-only" path is when no runtime code changed (e.g. README typo) — and even then, prefer no version bump at all.
 
 ### CI/CD Pipelines (fully automated)
 
