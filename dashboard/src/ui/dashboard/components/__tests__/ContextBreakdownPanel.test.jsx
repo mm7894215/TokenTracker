@@ -14,6 +14,16 @@ vi.mock("../../../../lib/timezone", () => ({
 }));
 
 describe("ContextBreakdownPanel", () => {
+  it("uses generic loading copy while session logs are being scanned", async () => {
+    getUsageCategoryBreakdown.mockReturnValueOnce(new Promise(() => {}));
+
+    render(<ContextBreakdownPanel from="2026-05-09" to="2026-05-09" source="codex" />);
+
+    expect(await screen.findByText(copy("dashboard.context_breakdown.loading_hint"))).toBeInTheDocument();
+    expect(screen.queryByText("Scanning Claude Code session logs…")).not.toBeInTheDocument();
+    expect(screen.queryByText("Scanning Codex session logs…")).not.toBeInTheDocument();
+  });
+
   it("renders Codex tool calls from total token attribution", async () => {
     getUsageCategoryBreakdown.mockResolvedValueOnce({
       source: "codex",
