@@ -1,7 +1,7 @@
 {
   "name": "tokentracker-cli",
   "version": "0.14.6",
-  "description": "Token usage tracker for AI agent CLIs (Claude Code, Codex, Cursor, Gemini, Kiro, OpenCode, OpenClaw, Every Code, Hermes, GitHub Copilot, Kimi Code, CodeBuddy, oh-my-pi, pi, Craft Agents, Kilo CLI, Kilo Code)",
+  "description": "Token usage tracker for AI agent CLIs (Claude Code, Codex, Cursor, Gemini, Kiro, OpenCode, OpenClaw, Every Code, Hermes, GitHub Copilot, Kimi Code, CodeBuddy, Grok Build, oh-my-pi, pi, Craft Agents, Kilo CLI, Kilo Code)",
   "main": "src/cli.js",
   "bin": {
     "tokentracker-cli": "bin/tracker.js",

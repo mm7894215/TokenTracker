@@ -47,7 +47,9 @@ const {
   resolveCraftSessionFiles,
   resolveCraftConfigDir,
   resolveKilocodeTaskFiles,
+  resolveGrokBuildSessions,
 } = require("../lib/rollout");
+const { probeGrokHookState, resolveGrokHome } = require("../lib/grok-hook");
 
 async function cmdStatus(argv = []) {
   const opts = parseArgs(argv);
@@ -212,6 +214,13 @@ async function cmdStatus(argv = []) {
   const kilocodeTaskFiles = resolveKilocodeTaskFiles(process.env);
   const kilocodeInstalled = kilocodeTaskFiles.length > 0;
 
+  // Grok Build (xAI TUI)
+  const grokHookState = await probeGrokHookState({ home, trackerDir, env: process.env });
+  const grokSessions = grokHookState.hasGrokInstall || grokHookState.sessionsDir
+    ? resolveGrokBuildSessions(process.env)
+    : [];
+  const grokInstalled = grokHookState.hasGrokInstall || grokSessions.length > 0;
+
   const copilotToken = readCopilotOauthToken({ home });
   const copilotOtel = describeCopilotOtelStatus({ home, env: process.env });
   const copilotLines = formatCopilotLines({
@@ -264,6 +273,9 @@ async function cmdStatus(argv = []) {
         : null,
       kilocodeInstalled
         ? `- Kilo Code (VS Code extension): passive reader (${kilocodeTaskFiles.length} task${kilocodeTaskFiles.length !== 1 ? "s" : ""} across ${new Set(kilocodeTaskFiles.map((t) => t.ide)).size} IDE${new Set(kilocodeTaskFiles.map((t) => t.ide)).size !== 1 ? "s" : ""})`
+        : null,
+      grokInstalled
+        ? `- Grok Build (xAI): ${grokHookState.configured ? "hook installed" : "detected"} (${grokSessions.length} session${grokSessions.length !== 1 ? "s" : ""} found, hook: ${grokHookState.configured ? "yes" : "no"})`
         : null,
       ...copilotLines,
       ...subscriptionLines,
