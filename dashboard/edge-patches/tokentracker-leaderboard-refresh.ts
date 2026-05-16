@@ -85,6 +85,19 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   "MiniMax-M2.7-highspeed": { input: 0.6, output: 2.4, cache_read: 0.06, cache_write: 0.375 },
   "deepseek-v4-flash": { input: 0.14, output: 0.28, cache_read: 0.0028, cache_write: 0.14 },
   "deepseek-v4-pro": { input: 0.435, output: 0.87, cache_read: 0.003625, cache_write: 0.435 },
+  "deepseek-chat": { input: 0.14, output: 0.28, cache_read: 0.0028, cache_write: 0.14 },
+  "deepseek-reasoner": { input: 0.14, output: 0.28, cache_read: 0.0028, cache_write: 0.14 },
+  // ── xAI Grok (mirrored from src/lib/pricing/curated-overrides.json;
+  //    Grok parser emits cache_creation_input_tokens = 0, so cache_write is
+  //    omitted — same as the canonical table). ──
+  "grok-build": { input: 1.25, output: 2.50, cache_read: 0.20 },
+  "grok-4-0709": { input: 3.00, output: 15.00, cache_read: 0.75 },
+  "grok-4": { input: 3.00, output: 15.00, cache_read: 0.75 },
+  "grok-4-latest": { input: 3.00, output: 15.00, cache_read: 0.75 },
+  "grok-4-fast": { input: 0.20, output: 0.50, cache_read: 0.05 },
+  "grok-4-fast-reasoning": { input: 0.20, output: 0.50, cache_read: 0.05 },
+  "grok-4-fast-non-reasoning": { input: 0.20, output: 0.50, cache_read: 0.05 },
+  "grok-4-1-fast-non-reasoning": { input: 0.20, output: 0.50, cache_read: 0.05 },
   // ── AWS Kiro (mirrored byte-for-byte from src/lib/local-api.js to
   //    prevent cloud/local cost drift — Kiro routes through Bedrock,
   //    most commonly claude-sonnet-4). ──
@@ -125,6 +138,18 @@ function getModelPricing(model: string) {
   if (lower.includes("minimax-m2.7")) return MODEL_PRICING["MiniMax-M2.7"];
   if (lower.includes("deepseek-v4-flash")) return MODEL_PRICING["deepseek-v4-flash"];
   if (lower.includes("deepseek-v4-pro")) return MODEL_PRICING["deepseek-v4-pro"];
+  if (lower.includes("deepseek-reasoner")) return MODEL_PRICING["deepseek-reasoner"];
+  if (lower.includes("deepseek-chat")) return MODEL_PRICING["deepseek-chat"];
+  if (lower.includes("grok-build")) return MODEL_PRICING["grok-build"];
+  if (lower.includes("grok-4-fast")) return MODEL_PRICING["grok-4-fast"];
+  // grok-4-1-fast-* must precede the generic grok-4 matcher. Cloud rows may
+  // carry a provider prefix or `-latest` suffix (e.g. xai/grok-4-1-fast-
+  // non-reasoning-latest), and the substring "grok-4-fast" does NOT match
+  // "grok-4-1-fast" (the "-1-" separates them). Without this specific match
+  // these rows fall through to grok-4 and get billed at $3/$15 MTok instead
+  // of the $0.20/$0.50 MTok fast-tier rate (15x / 30x overestimate).
+  if (lower.includes("grok-4-1-fast")) return MODEL_PRICING["grok-4-1-fast-non-reasoning"];
+  if (lower.includes("grok-4")) return MODEL_PRICING["grok-4"];
   if (lower.includes("kimi")) return MODEL_PRICING["kimi-k2.5"];
   if (lower.includes("kiro")) return MODEL_PRICING["kiro-cli-agent"];
   if (lower.includes("hy3")) return MODEL_PRICING["hy3-preview-agent"];

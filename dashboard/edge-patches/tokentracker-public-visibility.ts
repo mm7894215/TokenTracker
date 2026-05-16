@@ -18,29 +18,47 @@ function json(data: unknown, status = 200) {
   });
 }
 
-function extractUserIdFromSessionBody(body: unknown): string | null {
-  if (!body || typeof body !== "object") return null;
-  const o = body as Record<string, unknown>;
-  const u =
-    (o.user as Record<string, unknown> | undefined) ??
-    ((o.data as Record<string, unknown> | undefined)?.user as Record<string, unknown> | undefined);
-  if (!u || typeof u !== "object") return null;
-  const id = u.id ?? u.user_id;
-  return typeof id === "string" && id.length > 0 ? id : null;
+function b64urlToBytes(s: string): Uint8Array {
+  const b64 = s.replace(/-/g, "+").replace(/_/g, "/");
+  const pad = (4 - (b64.length % 4)) % 4;
+  const raw = atob(b64 + "=".repeat(pad));
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
 }
 
-/** JWT payload 中的 sub（网关已校验 token 时与 sessions/current 一致；避免 Edge 内 fetch 解析与浏览器不一致） */
-function userIdFromAccessTokenJwt(token: string): string | null {
+/**
+ * Verify a HS256 JWT signature locally with JWT_SECRET and return its `sub`.
+ *
+ * Previously this endpoint trusted an unverified JWT payload, which let any
+ * caller forge `{"sub":"<victim>"}` and POST to mutate that victim's public
+ * profile (leaderboard_public, display_name, github_url, etc.). InsForge
+ * does NOT validate JWTs at the gateway (see tokentracker-leaderboard-
+ * profile.ts for the matching pattern), so this edge function must do it.
+ *
+ * Returns null on any failure (bad shape, bad signature, expired); the
+ * caller surfaces that as 401.
+ */
+async function verifiedUserIdFromJwt(token: string): Promise<string | null> {
+  const secret = Deno.env.get("JWT_SECRET");
+  if (!secret) return null;
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
   try {
-    const parts = token.split(".");
-    if (parts.length < 2) return null;
-    const payloadPart = parts[1];
-    const padded = payloadPart
-      .replace(/-/g, "+")
-      .replace(/_/g, "/")
-      .padEnd(payloadPart.length + ((4 - (payloadPart.length % 4)) % 4), "=");
-    const json = atob(padded);
-    const payload = JSON.parse(json) as Record<string, unknown>;
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"],
+    );
+    const data = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
+    const sig = b64urlToBytes(parts[2]);
+    const ok = await crypto.subtle.verify("HMAC", key, sig, data);
+    if (!ok) return null;
+    const payloadStr = new TextDecoder().decode(b64urlToBytes(parts[1]));
+    const payload = JSON.parse(payloadStr) as Record<string, unknown>;
+    if (typeof payload.exp === "number" && Date.now() / 1000 > payload.exp) return null;
     const sub = payload.sub;
     if (typeof sub === "string" && sub.length > 0) return sub;
     const uid = payload.user_id;
@@ -49,27 +67,6 @@ function userIdFromAccessTokenJwt(token: string): string | null {
     /* ignore */
   }
   return null;
-}
-
-/** 与前端直连 API 相同：Authorization + 可选 apikey（InsForge 网关推荐同时带） */
-async function getUserIdFromSession(
-  baseUrl: string,
-  token: string,
-  anonKey: string | undefined,
-): Promise<string | null> {
-  const root = baseUrl.replace(/\/$/, "");
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/json",
-  };
-  if (anonKey) headers.apikey = anonKey;
-  const res = await fetch(`${root}/api/auth/sessions/current`, { headers });
-  if (res.ok) {
-    const body = await res.json().catch(() => null);
-    const fromApi = extractUserIdFromSessionBody(body);
-    if (fromApi) return fromApi;
-  }
-  return userIdFromAccessTokenJwt(token);
 }
 
 export default async function (req: Request): Promise<Response> {
@@ -84,7 +81,7 @@ export default async function (req: Request): Promise<Response> {
   const token = authH?.startsWith("Bearer ") ? authH.slice(7) : undefined;
   if (!token) return json({ error: "Unauthorized" }, 401);
 
-  const userId = userIdFromAccessTokenJwt(token) || await getUserIdFromSession(baseUrl, token, anonKey);
+  const userId = await verifiedUserIdFromJwt(token);
   if (!userId) return json({ error: "Unauthorized" }, 401);
 
   const serviceRoleKey = Deno.env.get("INSFORGE_SERVICE_ROLE_KEY");
