@@ -39,7 +39,7 @@ node bin/tracker.js serve --no-sync       # local dashboard server on :7680
 | Add a local API endpoint | `src/lib/local-api.js` — search `/functions/tokentracker-` |
 | Wire a provider into sync | `src/commands/sync.js` (call site + totals aggregation) + `src/commands/status.js` (status reporting) |
 | Add pricing for a model | `src/lib/pricing/curated-overrides.json` |
-| Add a dashboard page | `dashboard/src/pages/` (lazy-loaded in `App.jsx`) |
+| Add a dashboard page | `dashboard/src/pages/` (lazy-loaded via `React.lazy()` in `App.jsx`) |
 | Add UI components | `dashboard/src/ui/dashboard/components/` |
 | Add a provider icon | `dashboard/src/ui/dashboard/components/ProviderIcon.jsx` (`PROVIDER_ICON_MAP` keyed by `source.toUpperCase()`) |
 | Add user-facing text | `dashboard/src/content/copy.csv` — never hardcode |
@@ -82,8 +82,8 @@ UTC, half-hour buckets, append-only — readers take the latest entry per `(sour
 - Env-var prefixes: `TOKENTRACKER_` for CLI, `VITE_` for dashboard.
 - Git commits in **English**, conventional style (`feat:` / `fix:` / `refactor:` / `chore:` / `docs:` / `test:` / `ci:`).
 - **Privacy**: token counts only — never prompts, messages, or conversation bodies.
-- `EmbeddedServer/` is gitignored; built on demand by `scripts/bundle-node.sh`.
-- After editing `TokenTrackerBar/project.yml`: `xcodegen generate && ruby scripts/patch-pbxproj-icon.rb`.
+- `TokenTrackerBar/EmbeddedServer/` is gitignored; built on demand by `TokenTrackerBar/scripts/bundle-node.sh`.
+- After editing `TokenTrackerBar/project.yml`: `(cd TokenTrackerBar && xcodegen generate && ruby scripts/patch-pbxproj-icon.rb)`.
 
 ## Release workflow
 
@@ -93,7 +93,7 @@ UTC, half-hour buckets, append-only — readers take the latest entry per `(sour
 |---|---|---|---|
 | `src/` or `dashboard/` | ✅ | ✅ | ✅ |
 | `TokenTrackerBar/` Swift only | ✅ | ✅ | ✅ |
-| `edge-patches/`, scripts, docs, CI | — | — | — |
+| `dashboard/edge-patches/`, scripts, docs, CI | — | — | — |
 
 When the user says "release" or "发 release", that is explicit approval for the release commit(s) + push — do not ask again for commit/push permission within that scope.
 
@@ -130,7 +130,7 @@ openspec validate <id> --strict
 ### macOS build & release
 
 - **Icon Composer (`.icon`) needs Xcode 26+**. CI uses `macos-26` runners but a static `TokenTrackerBar/TokenTrackerBar/AppIcon.icns` is committed as fallback for older Xcode. If you update `AppIcon.icon`, regenerate `.icns` from a local Xcode 26 build and commit both.
-- **DMG layout on CI needs Homebrew `create-dmg`**. `scripts/create-dmg.sh` uses AppleScript locally but delegates to `create-dmg` on headless runners. Don't reintroduce a "skip Finder customization on CI" shortcut — produces bare DMGs.
+- **DMG layout on CI needs Homebrew `create-dmg`**. `TokenTrackerBar/scripts/create-dmg.sh` uses AppleScript locally but delegates to `create-dmg` on headless runners. Don't reintroduce a "skip Finder customization on CI" shortcut — produces bare DMGs.
 - **CI must ad-hoc sign the `.app` before DMG packaging.** Build flags strip signing entirely; without ad-hoc signing the `.app` + `com.apple.quarantine` xattr triggers Gatekeeper "damaged" rejection (unfixable without Terminal). The workflow signs inner Mach-O (`Resources/EmbeddedServer/node`) first, then the outer bundle with `--entitlements TokenTrackerBar/TokenTrackerBar.entitlements --sign -`. **Never** remove this step without replacing it with Developer ID + notarization.
 
 ### Dashboard layout
