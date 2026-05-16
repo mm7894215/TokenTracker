@@ -13,6 +13,13 @@ import { isMockEnabled } from "./lib/mock-data";
 import { isScreenshotModeEnabled } from "./lib/screenshot-mode";
 import { useCloudUsageSync } from "./hooks/use-cloud-usage-sync";
 import { AppLayout } from "./ui/components/Sidebar.jsx";
+// NativeAuthCallbackPage must be eager-imported: its module-level code
+// captures the OAuth `insforge_code` query param synchronously at app
+// boot, BEFORE the InsForge SDK's detectAuthCallback() strips it. Lazy
+// loading delays the module until route render, by which point the
+// param has already been removed — the page then falls through to the
+// "Sign-in incomplete" failure state.
+import { NativeAuthCallbackPage } from "./pages/NativeAuthCallbackPage.jsx";
 
 // Pages are lazy-loaded so each route ships in its own chunk; keeps the
 // initial main bundle small (was 1.9 MB before splitting, all 11 pages
@@ -38,11 +45,6 @@ const LimitsPage = lazy(() =>
 );
 const LoginPage = lazy(() =>
   import("./pages/LoginPage.jsx").then((m) => ({ default: m.LoginPage })),
-);
-const NativeAuthCallbackPage = lazy(() =>
-  import("./pages/NativeAuthCallbackPage.jsx").then((m) => ({
-    default: m.NativeAuthCallbackPage,
-  })),
 );
 const SettingsPage = lazy(() =>
   import("./pages/SettingsPage.jsx").then((m) => ({ default: m.SettingsPage })),
