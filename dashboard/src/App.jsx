@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { lazy, Suspense, useMemo } from "react";
 import { useLocation } from "react-router-dom";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
@@ -12,18 +12,47 @@ import { getBackendBaseUrl } from "./lib/config";
 import { isMockEnabled } from "./lib/mock-data";
 import { isScreenshotModeEnabled } from "./lib/screenshot-mode";
 import { useCloudUsageSync } from "./hooks/use-cloud-usage-sync";
-import { DashboardPage } from "./pages/DashboardPage.jsx";
-import IpCheckPage from "./pages/IpCheckPage.jsx";
-import { LandingPage } from "./pages/LandingPage.jsx";
-import { LeaderboardPage } from "./pages/LeaderboardPage.jsx";
-import { LeaderboardProfilePage } from "./pages/LeaderboardProfilePage.jsx";
-import { LimitsPage } from "./pages/LimitsPage.jsx";
-import { LoginPage } from "./pages/LoginPage.jsx";
-import { NativeAuthCallbackPage } from "./pages/NativeAuthCallbackPage.jsx";
-import { SettingsPage } from "./pages/SettingsPage.jsx";
-import { SkillsPage } from "./pages/SkillsPage.jsx";
 import { AppLayout } from "./ui/components/Sidebar.jsx";
-import { WidgetsPage } from "./pages/WidgetsPage.jsx";
+
+// Pages are lazy-loaded so each route ships in its own chunk; keeps the
+// initial main bundle small (was 1.9 MB before splitting, all 11 pages
+// were bundled together). Routes are mutually exclusive, so only one
+// chunk loads per navigation.
+const DashboardPage = lazy(() =>
+  import("./pages/DashboardPage.jsx").then((m) => ({ default: m.DashboardPage })),
+);
+const IpCheckPage = lazy(() => import("./pages/IpCheckPage.jsx"));
+const LandingPage = lazy(() =>
+  import("./pages/LandingPage.jsx").then((m) => ({ default: m.LandingPage })),
+);
+const LeaderboardPage = lazy(() =>
+  import("./pages/LeaderboardPage.jsx").then((m) => ({ default: m.LeaderboardPage })),
+);
+const LeaderboardProfilePage = lazy(() =>
+  import("./pages/LeaderboardProfilePage.jsx").then((m) => ({
+    default: m.LeaderboardProfilePage,
+  })),
+);
+const LimitsPage = lazy(() =>
+  import("./pages/LimitsPage.jsx").then((m) => ({ default: m.LimitsPage })),
+);
+const LoginPage = lazy(() =>
+  import("./pages/LoginPage.jsx").then((m) => ({ default: m.LoginPage })),
+);
+const NativeAuthCallbackPage = lazy(() =>
+  import("./pages/NativeAuthCallbackPage.jsx").then((m) => ({
+    default: m.NativeAuthCallbackPage,
+  })),
+);
+const SettingsPage = lazy(() =>
+  import("./pages/SettingsPage.jsx").then((m) => ({ default: m.SettingsPage })),
+);
+const SkillsPage = lazy(() =>
+  import("./pages/SkillsPage.jsx").then((m) => ({ default: m.SkillsPage })),
+);
+const WidgetsPage = lazy(() =>
+  import("./pages/WidgetsPage.jsx").then((m) => ({ default: m.WidgetsPage })),
+);
 
 export default function App() {
   // Subscribing to locale here makes App rerender on language switch, which
@@ -152,7 +181,7 @@ export default function App() {
     <ErrorBoundary>
       <ThemeProvider>
         <LoginModalProvider>
-          {content}
+          <Suspense fallback={null}>{content}</Suspense>
           <LoginModal />
           <Analytics />
           <SpeedInsights />
