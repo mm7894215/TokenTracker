@@ -22,13 +22,16 @@ describe("ProjectUsagePanel", () => {
     document.documentElement.classList.remove("screenshot-capture");
   });
 
-  it("renders a repo card link with repository identity and usage", () => {
-    render(<ProjectUsagePanel entries={[entry]} />);
+  it("renders a non-clickable repo card with repository identity and usage", () => {
+    // f299a3c0 (v0.11.1) intentionally removed the <a> wrapper from
+    // ProjectUsagePanel: synthetic source-only rows had bogus URLs
+    // (https://codex.ai etc.) that opened unrelated websites. The card is
+    // now display-only — regression-test the no-link contract here.
+    const { container } = render(<ProjectUsagePanel entries={[entry]} />);
 
-    const card = screen.getByRole("link", { name: /hello/i });
-    expect(card).toHaveAttribute("href", "https://github.com/octo/hello");
     expect(screen.getByText("hello")).toBeInTheDocument();
     expect(screen.getByText(/★/)).toBeInTheDocument();
+    expect(container.querySelector("a[href]")).toBeNull();
   });
 
   it("prefers total tokens when billable tokens are zero", () => {
