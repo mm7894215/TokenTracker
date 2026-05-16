@@ -83,31 +83,32 @@ export function DataDetails({
       {/* Projects Tab */}
       {activeTab === "projects" && (
         <div className="space-y-1">
-          {projectEntries.slice(0, projectLimit).map((entry) => (
-            <a
-              key={entry?.project_key || entry?.project_ref}
-              href={entry?.project_ref || "#"}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-3 p-2 rounded-lg hover:oai-bg-elevated transition-colors"
-            >
-              <div className="w-8 h-8 rounded-md oai-bg-elevated flex items-center justify-center oai-text-caption font-medium text-oai-gray-500 dark:text-oai-gray-300">
-                {(entry?.project_key?.[0] || "?").toUpperCase()}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="oai-text-body-sm font-medium text-oai-black dark:text-oai-white truncate">
-                  {entry?.project_key || entry?.project_ref?.split("/")?.pop() || "—"}
+          {projectEntries.slice(0, projectLimit).map((entry, idx) => {
+            const ref = typeof entry?.project_ref === "string" ? entry.project_ref : "";
+            const key = entry?.project_key || ref || `entry-${idx}`;
+            const raw = entry?.billable_total_tokens ?? entry?.total_tokens;
+            const n = Number(raw);
+            const tokenLabel = Number.isFinite(n) ? n.toLocaleString() : "—";
+            const projectLabel = entry?.project_key || ref.split("/").pop() || "—";
+            return (
+              <div
+                key={key}
+                className="flex items-center gap-3 p-2 rounded-lg"
+              >
+                <div className="w-8 h-8 rounded-md oai-bg-elevated flex items-center justify-center oai-text-caption font-medium text-oai-gray-500 dark:text-oai-gray-300">
+                  {(entry?.project_key?.[0] || "?").toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="oai-text-body-sm font-medium text-oai-black dark:text-oai-white truncate">
+                    {projectLabel}
+                  </div>
+                </div>
+                <div className="oai-text-body-sm font-medium text-oai-black dark:text-oai-white tabular-nums">
+                  {tokenLabel}
                 </div>
               </div>
-              <div className="oai-text-body-sm font-medium text-oai-black dark:text-oai-white tabular-nums">
-                {(() => {
-                  const raw = entry?.billable_total_tokens ?? entry?.total_tokens;
-                  const n = Number(raw);
-                  return Number.isFinite(n) ? n.toLocaleString() : "—";
-                })()}
-              </div>
-            </a>
-          ))}
+            );
+          })}
         </div>
       )}
 

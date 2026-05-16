@@ -1193,7 +1193,11 @@ function createLocalApiHandler({ queuePath }) {
           if (!bySrc.has(src)) {
             bySrc.set(src, {
               project_key: src,
-              project_ref: `https://${src}.ai`,
+              // Synthetic source-only row: leave project_ref empty rather than
+              // fabricating `https://${src}.ai`, which resolves to unrelated
+              // domains (e.g. codex.ai, cursor.ai) and was sent to the
+              // dashboard as a clickable href before v0.11.1 / this commit.
+              project_ref: "",
               total_tokens: 0,
               billable_total_tokens: 0,
             });
