@@ -323,7 +323,7 @@ function dedupMaxByHourSourceModel(rows: HourlyRow[]): HourlyRow[] {
   const winners = new Map<string, HourlyRow>();
   for (const row of rows) {
     if (!row.hour_start) continue;
-    const key = `${row.hour_start} ${row.source ?? ""} ${row.model ?? ""}`;
+    const key = `${row.hour_start} ${row.source ?? ""} ${row.model ?? ""}`;
     const incumbent = winners.get(key);
     const incumbentTotal = incumbent ? (Number(incumbent.total_tokens) || 0) : -1;
     const challengerTotal = Number(row.total_tokens) || 0;
