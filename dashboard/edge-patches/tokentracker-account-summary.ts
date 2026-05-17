@@ -1,8 +1,22 @@
 /**
  * InsForge Edge: account-wide usage summary (cross-device, aggregated by user_id).
  * Mirrors local-api.js `tokentracker-usage-summary` response schema.
- * Auth: reads `Authorization: Bearer <jwt>`; extracts user_id from payload.sub
- * (or payload.user_id). JWT signature is NOT verified in this function.
+ *
+ * Auth: HS256 JWT_SECRET signature verification (same template as
+ * tokentracker-device-token-issue). InsForge does NOT validate JWTs at the
+ * gateway, so edge functions that expose per-user data MUST verify the
+ * signature themselves — otherwise any caller can forge {"sub":"<victim>"}
+ * and read another user's full token history.
+ *
+ * Aggregation safety:
+ *   1. Only rows tied to an active device row (revoked_at IS NULL) are
+ *      considered. tokentracker_devices_active_unique enforces one active
+ *      device per (user, platform, device_name), so this filter drops the
+ *      historic device_id churn from before partial-unique was enforced.
+ *   2. When the same (hour, source, model) appears under multiple device_ids
+ *      (e.g. cross-device cursor resets, or transient device_id rotation
+ *      mid-history), take the MAX row instead of SUM. Avoids the
+ *      "displayed total > sum of both machines" symptom users reported.
  */
 import { createClient } from "npm:@insforge/sdk";
 
@@ -45,51 +59,67 @@ function zonedDayKey(hourStart: string, tz: string | null, offsetMinutes: number
   return hourStart.slice(0, 10);
 }
 
-async function sha256Hex(s: string): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+function b64urlToBytes(s: string): Uint8Array {
+  const b64 = s.replace(/-/g, "+").replace(/_/g, "/");
+  const pad = (4 - (b64.length % 4)) % 4;
+  const raw = atob(b64 + "=".repeat(pad));
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
 }
 
 /**
- * Resolve user_id from an Authorization header. Accepts either:
- *   1. End-user JWT (dashboard path) — user_id from sub claim
- *   2. Device token (CLI / menubar path) — lookup in tokentracker_device_tokens
- *        by sha256 hash; matches the contract used by tokentracker-ingest
+ * Verify HS256 JWT against JWT_SECRET and return its sub. Mirrors the helper
+ * in tokentracker-device-token-issue.ts. Returns null on any failure (bad
+ * shape, bad signature, expired) — caller surfaces that as 401.
  */
-async function resolveUserId(
-  authHeader: string | null,
-  client: ReturnType<typeof createClient>,
-): Promise<string | null> {
+async function verifiedUserIdFromJwt(authHeader: string | null): Promise<string | null> {
   if (!authHeader) return null;
   const token = authHeader.replace(/^Bearer\s+/i, "").trim();
   if (!token) return null;
-
-  // 1. Try JWT decode
+  const secret = Deno.env.get("JWT_SECRET");
+  if (!secret) return null;
   const parts = token.split(".");
-  if (parts.length === 3) {
-    try {
-      const payloadRaw = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-      const padded = payloadRaw + "=".repeat((4 - (payloadRaw.length % 4)) % 4);
-      const payload = JSON.parse(atob(padded)) as Record<string, unknown>;
-      const sub = (payload.sub ?? payload.user_id) as string | undefined;
-      if (typeof sub === "string" && sub.length > 0) return sub;
-    } catch { /* fall through */ }
-  }
-
-  // 2. Fallback: device token hash lookup
+  if (parts.length !== 3) return null;
   try {
-    const tokenHash = await sha256Hex(token);
-    const { data } = await client.database
-      .from("tokentracker_device_tokens")
-      .select("user_id")
-      .eq("token_hash", tokenHash)
-      .is("revoked_at", null)
-      .maybeSingle();
-    const row = data as { user_id?: string } | null;
-    return row?.user_id || null;
-  } catch {
-    return null;
-  }
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"],
+    );
+    const data = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
+    const sig = b64urlToBytes(parts[2]);
+    const ok = await crypto.subtle.verify("HMAC", key, sig, data);
+    if (!ok) return null;
+    const payload = JSON.parse(new TextDecoder().decode(b64urlToBytes(parts[1]))) as Record<string, unknown>;
+    if (typeof payload.exp === "number" && Date.now() / 1000 > payload.exp) return null;
+    const sub = payload.sub;
+    if (typeof sub === "string" && sub.length > 0) return sub;
+    const uid = payload.user_id;
+    if (typeof uid === "string" && uid.length > 0) return uid;
+  } catch { /* ignore */ }
+  return null;
+}
+
+/**
+ * Fetch the list of currently-active device_ids for a user. Used to filter
+ * `tokentracker_hourly` so rows tied to a revoked (historic) device_id do
+ * not inflate aggregated totals.
+ */
+async function fetchActiveDeviceIds(
+  client: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<string[]> {
+  const { data, error } = await client.database
+    .from("tokentracker_devices")
+    .select("id")
+    .eq("user_id", userId)
+    .is("revoked_at", null);
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as Array<{ id: string }>;
+  return rows.map((r) => r.id).filter((id): id is string => typeof id === "string" && id.length > 0);
 }
 
 /** Per-model pricing (USD per million tokens). Synced from src/lib/local-api.js. */
@@ -249,29 +279,59 @@ function aggregateByDay(
 async function fetchAllRows(
   client: ReturnType<typeof createClient>,
   userId: string,
+  activeDeviceIds: string[],
   rangeStart: string,
   rangeEnd: string,
   columns = "hour_start, source, model, total_tokens, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, conversations",
 ): Promise<HourlyRow[]> {
+  if (activeDeviceIds.length === 0) return [];
   const out: HourlyRow[] = [];
-  let offset = 0;
   const PAGE_SIZE = 1000;
-  while (true) {
-    const { data, error } = await client.database
-      .from("tokentracker_hourly")
-      .select(columns)
-      .eq("user_id", userId)
-      .gte("hour_start", rangeStart)
-      .lt("hour_start", rangeEnd)
-      .order("hour_start", { ascending: true })
-      .range(offset, offset + PAGE_SIZE - 1);
-    if (error) throw new Error(error.message);
-    if (!data || data.length === 0) break;
-    out.push(...(data as unknown as HourlyRow[]));
-    if (data.length < PAGE_SIZE) break;
-    offset += PAGE_SIZE;
+  // PostgREST `.in()` URL gets too large past ~25 IDs; chunk to be safe.
+  const DEVICE_CHUNK = 25;
+  for (let i = 0; i < activeDeviceIds.length; i += DEVICE_CHUNK) {
+    const chunk = activeDeviceIds.slice(i, i + DEVICE_CHUNK);
+    let offset = 0;
+    while (true) {
+      const { data, error } = await client.database
+        .from("tokentracker_hourly")
+        .select(columns)
+        .eq("user_id", userId)
+        .in("device_id", chunk)
+        .gte("hour_start", rangeStart)
+        .lt("hour_start", rangeEnd)
+        .order("hour_start", { ascending: true })
+        .range(offset, offset + PAGE_SIZE - 1);
+      if (error) throw new Error(error.message);
+      if (!data || data.length === 0) break;
+      out.push(...(data as unknown as HourlyRow[]));
+      if (data.length < PAGE_SIZE) break;
+      offset += PAGE_SIZE;
+    }
   }
   return out;
+}
+
+/**
+ * Collapse rows sharing the same (hour_start, source, model) into one row.
+ * Picks the row with the largest total_tokens — the entire row is kept so
+ * dependent columns stay consistent. Avoids double-counting when the same
+ * logical bucket got written under multiple device_ids (cross-machine or
+ * historic device_id rotation).
+ */
+function dedupMaxByHourSourceModel(rows: HourlyRow[]): HourlyRow[] {
+  const winners = new Map<string, HourlyRow>();
+  for (const row of rows) {
+    if (!row.hour_start) continue;
+    const key = `${row.hour_start} ${row.source ?? ""} ${row.model ?? ""}`;
+    const incumbent = winners.get(key);
+    const incumbentTotal = incumbent ? (Number(incumbent.total_tokens) || 0) : -1;
+    const challengerTotal = Number(row.total_tokens) || 0;
+    if (!incumbent || challengerTotal > incumbentTotal) {
+      winners.set(key, row);
+    }
+  }
+  return Array.from(winners.values());
 }
 
 export default async function (req: Request): Promise<Response> {
@@ -302,8 +362,15 @@ export default async function (req: Request): Promise<Response> {
     ...(anonKey ? { headers: { apikey: anonKey } } : {}),
   });
 
-  const userId = await resolveUserId(req.headers.get("Authorization"), client);
+  const userId = await verifiedUserIdFromJwt(req.headers.get("Authorization"));
   if (!userId) return json({ error: "Unauthorized" }, 401);
+
+  let activeDeviceIds: string[];
+  try {
+    activeDeviceIds = await fetchActiveDeviceIds(client, userId);
+  } catch (e) {
+    return json({ error: (e as Error).message }, 500);
+  }
 
   // Range for requested [from, to]; widen ±1 day to capture TZ-shifted
   // edge hours for non-UTC callers.
@@ -331,12 +398,13 @@ export default async function (req: Request): Promise<Response> {
 
   let allRows: HourlyRow[];
   try {
-    allRows = await fetchAllRows(client, userId, rollingStart, rollingEndNext.toISOString());
+    allRows = await fetchAllRows(client, userId, activeDeviceIds, rollingStart, rollingEndNext.toISOString());
   } catch (e) {
     return json({ error: (e as Error).message }, 500);
   }
 
-  const allDaily = aggregateByDay(allRows, tz, tzOffsetMinutes);
+  const dedupedRows = dedupMaxByHourSourceModel(allRows);
+  const allDaily = aggregateByDay(dedupedRows, tz, tzOffsetMinutes);
   const daily = allDaily.filter((d) => d.day >= from && d.day <= to);
 
   const totals = daily.reduce(
