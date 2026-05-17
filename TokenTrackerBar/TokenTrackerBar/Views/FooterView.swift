@@ -18,9 +18,9 @@ struct FooterView: View {
                     .foregroundStyle(hoveringDashboard ? .primary : Color.accentColor)
                     .scaleEffect(hoveringDashboard ? 1.03 : 1.0)
                     .animation(.easeOut(duration: 0.12), value: hoveringDashboard)
+                    .frame(minHeight: 28)
+                    .contentShape(Rectangle())
             }
-            .frame(minHeight: 28)
-            .contentShape(Rectangle())
             .buttonStyle(.plain)
             .onHover { hovering in
                 hoveringDashboard = hovering
@@ -40,9 +40,9 @@ struct FooterView: View {
                     .foregroundStyle(hoveringQuit ? .primary : .secondary)
                     .scaleEffect(hoveringQuit ? 1.03 : 1.0)
                     .animation(.easeOut(duration: 0.12), value: hoveringQuit)
+                    .frame(minHeight: 28)
+                    .contentShape(Rectangle())
             }
-            .frame(minHeight: 28)
-            .contentShape(Rectangle())
             .buttonStyle(.plain)
             .onHover { hovering in
                 hoveringQuit = hovering
