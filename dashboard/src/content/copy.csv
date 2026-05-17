@@ -477,18 +477,31 @@ skills.tab.my,ui,SkillsPage,SkillsPage,tab_my,My Skills,,active
 skills.tab.browse,ui,SkillsPage,SkillsPage,tab_browse,Browse,,active
 skills.action.refresh,ui,SkillsPage,SkillsPage,action_refresh,Refresh,,active
 skills.action.install,ui,SkillsPage,SkillCard,action_install,Install,,active
-skills.action.install_to,ui,SkillsPage,SkillCard,action_install_to,"Install to {{count}} Agents",,active
 skills.action.choose_targets,ui,SkillsPage,SkillCard,action_choose_targets,"Choose targets",,active
 skills.target.menu_label,ui,SkillsPage,SkillCard,target_menu_label,"Install to",,active
 skills.target.none,ui,SkillsPage,SkillsPage,target_none,"no targets",,active
 skills.toast.installed,ui,SkillsPage,SkillsPage,toast_installed,"Installed {{name}} to {{targets}}.",,active
 skills.action.remove,ui,SkillsPage,SkillsPage,action_remove,Remove,,active
 skills.action.search,ui,SkillsPage,SkillsPage,action_search,Search,,active
+skills.action.search_aria,ui,SkillsPage,SkillsPage,action_search_aria,"Search skills",,active
+skills.target.synced_summary,ui,SkillsPage,InstalledSkillRow,target_synced_summary,"Synced to {{targets}}",,active
+skills.target.synced_none,ui,SkillsPage,InstalledSkillRow,target_synced_none,"Not synced to any agent",,active
+skills.row.open_details,ui,SkillsPage,InstalledSkillRow,row_open_details,"Open details for {{name}}",,active
+skills.detail.close,ui,SkillsPage,SkillDetailPanel,detail_close,"Close details",,active
+skills.detail.sync_section_title,ui,SkillsPage,SkillDetailPanel,detail_sync_section_title,"Sync to",,active
+skills.detail.remove_button,ui,SkillsPage,SkillDetailPanel,detail_remove_button,"Remove from all agents",,active
+skills.detail.remove_confirm_hint,ui,SkillsPage,SkillDetailPanel,detail_remove_confirm_hint,"This unsyncs the skill from every agent and deletes its local copy.",,active
+skills.filter.agent_label,ui,SkillsPage,SkillsPage,filter_agent_label,"Agent",,active
+skills.filter.agent_all,ui,SkillsPage,SkillsPage,filter_agent_all,"All agents",,active
+skills.filter.clear,ui,SkillsPage,SkillsPage,filter_clear,"Clear filters",,active
+skills.filter.result_count,ui,SkillsPage,SkillsPage,filter_result_count,"{{filtered}} of {{total}} skills",,active
+skills.filter.result_count_browse,ui,SkillsPage,SkillsPage,filter_result_count_browse,"{{count}} results",,active
+skills.empty.no_match,ui,SkillsPage,SkillsPage,empty_no_match,"No skills match the current filters.",,active
+hint.dismiss,ui,shared,DismissibleHint,hint_dismiss,"Dismiss hint",,active
+hint.dismissible_aria,ui,shared,DismissibleHint,hint_dismissible_aria,"Dismissible hint",,active
 skills.card.installed,ui,SkillsPage,SkillCard,card_installed,Installed,,active
-skills.my.count,ui,SkillsPage,SkillsPage,my_count,"{{count}} skills",,active
-skills.target.toggle_aria,ui,SkillsPage,InstalledSkillRow,target_toggle_aria,"Toggle {{target}}",,active
-skills.target.sync_title,ui,SkillsPage,InstalledSkillRow,target_sync_title,"Enable in {{target}}",,active
-skills.target.remove_title,ui,SkillsPage,InstalledSkillRow,target_remove_title,"Disable in {{target}}",,active
+skills.card.targets_prefix,ui,SkillsPage,SkillCard,card_targets_prefix,"Will install to:",,active
+skills.card.targets_change,ui,SkillsPage,SkillCard,card_targets_change,Change,,active
 skills.card.installs,ui,SkillsPage,SkillCard,installs,"{{count}} installs",,active
 skills.source.label,ui,SkillsPage,SkillsPage,source_label,Source,,active
 skills.source.all,ui,SkillsPage,SkillsPage,source_all,All repositories,,active
@@ -498,6 +511,7 @@ skills.browse.placeholder_all,ui,SkillsPage,SkillsPage,browse_placeholder_all,"S
 skills.browse.placeholder_repo,ui,SkillsPage,SkillsPage,browse_placeholder_repo,"Search in {{repo}}…",,active
 skills.browse.placeholder_skillssh,ui,SkillsPage,SkillsPage,browse_placeholder_skillssh,"Search the skills.sh registry…",,active
 skills.browse.empty_sources,ui,SkillsPage,SkillsPage,browse_empty_sources,"Add a GitHub repository below to start browsing skills.",,active
+skills.browse.add_repo_hint,ui,SkillsPage,SkillsPage,browse_add_repo_hint,"Need more skills? Add a GitHub repository.",,active
 skills.browse.manage_sources,ui,SkillsPage,SkillsPage,browse_manage_sources,Manage sources,,active
 skills.browse.hint_skillssh,ui,SkillsPage,SkillsPage,browse_hint_skillssh,"Type at least 2 characters to search skills.sh.",,active
 skills.browse.loading_hint,ui,SkillsPage,SkillsPage,browse_loading_hint,"Fetching skill metadata from GitHub. First load can take up to a minute; results are cached.",,active

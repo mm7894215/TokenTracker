@@ -4,6 +4,7 @@ import { Select } from "@base-ui/react/select";
 import {
   Check,
   ChevronDown,
+  ChevronRight,
   Download,
   ExternalLink,
   Loader2,
@@ -11,9 +12,11 @@ import {
   RefreshCw,
   Search,
   Trash2,
+  X as XIcon,
 } from "lucide-react";
-import { Button, Card, ConfirmModal, Input } from "../ui/components";
+import { Button, Card, ConfirmModal, DismissibleHint, Input } from "../ui/components";
 import { ProviderIcon } from "../ui/dashboard/components/ProviderIcon.jsx";
+import { SkillDetailPanel } from "./SkillDetailPanel.jsx";
 import { copy } from "../lib/copy";
 import { cn } from "../lib/cn";
 import {
@@ -32,12 +35,12 @@ import {
 } from "../lib/skills-api";
 
 const DEFAULT_TARGETS = ["claude", "codex"];
-const TARGET_ACTIVE_CLASSES = {
-  claude: "bg-orange-500/10 ring-1 ring-orange-500/20 hover:bg-orange-500/20",
-  codex: "bg-emerald-500/10 ring-1 ring-emerald-500/20 hover:bg-emerald-500/20",
-  gemini: "bg-sky-500/10 ring-1 ring-sky-500/20 hover:bg-sky-500/20",
-  opencode: "bg-amber-500/10 ring-1 ring-amber-500/20 hover:bg-amber-500/20",
-  hermes: "bg-indigo-500/10 ring-1 ring-indigo-500/20 hover:bg-indigo-500/20",
+const TARGET_CHIP_ICON_CLASSES = {
+  claude: "text-orange-500 dark:text-orange-300",
+  codex: "text-emerald-600 dark:text-emerald-300",
+  gemini: "text-sky-600 dark:text-sky-300",
+  opencode: "text-amber-600 dark:text-amber-300",
+  hermes: "text-indigo-500 dark:text-indigo-300",
 };
 const SOURCE_ALL = "all";
 const SOURCE_SKILLSSH = "skillssh";
@@ -58,51 +61,66 @@ function targetBusyKey(skillId, targetId) {
   return `target:${skillId}:${targetId}`;
 }
 
-function TargetToggleGroup({ skill, targets, busyKey, onToggleTarget }) {
-  const activeTargets = new Set(skill.targets || []);
+function TargetChip({ target }) {
   return (
-    <div className="flex flex-wrap gap-1">
-      {targets.map((target) => {
-        const checked = activeTargets.has(target.id);
-        const busy = busyKey === targetBusyKey(skill.id, target.id);
-        const tooltipKey = checked ? "skills.target.remove_title" : "skills.target.sync_title";
-        return (
-          <button
-            key={target.id}
-            type="button"
-            aria-pressed={checked}
-            aria-label={copy("skills.target.toggle_aria", { target: target.label })}
-            title={copy(tooltipKey, { target: target.label })}
-            disabled={busy}
-            onClick={() => onToggleTarget(skill, target.id, !checked)}
-            className={cn(
-              "inline-flex h-8 w-8 items-center justify-center rounded-md transition disabled:cursor-wait disabled:opacity-70",
-              checked
-                ? TARGET_ACTIVE_CLASSES[target.id] || "bg-oai-gray-100 dark:bg-oai-gray-800"
-                : "opacity-40 grayscale hover:bg-oai-gray-100 hover:opacity-100 hover:grayscale-0 dark:hover:bg-oai-gray-800",
-            )}
-          >
-            {busy ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-            ) : (
-              <ProviderIcon provider={target.id} size={16} />
-            )}
-          </button>
-        );
-      })}
+    <span className="inline-flex h-6 items-center gap-1.5 rounded-full bg-oai-gray-100 px-2 text-[11px] font-medium text-oai-gray-700 ring-1 ring-oai-gray-200/70 dark:bg-oai-gray-800/70 dark:text-oai-gray-200 dark:ring-oai-gray-700/70">
+      <span className={cn("flex h-3.5 w-3.5 items-center justify-center", TARGET_CHIP_ICON_CLASSES[target.id])} aria-hidden>
+        <ProviderIcon provider={target.id} size={14} />
+      </span>
+      {target.label}
+    </span>
+  );
+}
+
+function TargetChipRow({ skill, targets }) {
+  const activeIds = new Set(skill.targets || []);
+  const synced = targets.filter((t) => activeIds.has(t.id));
+  if (!synced.length) {
+    return (
+      <span className="text-xs italic text-oai-gray-500 dark:text-oai-gray-400">
+        {copy("skills.target.synced_none")}
+      </span>
+    );
+  }
+  const summary = synced.map((t) => t.label).join(", ");
+  return (
+    <div className="flex flex-wrap gap-1" aria-label={copy("skills.target.synced_summary", { targets: summary })}>
+      {synced.map((target) => (
+        <TargetChip key={target.id} target={target} />
+      ))}
     </div>
   );
 }
 
-function SkillRow({ skill, targets, busyKey, onToggleTarget, onRemove }) {
-  const removing = busyKey === removeBusyKey(skill);
+function SkillRow({ skill, targets, selected, onSelect }) {
   const sourceLabel =
     skill.repoOwner && skill.repoName ? `${skill.repoOwner}/${skill.repoName}` : null;
   const titleAttr = sourceLabel ? `${skill.directory} · ${sourceLabel}` : skill.directory;
 
+  const handleKeyDown = (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onSelect?.(skill);
+    }
+  };
+
   return (
-    <div className="group grid gap-4 px-1 py-3 lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center">
-      <div className="min-w-0" title={titleAttr}>
+    <div
+      data-skill-row="1"
+      role="button"
+      tabIndex={0}
+      aria-pressed={selected}
+      aria-label={copy("skills.row.open_details", { name: skill.name || skill.directory })}
+      onClick={() => onSelect?.(skill)}
+      onKeyDown={handleKeyDown}
+      className={cn(
+        "flex cursor-pointer flex-col gap-3 rounded-md px-3 py-3 transition focus:outline-none focus:ring-2 focus:ring-oai-gray-400/30 lg:flex-row lg:items-center lg:gap-4",
+        selected
+          ? "bg-oai-gray-100 ring-1 ring-oai-gray-200 dark:bg-oai-gray-800/60 dark:ring-oai-gray-800"
+          : "hover:bg-oai-gray-50 dark:hover:bg-oai-gray-900/40",
+      )}
+    >
+      <div className="min-w-0 flex-1" title={titleAttr}>
         <h2 className="truncate text-sm font-semibold text-oai-black dark:text-white">
           {skill.name || skill.directory}
         </h2>
@@ -113,49 +131,144 @@ function SkillRow({ skill, targets, busyKey, onToggleTarget, onRemove }) {
         ) : null}
       </div>
 
-      <TargetToggleGroup
-        skill={skill}
-        targets={targets}
-        busyKey={busyKey}
-        onToggleTarget={onToggleTarget}
-      />
+      <div className="flex items-center gap-2 lg:gap-3">
+        <TargetChipRow skill={skill} targets={targets} />
+      </div>
 
-      <button
-        type="button"
-        aria-label={copy("skills.action.remove")}
-        title={copy("skills.action.remove")}
-        disabled={removing}
-        onClick={() => onRemove(skill)}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-oai-gray-400 opacity-0 transition duration-200 hover:bg-red-50 hover:text-red-600 group-hover:opacity-100 focus:opacity-100 disabled:cursor-wait disabled:opacity-100 dark:hover:bg-red-950/30 dark:hover:text-red-300 lg:justify-self-end"
-      >
-        {removing ? (
-          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-        ) : (
-          <Trash2 className="h-4 w-4" aria-hidden />
+      <ChevronRight
+        className={cn(
+          "hidden h-4 w-4 shrink-0 text-oai-gray-300 transition-colors dark:text-oai-gray-600 lg:block",
+          selected && "text-oai-gray-500 dark:text-oai-gray-300",
         )}
-      </button>
+        aria-hidden
+      />
     </div>
   );
 }
 
-function MySkillsView({ items, targets, busyKey, onToggleTarget, onRemove }) {
+function FilterToolbar({
+  agentFilter,
+  agentOptions,
+  onAgentFilter,
+  filteredCount,
+  totalCount,
+  anyFilter,
+  onClearFilters,
+}) {
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-2 px-1 pt-1 text-xs text-oai-gray-600 dark:text-oai-gray-300">
+      <Select.Root value={agentFilter} onValueChange={onAgentFilter}>
+        <Select.Trigger
+          aria-label={copy("skills.filter.agent_label")}
+          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-oai-gray-200 bg-oai-white px-2.5 text-xs font-medium text-oai-gray-700 transition hover:border-oai-gray-300 focus:outline-none focus:ring-2 focus:ring-oai-gray-400/30 data-[popup-open]:border-oai-gray-300 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-oai-gray-200 dark:hover:border-oai-gray-700"
+        >
+          <span className="text-oai-gray-500 dark:text-oai-gray-400">
+            {copy("skills.filter.agent_label")}:
+          </span>
+          <Select.Value>
+            {(value) =>
+              value === "all"
+                ? copy("skills.filter.agent_all")
+                : agentOptions.find((t) => t.id === value)?.label || value
+            }
+          </Select.Value>
+          <Select.Icon className="text-oai-gray-400">
+            <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+          </Select.Icon>
+        </Select.Trigger>
+        <Select.Portal>
+          <Select.Positioner sideOffset={4} alignItemWithTrigger={false} className="z-[60]">
+            <Select.Popup className="min-w-[var(--anchor-width)] overflow-hidden rounded-md border border-oai-gray-200 bg-white p-1 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.18)] outline-none dark:border-oai-gray-800 dark:bg-oai-gray-950 dark:shadow-[0_12px_32px_-12px_rgba(0,0,0,0.6)]">
+              <Select.Item
+                value="all"
+                className="flex cursor-default select-none items-center justify-between gap-2 rounded px-3 py-1.5 text-sm text-oai-black outline-none data-[highlighted]:bg-oai-gray-100 dark:text-white dark:data-[highlighted]:bg-oai-gray-800"
+              >
+                <Select.ItemText>{copy("skills.filter.agent_all")}</Select.ItemText>
+                <Select.ItemIndicator>
+                  <Check className="h-3.5 w-3.5" aria-hidden />
+                </Select.ItemIndicator>
+              </Select.Item>
+              {agentOptions.map((target) => (
+                <Select.Item
+                  key={target.id}
+                  value={target.id}
+                  className="flex cursor-default select-none items-center justify-between gap-2 rounded px-3 py-1.5 text-sm text-oai-black outline-none data-[highlighted]:bg-oai-gray-100 dark:text-white dark:data-[highlighted]:bg-oai-gray-800"
+                >
+                  <div className="flex items-center gap-2">
+                    <ProviderIcon provider={target.id} size={14} />
+                    <Select.ItemText>{target.label}</Select.ItemText>
+                  </div>
+                  <Select.ItemIndicator>
+                    <Check className="h-3.5 w-3.5" aria-hidden />
+                  </Select.ItemIndicator>
+                </Select.Item>
+              ))}
+            </Select.Popup>
+          </Select.Positioner>
+        </Select.Portal>
+      </Select.Root>
+
+      <span className="text-oai-gray-500 dark:text-oai-gray-400">
+        {copy("skills.filter.result_count", { filtered: filteredCount, total: totalCount })}
+      </span>
+
+      {anyFilter ? (
+        <button
+          type="button"
+          onClick={onClearFilters}
+          className="ml-auto inline-flex h-7 items-center gap-1 rounded-full bg-oai-gray-100 px-2.5 text-[11px] font-medium text-oai-gray-700 transition hover:bg-oai-gray-200 focus:outline-none focus:ring-2 focus:ring-oai-gray-400/30 dark:bg-oai-gray-800/70 dark:text-oai-gray-200 dark:hover:bg-oai-gray-700"
+        >
+          <XIcon className="h-3 w-3" aria-hidden />
+          {copy("skills.filter.clear")}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function MySkillsView({
+  items,
+  totalCount,
+  targets,
+  agentOptions,
+  agentFilter,
+  onAgentFilter,
+  anyFilter,
+  onClearFilters,
+  selectedId,
+  onSelect,
+}) {
   return (
     <div>
-      <div className="px-1 pb-2 text-xs text-oai-gray-500 dark:text-oai-gray-400">
-        {copy("skills.my.count", { count: items.length })}
-      </div>
-      <div className="divide-y divide-oai-gray-200/70 dark:divide-oai-gray-800/70">
-        {items.map((skill) => (
-          <SkillRow
-            key={skill.id || skill.key}
-            skill={skill}
-            targets={targets}
-            busyKey={busyKey}
-            onToggleTarget={onToggleTarget}
-            onRemove={onRemove}
-          />
-        ))}
-      </div>
+      <FilterToolbar
+        agentFilter={agentFilter}
+        agentOptions={agentOptions}
+        onAgentFilter={onAgentFilter}
+        filteredCount={items.length}
+        totalCount={totalCount}
+        anyFilter={anyFilter}
+        onClearFilters={onClearFilters}
+      />
+      {items.length === 0 ? (
+        <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-oai-gray-200 px-4 py-10 text-center text-sm text-oai-gray-500 dark:border-oai-gray-800 dark:text-oai-gray-400">
+          <p>{copy("skills.empty.no_match")}</p>
+          <Button type="button" variant="secondary" size="sm" onClick={onClearFilters}>
+            {copy("skills.filter.clear")}
+          </Button>
+        </div>
+      ) : (
+        <div className="divide-y divide-oai-gray-200/70 dark:divide-oai-gray-800/70">
+          {items.map((skill) => (
+            <SkillRow
+              key={skill.id || skill.key}
+              skill={skill}
+              targets={targets}
+              selected={selectedId === (skill.id || skill.directory)}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -177,10 +290,10 @@ const BrowseCard = React.memo(function BrowseCard({ skill, installed, installing
   };
 
   const sourceLabel = skill.repoOwner && skill.repoName ? `${skill.repoOwner}/${skill.repoName}` : null;
+  const sourceHref = sourceLabel ? `https://github.com/${skill.repoOwner}/${skill.repoName}` : null;
   const installsLabel = skill.installs != null
     ? copy("skills.card.installs", { count: Number(skill.installs || 0).toLocaleString() })
     : null;
-  const meta = [sourceLabel, installsLabel].filter(Boolean).join(" · ");
   const targetSummary = selectedTargets.length
     ? selectedTargets
         .map((id) => allTargets.find((t) => t.id === id)?.label || id)
@@ -210,8 +323,24 @@ const BrowseCard = React.memo(function BrowseCard({ skill, installed, installing
               {skill.name || skill.directory}
             </h2>
           )}
-          {meta ? (
-            <div className="mt-1 truncate text-xs text-oai-gray-500 dark:text-oai-gray-400">{meta}</div>
+          {(sourceLabel || installsLabel) ? (
+            <div className="mt-1 flex flex-wrap items-center gap-x-1.5 truncate text-xs text-oai-gray-500 dark:text-oai-gray-400">
+              {sourceHref ? (
+                <a
+                  href={sourceHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(event) => event.stopPropagation()}
+                  className="inline-flex items-center gap-1 truncate rounded text-oai-gray-500 hover:text-oai-black hover:underline focus:outline-none focus:ring-2 focus:ring-oai-gray-400/30 dark:text-oai-gray-400 dark:hover:text-white"
+                  title={sourceHref}
+                >
+                  <span className="truncate">{sourceLabel}</span>
+                  <ExternalLink className="h-2.5 w-2.5 shrink-0" aria-hidden />
+                </a>
+              ) : null}
+              {sourceLabel && installsLabel ? <span aria-hidden>·</span> : null}
+              {installsLabel ? <span className="truncate">{installsLabel}</span> : null}
+            </div>
           ) : null}
         </div>
         {installed ? (
@@ -230,74 +359,70 @@ const BrowseCard = React.memo(function BrowseCard({ skill, installed, installing
 
       <div className="mt-auto pt-5">
         {installed ? (
-          <div className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-oai-black/[0.04] text-sm font-medium text-oai-gray-700 ring-1 ring-inset ring-oai-black/[0.08] dark:bg-white/[0.05] dark:text-oai-gray-200 dark:ring-white/[0.08]">
+          <div className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-oai-black/[0.04] text-sm font-medium text-oai-gray-700 ring-1 ring-inset ring-oai-black/[0.08] dark:bg-white/[0.05] dark:text-oai-gray-200 dark:ring-white/[0.08]">
             <Check className="h-3.5 w-3.5" aria-hidden />
             {copy("skills.card.installed")}
           </div>
         ) : (
-          <div className="flex">
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-oai-gray-600 dark:text-oai-gray-300">
+              <span className="text-oai-gray-500 dark:text-oai-gray-400">
+                {copy("skills.card.targets_prefix")}
+              </span>
+              <span className="min-w-0 truncate font-medium text-oai-black dark:text-white">
+                {selectedTargets.length ? targetSummary : copy("skills.target.none")}
+              </span>
+              <Popover.Root>
+                <Popover.Trigger
+                  disabled={installing}
+                  aria-label={copy("skills.action.choose_targets")}
+                  className="rounded text-xs font-medium text-oai-gray-500 underline decoration-oai-gray-300 decoration-dotted underline-offset-2 transition hover:text-oai-black hover:decoration-oai-gray-500 focus:outline-none focus:ring-2 focus:ring-oai-gray-400/30 disabled:cursor-not-allowed disabled:opacity-60 dark:text-oai-gray-400 dark:decoration-oai-gray-600 dark:hover:text-white dark:hover:decoration-oai-gray-400"
+                >
+                  {copy("skills.card.targets_change")}
+                </Popover.Trigger>
+                <Popover.Portal>
+                  <Popover.Positioner sideOffset={6} side="bottom" align="end" className="!z-[80]">
+                    <Popover.Popup className="min-w-[220px] rounded-lg bg-white p-1.5 shadow-lg ring-1 ring-oai-gray-200 dark:bg-oai-gray-950 dark:ring-oai-gray-800">
+                      <div className="px-2 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wide text-oai-gray-500 dark:text-oai-gray-400">
+                        {copy("skills.target.menu_label")}
+                      </div>
+                      {allTargets.map((target) => {
+                        const checked = selectedTargets.includes(target.id);
+                        return (
+                          <label
+                            key={target.id}
+                            className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-oai-black hover:bg-oai-gray-100 dark:text-white dark:hover:bg-oai-gray-800"
+                          >
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 shrink-0 rounded border-oai-gray-300 text-oai-black focus:ring-oai-gray-400 dark:border-oai-gray-600 dark:bg-oai-gray-900 dark:text-white"
+                              checked={checked}
+                              onChange={() => toggleTarget(target.id)}
+                            />
+                            <ProviderIcon provider={target.id} size={16} />
+                            <span className="flex-1 text-left">{target.label}</span>
+                          </label>
+                        );
+                      })}
+                    </Popover.Popup>
+                  </Popover.Positioner>
+                </Popover.Portal>
+              </Popover.Root>
+            </div>
             <Button
               type="button"
               size="sm"
               onClick={() => onInstall(skill, selectedTargets)}
               disabled={installing || selectedTargets.length === 0}
-              className="flex-1 !rounded-r-none"
-              title={targetSummary}
+              className="w-full"
             >
               {installing ? (
                 <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
               ) : (
                 <Download className="mr-1.5 h-3.5 w-3.5" aria-hidden />
               )}
-              {selectedTargets.length > 1
-                ? copy("skills.action.install_to", { count: selectedTargets.length })
-                : copy("skills.action.install")}
+              {copy("skills.action.install")}
             </Button>
-            <Popover.Root>
-              <Popover.Trigger
-                disabled={installing}
-                aria-label={copy("skills.action.choose_targets")}
-                title={targetSummary}
-                className="inline-flex h-8 items-center justify-center rounded-r-md border-l border-white/20 bg-oai-black px-2 text-white hover:bg-oai-gray-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-oai-black/20 dark:bg-white dark:text-oai-black dark:hover:bg-oai-gray-200"
-              >
-                <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-              </Popover.Trigger>
-              <Popover.Portal>
-                <Popover.Positioner sideOffset={6} side="bottom" align="end" className="!z-[80]">
-                  <Popover.Popup className="min-w-[200px] rounded-lg bg-white p-1.5 shadow-lg ring-1 ring-oai-gray-200 dark:bg-oai-gray-950 dark:ring-oai-gray-800">
-                    <div className="px-2 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wide text-oai-gray-500 dark:text-oai-gray-400">
-                      {copy("skills.target.menu_label")}
-                    </div>
-                    {allTargets.map((target) => {
-                      const checked = selectedTargets.includes(target.id);
-                      return (
-                        <button
-                          key={target.id}
-                          type="button"
-                          onClick={() => toggleTarget(target.id)}
-                          className={cn(
-                            "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm",
-                            checked
-                              ? "bg-oai-gray-100 dark:bg-oai-gray-800"
-                              : "hover:bg-oai-gray-50 dark:hover:bg-oai-gray-900",
-                          )}
-                        >
-                          <ProviderIcon
-                            provider={target.id}
-                            size={16}
-                            className={checked ? "" : "grayscale opacity-40"}
-                          />
-                          <span className="flex-1 text-left">{target.label}</span>
-                          {checked ? (
-                            <Check className="h-3.5 w-3.5 text-emerald-500" aria-hidden />
-                          ) : null}
-                        </button>
-                      );
-                    })}
-                  </Popover.Popup>
-                </Popover.Positioner>
-              </Popover.Portal>
-            </Popover.Root>
           </div>
         )}
       </div>
@@ -384,6 +509,8 @@ export function SkillsPage() {
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [repoInput, setRepoInput] = useState("");
   const [manageOpen, setManageOpen] = useState(false);
+  const [agentFilter, setAgentFilter] = useState("all");
+  const [selectedSkillId, setSelectedSkillId] = useState(null);
   const [busyKey, setBusyKey] = useState("");
   const [loading, setLoading] = useState(true);
   const [browseLoading, setBrowseLoading] = useState(false);
@@ -610,6 +737,39 @@ export function SkillsPage() {
   const targets = installedData.targets || [];
   const mySkills = installedData.skills || [];
 
+  const filteredMySkills = useMemo(() => {
+    if (agentFilter === "all") return mySkills;
+    return mySkills.filter((skill) => (skill.targets || []).includes(agentFilter));
+  }, [mySkills, agentFilter]);
+
+  const myAnyFilter = agentFilter !== "all";
+
+  const selectedSkill = useMemo(() => {
+    if (!selectedSkillId) return null;
+    return mySkills.find((s) => (s.id || s.directory) === selectedSkillId) || null;
+  }, [mySkills, selectedSkillId]);
+
+  const handleClearMyFilters = useCallback(() => {
+    setAgentFilter("all");
+  }, []);
+
+  const handleSelectSkill = useCallback((skill) => {
+    setSelectedSkillId((prev) => {
+      const next = skill?.id || skill?.directory || null;
+      return prev === next ? null : next;
+    });
+  }, []);
+
+  const handleCloseDetail = useCallback(() => setSelectedSkillId(null), []);
+
+  // Close detail panel when leaving My tab or when skill no longer present.
+  useEffect(() => {
+    if (tab !== "my" && selectedSkillId) setSelectedSkillId(null);
+  }, [tab, selectedSkillId]);
+  useEffect(() => {
+    if (selectedSkillId && !selectedSkill) setSelectedSkillId(null);
+  }, [selectedSkill, selectedSkillId]);
+
   const browseItems = useMemo(() => {
     const pool = source === SOURCE_SKILLSSH ? searchData : discoverData;
     const filtered = source === SOURCE_SKILLSSH || source === SOURCE_ALL
@@ -659,11 +819,16 @@ export function SkillsPage() {
   } else if (tab === "my") {
     contentNode = mySkills.length ? (
       <MySkillsView
-        items={mySkills}
+        items={filteredMySkills}
+        totalCount={mySkills.length}
         targets={targets}
-        busyKey={busyKey}
-        onToggleTarget={handleToggleTarget}
-        onRemove={handleRemove}
+        agentOptions={targets}
+        agentFilter={agentFilter}
+        onAgentFilter={setAgentFilter}
+        anyFilter={myAnyFilter}
+        onClearFilters={handleClearMyFilters}
+        selectedId={selectedSkillId}
+        onSelect={handleSelectSkill}
       />
     ) : (
       <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed border-oai-gray-200 px-4 py-10 text-center dark:border-oai-gray-800">
@@ -730,6 +895,30 @@ export function SkillsPage() {
     // Browse
     const isSkillsSh = source === SOURCE_SKILLSSH;
     const noSources = repos.length === 0 && !isSkillsSh;
+    const browseAnyFilter = !isSkillsSh && (debouncedQuery.trim() !== "" || source !== SOURCE_ALL);
+    const handleClearBrowseFilters = () => {
+      setQuery("");
+      setSource(SOURCE_ALL);
+    };
+
+    const countNode =
+      !noSources && !browseLoading && (browseItems.length > 0 || browseAnyFilter) ? (
+        <div className="mb-2 flex flex-wrap items-center gap-2 px-1 text-xs text-oai-gray-500 dark:text-oai-gray-400">
+          <span>
+            {copy("skills.filter.result_count_browse", { count: browseItems.length })}
+          </span>
+          {browseAnyFilter ? (
+            <button
+              type="button"
+              onClick={handleClearBrowseFilters}
+              className="ml-auto inline-flex h-7 items-center gap-1 rounded-full bg-oai-gray-100 px-2.5 text-[11px] font-medium text-oai-gray-700 transition hover:bg-oai-gray-200 focus:outline-none focus:ring-2 focus:ring-oai-gray-400/30 dark:bg-oai-gray-800/70 dark:text-oai-gray-200 dark:hover:bg-oai-gray-700"
+            >
+              <XIcon className="h-3 w-3" aria-hidden />
+              {copy("skills.filter.clear")}
+            </button>
+          ) : null}
+        </div>
+      ) : null;
 
     let resultNode;
     if (noSources) {
@@ -765,6 +954,13 @@ export function SkillsPage() {
           ))}
         </div>
       );
+    } else if (browseAnyFilter) {
+      resultNode = emptyNode(
+        "skills.empty.no_match",
+        <Button type="button" variant="secondary" size="sm" onClick={handleClearBrowseFilters}>
+          {copy("skills.filter.clear")}
+        </Button>,
+      );
     } else if (isSkillsSh) {
       resultNode = emptyNode("skills.empty.search");
     } else {
@@ -784,10 +980,28 @@ export function SkillsPage() {
       </div>
     ) : null;
 
+    const hintNode =
+      !manageOpen && !isSkillsSh && repos.length <= 1 && browseItems.length > 0 ? (
+        <DismissibleHint id="skills-browse-intro" className="mt-6">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span>{copy("skills.browse.add_repo_hint")}</span>
+            <button
+              type="button"
+              onClick={() => setManageOpen(true)}
+              className="rounded font-medium text-oai-gray-700 underline decoration-dotted underline-offset-2 transition hover:text-oai-black focus:outline-none focus:ring-2 focus:ring-oai-gray-400/30 dark:text-oai-gray-200 dark:hover:text-white"
+            >
+              {copy("skills.browse.manage_sources")}
+            </button>
+          </div>
+        </DismissibleHint>
+      ) : null;
+
     contentNode = (
       <>
         {manageNode}
+        {countNode}
         {resultNode}
+        {hintNode}
       </>
     );
   }
@@ -922,11 +1136,13 @@ export function SkillsPage() {
               <div className="relative flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-oai-gray-400" aria-hidden />
                 <Input
+                  type="search"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" && source === SOURCE_SKILLSSH) handleSearch();
                   }}
+                  aria-label={copy("skills.action.search_aria")}
                   placeholder={
                     source === SOURCE_SKILLSSH
                       ? copy("skills.browse.placeholder_skillssh")
@@ -971,6 +1187,14 @@ export function SkillsPage() {
           ) : null}
 
           {contentNode}
+          <SkillDetailPanel
+            skill={selectedSkill}
+            targets={targets}
+            busyKey={busyKey}
+            onClose={handleCloseDetail}
+            onToggleTarget={handleToggleTarget}
+            onRemove={handleRemove}
+          />
         </div>
       </main>
 
@@ -994,8 +1218,13 @@ export function SkillsPage() {
         onConfirm={confirmRemove}
       />
 
-      {toast ? (
-        <div className="pointer-events-none fixed inset-x-0 bottom-6 z-[90] flex justify-center px-4">
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="pointer-events-none fixed inset-x-0 bottom-6 z-[90] flex justify-center px-4"
+      >
+        {toast ? (
           <div className="pointer-events-auto flex max-w-md items-center gap-3 rounded-full bg-oai-black px-4 py-2 text-sm text-white shadow-lg dark:bg-white dark:text-oai-black">
             <span>{toast.message}</span>
             {toast.undo ? (
@@ -1008,8 +1237,8 @@ export function SkillsPage() {
               </button>
             ) : null}
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -6,7 +6,7 @@
 
 ### 跨所有 CLI，看清你到底在 AI 上花了多少钱
 
-自动采集 **13 款 AI 编码工具** 的 token 用量，全程本地聚合，用一套漂亮的 Dashboard 看真实成本与趋势，**还能一键把 Skills 同步到你所有 Agent**。不需要云账号、不需要 API Key、不需要任何配置 —— 一条命令搞定。
+自动采集 **13 款 AI 编码工具** 的 token 用量，全程本地聚合，用一套漂亮的 Dashboard 看真实成本与趋势。不需要云账号、不需要 API Key、不需要任何配置 —— 一条命令搞定。
 
 [![npm version](https://img.shields.io/npm/v/tokentracker-cli.svg?color=blue)](https://www.npmjs.com/package/tokentracker-cli)
 [![npm downloads](https://img.shields.io/npm/dm/tokentracker-cli.svg?color=brightgreen)](https://www.npmjs.com/package/tokentracker-cli)
@@ -44,8 +44,8 @@ npx tokentracker-cli
 **30 秒能看到什么：**
 - 📊 本地 Dashboard（`localhost:7680`）—— 用量趋势、模型明细、成本分析
 - 🔌 自动识别并挂接你电脑上所有已安装的 AI 工具
-- 🧩 **Skills 管理器** —— 浏览 250+ 公开 skill，一键安装，同步到 Claude · Codex · Gemini · OpenCode · Hermes
 - 🏠 100% 本地运行 —— 无账号、无 API Key、无网络请求（排行榜是可选的）
+- 🧩 *可选：* Skills 面板——浏览 250+ 公开 skill，并在 Claude · Codex · Gemini · OpenCode · Hermes 之间同步
 
 > **想要原生 macOS 菜单栏 App？** [下载 `TokenTrackerBar.dmg`](https://github.com/mm7894215/TokenTracker/releases/latest) → 拖入「应用程序」即可。包含桌面小组件、菜单栏状态图标，以及同一套 Dashboard（跑在 WKWebView 里）。
 
@@ -79,7 +79,6 @@ brew install mm7894215/tokentracker/tokentracker
 ## ✨ 特性
 
 - 🔌 **开箱即用支持 16 款 AI 工具** —— Claude Code、Codex CLI、Cursor、Gemini CLI、Kiro、OpenCode、OpenClaw、Every Code、Hermes Agent、GitHub Copilot、Kimi Code、CodeBuddy、Grok Build、oh-my-pi、Kilo CLI、Kilo Code
-- 🧩 **Skills 管理器** —— 浏览 250+ 公开 skill（来自 `anthropics/skills`、`ComposioHQ/awesome-claude-skills`、`skills.sh` 以及你自己添加的任何 GitHub 仓库），一次安装，同步到 Claude / Codex / Gemini / OpenCode / Hermes，每个 Agent 单独开关，一键撤销
 - 🏠 **100% 本地** —— Token 数据绝不离开你的机器。无账号、无 API Key
 - 🚀 **零配置** —— 首次运行自动安装所有 hook。30 秒从零到 Dashboard
 - 📊 **漂亮的 Dashboard** —— 用量趋势、按模型的成本分解、GitHub 风格活跃度热力图、按项目归因
@@ -88,6 +87,7 @@ brew install mm7894215/tokentracker/tokentracker
 - 📈 **实时限额追踪** —— Claude / Codex / Cursor / Gemini / Kiro / Copilot / Antigravity 的配额窗口与重置倒计时
 - 💰 **成本引擎** —— 内置 70+ 模型定价表，精确到 USD
 - 🌐 **可选排行榜** —— 与全球开发者对比；列可拖拽排序，聚焦你关心的 provider（需登录参与）
+- 🧩 **可选 Skills 面板** —— 浏览 250+ 公开 skill（来自 `anthropics/skills`、`ComposioHQ/awesome-claude-skills`、`skills.sh` 以及你自己添加的任何 GitHub 仓库），在 Claude / Codex / Gemini / OpenCode / Hermes 之间同步，目标 Agent 文字可见、可单独管理、一键撤销
 - 🔒 **隐私优先** —— 只记录 token 数量与时间戳。**绝不**收集 prompt、回复、文件内容
 
 ---
