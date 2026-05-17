@@ -18,29 +18,47 @@ function json(data: unknown, status = 200) {
   });
 }
 
-function extractUserIdFromSessionBody(body: unknown): string | null {
-  if (!body || typeof body !== "object") return null;
-  const o = body as Record<string, unknown>;
-  const u =
-    (o.user as Record<string, unknown> | undefined) ??
-    ((o.data as Record<string, unknown> | undefined)?.user as Record<string, unknown> | undefined);
-  if (!u || typeof u !== "object") return null;
-  const id = u.id ?? u.user_id;
-  return typeof id === "string" && id.length > 0 ? id : null;
+function b64urlToBytes(s: string): Uint8Array {
+  const b64 = s.replace(/-/g, "+").replace(/_/g, "/");
+  const pad = (4 - (b64.length % 4)) % 4;
+  const raw = atob(b64 + "=".repeat(pad));
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
 }
 
-/** JWT payload 中的 sub（网关已校验 token 时与 sessions/current 一致；避免 Edge 内 fetch 解析与浏览器不一致） */
-function userIdFromAccessTokenJwt(token: string): string | null {
+/**
+ * Verify a HS256 JWT signature locally with JWT_SECRET and return its `sub`.
+ *
+ * Previously this endpoint trusted an unverified JWT payload, which let any
+ * caller forge `{"sub":"<victim>"}` and POST to mutate that victim's public
+ * profile (leaderboard_public, display_name, github_url, etc.). InsForge
+ * does NOT validate JWTs at the gateway (see tokentracker-leaderboard-
+ * profile.ts for the matching pattern), so this edge function must do it.
+ *
+ * Returns null on any failure (bad shape, bad signature, expired); the
+ * caller surfaces that as 401.
+ */
+async function verifiedUserIdFromJwt(token: string): Promise<string | null> {
+  const secret = Deno.env.get("JWT_SECRET");
+  if (!secret) return null;
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
   try {
-    const parts = token.split(".");
-    if (parts.length < 2) return null;
-    const payloadPart = parts[1];
-    const padded = payloadPart
-      .replace(/-/g, "+")
-      .replace(/_/g, "/")
-      .padEnd(payloadPart.length + ((4 - (payloadPart.length % 4)) % 4), "=");
-    const json = atob(padded);
-    const payload = JSON.parse(json) as Record<string, unknown>;
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"],
+    );
+    const data = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
+    const sig = b64urlToBytes(parts[2]);
+    const ok = await crypto.subtle.verify("HMAC", key, sig, data);
+    if (!ok) return null;
+    const payloadStr = new TextDecoder().decode(b64urlToBytes(parts[1]));
+    const payload = JSON.parse(payloadStr) as Record<string, unknown>;
+    if (typeof payload.exp === "number" && Date.now() / 1000 > payload.exp) return null;
     const sub = payload.sub;
     if (typeof sub === "string" && sub.length > 0) return sub;
     const uid = payload.user_id;
@@ -49,27 +67,6 @@ function userIdFromAccessTokenJwt(token: string): string | null {
     /* ignore */
   }
   return null;
-}
-
-/** 与前端直连 API 相同：Authorization + 可选 apikey（InsForge 网关推荐同时带） */
-async function getUserIdFromSession(
-  baseUrl: string,
-  token: string,
-  anonKey: string | undefined,
-): Promise<string | null> {
-  const root = baseUrl.replace(/\/$/, "");
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/json",
-  };
-  if (anonKey) headers.apikey = anonKey;
-  const res = await fetch(`${root}/api/auth/sessions/current`, { headers });
-  if (res.ok) {
-    const body = await res.json().catch(() => null);
-    const fromApi = extractUserIdFromSessionBody(body);
-    if (fromApi) return fromApi;
-  }
-  return userIdFromAccessTokenJwt(token);
 }
 
 export default async function (req: Request): Promise<Response> {
@@ -84,7 +81,7 @@ export default async function (req: Request): Promise<Response> {
   const token = authH?.startsWith("Bearer ") ? authH.slice(7) : undefined;
   if (!token) return json({ error: "Unauthorized" }, 401);
 
-  const userId = userIdFromAccessTokenJwt(token) || await getUserIdFromSession(baseUrl, token, anonKey);
+  const userId = await verifiedUserIdFromJwt(token);
   if (!userId) return json({ error: "Unauthorized" }, 401);
 
   const serviceRoleKey = Deno.env.get("INSFORGE_SERVICE_ROLE_KEY");
@@ -100,7 +97,7 @@ export default async function (req: Request): Promise<Response> {
   if (req.method === "GET") {
     const { data } = await client.database
       .from("tokentracker_user_settings")
-      .select("leaderboard_public, leaderboard_anonymous, updated_at")
+      .select("leaderboard_public, leaderboard_anonymous, github_url, show_github_url, updated_at")
       .eq("user_id", userId)
       .maybeSingle();
     const { data: pv } = await client.database
@@ -120,6 +117,8 @@ export default async function (req: Request): Promise<Response> {
       share_token: pv?.token_hash || null,
       updated_at: data?.updated_at || null,
       display_name: profile?.display_name || null,
+      github_url: data?.github_url || null,
+      show_github_url: data?.show_github_url || false,
     });
   }
   if (req.method === "POST") {
@@ -127,17 +126,49 @@ export default async function (req: Request): Promise<Response> {
       enabled?: boolean;
       anonymous?: boolean;
       display_name?: string;
+      github_url?: string | null;
+      show_github_url?: boolean;
     };
     const now = new Date().toISOString();
 
-    // Update settings (enabled / anonymous)
-    if (body.enabled !== undefined || body.anonymous !== undefined) {
+    // Validate github_url (optional). Accept public GitHub profile URLs only —
+    // any host/path shape that isn't a bare user/org page is rejected so we
+    // don't render arbitrary external links next to names on the leaderboard.
+    // `null` / empty string explicitly clears the value.
+    let normalizedGithubUrl: string | null | undefined = undefined;
+    if (body.github_url !== undefined) {
+      if (body.github_url === null || (typeof body.github_url === "string" && body.github_url.trim() === "")) {
+        normalizedGithubUrl = null;
+      } else if (typeof body.github_url === "string") {
+        const raw = body.github_url.trim();
+        // Allow bare handle, "@handle", or full URL. Normalize to canonical URL.
+        const handleMatch = raw.match(/^@?([A-Za-z0-9][A-Za-z0-9-]{0,38})$/);
+        const urlMatch = raw.match(/^https:\/\/github\.com\/([A-Za-z0-9][A-Za-z0-9-]{0,38})\/?$/i);
+        if (handleMatch) {
+          normalizedGithubUrl = `https://github.com/${handleMatch[1]}`;
+        } else if (urlMatch) {
+          normalizedGithubUrl = `https://github.com/${urlMatch[1]}`;
+        } else {
+          return json({ error: "Invalid GitHub URL. Use https://github.com/<username> or a bare username." }, 400);
+        }
+      }
+    }
+
+    // Update settings (enabled / anonymous / github_url / show_github_url)
+    if (
+      body.enabled !== undefined ||
+      body.anonymous !== undefined ||
+      normalizedGithubUrl !== undefined ||
+      body.show_github_url !== undefined
+    ) {
       const upsertRow: Record<string, unknown> = {
         user_id: userId,
         updated_at: now,
       };
       if (body.enabled !== undefined) upsertRow.leaderboard_public = Boolean(body.enabled);
       if (body.anonymous !== undefined) upsertRow.leaderboard_anonymous = Boolean(body.anonymous);
+      if (normalizedGithubUrl !== undefined) upsertRow.github_url = normalizedGithubUrl;
+      if (body.show_github_url !== undefined) upsertRow.show_github_url = Boolean(body.show_github_url);
       await client.database.from("tokentracker_user_settings").upsert(
         upsertRow,
         { onConflict: "user_id" },
@@ -161,6 +192,8 @@ export default async function (req: Request): Promise<Response> {
     if (body.enabled !== undefined) result.enabled = Boolean(body.enabled);
     if (body.anonymous !== undefined) result.anonymous = Boolean(body.anonymous);
     if (typeof body.display_name === "string") result.display_name = body.display_name.trim().slice(0, 50) || null;
+    if (normalizedGithubUrl !== undefined) result.github_url = normalizedGithubUrl;
+    if (body.show_github_url !== undefined) result.show_github_url = Boolean(body.show_github_url);
     return json(result);
   }
   return json({ error: "Method not allowed" }, 405);

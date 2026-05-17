@@ -13,7 +13,7 @@ set -euo pipefail
 #   ./bundle-node.sh --clean      # wipe EmbeddedServer/
 # ──────────────────────────────────────────────
 
-NODE_VERSION="22.14.0"
+NODE_VERSION="22.22.2"
 TARGET_ARCH="universal"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

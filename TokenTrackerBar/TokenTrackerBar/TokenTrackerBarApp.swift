@@ -16,6 +16,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let viewModel = DashboardViewModel()
     private let serverManager = ServerManager()
     private let launchAtLoginManager = LaunchAtLoginManager()
+    private static var userInitiatedQuit = false
+
+    /// Real quit path: popover/Footer Quit buttons, NativeBridge "quit", UpdateChecker relaunch.
+    /// Cmd+Q from the dashboard window goes through `applicationShouldTerminate` and is downgraded
+    /// to a window-close so the menu bar item stays alive.
+    static func requestQuit() {
+        userInitiatedQuit = true
+        NSApp.terminate(nil)
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if Self.userInitiatedQuit { return .terminateNow }
+        // Switch to accessory BEFORE closing the window so the Dock icon drops
+        // immediately; otherwise AppKit delays the update until focus changes.
+        NSApp.setActivationPolicy(.accessory)
+        DashboardWindowController.shared.closeWindow()
+        // Hide after the close animation completes (next runloop).
+        DispatchQueue.main.async { NSApp.hide(nil) }
+        return .terminateCancel
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusBarController = StatusBarController(

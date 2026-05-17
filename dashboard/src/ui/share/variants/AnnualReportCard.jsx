@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { copy } from "../../../lib/copy";
 import { formatTokens, formatCost } from "../build-share-card-data";
 import { VARIANT_SIZES } from "../share-card-constants";
 
@@ -155,7 +156,7 @@ export function AnnualReportCard({ data }) {
   return (
     <div style={{width:"100%",height:"100%",background:BG,fontFamily:F,position:"relative",overflow:"hidden",boxSizing:"border-box"}}>
       {/* ── Background image ── */}
-      <img src={bgUrl||"/neon_bg.png"} alt="" style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover",pointerEvents:"none"}} crossOrigin="anonymous"/>
+      <img src={bgUrl||"/neon_bg.png"} alt="" style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover",pointerEvents:"none"}}/>
 
       <div style={{position:"relative",zIndex:1,display:"flex",flexDirection:"column",height:"100%",padding:PAD,boxSizing:"border-box"}}>
 
@@ -165,7 +166,7 @@ export function AnnualReportCard({ data }) {
             <img src="/app-icon.png" alt="" width={64} height={64} style={{width:64,height:64,borderRadius:16,display:"block"}}/>
             <div>
               <div style={{fontSize:20,fontWeight:500,color:DIM,lineHeight:1.2}}>Token Tracker</div>
-              <div style={{fontSize:36,fontWeight:700,lineHeight:1.15,color:WHITE}}>Token Report</div>
+              <div style={{fontSize:36,fontWeight:700,lineHeight:1.15,color:WHITE}}>{copy("share.card.annual.report_title")}</div>
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -182,11 +183,11 @@ export function AnnualReportCard({ data }) {
           {/* Top row: ghost title left, legend right */}
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
             <div style={{display:"flex",alignItems:"center",gap:6,fontSize:14,color:DIM}}>
-              <span>Less</span>
+              <span>{copy("share.card.annual.less")}</span>
               {PAL.map((c,i)=><div key={i} style={{width:16,height:16,borderRadius:3,background:c}}/>)}
-              <span>More</span>
+              <span>{copy("share.card.annual.more")}</span>
             </div>
-            <div style={{fontSize:16,fontWeight:700,letterSpacing:"0.14em",color:"rgba(255,255,255,0.22)",textTransform:"uppercase"}}>TOKEN USAGE HEATMAP</div>
+            <div style={{fontSize:16,fontWeight:700,letterSpacing:"0.14em",color:"rgba(255,255,255,0.22)",textTransform:"uppercase"}}>{copy("share.card.annual.heatmap_title")}</div>
           </div>
           {/* Grid */}
           <div style={{display:"grid",gridTemplateColumns:`repeat(3,${CW}px)`,gap:`8px ${MG}px`,justifyContent:"center"}}>
@@ -198,11 +199,11 @@ export function AnnualReportCard({ data }) {
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:GAP,marginBottom:GAP}}>
           <div style={{...GLASS_SM,borderRadius:22,padding:"28px 16px",textAlign:"center"}}>
             <div style={{fontFamily:F_NUM,fontSize:52,fontWeight:700,color:WHITE,letterSpacing:"-0.02em",lineHeight:1}}>{formatTokens(data.totalTokens)}</div>
-            <div style={{fontSize:22,color:DIM,marginTop:12}}>Total Tokens</div>
+            <div style={{fontSize:22,color:DIM,marginTop:12}}>{copy("share.card.annual.total_tokens")}</div>
           </div>
           <div style={{...GLASS_SM,borderRadius:22,padding:"28px 16px",textAlign:"center"}}>
             <div style={{fontFamily:F_NUM,fontSize:52,fontWeight:700,color:WHITE,letterSpacing:"-0.02em",lineHeight:1}}>{formatCost(data.totalCost)}</div>
-            <div style={{fontSize:22,color:DIM,marginTop:12}}>Estimated Cost</div>
+            <div style={{fontSize:22,color:DIM,marginTop:12}}>{copy("share.card.annual.estimated_cost")}</div>
           </div>
         </div>
 
@@ -211,14 +212,14 @@ export function AnnualReportCard({ data }) {
           <div style={{...GLASS_SM,borderRadius:22,padding:"18px 24px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{display:"flex",alignItems:"center",gap:10}}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48 2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48 2.83-2.83"/><circle cx="12" cy="12" r="4"/></svg>
-              <span style={{fontSize:20,color:DIM}}>Longest Streak</span>
+              <span style={{fontSize:20,color:DIM}}>{copy("share.card.annual.longest_streak")}</span>
             </div>
-            <span style={{fontFamily:F_NUM,fontSize:28,fontWeight:700,color:WHITE}}>{str} days</span>
+            <span style={{fontFamily:F_NUM,fontSize:28,fontWeight:700,color:WHITE}}>{copy("share.card.annual.days_count", { days: str })}</span>
           </div>
           <div style={{...GLASS_SM,borderRadius:22,padding:"18px 24px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{display:"flex",alignItems:"center",gap:10}}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><circle cx="12" cy="12" r="4"/></svg>
-              <span style={{fontSize:20,color:DIM}}>Top Model</span>
+              <span style={{fontSize:20,color:DIM}}>{copy("share.card.annual.top_model")}</span>
             </div>
             <span style={{fontFamily:F,fontSize:28,fontWeight:700,color:WHITE}}>{top?top.name:"—"}</span>
           </div>
@@ -230,7 +231,7 @@ export function AnnualReportCard({ data }) {
             <img src="/app-icon.png" alt="" width={44} height={44} style={{width:44,height:44,borderRadius:8,display:"block"}}/>
             <span style={{fontSize:22,fontWeight:600,color:WHITE}}>Token Tracker</span>
           </div>
-          <span style={{fontSize:22,fontWeight:600,color:ACCENT}}>token.rynn.me</span>
+          <span style={{fontSize:22,fontWeight:600,color:ACCENT}}>tokentracker.cc</span>
         </div>
 
       </div>

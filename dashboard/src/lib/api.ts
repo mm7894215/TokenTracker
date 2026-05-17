@@ -5,6 +5,7 @@ import {
   getMockUsageHeatmap,
   getMockUsageMonthly,
   getMockUsageModelBreakdown,
+  getMockUsageCategoryBreakdown,
   getMockUsageSummary,
   getMockProjectUsageSummary,
   getMockLeaderboard,
@@ -12,6 +13,7 @@ import {
 } from "./mock-data";
 import { getInsforgeRemoteUrl, getInsforgeAnonKey } from "./insforge-config";
 import { isValidJwtShape } from "./auth-token";
+import { getLocalApiAuthHeaders } from "./local-api-auth";
 
 type AnyRecord = Record<string, any>;
 
@@ -22,6 +24,7 @@ const PATHS = {
   usageMonthly: "tokentracker-usage-monthly",
   usageHeatmap: "tokentracker-usage-heatmap",
   usageModelBreakdown: "tokentracker-usage-model-breakdown",
+  usageCategoryBreakdown: "tokentracker-usage-category-breakdown",
   projectUsageSummary: "tokentracker-project-usage-summary",
   userStatus: "tokentracker-user-status",
   localSync: "tokentracker-local-sync",
@@ -90,182 +93,6 @@ export async function getUsageSummary({
   const filterParams = buildFilterParams({ source, model });
   const rollingParams = rolling ? { rolling: "1" } : {};
   return fetchLocalJson(PATHS.usageSummary, { from, to, ...filterParams, ...tzParams, ...rollingParams });
-}
-
-// ---------------------------------------------------------------------------
-// Cloud (account-wide) fetchers — aggregate across all signed-in devices.
-// Endpoints live under `${INSFORGE_BASE_URL}/functions/tokentracker-account-*`
-// and require `Authorization: Bearer <access_token>`. Responses mirror the
-// corresponding local `tokentracker-usage-*` endpoints, so callers can swap
-// them in without further transformation.
-// ---------------------------------------------------------------------------
-
-const ACCOUNT_PATHS = {
-  summary: "tokentracker-account-summary",
-  daily: "tokentracker-account-daily",
-  hourly: "tokentracker-account-hourly",
-  monthly: "tokentracker-account-monthly",
-  heatmap: "tokentracker-account-heatmap",
-  modelBreakdown: "tokentracker-account-model-breakdown",
-} as const;
-
-async function fetchCloudAccountJson(
-  slug: string,
-  params: AnyRecord | undefined,
-  accessToken: string,
-) {
-  const baseUrl = getInsforgeRemoteUrl();
-  if (!baseUrl) {
-    const err: any = new Error("InsForge base URL not configured");
-    err.status = 0;
-    throw err;
-  }
-  if (!accessToken || !isValidJwtShape(accessToken)) {
-    const err: any = new Error("Account view requires a signed-in user");
-    err.status = 401;
-    throw err;
-  }
-  const root = baseUrl.replace(/\/$/, "");
-  const url = new URL(`${root}/functions/${slug}`);
-  if (params) {
-    for (const [key, value] of Object.entries(params)) {
-      if (value != null && value !== "") url.searchParams.set(key, String(value));
-    }
-  }
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    Authorization: `Bearer ${accessToken}`,
-  };
-  const anonKey = getInsforgeAnonKey();
-  if (anonKey) headers.apikey = anonKey;
-  const response = await fetch(url.toString(), {
-    method: "GET",
-    headers,
-    cache: "no-store",
-  });
-  if (!response.ok) {
-    const err: any = new Error(`Request failed with HTTP ${response.status}`);
-    err.status = response.status;
-    throw err;
-  }
-  return response.json();
-}
-
-export async function fetchCloudUsageSummary({
-  from,
-  to,
-  source,
-  model,
-  timeZone,
-  tzOffsetMinutes,
-  rolling = false,
-  accessToken,
-}: AnyRecord = {}) {
-  const tzParams = buildTimeZoneParams({ timeZone, tzOffsetMinutes });
-  const filterParams = buildFilterParams({ source, model });
-  const rollingParams = rolling ? { rolling: "1" } : {};
-  return fetchCloudAccountJson(
-    ACCOUNT_PATHS.summary,
-    { from, to, ...filterParams, ...tzParams, ...rollingParams },
-    accessToken,
-  );
-}
-
-export async function fetchCloudUsageDaily({
-  from,
-  to,
-  source,
-  model,
-  timeZone,
-  tzOffsetMinutes,
-  accessToken,
-}: AnyRecord = {}) {
-  const tzParams = buildTimeZoneParams({ timeZone, tzOffsetMinutes });
-  const filterParams = buildFilterParams({ source, model });
-  return fetchCloudAccountJson(
-    ACCOUNT_PATHS.daily,
-    { from, to, ...filterParams, ...tzParams },
-    accessToken,
-  );
-}
-
-export async function fetchCloudUsageHourly({
-  day,
-  source,
-  model,
-  timeZone,
-  tzOffsetMinutes,
-  accessToken,
-}: AnyRecord = {}) {
-  const tzParams = buildTimeZoneParams({ timeZone, tzOffsetMinutes });
-  const filterParams = buildFilterParams({ source, model });
-  const params = day ? { day, ...filterParams, ...tzParams } : { ...filterParams, ...tzParams };
-  return fetchCloudAccountJson(ACCOUNT_PATHS.hourly, params, accessToken);
-}
-
-export async function fetchCloudUsageMonthly({
-  months,
-  to,
-  source,
-  model,
-  timeZone,
-  tzOffsetMinutes,
-  accessToken,
-}: AnyRecord = {}) {
-  const tzParams = buildTimeZoneParams({ timeZone, tzOffsetMinutes });
-  const filterParams = buildFilterParams({ source, model });
-  return fetchCloudAccountJson(
-    ACCOUNT_PATHS.monthly,
-    {
-      ...(months ? { months: String(months) } : {}),
-      ...(to ? { to } : {}),
-      ...filterParams,
-      ...tzParams,
-    },
-    accessToken,
-  );
-}
-
-export async function fetchCloudUsageHeatmap({
-  weeks,
-  to,
-  weekStartsOn,
-  source,
-  model,
-  timeZone,
-  tzOffsetMinutes,
-  accessToken,
-}: AnyRecord = {}) {
-  const tzParams = buildTimeZoneParams({ timeZone, tzOffsetMinutes });
-  const filterParams = buildFilterParams({ source, model });
-  return fetchCloudAccountJson(
-    ACCOUNT_PATHS.heatmap,
-    {
-      weeks: String(weeks),
-      to,
-      week_starts_on: weekStartsOn,
-      ...filterParams,
-      ...tzParams,
-    },
-    accessToken,
-  );
-}
-
-export async function fetchCloudUsageModelBreakdown({
-  from,
-  to,
-  source,
-  timeZone,
-  tzOffsetMinutes,
-  accessToken,
-}: AnyRecord = {}) {
-  const tzParams = buildTimeZoneParams({ timeZone, tzOffsetMinutes });
-  const filterParams = buildFilterParams({ source });
-  return fetchCloudAccountJson(
-    ACCOUNT_PATHS.modelBreakdown,
-    { from, to, ...filterParams, ...tzParams },
-    accessToken,
-  );
 }
 
 export async function getProjectUsageSummary({
@@ -360,11 +187,21 @@ export async function getPublicVisibility({ accessToken }: AnyRecord = {}) {
   });
 }
 
-export async function setPublicVisibility({ accessToken, enabled, anonymous, display_name }: AnyRecord = {}) {
+export async function setPublicVisibility({
+  accessToken,
+  enabled,
+  anonymous,
+  display_name,
+  github_url,
+  show_github_url,
+}: AnyRecord = {}) {
   const body: AnyRecord = {};
   if (enabled !== undefined) body.enabled = Boolean(enabled);
   if (anonymous !== undefined) body.anonymous = Boolean(anonymous);
   if (display_name !== undefined) body.display_name = String(display_name);
+  // null is a valid value (clears the URL), so check for presence via `in`-style
+  if (github_url !== undefined) body.github_url = github_url === null ? null : String(github_url);
+  if (show_github_url !== undefined) body.show_github_url = Boolean(show_github_url);
   return fetchInsforgeFunction("tokentracker-public-visibility", {
     accessToken,
     method: "POST",
@@ -372,11 +209,14 @@ export async function setPublicVisibility({ accessToken, enabled, anonymous, dis
   });
 }
 
-export async function refreshLeaderboard({ accessToken, period }: AnyRecord = {}) {
+export async function refreshLeaderboard({ accessToken, period, source }: AnyRecord = {}) {
+  const body: AnyRecord = {};
+  if (period) body.period = period;
+  if (typeof source === "string" && source.trim()) body.source = source.trim();
   return fetchInsforgeFunction("tokentracker-leaderboard-refresh", {
     accessToken,
     method: "POST",
-    body: period ? { period } : {},
+    body,
   });
 }
 
@@ -427,9 +267,10 @@ export async function getUserStatus(_opts: AnyRecord = {}) {
 }
 
 export async function triggerLocalSync({ signal }: AnyRecord = {}) {
+  const authHeaders = await getLocalApiAuthHeaders();
   const response = await fetch(`/functions/${PATHS.localSync}`, {
     method: "POST",
-    headers: { Accept: "application/json" },
+    headers: { Accept: "application/json", ...authHeaders },
     cache: "no-store",
     signal,
   });
@@ -460,6 +301,20 @@ export async function getUsageModelBreakdown({
   const tzParams = buildTimeZoneParams({ timeZone, tzOffsetMinutes });
   const filterParams = buildFilterParams({ source });
   return fetchLocalJson(PATHS.usageModelBreakdown, { from, to, ...filterParams, ...tzParams });
+}
+
+export async function getUsageCategoryBreakdown({
+  from,
+  to,
+  source = "claude",
+  timeZone,
+  tzOffsetMinutes,
+}: AnyRecord = {}) {
+  if (isMockEnabled()) {
+    return getMockUsageCategoryBreakdown({ from, to, source });
+  }
+  const tzParams = buildTimeZoneParams({ timeZone, tzOffsetMinutes });
+  return fetchLocalJson(PATHS.usageCategoryBreakdown, { from, to, source, ...tzParams });
 }
 
 export async function getUsageDaily({
@@ -546,4 +401,3 @@ export async function getUsageHeatmap({
     ...tzParams,
   });
 }
-

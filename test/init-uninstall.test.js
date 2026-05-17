@@ -4,7 +4,7 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const { test } = require("node:test");
 
-const { cmdInit } = require("../src/commands/init");
+const { cmdInit, buildNotifyHandler } = require("../src/commands/init");
 const { cmdUninstall } = require("../src/commands/uninstall");
 const { buildClaudeHookCommand } = require("../src/lib/claude-config");
 const { buildGeminiHookCommand } = require("../src/lib/gemini-config");
@@ -14,6 +14,7 @@ const {
   DEFAULT_PLUGIN_NAME,
   PLUGIN_MARKER,
 } = require("../src/lib/opencode-config");
+const { GROK_HOOK_FILENAME } = require("../src/lib/grok-hook");
 
 async function waitForFile(filePath, { timeoutMs = 1500, intervalMs = 50 } = {}) {
   const start = Date.now();
@@ -31,6 +32,100 @@ async function waitForFile(filePath, { timeoutMs = 1500, intervalMs = 50 } = {})
 function flattenHookEntries(entries) {
   return entries.flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : [entry]));
 }
+
+async function runGeneratedNotifyHandler({ trackerDir, notify }) {
+  await fs.mkdir(trackerDir, { recursive: true });
+  const notifyPath = path.join(trackerDir, "notify.cjs");
+  await fs.writeFile(
+    notifyPath,
+    buildNotifyHandler({ trackerDir, packageName: "tokentracker-cli" }),
+    "utf8",
+  );
+  await fs.chmod(notifyPath, 0o755);
+  await fs.writeFile(
+    path.join(trackerDir, "codex_notify_original.json"),
+    JSON.stringify({ notify, capturedAt: new Date().toISOString() }),
+    "utf8",
+  );
+  await new Promise((resolve, reject) => {
+    const env = { ...process.env };
+    delete env.TOKENTRACKER_DEVICE_TOKEN;
+    const child = require("node:child_process").execFile(
+      process.execPath,
+      [notifyPath, "--source=codex", "turn-ended"],
+      { env },
+      (err) => (err ? reject(err) : resolve()),
+    );
+    child.stdin?.end();
+  });
+  await new Promise((resolve) => setTimeout(resolve, 250));
+}
+
+test("notify handler skips SkyComputerUseClient and stale explicit original notify paths", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-notify-chain-"));
+  try {
+    const markerPath = path.join(tmp, "unsafe-marker");
+    const skyDir = path.join(
+      tmp,
+      ".codex",
+      "plugins",
+      "cache",
+      "openai-bundled",
+      "computer-use",
+      "1.0.750",
+      "Codex Computer Use.app",
+      "Contents",
+      "SharedSupport",
+      "SkyComputerUseClient.app",
+      "Contents",
+      "MacOS",
+    );
+    const skyPath = path.join(skyDir, "SkyComputerUseClient");
+    await fs.mkdir(skyDir, { recursive: true });
+    await fs.writeFile(
+      skyPath,
+      `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(markerPath)}, 'ran');\n`,
+      "utf8",
+    );
+    await fs.chmod(skyPath, 0o755);
+
+    await runGeneratedNotifyHandler({
+      trackerDir: path.join(tmp, "tracker-sky"),
+      notify: [skyPath, "turn-ended"],
+    });
+    await assert.rejects(fs.stat(markerPath), /ENOENT/);
+
+    await runGeneratedNotifyHandler({
+      trackerDir: path.join(tmp, "tracker-missing"),
+      notify: [path.join(tmp, "missing-notify"), "turn-ended"],
+    });
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("notify handler still chains normal original notify commands", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-notify-chain-"));
+  try {
+    const markerPath = path.join(tmp, "safe-marker");
+    const shimPath = path.join(tmp, "safe-notify.js");
+    await fs.writeFile(
+      shimPath,
+      `require('node:fs').writeFileSync(${JSON.stringify(markerPath)}, process.argv.slice(2).join('|'));\n`,
+      "utf8",
+    );
+
+    await runGeneratedNotifyHandler({
+      trackerDir: path.join(tmp, "tracker-safe"),
+      notify: [process.execPath, shimPath],
+    });
+
+    const marker = await fs.readFile(markerPath, "utf8");
+    assert.ok(marker.includes("turn-ended"), "expected payload args to be forwarded");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
 
 test("init then uninstall restores original Codex notify (when pre-existing notify exists)", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-init-uninstall-"));
@@ -320,6 +415,53 @@ test("uninstall skips notify restore when no backup and notify not installed", a
     else process.env.CODE_HOME = prevCodeHome;
     if (prevOpencodeConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
     else process.env.OPENCODE_CONFIG_DIR = prevOpencodeConfigDir;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("uninstall removes Grok Build hook and handler", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-grok-uninstall-"));
+  const prevHome = process.env.HOME;
+  const prevGrokHome = process.env.GROK_HOME;
+  const prevWrite = process.stdout.write;
+
+  try {
+    process.env.HOME = tmp;
+    process.env.GROK_HOME = path.join(tmp, ".grok");
+    const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+    const hookPath = path.join(process.env.GROK_HOME, "hooks", GROK_HOOK_FILENAME);
+    const handlerPath = path.join(tmp, ".tokentracker", "bin", "grok-session-end-hook.cjs");
+    const legacyHandlerPath = path.join(trackerDir, "bin", "grok-session-end-hook.cjs");
+
+    await fs.mkdir(path.dirname(hookPath), { recursive: true });
+    await fs.mkdir(path.dirname(handlerPath), { recursive: true });
+    await fs.mkdir(path.dirname(legacyHandlerPath), { recursive: true });
+    await fs.writeFile(
+      hookPath,
+      JSON.stringify({
+        hooks: {
+          SessionEnd: [
+            { hooks: [{ type: "command", command: `/usr/bin/env node ${handlerPath}` }] },
+          ],
+        },
+      }) + "\n",
+      "utf8",
+    );
+    await fs.writeFile(handlerPath, "handler\n", "utf8");
+    await fs.writeFile(legacyHandlerPath, "legacy handler\n", "utf8");
+
+    process.stdout.write = () => true;
+    await cmdUninstall([]);
+
+    await assert.rejects(fs.stat(hookPath), /ENOENT/);
+    await assert.rejects(fs.stat(handlerPath), /ENOENT/);
+    await assert.rejects(fs.stat(legacyHandlerPath), /ENOENT/);
+  } finally {
+    process.stdout.write = prevWrite;
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    if (prevGrokHome === undefined) delete process.env.GROK_HOME;
+    else process.env.GROK_HOME = prevGrokHome;
     await fs.rm(tmp, { recursive: true, force: true });
   }
 });

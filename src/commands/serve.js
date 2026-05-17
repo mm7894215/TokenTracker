@@ -6,10 +6,21 @@ const cp = require("node:child_process");
 
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
 const { createLocalApiHandler, resolveQueuePath } = require("../lib/local-api");
+const { ensurePricingLoaded } = require("../lib/pricing");
 const { serveStaticFile } = require("../lib/static-server");
 const { openInBrowser } = require("../lib/browser-auth");
 
 const DEFAULT_PORT = 7680;
+const NPM_PACKAGE_NAME = "tokentracker-cli";
+const LOCAL_BIND_HOST = "127.0.0.1";
+
+function buildPortInUseHint(port) {
+  return `Port ${port} is still in use after cleanup. Try: npx ${NPM_PACKAGE_NAME} serve --port ${port + 1}\n`;
+}
+
+function getLocalServerUrl(port) {
+  return `http://${LOCAL_BIND_HOST}:${port}`;
+}
 
 async function cmdServe(argv) {
   const opts = parseArgs(argv);
@@ -24,6 +35,13 @@ async function cmdServe(argv) {
     } catch (e) {
       process.stdout.write(`Init warning: ${e?.message || e}\n`);
     }
+  }
+
+  try {
+    const { installLocalTrackerApp } = require("./init");
+    await installLocalTrackerApp({ appDir: path.join(trackerDir, "app") });
+  } catch (e) {
+    process.stdout.write(`Runtime refresh warning: ${e?.message || e}\n`);
   }
 
   // 0.1 Ensure config.json baseUrl matches the canonical default
@@ -54,6 +72,16 @@ async function cmdServe(argv) {
   const queuePath = resolveQueuePath();
   const dashboardDir = resolveDashboardDir();
 
+  // 2.1 Refresh LiteLLM pricing data in the background. The seed snapshot is
+  //     already loaded synchronously at require-time, so cost calculation is
+  //     functional right now; ensurePricingLoaded() only upgrades to fresh
+  //     disk cache or upstream data. Awaiting it here would block startup
+  //     for the full 10s fetch timeout when offline / behind a firewall.
+  const { cacheDir } = await resolveTrackerPaths();
+  ensurePricingLoaded({ cachePath: path.join(cacheDir, "pricing.json") }).catch(
+    (e) => process.stdout.write(`Pricing refresh warning: ${e?.message || e}\n`),
+  );
+
   if (!dashboardDir) {
     process.stderr.write(
       [
@@ -80,7 +108,6 @@ async function cmdServe(argv) {
       // CORS preflight
       if (req.method === "OPTIONS") {
         res.writeHead(204, {
-          "Access-Control-Allow-Origin": "*",
           "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
           "Access-Control-Allow-Headers": "Content-Type, Authorization",
         });
@@ -111,8 +138,8 @@ async function cmdServe(argv) {
   // 4. Listen (kill stale process on same port if needed)
   const port = opts.port;
   await ensurePortFree(port);
-  server.listen(port, () => {
-    const url = `http://localhost:${port}`;
+  server.listen(port, LOCAL_BIND_HOST, () => {
+    const url = getLocalServerUrl(port);
     process.stdout.write(
       [
         "",
@@ -133,7 +160,7 @@ async function cmdServe(argv) {
 
   server.on("error", (e) => {
     if (e.code === "EADDRINUSE") {
-      process.stderr.write(`Port ${port} is still in use after cleanup. Try: npx tokentracker serve --port ${port + 1}\n`);
+      process.stderr.write(buildPortInUseHint(port));
     } else {
       process.stderr.write(`Server error: ${e.message}\n`);
     }
@@ -221,4 +248,10 @@ function parseArgs(argv) {
   return opts;
 }
 
-module.exports = { cmdServe };
+module.exports = {
+  cmdServe,
+  buildPortInUseHint,
+  NPM_PACKAGE_NAME,
+  LOCAL_BIND_HOST,
+  getLocalServerUrl,
+};

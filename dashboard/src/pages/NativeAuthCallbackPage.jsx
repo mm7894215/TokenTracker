@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useInsforgeAuth } from "../contexts/InsforgeAuthContext.jsx";
+import { useLocale } from "../hooks/useLocale.js";
+import { copy } from "../lib/copy";
 
 /**
  * Unified OAuth callback page at /auth/callback.
@@ -25,6 +27,7 @@ const _initialParams = new URLSearchParams(_initialSearch);
 const _capturedCode = _initialParams.get("insforge_code") || _initialParams.get("code") || null;
 
 export function NativeAuthCallbackPage() {
+  useLocale();
   const { loading, signedIn } = useInsforgeAuth();
   const navigate = useNavigate();
   const [status, setStatus] = useState("processing");
@@ -96,7 +99,7 @@ export function NativeAuthCallbackPage() {
         {status === "processing" && (
           <>
             <div className="w-8 h-8 border-2 border-oai-gray-600 border-t-white rounded-full animate-spin mx-auto" />
-            <p className="text-oai-gray-400 text-sm">Processing…</p>
+            <p className="text-oai-gray-400 text-sm">{copy("auth.callback.processing")}</p>
           </>
         )}
         {status === "redirecting" && (
@@ -106,21 +109,21 @@ export function NativeAuthCallbackPage() {
                 <path d="M20 6 9 17l-5-5" />
               </svg>
             </div>
-            <p className="text-white text-sm font-medium">Signed in successfully</p>
+            <p className="text-white text-sm font-medium">{copy("auth.callback.success")}</p>
             <p className="text-oai-gray-500 text-xs">
-              Returning to TokenTracker…
+              {copy("auth.callback.redirecting")}
             </p>
           </>
         )}
         {status === "failed" && (
           <div className="space-y-3">
-            <p className="text-oai-gray-300 text-sm">Sign-in incomplete. Please try again.</p>
+            <p className="text-oai-gray-300 text-sm">{copy("auth.callback.failed")}</p>
             <button
               type="button"
               onClick={() => window.close()}
               className="px-4 py-2 rounded-lg bg-oai-gray-800 text-sm text-white hover:bg-oai-gray-700 transition-colors"
             >
-              Close this page
+              {copy("auth.callback.close")}
             </button>
           </div>
         )}

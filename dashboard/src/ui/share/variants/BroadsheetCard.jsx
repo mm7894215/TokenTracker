@@ -1,4 +1,5 @@
 import React from "react";
+import { copy } from "../../../lib/copy";
 import {
   formatTokens,
   formatCost,
@@ -102,7 +103,7 @@ export function BroadsheetCard({ data }) {
             textAlign: "right",
           }}
         >
-          Issue № {issueLabel}
+          {copy("share.card.broadsheet.issue")} № {issueLabel}
         </div>
       </header>
 
@@ -126,7 +127,7 @@ export function BroadsheetCard({ data }) {
               marginBottom: 6,
             }}
           >
-            By
+            {copy("share.card.broadsheet.by")}
           </div>
           <div
             style={{
@@ -151,7 +152,7 @@ export function BroadsheetCard({ data }) {
             lineHeight: 1.6,
           }}
         >
-          Tracked since
+          {copy("share.card.broadsheet.tracked_since")}
           <br />
           <span style={{ color: INK }}>{startLabel}</span>
         </div>
@@ -174,7 +175,7 @@ export function BroadsheetCard({ data }) {
             marginBottom: 10,
           }}
         >
-          Total tokens
+          {copy("share.card.broadsheet.total_tokens")}
         </div>
         <div
           style={{
@@ -227,8 +228,8 @@ export function BroadsheetCard({ data }) {
             color: INK_SOFT,
           }}
         >
-          <span>Estimated spend · {costLabel}</span>
-          <span>{data.activeDays} billable days</span>
+          <span>{copy("share.card.broadsheet.estimated_spend")} · {costLabel}</span>
+          <span>{copy("share.card.broadsheet.billable_days", { days: data.activeDays })}</span>
         </div>
       </div>
 
@@ -252,7 +253,7 @@ export function BroadsheetCard({ data }) {
                 fontWeight: 600,
               }}
             >
-              The Year in Print
+              {copy("share.card.broadsheet.heatmap_title")}
             </div>
             <div
               style={{
@@ -262,7 +263,10 @@ export function BroadsheetCard({ data }) {
                 color: INK_SOFT,
               }}
             >
-              {data.heatmapActiveDays} / {data.heatmapTotalDays} days on press
+              {copy("share.card.broadsheet.heatmap_days_on_record", {
+                active: data.heatmapActiveDays,
+                total: data.heatmapTotalDays,
+              })}
             </div>
           </div>
           <HeatmapStrip
@@ -296,7 +300,7 @@ export function BroadsheetCard({ data }) {
               fontWeight: 600,
             }}
           >
-            The Roster
+            {copy("share.card.broadsheet.roster_title")}
           </div>
           <div
             style={{
@@ -306,7 +310,7 @@ export function BroadsheetCard({ data }) {
               color: INK_SOFT,
             }}
           >
-            Models in regular rotation
+            {copy("share.card.broadsheet.roster_subtitle")}
           </div>
         </div>
 
@@ -320,7 +324,7 @@ export function BroadsheetCard({ data }) {
               paddingTop: 14,
             }}
           >
-            An empty week — the press was quiet.
+            {copy("share.card.broadsheet.empty")}
           </div>
         ) : (
           data.topModels.map((model, index) => (
@@ -401,22 +405,24 @@ export function BroadsheetCard({ data }) {
           textTransform: "uppercase",
           color: INK,
         }}
-      >
-        <div style={{ display: "flex", gap: 28 }}>
+        >
+          <div style={{ display: "flex", gap: 28 }}>
           <span>
-            Global rank{" "}
+            {copy("share.card.broadsheet.global_rank")}{" "}
             <span style={{ color: VERMILLION }}>
               № {data.rank != null ? data.rank : "—"}
             </span>
           </span>
           <span>
-            Active{" "}
-            <span style={{ color: VERMILLION }}>{data.activeDays} days</span>
+            {copy("share.card.broadsheet.active_days")}{" "}
+            <span style={{ color: VERMILLION }}>
+              {copy("share.card.broadsheet.days_count", { days: data.activeDays })}
+            </span>
           </span>
         </div>
         <div>
-          Track yours{" "}
-          <span style={{ color: VERMILLION }}>→ token.rynn.me</span>
+          {copy("share.card.broadsheet.track_yours")}{" "}
+          <span style={{ color: VERMILLION }}>→ tokentracker.cc</span>
         </div>
       </footer>
     </div>

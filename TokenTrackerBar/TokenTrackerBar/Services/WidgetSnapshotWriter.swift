@@ -266,6 +266,25 @@ enum WidgetSnapshotWriter {
             }
         }
 
+        // Kimi
+        if let kimi = limits.kimi, kimi.configured {
+            if let w = kimi.primaryWindow {
+                out.append(LimitProvider(source: "kimi", label: "Kimi · weekly",
+                                         fraction: w.usedPercent / 100.0,
+                                         resetsAt: parseISO(w.resetAt)))
+            }
+            if let w = kimi.secondaryWindow {
+                out.append(LimitProvider(source: "kimi", label: "Kimi · 5h",
+                                         fraction: w.usedPercent / 100.0,
+                                         resetsAt: parseISO(w.resetAt)))
+            }
+            if let w = kimi.tertiaryWindow {
+                out.append(LimitProvider(source: "kimi", label: "Kimi · total",
+                                         fraction: w.usedPercent / 100.0,
+                                         resetsAt: parseISO(w.resetAt)))
+            }
+        }
+
         // Kiro
         if limits.kiro.configured {
             if let w = limits.kiro.primaryWindow {
@@ -279,6 +298,15 @@ enum WidgetSnapshotWriter {
         if limits.antigravity.configured {
             if let w = limits.antigravity.primaryWindow {
                 out.append(LimitProvider(source: "antigravity", label: "Antigravity",
+                                         fraction: w.usedPercent / 100.0,
+                                         resetsAt: parseISO(w.resetAt)))
+            }
+        }
+
+        // GitHub Copilot
+        if let copilot = limits.copilot, copilot.configured {
+            if let w = copilot.primaryWindow {
+                out.append(LimitProvider(source: "copilot", label: "Copilot",
                                          fraction: w.usedPercent / 100.0,
                                          resetsAt: parseISO(w.resetAt)))
             }

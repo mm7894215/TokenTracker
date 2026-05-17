@@ -1,8 +1,14 @@
-import React, { useEffect, useState } from "react";
-import { ArrowUpRight, Download, Monitor } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { ArrowUpRight, ChevronDown, Download, Monitor } from "lucide-react";
 import { copy } from "../lib/copy";
 import { cn } from "../lib/cn";
 import { isNativeEmbed, nativeAction } from "../lib/native-bridge.js";
+import { useNativeSettings } from "../hooks/use-native-settings.js";
+import {
+  FALLBACK_MENU_BAR_ITEMS,
+  normalizeMenuBarItems,
+} from "../lib/menu-bar-display.js";
+import { ToggleSwitch } from "../components/settings/Controls.jsx";
 import { FadeIn, StaggerContainer, StaggerItem } from "../ui/foundation/FadeIn.jsx";
 
 /* ---------- SVG widget illustrations ----------
@@ -241,6 +247,241 @@ function UsageLimitsWidgetPreview() {
   );
 }
 
+/* ---------- Menu bar display configurator ---------- */
+
+function previewValueFor(item) {
+  switch (item.category) {
+    case "cost":
+      return "$8.42";
+    case "limits":
+      return "62%";
+    default:
+      return item.id === "last7dTokens" ? "1.8B" : "203M";
+  }
+}
+
+function metricLabel(id, fallback) {
+  switch (id) {
+    case "todayTokens":
+      return copy("menubar.metric.today_tokens");
+    case "todayCost":
+      return copy("menubar.metric.today_cost");
+    case "last7dTokens":
+      return copy("menubar.metric.last_7d_tokens");
+    case "totalTokens":
+      return copy("menubar.metric.total_tokens");
+    case "totalCost":
+      return copy("menubar.metric.total_cost");
+    case "claude5h":
+      return copy("menubar.metric.claude_5h");
+    case "claude7d":
+      return copy("menubar.metric.claude_7d");
+    case "codex5h":
+      return copy("menubar.metric.codex_5h");
+    case "codex7d":
+      return copy("menubar.metric.codex_7d");
+    default:
+      return fallback;
+  }
+}
+
+function fillTwoSlots(ids, availableItems) {
+  const allowed = new Set(availableItems.map((item) => item.id));
+  const filled = ids.filter((id) => allowed.has(id));
+  for (const item of availableItems) {
+    if (filled.length >= 2) break;
+    if (!filled.includes(item.id)) filled.push(item.id);
+  }
+  return filled.slice(0, 2);
+}
+
+/**
+ * Compact menu-bar segment mock — sized to the same proportions as a real
+ * macOS status item so the preview reads as "this is what your menu bar
+ * will look like" rather than "this is a control surface".
+ *
+ * Dark pill on a neutral wallpaper-style backdrop. When `showStats` is off,
+ * only the icon is shown (matches the native fallback behavior).
+ */
+function MenuBarPreview({ slotConfigs, showStats }) {
+  return (
+    <div className="flex justify-center rounded-xl bg-gradient-to-b from-oai-gray-100 to-oai-gray-200 px-6 py-8 dark:from-oai-gray-950/80 dark:to-oai-gray-900/80">
+      <div
+        className="inline-flex items-stretch rounded-md shadow-[0_1px_3px_rgba(0,0,0,0.18)] ring-1 ring-black/10 dark:ring-white/10 px-3"
+        style={{ background: "linear-gradient(180deg, #2c2c2e 0%, #1c1c1e 100%)" }}
+      >
+        {/* Icon column: asymmetric padding (more left, less right) brings the
+            character close to the first metric since there's no separator
+            between them. Character is sized to read like a real macOS
+            menu-bar glyph rather than a hero illustration. */}
+        <div className="flex items-center pl-2 pr-1 py-2.5">
+          <img
+            src="/clawd/mini/idle-tight.svg"
+            alt=""
+            aria-hidden="true"
+            className="block shrink-0"
+            style={{ height: 22, width: "auto" }}
+            draggable="false"
+          />
+        </div>
+        {showStats
+          ? slotConfigs.map(({ slot, item }, idx) => (
+              <React.Fragment key={slot}>
+                {idx > 0 ? (
+                  <span className="my-1 w-px bg-white/20" aria-hidden="true" />
+                ) : null}
+                <div className={cn(
+                  "flex min-w-[52px] flex-col items-center justify-center py-1.5",
+                  // First metric column hugs closer to the icon (no separator
+                  // there); subsequent columns get even padding around the divider.
+                  idx === 0 ? "pl-1 pr-2" : "px-2",
+                )}>
+                  <span className="text-[13px] font-semibold leading-none tabular-nums text-white">
+                    {item?.previewValue || "--"}
+                  </span>
+                  <span className="mt-[2px] text-[6px] font-semibold uppercase leading-none text-white/75">
+                    {item?.shortLabel || "Metric"}
+                  </span>
+                </div>
+              </React.Fragment>
+            ))
+          : null}
+      </div>
+    </div>
+  );
+}
+
+function MenuBarSlotSelect({ slot, value, options, disabled, onChange }) {
+  const slotLabel = slot === 0 ? copy("menubar.slot.primary") : copy("menubar.slot.secondary");
+  return (
+    <label className="flex min-w-0 flex-col gap-1.5">
+      <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-oai-gray-500 dark:text-oai-gray-400">
+        {slotLabel}
+      </span>
+      <div className="relative">
+        <select
+          value={value}
+          disabled={disabled}
+          aria-label={slotLabel}
+          onChange={(event) => onChange(slot, event.target.value)}
+          className={cn(
+            "w-full appearance-none rounded-lg border border-oai-gray-200 bg-white px-3 py-2 pr-9 text-sm font-medium text-oai-black transition-colors hover:border-oai-gray-300 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white dark:hover:border-oai-gray-700",
+            disabled && "cursor-not-allowed opacity-50 hover:border-oai-gray-200 dark:hover:border-oai-gray-800",
+          )}
+        >
+          {options.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.displayLabel}
+            </option>
+          ))}
+        </select>
+        <ChevronDown
+          className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-oai-gray-400"
+          aria-hidden="true"
+        />
+      </div>
+    </label>
+  );
+}
+
+function MenuBarToggleRow({ label, hint, checked, disabled, onChange }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-3">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-oai-black dark:text-white">{label}</p>
+        {hint ? (
+          <p className="mt-0.5 text-xs text-oai-gray-500 dark:text-oai-gray-400">{hint}</p>
+        ) : null}
+      </div>
+      <ToggleSwitch checked={checked} disabled={disabled} onChange={onChange} ariaLabel={label} />
+    </div>
+  );
+}
+
+function MenuBarDisplayCard() {
+  const { available, settings, setSetting } = useNativeSettings();
+
+  const availableItems = useMemo(() => {
+    const nativeItems = Array.isArray(settings?.menuBarAvailableItems)
+      ? settings.menuBarAvailableItems
+      : FALLBACK_MENU_BAR_ITEMS;
+    return nativeItems.map((item) => ({
+      ...item,
+      displayLabel: metricLabel(item.id, item.label),
+      previewValue: previewValueFor(item),
+    }));
+  }, [settings?.menuBarAvailableItems]);
+
+  const maxItems = Number(settings?.menuBarMaxItems) || 2;
+  const selectedIds = useMemo(
+    () => normalizeMenuBarItems(settings?.menuBarItems, availableItems, maxItems),
+    [availableItems, maxItems, settings?.menuBarItems],
+  );
+  const slotIds = useMemo(() => fillTwoSlots(selectedIds, availableItems), [availableItems, selectedIds]);
+  const showStats = settings?.showStats !== false;
+
+  const saveSelection = (ids) => {
+    setSetting("menuBarItems", normalizeMenuBarItems(ids, availableItems, maxItems));
+  };
+
+  const changeSlot = (slot, id) => {
+    const next = [...slotIds];
+    const otherSlot = slot === 0 ? 1 : 0;
+    if (next[otherSlot] === id) return;
+    next[slot] = id;
+    saveSelection(next);
+  };
+
+  const slotConfigs = [0, 1].map((slot) => {
+    const currentValue = slotIds[slot] || availableItems[slot]?.id || "";
+    const otherSlot = slot === 0 ? 1 : 0;
+    const otherValue = slotIds[otherSlot];
+    const options = availableItems.filter(
+      (candidate) => candidate.id === currentValue || candidate.id !== otherValue,
+    );
+    const item = availableItems.find((candidate) => candidate.id === currentValue);
+    return { slot, currentValue, options, item };
+  });
+
+  const animatedIcon = settings?.animatedIcon !== false;
+
+  return (
+    <article className="rounded-xl border border-oai-gray-200 bg-white p-5 transition-colors duration-200 dark:border-oai-gray-800 dark:bg-oai-gray-900 sm:p-6">
+      <MenuBarPreview slotConfigs={slotConfigs} showStats={showStats} />
+
+      <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
+        {slotConfigs.map(({ slot, currentValue, options }) => (
+          <MenuBarSlotSelect
+            key={slot}
+            slot={slot}
+            value={currentValue}
+            options={options}
+            disabled={!available || !showStats}
+            onChange={changeSlot}
+          />
+        ))}
+      </div>
+
+      <div className="mt-5 divide-y divide-oai-gray-100 border-t border-oai-gray-100 dark:divide-oai-gray-800 dark:border-oai-gray-800">
+        <MenuBarToggleRow
+          label={copy("settings.menubar.showStats")}
+          hint={available ? copy("settings.menubar.showStatsHint") : copy("menubar.native_only")}
+          checked={showStats}
+          disabled={!available}
+          onChange={() => setSetting("showStats", !showStats)}
+        />
+        <MenuBarToggleRow
+          label={copy("settings.menubar.animatedIcon")}
+          hint={copy("settings.menubar.animatedIconHint")}
+          checked={animatedIcon}
+          disabled={!available}
+          onChange={() => setSetting("animatedIcon", !animatedIcon)}
+        />
+      </div>
+    </article>
+  );
+}
+
 /* ---------- Header CTA — adaptive by platform ----------
  * native  → inside the menu bar app's WKWebView (bridge currently available)
  * mac-web → browser on macOS (can download the native app)
@@ -315,66 +556,72 @@ function HeaderCta() {
 /* ---------- Secondary catalog data ---------- */
 
 const SECONDARY_WIDGETS = [
+  { id: "summary",  Preview: SummaryWidgetPreview,      nameKey: "widgets.summary.name",   descKey: "widgets.summary.description" },
   { id: "heatmap",   Preview: HeatmapWidgetPreview,    nameKey: "widgets.heatmap.name",   descKey: "widgets.heatmap.description" },
   { id: "topModels", Preview: TopModelsWidgetPreview,  nameKey: "widgets.topModels.name", descKey: "widgets.topModels.description" },
   { id: "limits",    Preview: UsageLimitsWidgetPreview, nameKey: "widgets.limits.name",   descKey: "widgets.limits.description" },
 ];
 
+function WidgetCatalogCard({ Preview, nameKey, descKey }) {
+  return (
+    <article className="flex h-full flex-col rounded-xl border border-oai-gray-200 bg-white p-4 transition-colors duration-200 dark:border-oai-gray-800 dark:bg-oai-gray-900 sm:p-5">
+      <Preview />
+      <div className="mt-4">
+        <h3 className="text-[15px] font-semibold text-oai-black dark:text-white">
+          {copy(nameKey)}
+        </h3>
+        <p className="mt-1.5 text-sm leading-relaxed text-oai-gray-500 dark:text-oai-gray-400">
+          {copy(descKey)}
+        </p>
+      </div>
+    </article>
+  );
+}
+
 /* ---------- Page ---------- */
+
+function SectionTitle({ titleKey }) {
+  return (
+    <h2 className="mb-4 text-xl font-semibold tracking-tight text-oai-black dark:text-white sm:mb-5 sm:text-2xl">
+      {copy(titleKey)}
+    </h2>
+  );
+}
 
 export function WidgetsPage() {
   return (
     <div className="flex flex-col flex-1 text-oai-black dark:text-oai-white font-oai antialiased">
       <main className="flex-1 pt-8 sm:pt-10 pb-12 sm:pb-16">
         <div className="mx-auto max-w-5xl px-4 sm:px-6">
-          {/* Header — title + subtitle left, adaptive CTA right */}
+          {/* Page header — H1 + adaptive CTA. No page subtitle (the two H2
+              sections speak for themselves; subtitles only added title noise). */}
           <FadeIn y={12}>
-            <header className="mb-10 flex flex-col gap-6 sm:mb-14 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0">
-                <h1 className="mb-3 text-3xl font-semibold tracking-tight text-oai-black dark:text-white sm:text-4xl">
-                  {copy("widgets.page.title")}
-                </h1>
-                <p className="max-w-xl text-sm text-oai-gray-500 dark:text-oai-gray-400 sm:text-base">
-                  {copy("widgets.page.subtitle")}
-                </p>
-              </div>
+            <header className="mb-10 flex items-start justify-between gap-4 sm:mb-12">
+              <h1 className="text-3xl font-semibold tracking-tight text-oai-black dark:text-white sm:text-4xl">
+                {copy("widgets.page.title")}
+              </h1>
               <div className="shrink-0">
                 <HeaderCta />
               </div>
             </header>
           </FadeIn>
 
-          {/* Hero — Summary widget at 2× scale, with a single annotation
-              compressing the old four-step tutorial into one line */}
-          <FadeIn y={16} delay={0.08}>
-            <section className="mb-14 sm:mb-16" aria-label={copy("widgets.hero.aria")}>
-              <SummaryWidgetPreview size="lg" />
-              <p className="mt-5 text-center text-sm text-oai-gray-500 dark:text-oai-gray-400">
-                {copy("widgets.hero.annotation")}
-              </p>
+          {/* Menu Bar — own section, dedicated card */}
+          <FadeIn y={12} delay={0.06}>
+            <section aria-label={copy("widgets.menubar.section.title")} className="mb-12 sm:mb-14">
+              <SectionTitle titleKey="widgets.menubar.section.title" />
+              <MenuBarDisplayCard />
             </section>
           </FadeIn>
 
-          {/* Secondary catalog — three smaller tiles for the remaining widgets */}
-          <section>
-            <h2 className="mb-5 text-xs font-semibold uppercase tracking-wider text-oai-gray-500 dark:text-oai-gray-400">
-              {copy("widgets.section.more")}
-            </h2>
-            <StaggerContainer staggerDelay={0.08} initialDelay={0.12}>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-5">
+          {/* Desktop Widgets gallery */}
+          <section aria-label={copy("widgets.gallery.section.title")}>
+            <SectionTitle titleKey="widgets.gallery.section.title" />
+            <StaggerContainer staggerDelay={0.08} initialDelay={0.04}>
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-5">
                 {SECONDARY_WIDGETS.map(({ id, Preview, nameKey, descKey }) => (
                   <StaggerItem key={id}>
-                    <article className="rounded-xl border border-oai-gray-200 bg-white p-4 transition-colors duration-200 dark:border-oai-gray-800 dark:bg-oai-gray-900 sm:p-5">
-                      <Preview />
-                      <div className="mt-4">
-                        <h3 className="text-[15px] font-semibold text-oai-black dark:text-white">
-                          {copy(nameKey)}
-                        </h3>
-                        <p className="mt-1.5 text-sm leading-relaxed text-oai-gray-500 dark:text-oai-gray-400">
-                          {copy(descKey)}
-                        </p>
-                      </div>
-                    </article>
+                    <WidgetCatalogCard Preview={Preview} nameKey={nameKey} descKey={descKey} />
                   </StaggerItem>
                 ))}
               </div>

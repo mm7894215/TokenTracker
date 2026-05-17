@@ -1,5 +1,5 @@
-const DEFAULT_BASE_URL = "https://b46ug8xu.us-east.insforge.app";
-const DEFAULT_DASHBOARD_URL = "https://token.rynn.me";
+const DEFAULT_BASE_URL = "https://srctyff5.us-east.insforge.app";
+const DEFAULT_DASHBOARD_URL = "https://www.tokentracker.cc";
 const DEFAULT_HTTP_TIMEOUT_MS = 20_000;
 
 function resolveRuntimeConfig({ cli = {}, config = {}, env = process.env, defaults = {} } = {}) {

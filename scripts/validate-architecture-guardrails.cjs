@@ -14,6 +14,7 @@ const IGNORED_DIRS = new Set([
   "build",
   ".tmp",
   "archive",
+  "edge-patches",
 ]);
 
 const CLIENT_IMPORT_PATTERNS = [];
@@ -113,7 +114,7 @@ function scanClientFiles(root, errors) {
           });
         }
       });
-      if (line.includes(SDK_PACKAGE) && !sdkAllowed) {
+      if (SDK_PACKAGE && line.includes(SDK_PACKAGE) && !sdkAllowed) {
         errors.push({
           code: "CLIENT_SDK_IMPORT",
           file,

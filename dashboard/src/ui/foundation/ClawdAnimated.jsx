@@ -114,7 +114,9 @@ export function ClawdAnimated({ state = "idle-living", size = 48, className = ""
           `${bbox.x - pad} ${bbox.y - pad} ${bbox.width + pad * 2} ${bbox.height + pad * 2}`,
         );
       }
-    } catch {}
+    } catch {
+      // Some SVGs do not expose getBBox until fully rendered.
+    }
   }, [svgHtml]);
 
   return (

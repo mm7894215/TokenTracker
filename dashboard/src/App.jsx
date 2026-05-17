@@ -1,8 +1,9 @@
-import React, { Suspense, useMemo } from "react";
+import React, { lazy, Suspense, useMemo } from "react";
 import { useLocation } from "react-router-dom";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import { ErrorBoundary } from "./components/ErrorBoundary.jsx";
+import { useLocale } from "./hooks/useLocale.js";
 import { ThemeProvider } from "./ui/foundation/ThemeProvider.jsx";
 import { useInsforgeAuth } from "./contexts/InsforgeAuthContext.jsx";
 import { LoginModalProvider } from "./contexts/LoginModalContext.jsx";
@@ -11,50 +12,55 @@ import { getBackendBaseUrl } from "./lib/config";
 import { isMockEnabled } from "./lib/mock-data";
 import { isScreenshotModeEnabled } from "./lib/screenshot-mode";
 import { useCloudUsageSync } from "./hooks/use-cloud-usage-sync";
-import { LandingPage } from "./pages/LandingPage.jsx";
-import { LoginPage } from "./pages/LoginPage.jsx";
+import { AppLayout } from "./ui/components/Sidebar.jsx";
+// NativeAuthCallbackPage must be eager-imported: its module-level code
+// captures the OAuth `insforge_code` query param synchronously at app
+// boot, BEFORE the InsForge SDK's detectAuthCallback() strips it. Lazy
+// loading delays the module until route render, by which point the
+// param has already been removed — the page then falls through to the
+// "Sign-in incomplete" failure state.
 import { NativeAuthCallbackPage } from "./pages/NativeAuthCallbackPage.jsx";
-import { AppLayout } from "./ui/openai/components/Sidebar.jsx";
 
-const DashboardPage = React.lazy(() =>
-  import("./pages/DashboardPage.jsx").then((mod) => ({
-    default: mod.DashboardPage,
+// Pages are lazy-loaded so each route ships in its own chunk; keeps the
+// initial main bundle small (was 1.9 MB before splitting, all 11 pages
+// were bundled together). Routes are mutually exclusive, so only one
+// chunk loads per navigation.
+const DashboardPage = lazy(() =>
+  import("./pages/DashboardPage.jsx").then((m) => ({ default: m.DashboardPage })),
+);
+const IpCheckPage = lazy(() => import("./pages/IpCheckPage.jsx"));
+const LandingPage = lazy(() =>
+  import("./pages/LandingPage.jsx").then((m) => ({ default: m.LandingPage })),
+);
+const LeaderboardPage = lazy(() =>
+  import("./pages/LeaderboardPage.jsx").then((m) => ({ default: m.LeaderboardPage })),
+);
+const LeaderboardProfilePage = lazy(() =>
+  import("./pages/LeaderboardProfilePage.jsx").then((m) => ({
+    default: m.LeaderboardProfilePage,
   })),
 );
-
-const LeaderboardPage = React.lazy(() =>
-  import("./pages/LeaderboardPage.jsx").then((mod) => ({
-    default: mod.LeaderboardPage,
-  })),
+const LimitsPage = lazy(() =>
+  import("./pages/LimitsPage.jsx").then((m) => ({ default: m.LimitsPage })),
 );
-
-const LeaderboardProfilePage = React.lazy(() =>
-  import("./pages/LeaderboardProfilePage.jsx").then((mod) => ({
-    default: mod.LeaderboardProfilePage,
-  })),
+const LoginPage = lazy(() =>
+  import("./pages/LoginPage.jsx").then((m) => ({ default: m.LoginPage })),
 );
-
-const LimitsPage = React.lazy(() =>
-  import("./pages/LimitsPage.jsx").then((mod) => ({
-    default: mod.LimitsPage,
-  })),
+const SettingsPage = lazy(() =>
+  import("./pages/SettingsPage.jsx").then((m) => ({ default: m.SettingsPage })),
 );
-
-const SettingsPage = React.lazy(() =>
-  import("./pages/SettingsPage.jsx").then((mod) => ({
-    default: mod.SettingsPage,
-  })),
+const SkillsPage = lazy(() =>
+  import("./pages/SkillsPage.jsx").then((m) => ({ default: m.SkillsPage })),
 );
-
-const WidgetsPage = React.lazy(() =>
-  import("./pages/WidgetsPage.jsx").then((mod) => ({
-    default: mod.WidgetsPage,
-  })),
+const WidgetsPage = lazy(() =>
+  import("./pages/WidgetsPage.jsx").then((m) => ({ default: m.WidgetsPage })),
 );
-
-const IpCheckPage = React.lazy(() => import("./pages/IpCheckPage.jsx"));
 
 export default function App() {
+  // Subscribing to locale here makes App rerender on language switch, which
+  // rebuilds every child element reference and triggers copy() re-evaluation
+  // across the tree — without unmounting lazy-loaded pages.
+  const { resolvedLocale } = useLocale();
   const location = useLocation();
   const insforge = useInsforgeAuth();
   useCloudUsageSync();
@@ -82,8 +88,7 @@ export default function App() {
   const normalizedPath = pathname.replace(/\/+$/, "") || "/";
   const leaderboardProfileMatch = normalizedPath.match(/^\/leaderboard\/u\/([^/]+)$/i);
   const leaderboardProfileUserId = leaderboardProfileMatch ? leaderboardProfileMatch[1] : null;
-  const isLeaderboardPath =
-    normalizedPath === "/leaderboard" || Boolean(leaderboardProfileUserId);
+  const isLeaderboardPath = normalizedPath === "/leaderboard" || Boolean(leaderboardProfileUserId);
 
   const cloudAuthSignedIn = Boolean(insforge.enabled && insforge.signedIn);
   const signedIn = isLocalMode || cloudAuthSignedIn;
@@ -97,48 +102,36 @@ export default function App() {
       name: insforge.displayName || "",
       userId: insforge.user?.id || null,
     };
-  }, [insforge, cloudAuthSignedIn]);
+  }, [cloudAuthSignedIn, insforge]);
 
   let gate = isLocalMode || mockEnabled || screenshotMode ? "dashboard" : "landing";
-  if (normalizedPath === "/landing") {
-    gate = "landing";
-  }
-  if (normalizedPath === "/dashboard") {
-    gate = "dashboard";
-  }
-  if (isLeaderboardPath) {
-    gate = "dashboard";
-  }
-  const isLimitsPath = normalizedPath === "/limits";
-  if (isLimitsPath) {
-    gate = "dashboard";
-  }
-  const isSettingsPath = normalizedPath === "/settings";
-  if (isSettingsPath) {
-    gate = "dashboard";
-  }
-  const isWidgetsPath = normalizedPath === "/widgets";
-  if (isWidgetsPath) {
-    gate = "dashboard";
-  }
-  const isIpCheckPath = normalizedPath === "/ip-check";
-  if (isIpCheckPath) {
-    gate = "dashboard";
-  }
+  if (normalizedPath === "/landing") gate = "landing";
+  if (normalizedPath === "/dashboard") gate = "dashboard";
+  if (isLeaderboardPath) gate = "dashboard";
 
-  const PageComponent = leaderboardProfileUserId
-    ? LeaderboardProfilePage
-    : normalizedPath === "/leaderboard"
-      ? LeaderboardPage
-      : isLimitsPath
-        ? LimitsPage
-        : isSettingsPath
-          ? SettingsPage
-          : isWidgetsPath
-            ? WidgetsPage
-            : isIpCheckPath
-              ? IpCheckPage
-              : DashboardPage;
+  const isLimitsPath = normalizedPath === "/limits";
+  const isSettingsPath = normalizedPath === "/settings";
+  const isSkillsPath = normalizedPath === "/skills";
+  const isWidgetsPath = normalizedPath === "/widgets";
+  const isIpCheckPath = normalizedPath === "/ip-check";
+  if (isLimitsPath || isSettingsPath || isSkillsPath || isWidgetsPath || isIpCheckPath) gate = "dashboard";
+
+  let PageComponent = DashboardPage;
+  if (leaderboardProfileUserId) {
+    PageComponent = LeaderboardProfilePage;
+  } else if (normalizedPath === "/leaderboard") {
+    PageComponent = LeaderboardPage;
+  } else if (isLimitsPath) {
+    PageComponent = LimitsPage;
+  } else if (isSettingsPath) {
+    PageComponent = SettingsPage;
+  } else if (isSkillsPath) {
+    PageComponent = SkillsPage;
+  } else if (isWidgetsPath) {
+    PageComponent = WidgetsPage;
+  } else if (isIpCheckPath) {
+    PageComponent = IpCheckPage;
+  }
 
   // /leaderboard/u/:id (LeaderboardProfilePage) still ships its own
   // min-h-screen + sticky header/footer chrome, so it must NOT be wrapped
@@ -152,10 +145,9 @@ export default function App() {
       isLeaderboardIndexPath ||
       isLimitsPath ||
       isSettingsPath ||
+      isSkillsPath ||
       isWidgetsPath ||
       isIpCheckPath);
-
-  const loadingShell = <div className="min-h-screen bg-oai-white dark:bg-[#050505]" />;
 
   let content = null;
   if (normalizedPath === "/auth/callback" || normalizedPath === "/auth/native-callback") {
@@ -163,34 +155,35 @@ export default function App() {
   } else if (normalizedPath === "/login") {
     content = <LoginPage />;
   } else if (gate === "landing") {
-    content = (
-      <LandingPage signInUrl="/login" signUpUrl="/login" />
-    );
+    content = <LandingPage signInUrl="/login" signUpUrl="/login" />;
   } else {
     const pageNode = (
-      <Suspense fallback={loadingShell}>
-        <PageComponent
-          baseUrl={baseUrl}
-          auth={authObject}
-          signedIn={signedIn}
-          sessionSoftExpired={sessionSoftExpired}
-          signOut={() => (insforge.enabled ? insforge.signOut() : Promise.resolve())}
-          publicMode={publicMode}
-          publicToken={publicToken}
-          userId={leaderboardProfileUserId}
-          signInUrl="/login"
-          signUpUrl="/login"
-        />
-      </Suspense>
+      <PageComponent
+        key={resolvedLocale}
+        baseUrl={baseUrl}
+        auth={authObject}
+        signedIn={signedIn}
+        sessionSoftExpired={sessionSoftExpired}
+        signOut={() => (insforge.enabled ? insforge.signOut() : Promise.resolve())}
+        publicMode={publicMode}
+        publicToken={publicToken}
+        userId={leaderboardProfileUserId}
+        signInUrl="/login"
+        signUpUrl="/login"
+      />
     );
-    content = showSidebar ? <AppLayout>{pageNode}</AppLayout> : pageNode;
+    if (showSidebar) {
+      content = <AppLayout>{pageNode}</AppLayout>;
+    } else {
+      content = pageNode;
+    }
   }
 
   return (
     <ErrorBoundary>
       <ThemeProvider>
         <LoginModalProvider>
-          {content}
+          <Suspense fallback={null}>{content}</Suspense>
           <LoginModal />
           <Analytics />
           <SpeedInsights />

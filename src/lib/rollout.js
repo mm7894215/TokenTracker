@@ -10,6 +10,9 @@ const { ensureDir } = require("./fs");
 const DEFAULT_SOURCE = "codex";
 const DEFAULT_MODEL = "unknown";
 const BUCKET_SEPARATOR = "|";
+const CLAUDE_MEM_OBSERVER_PATH_SEGMENT = "--claude-mem-observer-sessions";
+const CLAUDE_MEM_OBSERVER_PROJECT_REF =
+  "https://local.tokentracker/claude-mem/observer-sessions";
 
 async function listRolloutFiles(sessionsDir) {
   const out = [];
@@ -679,7 +682,8 @@ async function parseOpenclawSessionFile({
     // OpenClaw wraps Codex, so it follows the same OpenAI convention where
     // `input` INCLUDES cached reads. Normalize by subtracting cached from
     // input so `input_tokens` is pure non-cached (matches CLAUDE.md spec
-    // and prevents downstream double-counting).
+    // and prevents downstream double-counting at the cache_read rate on top
+    // of the full input rate — ~6–7x cost inflation on cache-heavy sessions).
     const openclawRawInput = Number(usage.input || 0);
     const openclawCached = Number(usage.cacheRead || 0);
     const openclawCacheWrite = Number(usage.cacheWrite || 0);
@@ -691,7 +695,7 @@ async function parseOpenclawSessionFile({
       cache_creation_input_tokens: openclawCacheWrite,
       output_tokens: openclawOutput,
       reasoning_output_tokens: 0,
-      total_tokens: Number(usage.totalTokens || 0) || (openclawInput + openclawCached + openclawCacheWrite + openclawOutput),
+      total_tokens: openclawInput + openclawCached + openclawCacheWrite + openclawOutput,
       conversation_count: 1,
     };
 
@@ -897,10 +901,8 @@ async function parseClaudeFile({
     if (!usage || typeof usage !== "object") continue;
 
     if (seenMessageHashes) {
-      const msgId = obj?.message?.id;
-      const reqId = obj?.requestId;
-      if (msgId && reqId) {
-        const hash = `${msgId}:${reqId}`;
+      const hash = claudeMessageDedupKey(obj);
+      if (hash) {
         if (seenMessageHashes.has(hash)) continue;
         seenMessageHashes.add(hash);
       }
@@ -1245,6 +1247,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
             output_tokens: zeroTotals.output_tokens,
             reasoning_output_tokens: zeroTotals.reasoning_output_tokens,
             total_tokens: zeroTotals.total_tokens,
+            billable_total_tokens: zeroTotals.billable_total_tokens,
             conversation_count: zeroTotals.conversation_count,
           }),
         );
@@ -1266,6 +1269,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
               output_tokens: zeroTotals.output_tokens,
               reasoning_output_tokens: zeroTotals.reasoning_output_tokens,
               total_tokens: zeroTotals.total_tokens,
+              billable_total_tokens: zeroTotals.billable_total_tokens,
               conversation_count: zeroTotals.conversation_count,
             }),
           );
@@ -1293,6 +1297,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
             output_tokens: totals.output_tokens,
             reasoning_output_tokens: totals.reasoning_output_tokens,
             total_tokens: totals.total_tokens,
+            billable_total_tokens: totals.billable_total_tokens ?? totals.total_tokens,
             conversation_count: totals.conversation_count,
           }),
         );
@@ -1319,6 +1324,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
           output_tokens: zeroTotals.output_tokens,
           reasoning_output_tokens: zeroTotals.reasoning_output_tokens,
           total_tokens: zeroTotals.total_tokens,
+          billable_total_tokens: zeroTotals.billable_total_tokens,
           conversation_count: zeroTotals.conversation_count,
         }),
       );
@@ -1341,6 +1347,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
             output_tokens: zeroTotals.output_tokens,
             reasoning_output_tokens: zeroTotals.reasoning_output_tokens,
             total_tokens: zeroTotals.total_tokens,
+            billable_total_tokens: zeroTotals.billable_total_tokens,
             conversation_count: zeroTotals.conversation_count,
           }),
         );
@@ -1362,6 +1369,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
         output_tokens: unknownBucket.totals.output_tokens,
         reasoning_output_tokens: unknownBucket.totals.reasoning_output_tokens,
         total_tokens: unknownBucket.totals.total_tokens,
+        billable_total_tokens: unknownBucket.totals.billable_total_tokens ?? unknownBucket.totals.total_tokens,
         conversation_count: unknownBucket.totals.conversation_count,
       }),
     );
@@ -1408,6 +1416,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
           output_tokens: group.totals.output_tokens,
           reasoning_output_tokens: group.totals.reasoning_output_tokens,
           total_tokens: group.totals.total_tokens,
+          billable_total_tokens: group.totals.billable_total_tokens ?? group.totals.total_tokens,
           conversation_count: group.totals.conversation_count,
         }),
       );
@@ -1462,6 +1471,7 @@ async function enqueueTouchedProjectBuckets({
         output_tokens: totals.output_tokens,
         reasoning_output_tokens: totals.reasoning_output_tokens,
         total_tokens: totals.total_tokens,
+        billable_total_tokens: totals.billable_total_tokens ?? totals.total_tokens,
         conversation_count: totals.conversation_count,
       }),
     );
@@ -1717,6 +1727,7 @@ function initTotals() {
     output_tokens: 0,
     reasoning_output_tokens: 0,
     total_tokens: 0,
+    billable_total_tokens: 0,
     conversation_count: 0,
   };
 }
@@ -1728,6 +1739,7 @@ function addTotals(target, delta) {
   target.output_tokens += delta.output_tokens || 0;
   target.reasoning_output_tokens += delta.reasoning_output_tokens || 0;
   target.total_tokens += delta.total_tokens || 0;
+  target.billable_total_tokens += delta.billable_total_tokens ?? delta.total_tokens ?? 0;
   target.conversation_count += delta.conversation_count || 0;
 }
 
@@ -1739,6 +1751,7 @@ function totalsKey(totals) {
     totals.output_tokens || 0,
     totals.reasoning_output_tokens || 0,
     totals.total_tokens || 0,
+    totals.billable_total_tokens ?? totals.total_tokens ?? 0,
     totals.conversation_count || 0,
   ].join("|");
 }
@@ -1760,6 +1773,12 @@ function toUtcHalfHourStart(ts) {
     ),
   );
   return bucketStart.toISOString();
+}
+
+function normalizeNonNegativeNumber(value) {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return n;
 }
 
 function bucketKey(source, model, hourStart) {
@@ -1810,6 +1829,12 @@ async function resolveProjectMetaForPath(startDir, cache) {
   if (!startDir || typeof startDir !== "string") return null;
   if (cache && cache.has(startDir)) return cache.get(startDir);
 
+  if (startDir.includes(CLAUDE_MEM_OBSERVER_PATH_SEGMENT)) {
+    const meta = { projectRef: CLAUDE_MEM_OBSERVER_PROJECT_REF, repoRoot: startDir };
+    if (cache) cache.set(startDir, meta);
+    return meta;
+  }
+
   const visited = [];
   let current = startDir;
   const root = path.parse(startDir).root;
@@ -1848,13 +1873,38 @@ function hashRepoRoot(repoRoot) {
   return crypto.createHash("sha256").update(String(repoRoot)).digest("hex");
 }
 
+function deriveProjectKeyFromRef(projectRef) {
+  if (typeof projectRef !== "string") return null;
+  try {
+    const parsed = new URL(projectRef);
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    if (segments.length < 2) return null;
+    // GitHub paths are always owner/repo, but GitLab supports nested groups
+    // (group/subgroup/.../repo). Preserve the full path so nested-group repos
+    // don't collapse to the first two segments.
+    return segments.join("/");
+  } catch (_e) {
+    return null;
+  }
+}
+
 async function defaultPublicRepoResolver({ projectRef, repoRoot }) {
+  const repoRootHash = repoRoot ? hashRepoRoot(repoRoot) : null;
+  const projectKey = deriveProjectKeyFromRef(projectRef);
+  if (!projectKey) {
+    return {
+      status: "blocked",
+      projectKey: null,
+      projectRef: projectRef || null,
+      repoRootHash,
+      reason: projectRef ? "unparseable_ref" : "missing_ref",
+    };
+  }
   return {
-    status: "blocked",
-    projectKey: null,
-    projectRef: projectRef || null,
-    repoRootHash: repoRoot ? hashRepoRoot(repoRoot) : null,
-    reason: projectRef ? "local_only" : "missing_ref",
+    status: "public_verified",
+    projectKey,
+    projectRef,
+    repoRootHash,
   };
 }
 
@@ -2057,7 +2107,9 @@ function normalizeGeminiTokens(tokens) {
   const output = toNonNegativeInt(tokens.output);
   const tool = toNonNegativeInt(tokens.tool);
   const thoughts = toNonNegativeInt(tokens.thoughts);
-  const total = toNonNegativeInt(tokens.total);
+  const reportedTotal = toNonNegativeInt(tokens.total);
+  const computedTotal = input + cached + output + tool + thoughts;
+  const total = Math.max(reportedTotal, computedTotal);
 
   return {
     input_tokens: input,
@@ -2093,6 +2145,7 @@ function sameGeminiTotals(a, b) {
   return (
     a.input_tokens === b.input_tokens &&
     a.cached_input_tokens === b.cached_input_tokens &&
+    a.cache_creation_input_tokens === b.cache_creation_input_tokens &&
     a.output_tokens === b.output_tokens &&
     a.reasoning_output_tokens === b.reasoning_output_tokens &&
     a.total_tokens === b.total_tokens
@@ -2107,11 +2160,19 @@ function diffGeminiTotals(current, previous) {
   const totalReset = (current.total_tokens || 0) < (previous.total_tokens || 0);
   if (totalReset) return current;
 
+  // Must include cache_creation_input_tokens in both the equality check and
+  // the delta — OpenCode routes through this diff and its cache.write number
+  // would otherwise be permanently reported as zero. Gemini itself always
+  // emits cache_creation=0 so the extra field is a no-op for Gemini.
   const delta = {
     input_tokens: Math.max(0, (current.input_tokens || 0) - (previous.input_tokens || 0)),
     cached_input_tokens: Math.max(
       0,
       (current.cached_input_tokens || 0) - (previous.cached_input_tokens || 0),
+    ),
+    cache_creation_input_tokens: Math.max(
+      0,
+      (current.cache_creation_input_tokens || 0) - (previous.cache_creation_input_tokens || 0),
     ),
     output_tokens: Math.max(0, (current.output_tokens || 0) - (previous.output_tokens || 0)),
     reasoning_output_tokens: Math.max(
@@ -2142,26 +2203,18 @@ function pickDelta(lastUsage, totalUsage, prevTotals) {
   const hasTotal = isNonEmptyObject(totalUsage);
   const hasPrevTotals = isNonEmptyObject(prevTotals);
 
-  // Codex rollout logs sometimes emit duplicate token_count records where total_token_usage does not
-  // change between adjacent entries. Counting last_token_usage in those cases will double-count.
-  if (hasTotal && hasPrevTotals && sameUsage(totalUsage, prevTotals)) {
-    return null;
-  }
-
-  if (!hasLast && hasTotal && hasPrevTotals && totalsReset(totalUsage, prevTotals)) {
-    const normalized = normalizeUsage(totalUsage);
-    return isAllZeroUsage(normalized) ? null : normalized;
-  }
-
-  if (hasLast) {
-    return normalizeUsage(lastUsage);
-  }
-
   if (hasTotal && hasPrevTotals) {
+    if (totalsReset(totalUsage, prevTotals)) {
+      const resetUsage = hasLast ? lastUsage : totalUsage;
+      const normalized = normalizeUsage(resetUsage);
+      return isAllZeroUsage(normalized) ? null : normalized;
+    }
+
     const delta = {};
     for (const k of [
       "input_tokens",
       "cached_input_tokens",
+      "cache_creation_input_tokens",
       "output_tokens",
       "reasoning_output_tokens",
       "total_tokens",
@@ -2171,6 +2224,11 @@ function pickDelta(lastUsage, totalUsage, prevTotals) {
       if (Number.isFinite(a) && Number.isFinite(b)) delta[k] = Math.max(0, a - b);
     }
     const normalized = normalizeUsage(delta);
+    return isAllZeroUsage(normalized) ? null : normalized;
+  }
+
+  if (hasLast) {
+    const normalized = normalizeUsage(lastUsage);
     return isAllZeroUsage(normalized) ? null : normalized;
   }
 
@@ -2195,16 +2253,38 @@ function normalizeUsage(u) {
     const n = Number(u[k] || 0);
     out[k] = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
   }
-  // OpenAI / Codex convention: `input_tokens` INCLUDES `cached_input_tokens`
-  // (cached is a subset of input), and `total_tokens = input + output`.
-  // Our storage convention (per CLAUDE.md) is `input_tokens` = pure
-  // non-cached input, so downstream sums match. Subtract cached from input
-  // to normalize. Leave total_tokens alone — raw OpenAI total is correct
-  // (it equals input + output = non_cached + cached + output).
-  if (out.input_tokens >= out.cached_input_tokens) {
-    out.input_tokens = out.input_tokens - out.cached_input_tokens;
-  }
+  // Codex rollouts (and Every Code, which shares the format) report
+  // `input_tokens` as the TOTAL prompt, with `cached_input_tokens` as the
+  // cached subset — i.e. the cached slice is INSIDE the input count. Our
+  // queue schema (CLAUDE.md → Token Normalization Convention) stores
+  // `input_tokens` as pure non-cached input and `cached_input_tokens`
+  // separately. Without this subtraction the cost formula bills the cached
+  // bytes twice: once at the full input rate and again at the cache_read
+  // rate, producing ~6–7x cost inflation on cache-heavy Codex sessions
+  // (verified against ccusage's per-day numbers on the same rollouts).
+  // We intentionally leave `total_tokens` unchanged: Codex reports
+  // total = input(inclusive of cached) + output, which numerically equals
+  // our schema's non_cached + cached + output + 0 (cache_creation=0 here).
+  out.input_tokens = Math.max(0, out.input_tokens - out.cached_input_tokens);
   return out;
+}
+
+// Stable dedup key for one Claude jsonl entry. Anthropic's official protocol
+// guarantees `message.id` is globally unique per response, so msgId alone is a
+// valid dedup key. Older code required both msgId AND requestId, which short-
+// circuited dedup entirely for jsonl entries where `requestId` is absent
+// (DeepSeek/Kimi/Mimo/MiniMax anthropic-compatible endpoints don't return the
+// `request-id` HTTP header, and Claude Code's sub-agent / thinking transport
+// paths drop the field too). The short-circuit caused 1.6–3.7x overcounting on
+// every affected provider — see issue #64. Falling back to msgId-only keeps
+// backward compatibility for the (msgId, reqId) format already persisted in
+// cursors.claudeHashes (msgId strings don't contain `:`, so the two formats
+// share the same Set without collision).
+function claudeMessageDedupKey(obj) {
+  const msgId = typeof obj?.message?.id === "string" && obj.message.id ? obj.message.id : null;
+  if (!msgId) return null;
+  const reqId = typeof obj?.requestId === "string" && obj.requestId ? obj.requestId : null;
+  return reqId ? `${msgId}:${reqId}` : msgId;
 }
 
 function normalizeClaudeUsage(u) {
@@ -2238,20 +2318,6 @@ function isAllZeroUsage(u) {
     "total_tokens",
   ]) {
     if (Number(u[k] || 0) !== 0) return false;
-  }
-  return true;
-}
-
-function sameUsage(a, b) {
-  for (const k of [
-    "input_tokens",
-    "cached_input_tokens",
-    "cache_creation_input_tokens",
-    "output_tokens",
-    "reasoning_output_tokens",
-    "total_tokens",
-  ]) {
-    if (toNonNegativeInt(a?.[k]) !== toNonNegativeInt(b?.[k])) return false;
   }
   return true;
 }
@@ -2372,6 +2438,7 @@ async function parseOpencodeDbIncremental({
   projectQueuePath,
   onProgress,
   source,
+  cursorKey,
   publicRepoResolver,
 }) {
   await ensureDir(path.dirname(queuePath));
@@ -2387,7 +2454,8 @@ async function parseOpencodeDbIncremental({
   const projectTouchedBuckets = projectEnabled ? new Set() : null;
   const projectMetaCache = projectEnabled ? new Map() : null;
   const publicRepoCache = projectEnabled ? new Map() : null;
-  const opencodeState = normalizeOpencodeState(cursors?.opencode);
+  const cursorNamespace = typeof cursorKey === "string" && cursorKey.length > 0 ? cursorKey : "opencode";
+  const opencodeState = normalizeOpencodeState(cursors?.[cursorNamespace]);
   const messageIndex = opencodeState.messages;
   const touchedBuckets = new Set();
   const defaultSource = normalizeSourceInput(source) || "opencode";
@@ -2506,7 +2574,7 @@ async function parseOpencodeDbIncremental({
   hourlyState.updatedAt = new Date().toISOString();
   cursors.hourly = hourlyState;
   opencodeState.updatedAt = new Date().toISOString();
-  cursors.opencode = opencodeState;
+  cursors[cursorNamespace] = opencodeState;
   if (projectState) {
     projectState.updatedAt = new Date().toISOString();
     cursors.projectHourly = projectState;
@@ -2556,20 +2624,30 @@ async function parseCursorApiIncremental({
   const hourlyState = normalizeHourlyState(cursors?.hourly);
   const touchedBuckets = new Set();
 
-  // Incremental: skip records we already processed
+  // Cursor's CSV is an account-level API export, not an append-only local log.
+  // Treat the fetched CSV as authoritative so historical backfills and row
+  // corrections replace prior local bucket totals instead of being skipped.
   const lastTs = cursors?.cursorApi?.lastRecordTimestamp || null;
   let latestTs = lastTs;
   let eventsAggregated = 0;
   const cb = typeof onProgress === "function" ? onProgress : null;
   const total = records.length;
 
+  if (records.length > 0) {
+    for (const [key, bucket] of Object.entries(hourlyState.buckets || {})) {
+      const parsed = parseBucketKey(key);
+      const sourceKey = normalizeSourceInput(parsed.source) || DEFAULT_SOURCE;
+      if (sourceKey !== defaultSource) continue;
+      if (!bucket?.totals) continue;
+      bucket.totals = initTotals();
+      touchedBuckets.add(key);
+    }
+  }
+
   for (let i = 0; i < records.length; i++) {
     const record = records[i];
     const recordDate = record.date;
     if (!recordDate) continue;
-
-    // Skip records we already processed (CSV is ordered newest-first)
-    if (lastTs && recordDate <= lastTs) continue;
 
     const { normalizeCursorUsage } = require("./cursor-config");
     const delta = normalizeCursorUsage(record);
@@ -2670,6 +2748,16 @@ function readKiroDbTokens(dbPath, sinceId) {
 // The fallback file does not include per-row timestamps, so newly appended rows are
 // bucketed using the file mtime observed during this sync. We track a separate JSONL
 // cursor so it never shares state with the SQLite path.
+function countKiroJsonlLines(jsonlPath) {
+  if (!jsonlPath || !fssync.existsSync(jsonlPath)) return 0;
+  try {
+    const raw = fssync.readFileSync(jsonlPath, "utf8");
+    return raw.split("\n").filter((l) => l.trim()).length;
+  } catch (_e) {
+    return 0;
+  }
+}
+
 function readKiroJsonlTokens(jsonlPath, sinceLineIndex) {
   if (!jsonlPath || !fssync.existsSync(jsonlPath)) {
     return { rows: [], lineCount: 0, reset: false };
@@ -2814,6 +2902,14 @@ async function parseKiroIncremental({ dbPath, jsonlPath, cursors, queuePath, onP
   if (fssync.existsSync(resolvedDbPath)) {
     rows = readKiroDbTokens(resolvedDbPath, lastDbId);
     usingDb = true;
+    // DB and JSONL are siblings for the same usage events. If the DB ever
+    // disappears (corrupted / wiped) and we fall back to JSONL in a later
+    // run, we must not re-read lines that the DB path already consumed.
+    // Advance the JSONL line cursor to the current file tail.
+    if (fssync.existsSync(resolvedJsonlPath)) {
+      const tailLineCount = countKiroJsonlLines(resolvedJsonlPath);
+      if (tailLineCount > nextJsonlLine) nextJsonlLine = tailLineCount;
+    }
   } else if (fssync.existsSync(resolvedJsonlPath)) {
     const jsonlResult = readKiroJsonlTokens(resolvedJsonlPath, lastJsonlLine);
     rows = jsonlResult.rows;
@@ -2916,10 +3012,13 @@ function resolveHermesDbPath() {
   return path.join(home, ".hermes", "state.db");
 }
 
-function readHermesSessions(dbPath, sinceEpoch) {
+function readHermesSessions(dbPath, lastCompletedEpoch) {
   if (!dbPath || !fssync.existsSync(dbPath)) return [];
-  const since = Number.isFinite(sinceEpoch) && sinceEpoch > 0 ? sinceEpoch : 0;
-  const sql = `SELECT id, model, started_at, ended_at, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, message_count FROM sessions WHERE started_at > ${since} AND (input_tokens > 0 OR output_tokens > 0 OR cache_read_tokens > 0 OR reasoning_tokens > 0) ORDER BY started_at ASC`;
+  const since = Number.isFinite(lastCompletedEpoch) && lastCompletedEpoch > 0 ? lastCompletedEpoch : 0;
+  // Fetch sessions that started after the cursor, OR sessions that are still
+  // in-progress (ended_at IS NULL).  Hermes updates token counts in real-time,
+  // so an active session keeps growing and must be re-read on every sync.
+  const sql = `SELECT id, model, started_at, ended_at, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, message_count FROM sessions WHERE (started_at > ${since} OR ended_at IS NULL) AND (input_tokens > 0 OR output_tokens > 0 OR cache_read_tokens > 0 OR reasoning_tokens > 0) ORDER BY started_at ASC`;
   let raw;
   try {
     raw = cp.execFileSync("sqlite3", ["-json", dbPath, sql], {
@@ -2943,17 +3042,25 @@ function readHermesSessions(dbPath, sinceEpoch) {
 async function parseHermesIncremental({ dbPath, cursors, queuePath, onProgress }) {
   await ensureDir(path.dirname(queuePath));
   const hermesState = cursors.hermes && typeof cursors.hermes === "object" ? cursors.hermes : {};
-  const lastStartedAt =
-    typeof hermesState.lastStartedAt === "number" ? hermesState.lastStartedAt : 0;
+
+  // Only advance past sessions that have fully ended.  Active sessions
+  // (ended_at IS NULL) must be re-read every sync because Hermes updates
+  // their token counts in real-time after each turn.
+  const lastCompletedStartedAt =
+    typeof hermesState.lastCompletedStartedAt === "number" ? hermesState.lastCompletedStartedAt : 0;
+
+  // Per-session snapshot from the previous sync: { [sessionId]: { in, out, cacheRead, cacheWrite, reasoning } }
+  const prevSnapshots = (hermesState.snapshots && typeof hermesState.snapshots === "object")
+    ? hermesState.snapshots : {};
 
   const resolvedDbPath = dbPath || resolveHermesDbPath();
   if (!fssync.existsSync(resolvedDbPath)) {
     return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
   }
 
-  const rows = readHermesSessions(resolvedDbPath, lastStartedAt);
+  const rows = readHermesSessions(resolvedDbPath, lastCompletedStartedAt);
   if (rows.length === 0) {
-    cursors.hermes = { ...hermesState, lastStartedAt, updatedAt: new Date().toISOString() };
+    cursors.hermes = { ...hermesState, lastCompletedStartedAt, updatedAt: new Date().toISOString() };
     return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
   }
 
@@ -2961,7 +3068,8 @@ async function parseHermesIncremental({ dbPath, cursors, queuePath, onProgress }
   const touchedBuckets = new Set();
   const cb = typeof onProgress === "function" ? onProgress : null;
   let eventsAggregated = 0;
-  let maxStartedAt = lastStartedAt;
+  let maxCompletedStartedAt = lastCompletedStartedAt;
+  const nextSnapshots = {};
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
@@ -2971,6 +3079,28 @@ async function parseHermesIncremental({ dbPath, cursors, queuePath, onProgress }
     const cacheWrite = toNonNegativeInt(row.cache_write_tokens);
     const reasoning = toNonNegativeInt(row.reasoning_tokens);
     if (inputTokens === 0 && outputTokens === 0 && cacheRead === 0 && reasoning === 0) continue;
+
+    // Save current snapshot for next sync
+    nextSnapshots[row.id] = { in: inputTokens, out: outputTokens, cacheRead, cacheWrite, reasoning };
+
+    // Compute delta from previous snapshot (if any) so that we only count
+    // new tokens since the last sync.  First time we see a session the
+    // previous snapshot is absent, so the full amount is the delta.
+    const prev = prevSnapshots[row.id];
+    let dInput = inputTokens;
+    let dOutput = outputTokens;
+    let dCacheRead = cacheRead;
+    let dCacheWrite = cacheWrite;
+    let dReasoning = reasoning;
+    if (prev) {
+      dInput = Math.max(0, inputTokens - (prev.in || 0));
+      dOutput = Math.max(0, outputTokens - (prev.out || 0));
+      dCacheRead = Math.max(0, cacheRead - (prev.cacheRead || 0));
+      dCacheWrite = Math.max(0, cacheWrite - (prev.cacheWrite || 0));
+      dReasoning = Math.max(0, reasoning - (prev.reasoning || 0));
+    }
+    // Skip if delta is zero (session unchanged since last sync)
+    if (dInput === 0 && dOutput === 0 && dCacheRead === 0 && dCacheWrite === 0 && dReasoning === 0) continue;
 
     // Prefer ended_at for bucket placement; fall back to started_at
     const epochSec = row.ended_at || row.started_at;
@@ -2982,12 +3112,12 @@ async function parseHermesIncremental({ dbPath, cursors, queuePath, onProgress }
     const model = normalizeModelInput(row.model) || "hermes-agent";
 
     const delta = {
-      input_tokens: inputTokens,
-      cached_input_tokens: cacheRead,
-      cache_creation_input_tokens: cacheWrite,
-      output_tokens: outputTokens,
-      reasoning_output_tokens: reasoning,
-      total_tokens: inputTokens + outputTokens + cacheRead + cacheWrite + reasoning,
+      input_tokens: dInput,
+      cached_input_tokens: dCacheRead,
+      cache_creation_input_tokens: dCacheWrite,
+      output_tokens: dOutput,
+      reasoning_output_tokens: dReasoning,
+      total_tokens: dInput + dOutput + dCacheRead + dCacheWrite + dReasoning,
       conversation_count: toNonNegativeInt(row.message_count) || 1,
     };
 
@@ -2996,7 +3126,10 @@ async function parseHermesIncremental({ dbPath, cursors, queuePath, onProgress }
     touchedBuckets.add(bucketKey("hermes", model, bucketStart));
     eventsAggregated++;
 
-    if (row.started_at > maxStartedAt) maxStartedAt = row.started_at;
+    // Only advance cursor past sessions that have ended
+    if (row.ended_at && row.started_at > maxCompletedStartedAt) {
+      maxCompletedStartedAt = row.started_at;
+    }
 
     if (cb) {
       cb({
@@ -3013,9 +3146,2991 @@ async function parseHermesIncremental({ dbPath, cursors, queuePath, onProgress }
   const updatedAt = new Date().toISOString();
   hourlyState.updatedAt = updatedAt;
   cursors.hourly = hourlyState;
-  cursors.hermes = { ...hermesState, lastStartedAt: maxStartedAt, updatedAt };
+  cursors.hermes = {
+    ...hermesState,
+    lastStartedAt: maxCompletedStartedAt, // keep for backward compat
+    lastCompletedStartedAt: maxCompletedStartedAt,
+    snapshots: nextSnapshots,
+    updatedAt,
+  };
 
   return { recordsProcessed: rows.length, eventsAggregated, bucketsQueued };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Kimi — passive JSONL reader (~/.kimi/sessions/**/wire.jsonl)
+// No hook installation needed; Kimi writes wire.jsonl automatically.
+
+function resolveKimiDefaultModel(env = process.env) {
+  const fallback = "kimi-for-coding";
+  try {
+    const home = env.HOME || require("node:os").homedir();
+    const cfgPath = path.join(env.KIMI_HOME || path.join(home, ".kimi"), "config.toml");
+    const raw = fssync.readFileSync(cfgPath, "utf8");
+    const defaultMatch = raw.match(/^\s*default_model\s*=\s*"([^"]+)"/m);
+    if (!defaultMatch) return fallback;
+    const sectionKey = defaultMatch[1];
+    const escaped = sectionKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const sectionRe = new RegExp(
+      `\\[models\\."${escaped}"\\]([\\s\\S]*?)(?:\\n\\[|$)`,
+    );
+    const section = raw.match(sectionRe);
+    if (section) {
+      const modelMatch = section[1].match(/^\s*model\s*=\s*"([^"]+)"/m);
+      if (modelMatch && modelMatch[1]) return modelMatch[1];
+    }
+    if (sectionKey.includes("/")) return sectionKey.split("/").pop();
+    return sectionKey || fallback;
+  } catch {
+    return fallback;
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Kiro CLI — reads historical conversation state from
+// ~/Library/Application Support/kiro-cli/data.sqlite3 (table conversations_v2).
+// Kiro CLI does NOT store explicit token counts locally. Each request row
+// carries: user_prompt_length (chars), response_size (chars), model_id,
+// request_start_timestamp_ms, message_id. We approximate tokens at 4 chars /
+// token. Source is merged with Kiro IDE (source='kiro') and canonicalized
+// model names are used so CLI and IDE rows collapse when they refer to the
+// same underlying Bedrock model. Cursor state is per-request-id so mutable
+// requests can be reprocessed (subtract-old/add-new on fingerprint change).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const KIRO_CLI_CHARS_PER_TOKEN = 4;
+
+function resolveKiroCliDbPath(env = process.env) {
+  if (env.KIRO_CLI_DB_PATH) return env.KIRO_CLI_DB_PATH;
+  const home = env.HOME || require("node:os").homedir();
+  return path.join(home, "Library", "Application Support", "kiro-cli", "data.sqlite3");
+}
+
+// Bug-4: canonical UUID shape — 8-4-4-4-12 hex groups. The looser
+// /^[0-9a-f-]{36}\.json$/ form accepted `36 hyphens`.json or 36 hex with
+// no hyphens. kiro-cli writes proper UUIDs; lock to the canonical shape.
+const KIRO_CLI_SESSION_FILE_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$/i;
+
+// Lists ~/.kiro/sessions/cli/{uuid}.json files. Includes files whose sibling
+// .lock is present — we read those as tail-only snapshots so a running
+// session's completed turns still land in the queue on the next sync. The
+// .json files are rewritten atomically by kiro-cli on each turn flush, so
+// a stale read just means we'll pick up the rest next time.
+//
+// TASK-014: env.HOME is honored (symmetric with resolveKiroCliDbPath) so
+// callers can redirect to a tmp home for hermetic tests/CI.
+function resolveKiroCliSessionFiles(env = process.env) {
+  const home = env.HOME || require("node:os").homedir();
+  const kiroHome = env.KIRO_HOME || path.join(home, ".kiro");
+  const sessionsDir = path.join(kiroHome, "sessions", "cli");
+  if (!fssync.existsSync(sessionsDir)) return [];
+  const files = [];
+  try {
+    for (const entry of fssync.readdirSync(sessionsDir)) {
+      // TASK-003: only canonical {uuid}.json files; backups, scratch,
+      // typos are skipped so they don't feed JSON.parse garbage.
+      if (!KIRO_CLI_SESSION_FILE_RE.test(entry)) continue;
+      files.push(path.join(sessionsDir, entry));
+    }
+  } catch {
+    // ignore read errors
+  }
+  return files;
+}
+
+// Build char-count maps from a .jsonl sibling file. Lets us approximate
+// per-turn tokens when the live session's input_token_count /
+// output_token_count fields are 0 (kiro-cli does not persist real token
+// counts; billing is credit-based).
+//
+// Returns:
+//   byMessage:       message_id -> assistant+toolUse char count
+//   messageKind:     message_id -> jsonl event kind
+//   turnPromptChars: turn_index -> input chars attributed to that turn
+//
+// Input attribution: Kiro CLI's turn.message_ids only records
+// AssistantMessage / ToolResults ids, NEVER the user Prompt id. So the
+// Prompt event is invisible if you look it up by message_id. To recover
+// the per-turn user input, we walk the jsonl in timestamp order and buffer
+// Prompt chars until the next AssistantMessage that belongs to a turn
+// (turnMessageIds provides that mapping). The first such AssistantMessage
+// "claims" the buffered Prompt chars for its turn, and the buffer resets.
+// Later cycles within the same turn (Assistant → ToolResults → Assistant)
+// do not re-attribute.
+async function readKiroCliMessageChars(jsonlPath, turnMessageIds) {
+  const result = {
+    byMessage: new Map(),
+    messageKind: new Map(),
+    turnPromptChars: new Map(),
+  };
+  if (!jsonlPath || !fssync.existsSync(jsonlPath)) return result;
+  // TASK-005: stream via readline so multi-MB .jsonl files (heavy tool-use
+  // sessions) don't block the sync event loop by buffering whole-file.
+  let stream;
+  try {
+    stream = fssync.createReadStream(jsonlPath, { encoding: "utf8" });
+  } catch {
+    return result;
+  }
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  const midToTurn =
+    turnMessageIds instanceof Map ? turnMessageIds : new Map();
+  const attributedTurns = new Set();
+  let pendingPromptChars = 0;
+  // Bug-5: wrap the streamed iteration. Mid-read errors (file deleted or
+  // truncated while kiro-cli is writing) would otherwise propagate up and
+  // crash the whole sync pass. On error we return the partial result and
+  // let the next sync re-read fresh.
+  try {
+    for await (const line of rl) {
+      if (!line || !line.trim()) continue;
+      let evt;
+      try {
+        evt = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const data = evt && evt.data;
+      if (!data || typeof data !== "object") continue;
+      const mid = data.message_id;
+      if (!mid) continue;
+      const content = Array.isArray(data.content) ? data.content : [];
+      let chars = 0;
+      for (const c of content) {
+        if (!c || typeof c !== "object") continue;
+        if (c.kind === "text" && typeof c.data === "string") {
+          chars += c.data.length;
+        } else if (c.kind === "toolUse" && c.data && typeof c.data === "object") {
+          try {
+            chars += JSON.stringify(c.data.input || {}).length;
+          } catch {
+            // ignore
+          }
+        }
+      }
+      result.byMessage.set(mid, (result.byMessage.get(mid) || 0) + chars);
+      if (!result.messageKind.has(mid)) result.messageKind.set(mid, evt.kind);
+
+      if (evt.kind === "Prompt") {
+        pendingPromptChars += chars;
+      } else if (evt.kind === "AssistantMessage" && midToTurn.has(mid)) {
+        const turnIdx = midToTurn.get(mid);
+        if (!attributedTurns.has(turnIdx)) {
+          result.turnPromptChars.set(turnIdx, pendingPromptChars);
+          attributedTurns.add(turnIdx);
+          pendingPromptChars = 0;
+        }
+      }
+    }
+  } catch {
+    // partial data — return what we have.
+  }
+  return result;
+}
+
+// Extract flat per-turn records from a live session .json + its .jsonl
+// sibling. Returns [{ request_id, model_id, request_start_timestamp_ms,
+// input_tokens, output_tokens }]. We use the same request_id dedup slot as
+// the SQLite path so mutations (turn rewritten on next flush) go through
+// the subtract-old/add-new path in parseKiroCliIncremental.
+async function readKiroCliSessionTurns(jsonPath) {
+  if (!jsonPath || !fssync.existsSync(jsonPath)) return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(fssync.readFileSync(jsonPath, "utf8"));
+  } catch {
+    return [];
+  }
+  if (!parsed || typeof parsed !== "object") return [];
+  const turns = Array.isArray(
+    parsed?.session_state?.conversation_metadata?.user_turn_metadatas,
+  )
+    ? parsed.session_state.conversation_metadata.user_turn_metadatas
+    : [];
+  if (turns.length === 0) return [];
+
+  const modelInfo = parsed?.session_state?.rts_model_state?.model_info || null;
+  const sessionModelId =
+    (modelInfo && (modelInfo.model_id || modelInfo.model_name)) || null;
+  const sessionId =
+    typeof parsed.session_id === "string" ? parsed.session_id : path.basename(jsonPath, ".json");
+
+  // Build turn_index -> Set(message_id) so the jsonl walker can attribute
+  // orphaned Prompt events (not referenced by turn.message_ids) to the
+  // right turn. The turn.message_ids list only contains AssistantMessage
+  // and ToolResults ids; Prompt ids appear in the jsonl stream only.
+  const turnMessageIds = new Map();
+  for (let i = 0; i < turns.length; i++) {
+    const t = turns[i];
+    if (!t || !Array.isArray(t.message_ids)) continue;
+    for (const mid of t.message_ids) {
+      if (typeof mid === "string" && mid) turnMessageIds.set(mid, i);
+    }
+  }
+
+  // Load sibling .jsonl for char-count fallback.
+  const jsonlPath = jsonPath.replace(/\.json$/, ".jsonl");
+  const charMap = await readKiroCliMessageChars(jsonlPath, turnMessageIds);
+
+  const flat = [];
+  for (let turnIdx = 0; turnIdx < turns.length; turnIdx++) {
+    const turn = turns[turnIdx];
+    if (!turn || typeof turn !== "object") continue;
+    // TASK-001: preserve the integer 0. `|| null` would coerce a valid
+    // loop_id.rand=0 into a message_id fallback, splitting the dedup
+    // namespace across runs that see 0 vs runs that don't.
+    const loopRand =
+      turn.loop_id && typeof turn.loop_id === "object"
+        ? turn.loop_id.rand ?? turn.loop_id.seed ?? null
+        : null;
+    const messageIds = Array.isArray(turn.message_ids) ? turn.message_ids : [];
+    const requestId = loopRand != null ? `${sessionId}:${loopRand}` : (messageIds[0] || null);
+    if (!requestId) continue;
+
+    // Prefer real token counts if kiro-cli populated them.
+    let inputTokens = toNonNegativeInt(turn.input_token_count);
+    let outputTokens = toNonNegativeInt(turn.output_token_count);
+
+    if (inputTokens === 0 && outputTokens === 0) {
+      // Fall back to char-count approximation. Input chars come from the
+      // sequential Prompt attribution (see readKiroCliMessageChars);
+      // output chars come from AssistantMessage+toolUse bodies referenced
+      // by turn.message_ids.
+      const promptChars = charMap.turnPromptChars.get(turnIdx) || 0;
+      let assistantChars = 0;
+      for (const mid of messageIds) {
+        const chars = charMap.byMessage.get(mid) || 0;
+        const kind = charMap.messageKind.get(mid);
+        if (kind === "AssistantMessage") assistantChars += chars;
+      }
+      inputTokens = Math.floor(promptChars / KIRO_CLI_CHARS_PER_TOKEN);
+      outputTokens = Math.floor(assistantChars / KIRO_CLI_CHARS_PER_TOKEN);
+    }
+
+    // TASK-006: timestamp precedence matches SQLite's
+    // request_start_timestamp_ms so a turn that migrates SQLite ↔
+    // session-file buckets identically across tiers (previously a turn
+    // straddling a half-hour boundary bucketed differently per source
+    // because session files use end_timestamp while SQLite uses start).
+    //   1. turn.request_start_timestamp_ms   (numeric ms, SQLite shape)
+    //   2. turn.start_timestamp              (ISO string)
+    //   3. turn.end_timestamp                (ISO string, legacy fallback)
+    let tsMs = NaN;
+    if (Number.isFinite(Number(turn.request_start_timestamp_ms))) {
+      tsMs = Number(turn.request_start_timestamp_ms);
+    } else if (turn.start_timestamp) {
+      tsMs = Date.parse(turn.start_timestamp);
+    } else if (turn.end_timestamp) {
+      tsMs = Date.parse(turn.end_timestamp);
+    }
+    if (!Number.isFinite(tsMs) || tsMs <= 0) continue;
+
+    flat.push({
+      request_id: requestId,
+      session_model_id: sessionModelId,
+      message_id: messageIds[0] || null,
+      // Turn-granular migration match: surface the full list so the
+      // cross-source retraction in parseKiroCliIncremental can drop this
+      // specific turn iff any of its assistant/tool_result message_ids
+      // appears in SQLite. Session-level matching over-retracts newer
+      // turns in an active session whose older turns have already
+      // flushed to SQLite.
+      all_message_ids: messageIds.slice(),
+      model_id: turn.model_id || sessionModelId,
+      request_start_timestamp_ms: tsMs,
+      // D-1 / Bug-2: tag with session_id so the retraction pass can match
+      // session-origin entries even when the requestId format has no
+      // colon (no-loop_id fallback uses a bare message_id UUID that would
+      // otherwise be indistinguishable from SQLite's UUID keys).
+      session_id: sessionId,
+      // For the parser, we feed the ALREADY-approximated tokens directly via
+      // a special sentinel field. The parser will divide chars by
+      // KIRO_CLI_CHARS_PER_TOKEN; bypass that by pre-multiplying here.
+      user_prompt_length: inputTokens * KIRO_CLI_CHARS_PER_TOKEN,
+      response_size: outputTokens * KIRO_CLI_CHARS_PER_TOKEN,
+    });
+  }
+  return flat;
+}
+
+// Canonicalize a Kiro-CLI-emitted model id so IDE and CLI rows collapse when
+// they refer to the same underlying Bedrock model. Examples:
+//   anthropic.claude-sonnet-4-20250514-v1:0  -> claude-sonnet-4
+//   claude-opus-4.6                           -> claude-opus-4.6
+//   claude-sonnet-4.5                         -> claude-sonnet-4.5
+//   auto                                      -> null (caller uses 'kiro-cli-agent')
+//   <unknown/falsy>                           -> null (caller falls back to 'kiro-cli-agent')
+//
+// "auto" is treated as unknown because Kiro CLI's auto-routing does not
+// expose the underlying Bedrock model id in the session file. Returning
+// null lets pricing fall into the kiro-cli-agent bucket (sonnet-4 rates)
+// rather than the literal "auto" string which matches Cursor's composer-1
+// pricing by accident.
+function canonicalizeKiroCliModelId(raw) {
+  if (!raw || typeof raw !== "string") return null;
+  let name = raw.trim();
+  if (!name) return null;
+  name = name.toLowerCase();
+  if (name === "auto") return null;
+  // Strip provider prefix (anthropic., aws., openai., or a full Bedrock ARN).
+  name = name.replace(
+    /^(?:arn:aws:bedrock:[^:]*:[^:]*:(?:foundation-model\/)?|anthropic\.|openai\.|aws\.)/,
+    "",
+  );
+  // Strip Bedrock revision suffix `:N`.
+  name = name.replace(/:\d+$/, "");
+  // Strip date + vN suffix (e.g. "-20250514-v1"), or lone "-vN", or lone date.
+  name = name.replace(/-\d{8}-v\d+$/i, "");
+  name = name.replace(/-v\d+$/i, "");
+  name = name.replace(/-\d{8}$/, "");
+  // Strip trailing ".v1" or similar Anthropic-on-Bedrock tails if present.
+  name = name.replace(/\.v\d+$/i, "");
+  return name || null;
+}
+
+// Read Kiro CLI requests using SQL-side json_extract so we don't pull the
+// full (93 MB-ish) conversations_v2 blob back through sqlite3 -json.
+//
+// D-1: also surfaces `user_turn_metadata.continuation_id` so the cross-
+// source retraction pass (parseKiroCliIncremental) can match whichever
+// UUID kiro-cli used as the session link. The SQL column
+// `conversation_id` and the inner JSON `continuation_id` are different
+// UUIDs on observed data; covering both means retraction fires whichever
+// side matches the live session's `session_id`.
+function readKiroCliRequests(dbPath, env = process.env) {
+  if (!dbPath || !fssync.existsSync(dbPath)) return [];
+  let raw;
+  try {
+    raw = cp.execFileSync(
+      "sqlite3",
+      [
+        "-json",
+        dbPath,
+        "SELECT conversation_id, " +
+          "json_extract(value, '$.model_info.model_id') AS session_model_id, " +
+          "json_extract(value, '$.user_turn_metadata.continuation_id') AS continuation_id, " +
+          "json_extract(value, '$.user_turn_metadata.requests') AS requests_json " +
+          "FROM conversations_v2 " +
+          "WHERE json_extract(value, '$.user_turn_metadata.requests') IS NOT NULL",
+      ],
+      { encoding: "utf8", maxBuffer: 128 * 1024 * 1024, timeout: 120_000 },
+    );
+  } catch (err) {
+    // TASK-012 / D-8: debug-gated stderr log so a missing sqlite3 binary
+    // is distinguishable from an empty DB. Silent by default. env is
+    // threaded so tests can toggle debug hermetically.
+    const dbg = String((env && env.TOKENTRACKER_DEBUG) || "").toLowerCase();
+    if (dbg === "1" || dbg === "true") {
+      process.stderr.write(
+        `[kiro-cli] sqlite3 read failed: ${err?.message || err}\n`,
+      );
+    }
+    return [];
+  }
+  if (!raw || !raw.trim()) return [];
+  let rows;
+  try {
+    rows = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(rows)) return [];
+  const flat = [];
+  for (const row of rows) {
+    let requests;
+    try {
+      requests = JSON.parse(row.requests_json || "[]");
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(requests)) continue;
+    for (const r of requests) {
+      if (!r || typeof r !== "object") continue;
+      flat.push({
+        conversation_id: row.conversation_id,
+        continuation_id: row.continuation_id || null,
+        session_model_id: row.session_model_id || null,
+        request_id: r.request_id || null,
+        message_id: r.message_id || null,
+        user_prompt_length: r.user_prompt_length,
+        response_size: r.response_size,
+        model_id: r.model_id || null,
+        request_start_timestamp_ms: r.request_start_timestamp_ms,
+      });
+    }
+  }
+  return flat;
+}
+
+async function parseKiroCliIncremental({ sessionFiles, cursors, queuePath, onProgress, env } = {}) {
+  await ensureDir(path.dirname(queuePath));
+  const kiroCliState =
+    cursors.kiroCli && typeof cursors.kiroCli === "object" ? cursors.kiroCli : {};
+  const seenIds = new Set(Array.isArray(kiroCliState.seenIds) ? kiroCliState.seenIds : []);
+
+  // Back-compat branch: if caller explicitly passes sessionFiles (an array of
+  // per-session .json paths, the old contract used in tests/fixtures), read
+  // them as user_turn_metadatas. New default path below reads the SQLite DB.
+  if (Array.isArray(sessionFiles)) {
+    return parseKiroCliFromSessionFiles({
+      sessionFiles,
+      cursors,
+      queuePath,
+      onProgress,
+      env,
+      kiroCliState,
+      seenIds,
+    });
+  }
+
+  const resolvedEnv = env || process.env;
+  const dbPath = resolveKiroCliDbPath(resolvedEnv);
+
+  // Combine two sources under the same (source='kiro', cursors.kiroCli)
+  // namespace: historical rows from the SQLite DB plus live session state
+  // from ~/.kiro/sessions/cli/{uuid}.json (covers turns from a running
+  // session that hasn't flushed to SQLite yet). Request ID shapes differ:
+  // SQLite carries a persisted request_id UUID; session files synthesize
+  // `${sessionId}:${loop_id.rand}`. When kiro-cli migrates a live session
+  // into SQLite the same turn lands under a new request_id — the cross-
+  // source retraction pass below (D-1 + TASK-007) matches session_id ↔
+  // SQLite conversation_id OR continuation_id to subtract the orphan
+  // session-file cursor entry before the new SQLite row is processed.
+  const flatDb = fssync.existsSync(dbPath)
+    ? readKiroCliRequests(dbPath, resolvedEnv)
+    : [];
+  const sessionFilesList = resolveKiroCliSessionFiles(resolvedEnv);
+  let flatSessions = [];
+  for (const jsonPath of sessionFilesList) {
+    const turns = await readKiroCliSessionTurns(jsonPath);
+    for (const turn of turns) flatSessions.push(turn);
+  }
+  // Per-request state replaces the old seenIds set. Each entry captures
+  // what we contributed for that request_id last time, so a later mutation
+  // (same request_id, different fingerprint) can subtract-old/add-new
+  // instead of being skipped forever.
+  const requestState =
+    kiroCliState.requests && typeof kiroCliState.requests === "object"
+      ? { ...kiroCliState.requests }
+      : {};
+
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const touchedBuckets = new Set();
+  const debugEnabled = ["1", "true"].includes(
+    String(resolvedEnv.TOKENTRACKER_DEBUG || "").toLowerCase(),
+  );
+
+  // ── TASK-007 + D-1: cross-source retraction. When a conversation has
+  //    migrated from the session-file tier into SQLite, the cursor's
+  //    prior session-file entry (keyed `${sessionId}:${loopRand}` OR a
+  //    bare message_id UUID when loop_id is absent) never matches the
+  //    new SQLite request_id. Without retraction the old contribution
+  //    stays in the bucket absolute and the new SQLite row is added on
+  //    top — permanent double-count. D-6: typed non-empty check so a
+  //    corrupt NULL/empty conv_id can't poison the match set.
+  //
+  // Two match sets are built:
+  //   • migratedConvIds  — session_id → any row in SQLite. Used to scope
+  //                        cursor retraction (coarse but safe because
+  //                        un-migrated turns still present in the session
+  //                        file are re-added later in this same run).
+  //   • migratedMsgIds   — r.message_id → exact turn in SQLite. Used to
+  //                        filter flatSessions at TURN granularity. An
+  //                        active session with older migrated turns +
+  //                        newer session-file-only turns must keep the
+  //                        newer turns; session-level filtering dropped
+  //                        them and caused Kiro CLI under-count.
+  const migratedConvIds = new Set();
+  const migratedMsgIds = new Set();
+  for (const row of flatDb) {
+    if (!row) continue;
+    if (typeof row.conversation_id === "string" && row.conversation_id)
+      migratedConvIds.add(row.conversation_id);
+    if (typeof row.continuation_id === "string" && row.continuation_id)
+      migratedConvIds.add(row.continuation_id);
+    if (typeof row.message_id === "string" && row.message_id)
+      migratedMsgIds.add(row.message_id);
+  }
+  if (migratedConvIds.size > 0) {
+    // Pre-collect to retract so mutation during iteration is safe.
+    // Retraction stays session-level: for every cursor entry whose
+    // session_id has any row in SQLite, subtract its prior contribution.
+    // This is provably correct because turns still live in the session
+    // file get re-added in this same run via the (turn-granular) filter
+    // below, producing a net delta of zero for un-migrated turns.
+    const toRetract = [];
+    for (const [reqId, prev] of Object.entries(requestState)) {
+      if (!prev || typeof prev !== "object") continue;
+      // Bug-2: prefer the stored session_id tag (new schema); fall back
+      // to colon-split for legacy cursors pre-dating this change.
+      let sid = null;
+      if (typeof prev.session_id === "string" && prev.session_id) {
+        sid = prev.session_id;
+      } else {
+        const colon = reqId.indexOf(":");
+        if (colon > 0) sid = reqId.slice(0, colon);
+      }
+      if (!sid || !migratedConvIds.has(sid)) continue;
+      toRetract.push([reqId, prev, sid]);
+    }
+    for (const [reqId, prev, sid] of toRetract) {
+      if (prev.input_tokens || prev.output_tokens) {
+        const prevBucket = getHourlyBucket(
+          hourlyState,
+          "kiro",
+          prev.model,
+          prev.bucketStart,
+        );
+        addTotals(prevBucket.totals, {
+          input_tokens: -prev.input_tokens,
+          cached_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+          output_tokens: -prev.output_tokens,
+          reasoning_output_tokens: 0,
+          total_tokens: -(prev.input_tokens + prev.output_tokens),
+          conversation_count: -1,
+        });
+        touchedBuckets.add(bucketKey("kiro", prev.model, prev.bucketStart));
+      }
+      delete requestState[reqId];
+      if (debugEnabled) {
+        process.stderr.write(
+          `[kiro-cli] retracted migrated session entry (conv ${sid})\n`,
+        );
+      }
+    }
+    // Turn-granular filter: drop a session-file turn only when at least
+    // one of its assistant/tool_result message_ids is present in SQLite
+    // (i.e. this specific turn has been flushed). Newer turns in the
+    // same session that haven't yet landed in SQLite survive.
+    //
+    // Edge: a turn with no message_ids at all cannot be matched. We keep
+    // it — preferring a rare potential double-count (narrow, since such
+    // a turn would also have no request_id under the no-loop_id path and
+    // be discarded upstream) over the reported regression of dropping
+    // legitimate newer turns wholesale. D-14: still O(N) single-pass.
+    const before = flatSessions.length;
+    flatSessions = flatSessions.filter((s) => {
+      if (!s) return false;
+      const mids = Array.isArray(s.all_message_ids)
+        ? s.all_message_ids
+        : s.message_id
+        ? [s.message_id]
+        : [];
+      for (const mid of mids) {
+        if (typeof mid === "string" && mid && migratedMsgIds.has(mid)) {
+          return false;
+        }
+      }
+      return true;
+    });
+    if (debugEnabled && flatSessions.length !== before) {
+      process.stderr.write(
+        `[kiro-cli] dropped ${before - flatSessions.length} migrated session-file turn(s)\n`,
+      );
+    }
+  }
+
+  const flat = flatDb.concat(flatSessions);
+
+  if (flat.length === 0) {
+    // Bug-1: retraction may have touched buckets even with empty flat.
+    // Clamp + cap BEFORE flushing so the early-return path applies the
+    // same guarantees as the main path (fixes a skip that flushed
+    // negative conversation_counts and left the cap unapplied).
+    const cappedEarly = clampAndCapKiroCliState({
+      requestState,
+      hourlyState,
+      touchedBuckets,
+    });
+    const bucketsQueued = await enqueueTouchedBuckets({
+      queuePath,
+      hourlyState,
+      touchedBuckets,
+    });
+    const updatedAt = new Date().toISOString();
+    hourlyState.updatedAt = updatedAt;
+    cursors.hourly = hourlyState;
+    cursors.kiroCli = { ...kiroCliState, requests: cappedEarly, updatedAt };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued };
+  }
+  const cb = typeof onProgress === "function" ? onProgress : null;
+  let recordsProcessed = 0;
+  let eventsAggregated = 0;
+
+  for (let i = 0; i < flat.length; i++) {
+    const r = flat[i];
+    recordsProcessed++;
+
+    const requestId = r.request_id || r.message_id;
+    if (!requestId) continue;
+
+    const promptChars = toNonNegativeInt(r.user_prompt_length);
+    const responseChars = toNonNegativeInt(r.response_size);
+    const approxInput = Math.floor(promptChars / KIRO_CLI_CHARS_PER_TOKEN);
+    const approxOutput = Math.floor(responseChars / KIRO_CLI_CHARS_PER_TOKEN);
+
+    const tsMs = Number(r.request_start_timestamp_ms);
+    if (!Number.isFinite(tsMs) || tsMs <= 0) continue;
+    const bucketStart = toUtcHalfHourStart(new Date(tsMs).toISOString());
+    if (!bucketStart) continue;
+
+    const rawModel = r.model_id || r.session_model_id;
+    const canonical = canonicalizeKiroCliModelId(rawModel);
+    const model = canonical || "kiro-cli-agent";
+
+    // Fingerprint captures every field whose change should cause a re-bucket.
+    const fingerprint = `${promptChars}:${responseChars}:${model}:${tsMs}`;
+    const prev = requestState[requestId];
+    if (prev && prev.fingerprint === fingerprint) continue; // unchanged
+
+    // Subtract the prior contribution (if any) from its prior bucket so the
+    // bucket's absolute totals reflect the CURRENT truth, not the historical
+    // truth. enqueueTouchedBuckets will emit the net delta at flush time.
+    if (prev && (prev.input_tokens || prev.output_tokens)) {
+      const prevBucket = getHourlyBucket(hourlyState, "kiro", prev.model, prev.bucketStart);
+      addTotals(prevBucket.totals, {
+        input_tokens: -prev.input_tokens,
+        cached_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        output_tokens: -prev.output_tokens,
+        reasoning_output_tokens: 0,
+        total_tokens: -(prev.input_tokens + prev.output_tokens),
+        conversation_count: -1,
+      });
+      touchedBuckets.add(bucketKey("kiro", prev.model, prev.bucketStart));
+    }
+
+    // Add the new contribution.
+    if (approxInput > 0 || approxOutput > 0) {
+      const bucket = getHourlyBucket(hourlyState, "kiro", model, bucketStart);
+      addTotals(bucket.totals, {
+        input_tokens: approxInput,
+        cached_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        output_tokens: approxOutput,
+        reasoning_output_tokens: 0,
+        total_tokens: approxInput + approxOutput,
+        conversation_count: 1,
+      });
+      touchedBuckets.add(bucketKey("kiro", model, bucketStart));
+      eventsAggregated++;
+    }
+
+    // Always record the cursor entry (even for zero-token requests) so we
+    // don't re-count later if Kiro rewrites this request with real data.
+    // Bug-2: tag session-origin entries with session_id so the retraction
+    // pass can identify them regardless of request_id format (the
+    // no-loop_id fallback produces a bare UUID with no colon, which would
+    // otherwise be indistinguishable from SQLite's UUID keys).
+    requestState[requestId] = {
+      fingerprint,
+      bucketStart,
+      model,
+      input_tokens: approxInput,
+      output_tokens: approxOutput,
+      ...(r.session_id ? { session_id: r.session_id } : {}),
+    };
+
+    if (cb && i % 50 === 0) {
+      cb({
+        index: i + 1,
+        total: flat.length,
+        recordsProcessed,
+        eventsAggregated,
+        bucketsQueued: touchedBuckets.size,
+      });
+    }
+  }
+
+  const cappedState = clampAndCapKiroCliState({
+    requestState,
+    hourlyState,
+    touchedBuckets,
+  });
+
+  const bucketsQueued = await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets });
+  const updatedAt = new Date().toISOString();
+  hourlyState.updatedAt = updatedAt;
+  cursors.hourly = hourlyState;
+  cursors.kiroCli = { ...kiroCliState, requests: cappedState, updatedAt };
+
+  return { recordsProcessed, eventsAggregated, bucketsQueued };
+}
+
+// TASK-004 + TASK-010 + Bug-1: shared end-of-run clamp + cap for
+// parseKiroCliIncremental. Centralized so the main path AND the
+// retraction-only early-return path both apply the same guarantees.
+// Mutates hourlyState bucket totals in place (clamp) and returns a new
+// capped requestState object (cap).
+const KIRO_CLI_CURSOR_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
+const KIRO_CLI_CURSOR_MAX_ENTRIES = 20_000;
+
+function clampAndCapKiroCliState({ requestState, hourlyState, touchedBuckets }) {
+  // TASK-010: clamp conversation_count to >= 0 on Kiro-touched buckets
+  // only. The shared enqueueTouchedBuckets is left untouched so
+  // legitimate negatives from the 10 other parsers are not masked. Kiro
+  // negatives come from the subtract-old pass on mutation or retraction.
+  for (const key of touchedBuckets) {
+    const bucket = hourlyState.buckets && hourlyState.buckets[key];
+    if (bucket && bucket.totals && bucket.totals.conversation_count < 0) {
+      bucket.totals.conversation_count = 0;
+    }
+  }
+  // TASK-004: cap cursors.kiroCli.requests by age + count. Runs LAST so
+  // nothing active or just-retracted is pruned mid-flight.
+  const ageCutoffMs = Date.now() - KIRO_CLI_CURSOR_MAX_AGE_MS;
+  const cappedEntries = [];
+  for (const [reqId, entry] of Object.entries(requestState)) {
+    if (!entry || typeof entry !== "object") continue;
+    const ts = entry.bucketStart ? Date.parse(entry.bucketStart) : NaN;
+    if (!Number.isFinite(ts) || ts < ageCutoffMs) continue;
+    cappedEntries.push([reqId, entry, ts]);
+  }
+  if (cappedEntries.length > KIRO_CLI_CURSOR_MAX_ENTRIES) {
+    cappedEntries.sort((a, b) => b[2] - a[2]); // newest first
+    cappedEntries.length = KIRO_CLI_CURSOR_MAX_ENTRIES;
+  }
+  const capped = {};
+  for (const [reqId, entry] of cappedEntries) capped[reqId] = entry;
+  return capped;
+}
+
+// Back-compat path: per-session .json files (the old fixture shape). Emits
+// exact tokens if the fixture happens to carry them (which the test fixture
+// does). Used only by the test/rollout-parser.test.js fixture tests.
+async function parseKiroCliFromSessionFiles({
+  sessionFiles,
+  cursors,
+  queuePath,
+  onProgress,
+  env,
+  kiroCliState,
+  seenIds,
+}) {
+  const fileOffsets =
+    kiroCliState.fileOffsets && typeof kiroCliState.fileOffsets === "object"
+      ? { ...kiroCliState.fileOffsets }
+      : {};
+  if (sessionFiles.length === 0) {
+    cursors.kiroCli = {
+      ...kiroCliState,
+      seenIds: Array.from(seenIds),
+      fileOffsets,
+      updatedAt: new Date().toISOString(),
+    };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
+
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const touchedBuckets = new Set();
+  const cb = typeof onProgress === "function" ? onProgress : null;
+  let recordsProcessed = 0;
+  let eventsAggregated = 0;
+
+  for (let fileIdx = 0; fileIdx < sessionFiles.length; fileIdx++) {
+    const filePath = sessionFiles[fileIdx];
+    let stat;
+    try {
+      stat = fssync.statSync(filePath);
+    } catch {
+      continue;
+    }
+
+    const prevEntry = fileOffsets[filePath] || {};
+    const prevMtime = Number(prevEntry.mtimeMs) || 0;
+    const prevLastIndex = Number.isFinite(Number(prevEntry.lastIndex))
+      ? Number(prevEntry.lastIndex)
+      : -1;
+    if (prevMtime && stat.mtimeMs <= prevMtime) continue;
+
+    let parsed;
+    try {
+      parsed = JSON.parse(fssync.readFileSync(filePath, "utf8"));
+    } catch {
+      continue;
+    }
+    if (!parsed || typeof parsed !== "object") continue;
+
+    const turns = Array.isArray(
+      parsed?.session_state?.conversation_metadata?.user_turn_metadatas,
+    )
+      ? parsed.session_state.conversation_metadata.user_turn_metadatas
+      : [];
+    const sessionId = typeof parsed.session_id === "string" ? parsed.session_id : filePath;
+    const sessionModelId =
+      (parsed?.session_state?.rts_model_state?.model_info &&
+        (parsed.session_state.rts_model_state.model_info.model_id ||
+          parsed.session_state.rts_model_state.model_info.modelId)) ||
+      null;
+
+    let maxIndex = prevLastIndex;
+    for (let i = 0; i < turns.length; i++) {
+      if (i <= prevLastIndex) continue;
+      const turn = turns[i];
+      if (!turn || typeof turn !== "object") continue;
+      recordsProcessed++;
+
+      const input = toNonNegativeInt(turn.input_tokens);
+      const output = toNonNegativeInt(turn.output_tokens);
+      const cacheRead = toNonNegativeInt(
+        turn.cache_read_input_tokens ?? turn.cached_input_tokens,
+      );
+      const cacheCreation = toNonNegativeInt(
+        turn.cache_creation_input_tokens ?? turn.cache_write_input_tokens,
+      );
+      const reasoning = toNonNegativeInt(turn.reasoning_output_tokens);
+      if (input === 0 && output === 0 && cacheRead === 0 && cacheCreation === 0) {
+        maxIndex = i;
+        continue;
+      }
+
+      const ts = turn.timestamp || turn.created_at || turn.updated_at;
+      if (!ts) continue;
+      const bucketStart = toUtcHalfHourStart(ts);
+      if (!bucketStart) continue;
+
+      const turnMessageId =
+        typeof turn.message_id === "string" && turn.message_id ? turn.message_id : null;
+      const dedupKey = turnMessageId ? `${sessionId}:${turnMessageId}` : null;
+      if (dedupKey && seenIds.has(dedupKey)) {
+        maxIndex = i;
+        continue;
+      }
+
+      const rawModel =
+        turn.model_id ||
+        turn.modelId ||
+        (turn.model_info && (turn.model_info.model_id || turn.model_info.modelId)) ||
+        sessionModelId;
+      const normalized = rawModel ? normalizeKiroModelName(rawModel) : null;
+      const model = normalized || "kiro-cli-agent";
+
+      const delta = {
+        input_tokens: input,
+        cached_input_tokens: cacheRead,
+        cache_creation_input_tokens: cacheCreation,
+        output_tokens: output,
+        reasoning_output_tokens: reasoning,
+        total_tokens: input + output + cacheRead + cacheCreation + reasoning,
+        conversation_count: 1,
+      };
+
+      const bucket = getHourlyBucket(hourlyState, "kiro", model, bucketStart);
+      addTotals(bucket.totals, delta);
+      touchedBuckets.add(bucketKey("kiro", model, bucketStart));
+      if (dedupKey) seenIds.add(dedupKey);
+      maxIndex = i;
+      eventsAggregated++;
+
+      if (cb) {
+        cb({
+          index: fileIdx + 1,
+          total: sessionFiles.length,
+          recordsProcessed,
+          eventsAggregated,
+          bucketsQueued: touchedBuckets.size,
+        });
+      }
+    }
+
+    fileOffsets[filePath] = {
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      lastIndex: maxIndex,
+    };
+  }
+
+  const seenArr = Array.from(seenIds);
+  const cappedSeen = seenArr.length > 10_000 ? seenArr.slice(seenArr.length - 10_000) : seenArr;
+
+  const bucketsQueued = await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets });
+  const updatedAt = new Date().toISOString();
+  hourlyState.updatedAt = updatedAt;
+  cursors.hourly = hourlyState;
+  cursors.kiroCli = { ...kiroCliState, seenIds: cappedSeen, fileOffsets, updatedAt };
+
+  return { recordsProcessed, eventsAggregated, bucketsQueued };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+function resolveKimiWireFiles(env = process.env) {
+  const home = require("node:os").homedir();
+  const kimiHome = env.KIMI_HOME || path.join(home, ".kimi");
+  const sessionsDir = path.join(kimiHome, "sessions");
+  if (!fssync.existsSync(sessionsDir)) return [];
+  const files = [];
+  try {
+    for (const ws of fssync.readdirSync(sessionsDir)) {
+      const wsDir = path.join(sessionsDir, ws);
+      let wsStat;
+      try { wsStat = fssync.statSync(wsDir); } catch { continue; }
+      if (!wsStat.isDirectory()) continue;
+      for (const sess of fssync.readdirSync(wsDir)) {
+        const wireFile = path.join(wsDir, sess, "wire.jsonl");
+        if (fssync.existsSync(wireFile)) files.push(wireFile);
+      }
+    }
+  } catch { /* ignore */ }
+  return files;
+}
+
+async function parseKimiIncremental({ wireFiles, cursors, queuePath, onProgress, env, model } = {}) {
+  await ensureDir(path.dirname(queuePath));
+  const kimiState = cursors.kimi && typeof cursors.kimi === "object" ? cursors.kimi : {};
+  const seenIds = new Set(Array.isArray(kimiState.seenIds) ? kimiState.seenIds : []);
+  const fileOffsets =
+    kimiState.fileOffsets && typeof kimiState.fileOffsets === "object"
+      ? { ...kimiState.fileOffsets }
+      : {};
+
+  const files = Array.isArray(wireFiles)
+    ? wireFiles
+    : resolveKimiWireFiles(env || process.env);
+  const kimiModel = model || resolveKimiDefaultModel(env || process.env);
+  if (files.length === 0) {
+    cursors.kimi = { ...kimiState, seenIds: Array.from(seenIds), fileOffsets, updatedAt: new Date().toISOString() };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
+
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const touchedBuckets = new Set();
+  const cb = typeof onProgress === "function" ? onProgress : null;
+  let recordsProcessed = 0;
+  let eventsAggregated = 0;
+
+  for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+    const filePath = files[fileIdx];
+    let stat;
+    try { stat = fssync.statSync(filePath); } catch { continue; }
+
+    const prevEntry = fileOffsets[filePath] || {};
+    const prevSize = Number(prevEntry.size) || 0;
+    const prevIno = prevEntry.ino;
+    const inodeChanged = typeof prevIno === "number" && prevIno !== stat.ino;
+    const startOffset = stat.size < prevSize || inodeChanged ? 0 : prevSize;
+    if (stat.size <= startOffset) continue;
+
+    let stream;
+    try {
+      stream = fssync.createReadStream(filePath, { encoding: "utf8", start: startOffset });
+    } catch { continue; }
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+    for await (const line of rl) {
+      if (!line || !line.trim()) continue;
+      let entry;
+      try { entry = JSON.parse(line); } catch { continue; }
+
+      const msg = entry.message;
+      if (!msg || msg.type !== "StatusUpdate") continue;
+
+      const payload = msg.payload;
+      if (!payload) continue;
+      const { token_usage, message_id } = payload;
+      if (!token_usage || !message_id) continue;
+      if (seenIds.has(message_id)) continue;
+
+      recordsProcessed++;
+
+      const input = toNonNegativeInt(token_usage.input_other);
+      const output = toNonNegativeInt(token_usage.output);
+      const cacheRead = toNonNegativeInt(token_usage.input_cache_read);
+      const cacheCreation = toNonNegativeInt(token_usage.input_cache_creation);
+      if (input === 0 && output === 0 && cacheRead === 0 && cacheCreation === 0) {
+        seenIds.add(message_id);
+        continue;
+      }
+
+      const epochSec = entry.timestamp ?? payload.timestamp;
+      if (epochSec == null || !Number.isFinite(Number(epochSec))) continue;
+      const tsIso = new Date(Number(epochSec) * 1000).toISOString();
+      const bucketStart = toUtcHalfHourStart(tsIso);
+      if (!bucketStart) continue;
+
+      const delta = {
+        input_tokens: input,
+        cached_input_tokens: cacheRead,
+        cache_creation_input_tokens: cacheCreation,
+        output_tokens: output,
+        reasoning_output_tokens: 0,
+        total_tokens: input + output + cacheRead + cacheCreation,
+        conversation_count: 1,
+      };
+
+      const bucket = getHourlyBucket(hourlyState, "kimi", kimiModel, bucketStart);
+      addTotals(bucket.totals, delta);
+      touchedBuckets.add(bucketKey("kimi", kimiModel, bucketStart));
+      seenIds.add(message_id);
+      eventsAggregated++;
+
+      if (cb) {
+        cb({
+          index: fileIdx + 1,
+          total: files.length,
+          recordsProcessed,
+          eventsAggregated,
+          bucketsQueued: touchedBuckets.size,
+        });
+      }
+    }
+
+    let postStat = stat;
+    try { postStat = fssync.statSync(filePath); } catch {}
+    fileOffsets[filePath] = { size: postStat.size, mtimeMs: postStat.mtimeMs, ino: postStat.ino };
+  }
+
+  // Cap seenIds to last 10k to bound cursor state size
+  const seenArr = Array.from(seenIds);
+  const cappedSeen = seenArr.length > 10_000 ? seenArr.slice(seenArr.length - 10_000) : seenArr;
+
+  const bucketsQueued = await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets });
+  const updatedAt = new Date().toISOString();
+  hourlyState.updatedAt = updatedAt;
+  cursors.hourly = hourlyState;
+  cursors.kimi = { ...kimiState, seenIds: cappedSeen, fileOffsets, updatedAt };
+
+  return { recordsProcessed, eventsAggregated, bucketsQueued };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CodeBuddy CLI — passive JSONL reader (~/.codebuddy/projects/<cwd>/<sid>.jsonl)
+//
+// Tencent's CodeBuddy CLI is structurally cloned from Claude Code:
+//   ~/.codebuddy/projects/<encoded-cwd>/<sessionId>.jsonl  — conversation log
+//   ~/.codebuddy/sessions/<pid>.json                       — session metadata
+//   ~/.codebuddy/settings.json                             — `{"model": "..."}`
+//
+// CodeBuddy ships NO hook system — we incrementally tail the JSONL files on
+// each sync (passive scan only, same shape as Kimi's wire.jsonl reader).
+//
+// Per-line record types: message, reasoning, topic, file-history-snapshot.
+// Only `type=="message" && role=="assistant"` carry token usage. The shape:
+//
+//   providerData.rawUsage = {
+//     prompt_tokens: 22223,           // OpenAI-style — INCLUDES cached
+//     completion_tokens: 250,
+//     prompt_tokens_details: { cached_tokens: 512, reasoning_tokens?: number },
+//     cache_read_input_tokens: 0,     // Anthropic-style mirror (often 0)
+//     cache_creation_input_tokens: 0,
+//   }
+//
+// Token math (matches the repo's queue convention; do NOT pass prompt_tokens
+// through unchanged — that double-counts cached input):
+//   input_tokens               = prompt_tokens - prompt_tokens_details.cached_tokens
+//   cached_input_tokens        = prompt_tokens_details.cached_tokens
+//   cache_creation_input_tokens = cache_creation_input_tokens (often 0)
+//   output_tokens              = completion_tokens
+//   reasoning_output_tokens    = prompt_tokens_details.reasoning_tokens || 0
+//   total_tokens               = sum of the above
+// ─────────────────────────────────────────────────────────────────────────────
+
+function resolveCodebuddyHome(env = process.env) {
+  const home = env.HOME || require("node:os").homedir();
+  return env.CODEBUDDY_HOME || path.join(home, ".codebuddy");
+}
+
+function resolveCodebuddyDefaultModel(env = process.env) {
+  const fallback = "codebuddy-unknown";
+  try {
+    const settingsPath = path.join(resolveCodebuddyHome(env), "settings.json");
+    const raw = fssync.readFileSync(settingsPath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && typeof parsed.model === "string" && parsed.model.trim()) {
+      return parsed.model.trim();
+    }
+  } catch (_e) {
+    // settings missing or malformed — fall through
+  }
+  return fallback;
+}
+
+function resolveCodebuddyProjectFiles(env = process.env) {
+  const projectsDir = path.join(resolveCodebuddyHome(env), "projects");
+  if (!fssync.existsSync(projectsDir)) return [];
+  const files = [];
+  try {
+    for (const cwd of fssync.readdirSync(projectsDir)) {
+      const cwdDir = path.join(projectsDir, cwd);
+      let stat;
+      try { stat = fssync.statSync(cwdDir); } catch { continue; }
+      if (!stat.isDirectory()) continue;
+      let entries;
+      try { entries = fssync.readdirSync(cwdDir); } catch { continue; }
+      for (const entry of entries) {
+        if (!entry.endsWith(".jsonl")) continue;
+        files.push(path.join(cwdDir, entry));
+      }
+    }
+  } catch {
+    // ignore — return what we have
+  }
+  files.sort((a, b) => a.localeCompare(b));
+  return files;
+}
+
+async function parseCodebuddyIncremental({
+  projectFiles,
+  cursors,
+  queuePath,
+  onProgress,
+  env,
+  defaultModel,
+} = {}) {
+  await ensureDir(path.dirname(queuePath));
+  const codebuddyState =
+    cursors.codebuddy && typeof cursors.codebuddy === "object" ? cursors.codebuddy : {};
+  const seenIds = new Set(
+    Array.isArray(codebuddyState.seenIds) ? codebuddyState.seenIds : [],
+  );
+  const fileOffsets =
+    codebuddyState.fileOffsets && typeof codebuddyState.fileOffsets === "object"
+      ? { ...codebuddyState.fileOffsets }
+      : {};
+
+  const files = Array.isArray(projectFiles)
+    ? projectFiles
+    : resolveCodebuddyProjectFiles(env || process.env);
+  const fallbackModel = defaultModel || resolveCodebuddyDefaultModel(env || process.env);
+
+  if (files.length === 0) {
+    cursors.codebuddy = {
+      ...codebuddyState,
+      seenIds: Array.from(seenIds),
+      fileOffsets,
+      updatedAt: new Date().toISOString(),
+    };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
+
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const touchedBuckets = new Set();
+  const cb = typeof onProgress === "function" ? onProgress : null;
+  let recordsProcessed = 0;
+  let eventsAggregated = 0;
+
+  for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+    const filePath = files[fileIdx];
+    let stat;
+    try { stat = fssync.statSync(filePath); } catch { continue; }
+
+    const prevEntry = fileOffsets[filePath] || {};
+    const prevSize = Number(prevEntry.size) || 0;
+    const prevIno = prevEntry.ino;
+    // Re-read from start if file shrunk (truncate/rewrite) or inode changed
+    // (file deleted + recreated). Otherwise pick up after the last read offset.
+    const inodeChanged = typeof prevIno === "number" && prevIno !== stat.ino;
+    const startOffset = stat.size < prevSize || inodeChanged ? 0 : prevSize;
+    if (stat.size <= startOffset) continue;
+
+    let stream;
+    try {
+      stream = fssync.createReadStream(filePath, {
+        encoding: "utf8",
+        start: startOffset,
+      });
+    } catch { continue; }
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+    for await (const line of rl) {
+      if (!line || !line.trim()) continue;
+      let entry;
+      try { entry = JSON.parse(line); } catch { continue; }
+
+      // Only assistant message events carry token usage.
+      if (!entry || entry.type !== "message" || entry.role !== "assistant") continue;
+
+      const provider = entry.providerData;
+      const rawUsage = provider && typeof provider === "object" ? provider.rawUsage : null;
+      if (!rawUsage || typeof rawUsage !== "object") continue;
+
+      // Dedup per-message — message id (uuid) is most stable, then session +
+      // timestamp as fallback.
+      const sessionId =
+        typeof entry.sessionId === "string" && entry.sessionId
+          ? entry.sessionId
+          : path.basename(filePath, ".jsonl");
+      const tsMs =
+        Number.isFinite(Number(entry.timestamp)) && Number(entry.timestamp) > 0
+          ? Number(entry.timestamp)
+          : null;
+      const messageId =
+        typeof entry.uuid === "string" && entry.uuid
+          ? entry.uuid
+          : typeof entry.id === "string" && entry.id
+            ? entry.id
+            : tsMs != null
+              ? `${sessionId}:${tsMs}`
+              : null;
+      if (!messageId) continue;
+      if (seenIds.has(messageId)) continue;
+
+      recordsProcessed++;
+
+      const promptTokens = toNonNegativeInt(rawUsage.prompt_tokens);
+      const completionTokens = toNonNegativeInt(rawUsage.completion_tokens);
+      const details =
+        rawUsage.prompt_tokens_details && typeof rawUsage.prompt_tokens_details === "object"
+          ? rawUsage.prompt_tokens_details
+          : {};
+      const cachedTokens = toNonNegativeInt(details.cached_tokens);
+      // Anthropic-style mirror; CodeBuddy emits these too even if usually 0.
+      const cacheReadAlt = toNonNegativeInt(rawUsage.cache_read_input_tokens);
+      const cacheCreation = toNonNegativeInt(rawUsage.cache_creation_input_tokens);
+      const reasoningTokens = toNonNegativeInt(details.reasoning_tokens);
+
+      // CRITICAL: prompt_tokens is OpenAI-style and INCLUDES cached.
+      // Subtract cached so input_tokens is pure non-cached input — matches
+      // the repo's normalization convention (see CLAUDE.md "Token
+      // Normalization Convention"). cache_read takes the larger of the two
+      // mirrored fields (rawUsage.cache_read_input_tokens vs
+      // prompt_tokens_details.cached_tokens) since CodeBuddy populates one
+      // or the other depending on upstream provider.
+      const cacheRead = Math.max(cachedTokens, cacheReadAlt);
+      const inputTokens = Math.max(0, promptTokens - cacheRead);
+
+      if (
+        inputTokens === 0 &&
+        completionTokens === 0 &&
+        cacheRead === 0 &&
+        cacheCreation === 0
+      ) {
+        seenIds.add(messageId);
+        continue;
+      }
+
+      if (tsMs == null) {
+        seenIds.add(messageId);
+        continue;
+      }
+      const tsIso = new Date(tsMs).toISOString();
+      const bucketStart = toUtcHalfHourStart(tsIso);
+      if (!bucketStart) continue;
+
+      const model =
+        normalizeModelInput(provider?.model) ||
+        normalizeModelInput(entry.model) ||
+        fallbackModel;
+
+      const delta = {
+        input_tokens: inputTokens,
+        cached_input_tokens: cacheRead,
+        cache_creation_input_tokens: cacheCreation,
+        output_tokens: completionTokens,
+        reasoning_output_tokens: reasoningTokens,
+        total_tokens:
+          inputTokens + completionTokens + cacheRead + cacheCreation + reasoningTokens,
+        conversation_count: 1,
+      };
+
+      const bucket = getHourlyBucket(hourlyState, "codebuddy", model, bucketStart);
+      addTotals(bucket.totals, delta);
+      touchedBuckets.add(bucketKey("codebuddy", model, bucketStart));
+      seenIds.add(messageId);
+      eventsAggregated++;
+
+      if (cb) {
+        cb({
+          index: fileIdx + 1,
+          total: files.length,
+          recordsProcessed,
+          eventsAggregated,
+          bucketsQueued: touchedBuckets.size,
+        });
+      }
+    }
+
+    let postStat = stat;
+    try { postStat = fssync.statSync(filePath); } catch {}
+    fileOffsets[filePath] = {
+      size: postStat.size,
+      mtimeMs: postStat.mtimeMs,
+      ino: postStat.ino,
+    };
+  }
+
+  // Cap dedup set to last 10k IDs to bound cursor state size — same convention
+  // as Kimi/Copilot so cursors.json doesn't grow unbounded.
+  const seenArr = Array.from(seenIds);
+  const cappedSeen =
+    seenArr.length > 10_000 ? seenArr.slice(seenArr.length - 10_000) : seenArr;
+
+  const bucketsQueued = await enqueueTouchedBuckets({
+    queuePath,
+    hourlyState,
+    touchedBuckets,
+  });
+  const updatedAt = new Date().toISOString();
+  hourlyState.updatedAt = updatedAt;
+  cursors.hourly = hourlyState;
+  cursors.codebuddy = {
+    ...codebuddyState,
+    seenIds: cappedSeen,
+    fileOffsets,
+    updatedAt,
+  };
+
+  return { recordsProcessed, eventsAggregated, bucketsQueued };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// oh-my-pi (omp) — passive JSONL reader (~/.omp/agent/sessions/**/*.jsonl)
+//
+// oh-my-pi writes one append-only JSONL per session:
+//   ~/.omp/agent/sessions/--<cwd-encoded>--/<timestamp>_<sessionId>.jsonl
+//
+// Per-line record types: the first line is type:"session" (header).
+// Only type:"message" lines with message.role=="assistant" carry token usage.
+// The shape (verbatim from oh-my-pi docs/session.md):
+//
+//   {
+//     "type": "message",
+//     "id": "a1b2c3d4",          ← 8-char dedup key
+//     "parentId": "...",
+//     "timestamp": "2026-02-16T10:21:00.000Z",
+//     "message": {
+//       "role": "assistant",
+//       "provider": "anthropic",
+//       "model": "claude-sonnet-4-5",
+//       "usage": {
+//         "input": 100, "output": 20, "cacheRead": 0, "cacheWrite": 0,
+//         "totalTokens": 120, "reasoningTokens": 0
+//       },
+//       "timestamp": 1760000000000   ← ms epoch, preferred for bucketing
+//     }
+//   }
+//
+// oh-my-pi is a router — dispatches to upstream providers (Anthropic, OpenAI,
+// etc.) and records the upstream model name per message. There is no global
+// default model setting; model is always per-message (fallback: "omp-unknown").
+// ─────────────────────────────────────────────────────────────────────────────
+
+function resolveOmpHome(env = process.env) {
+  const home = env.HOME || require("node:os").homedir();
+  // Honor TokenTracker override first, then oh-my-pi upstream env vars.
+  if (env.OMP_HOME) return env.OMP_HOME;
+  if (env.PI_CONFIG_DIR) return path.join(home, env.PI_CONFIG_DIR);
+  return path.join(home, ".omp");
+}
+
+// PI_CODING_AGENT_DIR is documented by both pi-coding-agent and oh-my-pi as
+// their agent directory override. When set, attribute it to whichever tool the
+// user actually has installed: ~/.pi present → "pi", otherwise "omp" (the
+// historical default in this codebase, preserved for back-compat).
+//
+// Users with both tools installed can disambiguate explicitly with
+// TOKENTRACKER_PI_AGENT_DIR / TOKENTRACKER_OMP_AGENT_DIR, which take
+// precedence in their respective resolvers.
+function decidePiCodingAgentDirOwner(env = process.env) {
+  const home = env.HOME || require("node:os").homedir();
+  // Require an actual directory — a stray file (lockfile, junk) at ~/.pi
+  // shouldn't reroute an existing oh-my-pi user's PI_CODING_AGENT_DIR override.
+  try {
+    if (fssync.statSync(path.join(home, ".pi")).isDirectory()) return "pi";
+  } catch {
+    // ENOENT or EACCES — treat as "no pi install signal".
+  }
+  return "omp";
+}
+
+function expandHomePath(dir, env = process.env) {
+  if (typeof dir !== "string" || !dir) return dir;
+  if (dir !== "~" && !dir.startsWith("~/")) return dir;
+  const home = env.HOME || require("node:os").homedir();
+  return dir === "~" ? home : path.join(home, dir.slice(2));
+}
+
+function resolveOmpAgentDir(env = process.env) {
+  if (env.TOKENTRACKER_OMP_AGENT_DIR) {
+    return expandHomePath(env.TOKENTRACKER_OMP_AGENT_DIR, env);
+  }
+  if (env.PI_CODING_AGENT_DIR && decidePiCodingAgentDirOwner(env) === "omp") {
+    return expandHomePath(env.PI_CODING_AGENT_DIR, env);
+  }
+  return path.join(resolveOmpHome(env), "agent");
+}
+
+function resolveOmpSessionFiles(env = process.env) {
+  const sessionsDir = path.join(resolveOmpAgentDir(env), "sessions");
+  if (!fssync.existsSync(sessionsDir)) return [];
+  const files = [];
+  try {
+    for (const cwdDir of fssync.readdirSync(sessionsDir)) {
+      const cwdPath = path.join(sessionsDir, cwdDir);
+      let stat;
+      try { stat = fssync.statSync(cwdPath); } catch { continue; }
+      if (!stat.isDirectory()) continue;
+      let entries;
+      try { entries = fssync.readdirSync(cwdPath); } catch { continue; }
+      for (const entry of entries) {
+        if (!entry.endsWith(".jsonl")) continue;
+        files.push(path.join(cwdPath, entry));
+      }
+    }
+  } catch {
+    // ignore — return what we have
+  }
+  files.sort((a, b) => a.localeCompare(b));
+  return files;
+}
+
+function resolveOmpDefaultModel() {
+  // oh-my-pi has no global default model setting; model is per-message.
+  return "omp-unknown";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Kilo Code VS Code extension — passive reader for VS Code-family
+// globalStorage/kilocode.kilo-code/tasks/<uuid>/ui_messages.json files.
+//
+// Each task folder contains a ui_messages.json (JSON array, not JSONL). Token
+// usage records are messages where `say == "api_req_started"`; the `text`
+// field is a JSON-stringified payload:
+//
+//   {
+//     "apiProtocol":    "openai" | "anthropic" | ...,
+//     "tokensIn":       28673,    // request input (already excludes cache)
+//     "tokensOut":      31,       // completion
+//     "cacheWrites":    0,
+//     "cacheReads":     5120,
+//     "cost":           0,
+//     "usageMissing":   false,
+//     "inferenceProvider": "Moonshot AI" | "minimax" | ...,
+//   }
+//
+// We scan every supported VS Code-family install (Cursor, Code, CodeBuddy,
+// Windsurf, …) under both Library/Application Support (macOS) and Linux/Win
+// equivalents. Files are small (median ~30KB) and rewritten on each turn — we
+// can't byte-tail them, so we read the whole file on every sync and dedupe by
+// (taskId, ts). Per-file mtime caching skips unchanged files.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function resolveKilocodeRoots(env = process.env) {
+  if (typeof env.TOKENTRACKER_KILOCODE_ROOTS === "string" && env.TOKENTRACKER_KILOCODE_ROOTS.trim()) {
+    return env.TOKENTRACKER_KILOCODE_ROOTS.split(":")
+      .map((r) => r.trim())
+      .filter(Boolean);
+  }
+  const home = env.HOME || require("node:os").homedir();
+  const candidates = [];
+  if (process.platform === "darwin") {
+    const base = path.join(home, "Library", "Application Support");
+    candidates.push(
+      path.join(base, "Code"),
+      path.join(base, "Code - Insiders"),
+      path.join(base, "Cursor"),
+      path.join(base, "CodeBuddy"),
+      path.join(base, "Windsurf"),
+      path.join(base, "VSCodium"),
+      path.join(base, "Trae"),
+      path.join(base, "Trae CN"),
+    );
+  } else if (process.platform === "win32") {
+    const appData = env.APPDATA || path.join(home, "AppData", "Roaming");
+    candidates.push(
+      path.join(appData, "Code"),
+      path.join(appData, "Code - Insiders"),
+      path.join(appData, "Cursor"),
+      path.join(appData, "CodeBuddy"),
+      path.join(appData, "Windsurf"),
+      path.join(appData, "VSCodium"),
+    );
+  } else {
+    const xdg = env.XDG_CONFIG_HOME || path.join(home, ".config");
+    candidates.push(
+      path.join(xdg, "Code"),
+      path.join(xdg, "Code - Insiders"),
+      path.join(xdg, "Cursor"),
+      path.join(xdg, "CodeBuddy"),
+      path.join(xdg, "Windsurf"),
+      path.join(xdg, "VSCodium"),
+    );
+  }
+  return candidates;
+}
+
+function resolveKilocodeTaskFiles(env = process.env) {
+  const roots = resolveKilocodeRoots(env);
+  const out = [];
+  for (const root of roots) {
+    const tasksDir = path.join(root, "User", "globalStorage", "kilocode.kilo-code", "tasks");
+    if (!fssync.existsSync(tasksDir)) continue;
+    let entries;
+    try { entries = fssync.readdirSync(tasksDir); } catch { continue; }
+    for (const taskUuid of entries) {
+      const filePath = path.join(tasksDir, taskUuid, "ui_messages.json");
+      if (!fssync.existsSync(filePath)) continue;
+      out.push({ filePath, taskUuid, ide: path.basename(root) });
+    }
+  }
+  out.sort((a, b) => a.filePath.localeCompare(b.filePath));
+  return out;
+}
+
+// Kilo Code only persists the inference provider (e.g. "minimax",
+// "Moonshot AI", "Stealth") in ui_messages.json — the actual model id is
+// stored in workspace state but isn't attributed to individual turns and may
+// change across sessions, so we cannot map a row back to a model id reliably.
+// We surface the provider explicitly so the dashboard's Model column doesn't
+// imply this is a model.
+function normalizeKilocodeProviderToModel(providerName) {
+  if (typeof providerName !== "string" || !providerName.trim()) return "provider:unknown";
+  const slug = providerName
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9._-]/g, "");
+  // A slug consisting only of separators (dashes/dots/underscores) carries no
+  // information — treat it as unknown.
+  if (!slug || !/[a-z0-9]/.test(slug)) return "provider:unknown";
+  return `provider:${slug}`;
+}
+
+async function parseKilocodeIncremental({
+  taskFiles,
+  cursors,
+  queuePath,
+  onProgress,
+  env,
+} = {}) {
+  await ensureDir(path.dirname(queuePath));
+  const kilocodeState =
+    cursors.kilocode && typeof cursors.kilocode === "object" ? cursors.kilocode : {};
+  const seenIds = new Set(
+    Array.isArray(kilocodeState.seenIds) ? kilocodeState.seenIds : [],
+  );
+  const fileOffsets =
+    kilocodeState.fileOffsets && typeof kilocodeState.fileOffsets === "object"
+      ? { ...kilocodeState.fileOffsets }
+      : {};
+
+  const files = Array.isArray(taskFiles)
+    ? taskFiles
+    : resolveKilocodeTaskFiles(env || process.env);
+
+  if (files.length === 0) {
+    cursors.kilocode = {
+      ...kilocodeState,
+      seenIds: Array.from(seenIds),
+      fileOffsets,
+      updatedAt: new Date().toISOString(),
+    };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
+
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const touchedBuckets = new Set();
+  const cb = typeof onProgress === "function" ? onProgress : null;
+  let recordsProcessed = 0;
+  let eventsAggregated = 0;
+
+  for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+    const entry = files[fileIdx];
+    const { filePath, taskUuid } = entry;
+    let stat;
+    try { stat = fssync.statSync(filePath); } catch { continue; }
+
+    const prevEntry = fileOffsets[filePath];
+    if (
+      prevEntry &&
+      Number(prevEntry.size) === stat.size &&
+      Number(prevEntry.mtimeMs) === stat.mtimeMs
+    ) {
+      continue;
+    }
+
+    let raw;
+    try { raw = fssync.readFileSync(filePath, "utf8"); } catch { continue; }
+    let data;
+    try { data = JSON.parse(raw); } catch { continue; }
+    if (!Array.isArray(data)) continue;
+
+    for (const msg of data) {
+      if (!msg || typeof msg !== "object") continue;
+      // `api_req_started` is the live billing record; `api_req_deleted` keeps
+      // the same payload when a user removes a turn from the task (Cline-style
+      // edit-and-retry) — tokens were already consumed by the provider, so we
+      // still count them.
+      if (msg.say !== "api_req_started" && msg.say !== "api_req_deleted") continue;
+      if (typeof msg.text !== "string" || !msg.text.startsWith("{")) continue;
+
+      let payload;
+      try { payload = JSON.parse(msg.text); } catch { continue; }
+      if (!payload || typeof payload !== "object") continue;
+
+      const ts = Number(msg.ts);
+      if (!Number.isFinite(ts) || ts <= 0) continue;
+
+      const dedupKey = `${taskUuid}:${ts}`;
+      recordsProcessed++;
+      if (seenIds.has(dedupKey)) continue;
+
+      const tokensIn = toNonNegativeInt(payload.tokensIn);
+      const tokensOut = toNonNegativeInt(payload.tokensOut);
+      const cacheReads = toNonNegativeInt(payload.cacheReads);
+      const cacheWrites = toNonNegativeInt(payload.cacheWrites);
+      if (tokensIn === 0 && tokensOut === 0 && cacheReads === 0 && cacheWrites === 0) {
+        seenIds.add(dedupKey);
+        continue;
+      }
+
+      const tsIso = new Date(ts).toISOString();
+      const bucketStart = toUtcHalfHourStart(tsIso);
+      if (!bucketStart) continue;
+
+      const delta = {
+        input_tokens: tokensIn,
+        cached_input_tokens: cacheReads,
+        cache_creation_input_tokens: cacheWrites,
+        output_tokens: tokensOut,
+        reasoning_output_tokens: 0,
+        total_tokens: tokensIn + tokensOut + cacheReads + cacheWrites,
+        conversation_count: 1,
+      };
+
+      const model = normalizeKilocodeProviderToModel(payload.inferenceProvider);
+      const bucket = getHourlyBucket(hourlyState, "kilo-code", model, bucketStart);
+      addTotals(bucket.totals, delta);
+      touchedBuckets.add(bucketKey("kilo-code", model, bucketStart));
+      seenIds.add(dedupKey);
+      eventsAggregated++;
+    }
+
+    fileOffsets[filePath] = { size: stat.size, mtimeMs: stat.mtimeMs, ino: stat.ino };
+
+    if (cb) {
+      cb({
+        index: fileIdx + 1,
+        total: files.length,
+        recordsProcessed,
+        eventsAggregated,
+        bucketsQueued: touchedBuckets.size,
+      });
+    }
+  }
+
+  // Cap seenIds to last 50k to bound cursor state size
+  const seenArr = Array.from(seenIds);
+  const cappedSeen = seenArr.length > 50_000 ? seenArr.slice(seenArr.length - 50_000) : seenArr;
+
+  const bucketsQueued = await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets });
+  const updatedAt = new Date().toISOString();
+  hourlyState.updatedAt = updatedAt;
+  cursors.hourly = hourlyState;
+  cursors.kilocode = { ...kilocodeState, seenIds: cappedSeen, fileOffsets, updatedAt };
+
+  return { recordsProcessed, eventsAggregated, bucketsQueued };
+}
+
+async function parseOmpIncremental({
+  sessionFiles,
+  cursors,
+  queuePath,
+  onProgress,
+  env,
+  defaultModel,
+} = {}) {
+  await ensureDir(path.dirname(queuePath));
+  const ompState = cursors.omp && typeof cursors.omp === "object" ? cursors.omp : {};
+  const seenIds = new Set(Array.isArray(ompState.seenIds) ? ompState.seenIds : []);
+  const fileOffsets =
+    ompState.fileOffsets && typeof ompState.fileOffsets === "object"
+      ? { ...ompState.fileOffsets }
+      : {};
+
+  const files = Array.isArray(sessionFiles)
+    ? sessionFiles
+    : resolveOmpSessionFiles(env || process.env);
+  const fallbackModel = defaultModel || resolveOmpDefaultModel();
+
+  if (files.length === 0) {
+    cursors.omp = {
+      ...ompState,
+      seenIds: Array.from(seenIds),
+      fileOffsets,
+      updatedAt: new Date().toISOString(),
+    };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
+
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const touchedBuckets = new Set();
+  const cb = typeof onProgress === "function" ? onProgress : null;
+  let recordsProcessed = 0;
+  let eventsAggregated = 0;
+
+  for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+    const filePath = files[fileIdx];
+    let stat;
+    try { stat = fssync.statSync(filePath); } catch { continue; }
+
+    const prevEntry = fileOffsets[filePath] || {};
+    const prevSize = Number(prevEntry.size) || 0;
+    const prevIno = prevEntry.ino;
+    // Re-read from start if file shrunk (truncate/rewrite) or inode changed.
+    const inodeChanged = typeof prevIno === "number" && prevIno !== stat.ino;
+    const startOffset = stat.size < prevSize || inodeChanged ? 0 : prevSize;
+    if (stat.size <= startOffset) continue;
+
+    let stream;
+    try {
+      stream = fssync.createReadStream(filePath, {
+        encoding: "utf8",
+        start: startOffset,
+      });
+    } catch { continue; }
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+    for await (const line of rl) {
+      if (!line || !line.trim()) continue;
+      let entry;
+      try { entry = JSON.parse(line); } catch { continue; }
+
+      // First line of each file is type:"session" (header) — skip all
+      // non-message records.
+      if (!entry || entry.type !== "message") continue;
+
+      // Only assistant messages carry token usage.
+      const msg = entry.message;
+      if (!msg || msg.role !== "assistant") continue;
+
+      const usage = msg.usage;
+      if (!usage || typeof usage !== "object") continue;
+
+      // Dedup by top-level entry id (8-char string assigned by oh-my-pi).
+      const entryId = typeof entry.id === "string" && entry.id ? entry.id : null;
+      if (!entryId) continue;
+      if (seenIds.has(entryId)) continue;
+
+      recordsProcessed++;
+
+      const input = toNonNegativeInt(usage.input);
+      const output = toNonNegativeInt(usage.output);
+      const cacheRead = toNonNegativeInt(usage.cacheRead);
+      const cacheWrite = toNonNegativeInt(usage.cacheWrite);
+      const reasoningTokens = toNonNegativeInt(usage.reasoningTokens);
+
+      if (input === 0 && output === 0 && cacheRead === 0 && cacheWrite === 0) {
+        seenIds.add(entryId);
+        continue;
+      }
+
+      // Prefer message-level timestamp (ms epoch); fall back to entry-level
+      // ISO string. Entries with no resolvable timestamp are skipped — they
+      // cannot be placed in a bucket.
+      let tsMs = null;
+      if (Number.isFinite(Number(msg.timestamp)) && Number(msg.timestamp) > 0) {
+        tsMs = Number(msg.timestamp);
+      } else if (typeof entry.timestamp === "string" && entry.timestamp) {
+        const parsed = Date.parse(entry.timestamp);
+        if (Number.isFinite(parsed) && parsed > 0) tsMs = parsed;
+      }
+      if (tsMs == null) {
+        seenIds.add(entryId);
+        continue;
+      }
+
+      const tsIso = new Date(tsMs).toISOString();
+      const bucketStart = toUtcHalfHourStart(tsIso);
+      if (!bucketStart) continue;
+
+      // Use provided totalTokens when available; otherwise sum all components.
+      const totalTokens =
+        Number.isFinite(Number(usage.totalTokens)) && Number(usage.totalTokens) > 0
+          ? toNonNegativeInt(usage.totalTokens)
+          : input + output + cacheRead + cacheWrite + reasoningTokens;
+
+      const model = normalizeModelInput(msg.model) || fallbackModel;
+
+      const delta = {
+        input_tokens: input,
+        cached_input_tokens: cacheRead,
+        cache_creation_input_tokens: cacheWrite,
+        output_tokens: output,
+        reasoning_output_tokens: reasoningTokens,
+        total_tokens: totalTokens,
+        conversation_count: 1,
+      };
+
+      const bucket = getHourlyBucket(hourlyState, "omp", model, bucketStart);
+      addTotals(bucket.totals, delta);
+      touchedBuckets.add(bucketKey("omp", model, bucketStart));
+      seenIds.add(entryId);
+      eventsAggregated++;
+
+      if (cb) {
+        cb({
+          index: fileIdx + 1,
+          total: files.length,
+          recordsProcessed,
+          eventsAggregated,
+          bucketsQueued: touchedBuckets.size,
+        });
+      }
+    }
+
+    let postStat = stat;
+    try { postStat = fssync.statSync(filePath); } catch {}
+    fileOffsets[filePath] = {
+      size: postStat.size,
+      mtimeMs: postStat.mtimeMs,
+      ino: postStat.ino,
+    };
+  }
+
+  // Cap dedup set to last 10k IDs to bound cursor state size — same convention
+  // as Kimi/CodeBuddy/Copilot so cursors.json doesn't grow unbounded.
+  const seenArr = Array.from(seenIds);
+  const cappedSeen =
+    seenArr.length > 10_000 ? seenArr.slice(seenArr.length - 10_000) : seenArr;
+
+  const bucketsQueued = await enqueueTouchedBuckets({
+    queuePath,
+    hourlyState,
+    touchedBuckets,
+  });
+  const updatedAt = new Date().toISOString();
+  hourlyState.updatedAt = updatedAt;
+  cursors.hourly = hourlyState;
+  cursors.omp = {
+    ...ompState,
+    seenIds: cappedSeen,
+    fileOffsets,
+    updatedAt,
+  };
+
+  return { recordsProcessed, eventsAggregated, bucketsQueued };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// pi (@mariozechner/pi-coding-agent) — passive JSONL reader
+// (~/.pi/agent/sessions/**/*.jsonl)
+//
+// Same on-disk session format as oh-my-pi (omp): one JSONL file per session,
+// first line type:"session" header, then a tree of message/model_change/etc.
+// records. Token usage lives on type:"message" entries with role:"assistant"
+// under message.usage.
+//
+// PI_CODING_AGENT_DIR is shared with omp (both upstream tools document it).
+// resolvePiAgentDir / resolveOmpAgentDir use decidePiCodingAgentDirOwner to
+// route the override to exactly one provider so the same sessions dir is
+// never scanned twice.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function resolvePiHome(env = process.env) {
+  const home = env.HOME || require("node:os").homedir();
+  return path.join(home, ".pi");
+}
+
+function resolvePiAgentDir(env = process.env) {
+  if (env.TOKENTRACKER_PI_AGENT_DIR) {
+    return expandHomePath(env.TOKENTRACKER_PI_AGENT_DIR, env);
+  }
+  if (env.PI_CODING_AGENT_DIR && decidePiCodingAgentDirOwner(env) === "pi") {
+    return expandHomePath(env.PI_CODING_AGENT_DIR, env);
+  }
+  return path.join(resolvePiHome(env), "agent");
+}
+
+// Defense in depth for invariant 2 (no double-count). Two explicit overrides
+// pointing at the same path (e.g. TOKENTRACKER_OMP_AGENT_DIR === TOKENTRACKER_PI_AGENT_DIR,
+// or TOKENTRACKER_OMP_AGENT_DIR === PI_CODING_AGENT_DIR with ~/.pi present) bypass
+// the install-signal disambiguator and would otherwise have both providers scan
+// the same sessions directory under different `source` tags.
+function piAgentDirCollidesWithOmp(env = process.env) {
+  return path.resolve(resolvePiAgentDir(env)) === path.resolve(resolveOmpAgentDir(env));
+}
+
+function resolvePiSessionFiles(env = process.env) {
+  const sessionsDir = path.join(resolvePiAgentDir(env), "sessions");
+  if (!fssync.existsSync(sessionsDir)) return [];
+  const files = [];
+  try {
+    for (const cwdDir of fssync.readdirSync(sessionsDir)) {
+      const cwdPath = path.join(sessionsDir, cwdDir);
+      let stat;
+      try { stat = fssync.statSync(cwdPath); } catch { continue; }
+      if (!stat.isDirectory()) continue;
+      let entries;
+      try { entries = fssync.readdirSync(cwdPath); } catch { continue; }
+      for (const entry of entries) {
+        if (!entry.endsWith(".jsonl")) continue;
+        files.push(path.join(cwdPath, entry));
+      }
+    }
+  } catch {
+    // ignore — return what we have
+  }
+  files.sort((a, b) => a.localeCompare(b));
+  return files;
+}
+
+function resolvePiDefaultModel() {
+  // pi has no global default model; model is per-message.
+  return "pi-unknown";
+}
+
+async function parsePiIncremental({
+  sessionFiles,
+  cursors,
+  queuePath,
+  onProgress,
+  env,
+  defaultModel,
+} = {}) {
+  await ensureDir(path.dirname(queuePath));
+  const piState = cursors.pi && typeof cursors.pi === "object" ? cursors.pi : {};
+  const seenIds = new Set(Array.isArray(piState.seenIds) ? piState.seenIds : []);
+  const fileOffsets =
+    piState.fileOffsets && typeof piState.fileOffsets === "object"
+      ? { ...piState.fileOffsets }
+      : {};
+
+  const files = Array.isArray(sessionFiles)
+    ? sessionFiles
+    : resolvePiSessionFiles(env || process.env);
+  const fallbackModel = defaultModel || resolvePiDefaultModel();
+
+  if (files.length === 0) {
+    cursors.pi = {
+      ...piState,
+      seenIds: Array.from(seenIds),
+      fileOffsets,
+      updatedAt: new Date().toISOString(),
+    };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
+
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const touchedBuckets = new Set();
+  const cb = typeof onProgress === "function" ? onProgress : null;
+  let recordsProcessed = 0;
+  let eventsAggregated = 0;
+
+  for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+    const filePath = files[fileIdx];
+    let stat;
+    try { stat = fssync.statSync(filePath); } catch { continue; }
+
+    const prevEntry = fileOffsets[filePath] || {};
+    const prevSize = Number(prevEntry.size) || 0;
+    const prevIno = prevEntry.ino;
+    const inodeChanged = typeof prevIno === "number" && prevIno !== stat.ino;
+    const startOffset = stat.size < prevSize || inodeChanged ? 0 : prevSize;
+    if (stat.size <= startOffset) continue;
+
+    let stream;
+    try {
+      stream = fssync.createReadStream(filePath, {
+        encoding: "utf8",
+        start: startOffset,
+      });
+    } catch { continue; }
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+    for await (const line of rl) {
+      if (!line || !line.trim()) continue;
+      let entry;
+      try { entry = JSON.parse(line); } catch { continue; }
+
+      if (!entry || entry.type !== "message") continue;
+
+      const msg = entry.message;
+      if (!msg || msg.role !== "assistant") continue;
+
+      const usage = msg.usage;
+      if (!usage || typeof usage !== "object") continue;
+
+      const entryId = typeof entry.id === "string" && entry.id ? entry.id : null;
+      if (!entryId) continue;
+      if (seenIds.has(entryId)) continue;
+
+      recordsProcessed++;
+
+      const input = toNonNegativeInt(usage.input);
+      const output = toNonNegativeInt(usage.output);
+      const cacheRead = toNonNegativeInt(usage.cacheRead);
+      const cacheWrite = toNonNegativeInt(usage.cacheWrite);
+      const reasoningTokens = toNonNegativeInt(usage.reasoningTokens);
+
+      if (input === 0 && output === 0 && cacheRead === 0 && cacheWrite === 0) {
+        seenIds.add(entryId);
+        continue;
+      }
+
+      let tsMs = null;
+      if (Number.isFinite(Number(msg.timestamp)) && Number(msg.timestamp) > 0) {
+        tsMs = Number(msg.timestamp);
+      } else if (typeof entry.timestamp === "string" && entry.timestamp) {
+        const parsed = Date.parse(entry.timestamp);
+        if (Number.isFinite(parsed) && parsed > 0) tsMs = parsed;
+      }
+      if (tsMs == null) {
+        seenIds.add(entryId);
+        continue;
+      }
+
+      const tsIso = new Date(tsMs).toISOString();
+      const bucketStart = toUtcHalfHourStart(tsIso);
+      if (!bucketStart) continue;
+
+      const totalTokens =
+        Number.isFinite(Number(usage.totalTokens)) && Number(usage.totalTokens) > 0
+          ? toNonNegativeInt(usage.totalTokens)
+          : input + output + cacheRead + cacheWrite + reasoningTokens;
+
+      const model = normalizeModelInput(msg.model) || fallbackModel;
+
+      const delta = {
+        input_tokens: input,
+        cached_input_tokens: cacheRead,
+        cache_creation_input_tokens: cacheWrite,
+        output_tokens: output,
+        reasoning_output_tokens: reasoningTokens,
+        total_tokens: totalTokens,
+        conversation_count: 1,
+      };
+
+      const bucket = getHourlyBucket(hourlyState, "pi", model, bucketStart);
+      addTotals(bucket.totals, delta);
+      touchedBuckets.add(bucketKey("pi", model, bucketStart));
+      seenIds.add(entryId);
+      eventsAggregated++;
+
+      if (cb) {
+        cb({
+          index: fileIdx + 1,
+          total: files.length,
+          recordsProcessed,
+          eventsAggregated,
+          bucketsQueued: touchedBuckets.size,
+        });
+      }
+    }
+
+    let postStat = stat;
+    try { postStat = fssync.statSync(filePath); } catch {}
+    fileOffsets[filePath] = {
+      size: postStat.size,
+      mtimeMs: postStat.mtimeMs,
+      ino: postStat.ino,
+    };
+  }
+
+  const seenArr = Array.from(seenIds);
+  const cappedSeen =
+    seenArr.length > 10_000 ? seenArr.slice(seenArr.length - 10_000) : seenArr;
+
+  const bucketsQueued = await enqueueTouchedBuckets({
+    queuePath,
+    hourlyState,
+    touchedBuckets,
+  });
+  const updatedAt = new Date().toISOString();
+  hourlyState.updatedAt = updatedAt;
+  cursors.hourly = hourlyState;
+  cursors.pi = {
+    ...piState,
+    seenIds: cappedSeen,
+    fileOffsets,
+    updatedAt,
+  };
+
+  return { recordsProcessed, eventsAggregated, bucketsQueued };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Craft Agents (lukilabs/craft-agents-oss) — passive JSONL reader
+//
+// Craft is a desktop Electron agent that wraps the Claude Agent SDK plus
+// multiple LLM backends (Anthropic, OpenAI, Google, GitHub Copilot, OpenRouter,
+// Groq, Mistral, DeepSeek, xAI, Bedrock, Vertex). It writes per-session JSONL
+// files with a pre-aggregated SessionTokenUsage block on the FIRST line:
+//
+//   line 1: SessionHeader
+//     {
+//       "id": "260430-swift-river",
+//       "model": "claude-sonnet-4-6",
+//       "llmConnection": "anthropic-default",
+//       "lastMessageAt": 1745003600000,
+//       "tokenUsage": {
+//         "inputTokens": 1234,            ← pure non-cached input
+//         "outputTokens": 567,
+//         "totalTokens": 9876,
+//         "cacheReadTokens": 5500,
+//         "cacheCreationTokens": 1100
+//       }
+//     }
+//   line 2..N: StoredMessage records (we do not need them for token totals)
+//
+// Disk layout:
+//   ~/.craft-agent/                    ← config dir (override: CRAFT_CONFIG_DIR)
+//     config.json                      ← workspaces[].rootPath list
+//     workspaces/<id>/sessions/<sid>/session.jsonl  (default)
+//   <user-chosen-rootPath>/sessions/<sid>/session.jsonl  (custom workspaces)
+//
+// Workspaces can be relocated outside ~/.craft-agent, so we MUST read
+// config.json to enumerate every rootPath rather than just globbing the
+// default directory.
+//
+// Token semantics map directly onto TokenTracker conventions — `inputTokens`
+// is already pure non-cached input (no Codex-style trap, see
+// feedback_rollout_input_semantics.md). Re-parses are idempotent: the header
+// is rewritten as the session grows, and we dedup by sessionId combined with
+// the most-recent header byte length so a growing total replaces the old
+// snapshot instead of double-counting.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function resolveCraftConfigDir(env = process.env) {
+  if (env.CRAFT_CONFIG_DIR) return env.CRAFT_CONFIG_DIR;
+  const home = env.HOME || require("node:os").homedir();
+  return path.join(home, ".craft-agent");
+}
+
+function resolveCraftWorkspaceRoots(env = process.env) {
+  const configDir = resolveCraftConfigDir(env);
+  const roots = new Set();
+  // Always include the default workspaces directory so a fresh install (no
+  // config.json yet) still gets discovered.
+  const defaultWorkspaces = path.join(configDir, "workspaces");
+  if (fssync.existsSync(defaultWorkspaces)) {
+    try {
+      for (const entry of fssync.readdirSync(defaultWorkspaces)) {
+        const wsPath = path.join(defaultWorkspaces, entry);
+        let stat;
+        try { stat = fssync.statSync(wsPath); } catch { continue; }
+        if (stat.isDirectory()) roots.add(wsPath);
+      }
+    } catch {
+      // ignore
+    }
+  }
+  // Layer in user-relocated workspaces from config.json.
+  const configPath = path.join(configDir, "config.json");
+  if (fssync.existsSync(configPath)) {
+    try {
+      const raw = fssync.readFileSync(configPath, "utf8");
+      const cfg = JSON.parse(raw);
+      const list = Array.isArray(cfg?.workspaces) ? cfg.workspaces : [];
+      for (const ws of list) {
+        const root = ws && typeof ws.rootPath === "string" ? ws.rootPath : null;
+        if (root && fssync.existsSync(root)) roots.add(root);
+      }
+    } catch {
+      // malformed config.json — fall back to default discovery only
+    }
+  }
+  return Array.from(roots).sort((a, b) => a.localeCompare(b));
+}
+
+function resolveCraftSessionFiles(env = process.env) {
+  const roots = resolveCraftWorkspaceRoots(env);
+  if (roots.length === 0) return [];
+  const files = [];
+  for (const root of roots) {
+    const sessionsDir = path.join(root, "sessions");
+    if (!fssync.existsSync(sessionsDir)) continue;
+    let entries;
+    try { entries = fssync.readdirSync(sessionsDir); } catch { continue; }
+    for (const sessionId of entries) {
+      const sessionDir = path.join(sessionsDir, sessionId);
+      let stat;
+      try { stat = fssync.statSync(sessionDir); } catch { continue; }
+      if (!stat.isDirectory()) continue;
+      const filePath = path.join(sessionDir, "session.jsonl");
+      if (fssync.existsSync(filePath)) files.push(filePath);
+    }
+  }
+  files.sort((a, b) => a.localeCompare(b));
+  return files;
+}
+
+function resolveCraftDefaultModel() {
+  // Craft is a router. Per-session header carries the actual model.
+  return "craft-unknown";
+}
+
+async function parseCraftIncremental({
+  sessionFiles,
+  cursors,
+  queuePath,
+  onProgress,
+  env,
+  defaultModel,
+} = {}) {
+  await ensureDir(path.dirname(queuePath));
+  const craftState = cursors.craft && typeof cursors.craft === "object" ? cursors.craft : {};
+  // Per-session previous totals so each re-parse only contributes the delta
+  // of the running token totals (the header rewrites in place as the session
+  // grows). Shape: { [sessionId]: { input, output, cacheRead, cacheWrite, total } }
+  const sessionTotals =
+    craftState.sessionTotals && typeof craftState.sessionTotals === "object"
+      ? { ...craftState.sessionTotals }
+      : {};
+
+  const files = Array.isArray(sessionFiles)
+    ? sessionFiles
+    : resolveCraftSessionFiles(env || process.env);
+  const fallbackModel = defaultModel || resolveCraftDefaultModel();
+
+  if (files.length === 0) {
+    cursors.craft = {
+      ...craftState,
+      sessionTotals,
+      updatedAt: new Date().toISOString(),
+    };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
+
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const touchedBuckets = new Set();
+  const cb = typeof onProgress === "function" ? onProgress : null;
+  let recordsProcessed = 0;
+  let eventsAggregated = 0;
+
+  for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+    const filePath = files[fileIdx];
+    let stat;
+    try { stat = fssync.statSync(filePath); } catch { continue; }
+
+    // Read only the FIRST line — the SessionHeader carries the running totals.
+    // Streaming the whole file would be wasted work since we don't use
+    // per-message records for token accounting. We cap at 1 MiB to bound
+    // memory if the first line is unexpectedly huge; real headers observed
+    // in v0.9.0 are ~1–2 KiB so this is generous.
+    let header = null;
+    let parseError = null;
+    let stream;
+    try {
+      stream = fssync.createReadStream(filePath, {
+        encoding: "utf8",
+        end: 1024 * 1024 - 1,
+      });
+    } catch { continue; }
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+    for await (const line of rl) {
+      if (!line || !line.trim()) continue;
+      try {
+        header = JSON.parse(line);
+      } catch (e) {
+        parseError = e;
+        header = null;
+      }
+      break;
+    }
+    rl.close();
+    try { stream.destroy(); } catch {}
+
+    if (!header || typeof header !== "object") {
+      if (parseError && process.env.TOKENTRACKER_DEBUG) {
+        process.stderr.write(
+          `[craft] header parse failed for ${filePath}: ${parseError.message}\n`,
+        );
+      }
+      continue;
+    }
+    const usage = header.tokenUsage;
+    if (!usage || typeof usage !== "object") continue;
+
+    const sessionId =
+      typeof header.id === "string" && header.id
+        ? header.id
+        : (typeof header.sdkSessionId === "string" && header.sdkSessionId
+            ? header.sdkSessionId
+            : null);
+    if (!sessionId) continue;
+
+    recordsProcessed++;
+
+    const totalInput = toNonNegativeInt(usage.inputTokens);
+    const totalOutput = toNonNegativeInt(usage.outputTokens);
+    const totalCacheRead = toNonNegativeInt(usage.cacheReadTokens);
+    const totalCacheWrite = toNonNegativeInt(usage.cacheCreationTokens);
+    const totalReported =
+      Number.isFinite(Number(usage.totalTokens)) && Number(usage.totalTokens) > 0
+        ? toNonNegativeInt(usage.totalTokens)
+        : totalInput + totalOutput + totalCacheRead + totalCacheWrite;
+
+    const prev = sessionTotals[sessionId] || {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total: 0,
+    };
+
+    // Compute the delta since the last sync. Negative deltas mean the session
+    // was reset/truncated — clamp to 0 and replace the snapshot.
+    const dInput = Math.max(0, totalInput - prev.input);
+    const dOutput = Math.max(0, totalOutput - prev.output);
+    const dCacheRead = Math.max(0, totalCacheRead - prev.cacheRead);
+    const dCacheWrite = Math.max(0, totalCacheWrite - prev.cacheWrite);
+    const dTotal = Math.max(0, totalReported - prev.total);
+
+    const nowMs = Date.now();
+
+    if (dInput === 0 && dOutput === 0 && dCacheRead === 0 && dCacheWrite === 0) {
+      // No new usage since last parse — but still update the snapshot in case
+      // an earlier truncate left it stale, and refresh lastSeenAt so the
+      // eviction policy treats the session as live.
+      sessionTotals[sessionId] = {
+        input: totalInput,
+        output: totalOutput,
+        cacheRead: totalCacheRead,
+        cacheWrite: totalCacheWrite,
+        total: totalReported,
+        lastSeenAt: nowMs,
+      };
+      continue;
+    }
+
+    // Bucket on lastMessageAt (preferred) or createdAt — both ms epoch.
+    let tsMs = null;
+    const tsCandidates = [header.lastMessageAt, header.lastUsedAt, header.createdAt];
+    for (const cand of tsCandidates) {
+      if (Number.isFinite(Number(cand)) && Number(cand) > 0) {
+        tsMs = Number(cand);
+        break;
+      }
+    }
+    if (tsMs == null) tsMs = stat.mtimeMs;
+    if (!Number.isFinite(tsMs) || tsMs <= 0) continue;
+
+    const tsIso = new Date(tsMs).toISOString();
+    const bucketStart = toUtcHalfHourStart(tsIso);
+    if (!bucketStart) continue;
+
+    const model = normalizeModelInput(header.model) || fallbackModel;
+
+    // conversation_count: 1 the first time we see a session, 0 on subsequent
+    // syncs of the same session. NOTE: this differs from omp/Claude which
+    // count one-per-assistant-message. Cross-provider "conversations" totals
+    // are therefore not directly comparable — Craft's are per-session.
+    const delta = {
+      input_tokens: dInput,
+      cached_input_tokens: dCacheRead,
+      cache_creation_input_tokens: dCacheWrite,
+      output_tokens: dOutput,
+      reasoning_output_tokens: 0,
+      total_tokens: dTotal > 0 ? dTotal : dInput + dOutput + dCacheRead + dCacheWrite,
+      conversation_count: prev.total === 0 ? 1 : 0,
+    };
+
+    const bucket = getHourlyBucket(hourlyState, "craft", model, bucketStart);
+    addTotals(bucket.totals, delta);
+    touchedBuckets.add(bucketKey("craft", model, bucketStart));
+    eventsAggregated++;
+
+    sessionTotals[sessionId] = {
+      input: totalInput,
+      output: totalOutput,
+      cacheRead: totalCacheRead,
+      cacheWrite: totalCacheWrite,
+      total: totalReported,
+      lastSeenAt: nowMs,
+    };
+
+    if (cb) {
+      cb({
+        index: fileIdx + 1,
+        total: files.length,
+        recordsProcessed,
+        eventsAggregated,
+        bucketsQueued: touchedBuckets.size,
+      });
+    }
+  }
+
+  // Cap session-totals map at 5k entries to bound cursor state size. Evict by
+  // lastSeenAt (least-recently-seen first) so that long-lived sessions stay
+  // tracked even when many newer one-shot sessions cycle through. Insertion
+  // order would silently re-zero a long-running session and double-count its
+  // total on the next sync.
+  const entries = Object.entries(sessionTotals);
+  let capped = sessionTotals;
+  if (entries.length > 5000) {
+    entries.sort((a, b) => (a[1]?.lastSeenAt || 0) - (b[1]?.lastSeenAt || 0));
+    capped = Object.fromEntries(entries.slice(entries.length - 5000));
+  }
+
+  const bucketsQueued = await enqueueTouchedBuckets({
+    queuePath,
+    hourlyState,
+    touchedBuckets,
+  });
+  const updatedAt = new Date().toISOString();
+  hourlyState.updatedAt = updatedAt;
+  cursors.hourly = hourlyState;
+  cursors.craft = {
+    ...craftState,
+    sessionTotals: capped,
+    updatedAt,
+  };
+
+  return { recordsProcessed, eventsAggregated, bucketsQueued };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GitHub Copilot CLI — OpenTelemetry JSONL exporter
+// User must opt in by setting:
+//   COPILOT_OTEL_ENABLED=true
+//   COPILOT_OTEL_EXPORTER_TYPE=file
+//   COPILOT_OTEL_FILE_EXPORTER_PATH=$HOME/.copilot/otel/copilot-otel-...jsonl
+// We scan the default directory plus the env-overridden path.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function resolveCopilotOtelPaths(env = process.env) {
+  const home = env.HOME || require("node:os").homedir();
+  const paths = new Set();
+  const defaultDir = path.join(home, ".copilot", "otel");
+  if (fssync.existsSync(defaultDir)) {
+    try {
+      for (const entry of fssync.readdirSync(defaultDir)) {
+        if (entry.endsWith(".jsonl")) paths.add(path.join(defaultDir, entry));
+      }
+    } catch (_e) {}
+  }
+  const explicit = env.COPILOT_OTEL_FILE_EXPORTER_PATH;
+  if (typeof explicit === "string" && explicit.trim() && fssync.existsSync(explicit)) {
+    paths.add(explicit);
+  }
+  return Array.from(paths).sort();
+}
+
+function isCopilotChatSpan(record) {
+  if (!record || typeof record !== "object") return false;
+  // Skip metric records (resource + scopeMetrics) which have no chat usage data
+  if (record.scopeMetrics) return false;
+  const opName = record?.attributes?.["gen_ai.operation.name"];
+  // Both Copilot CLI (Span shape with type:"span") and Copilot Chat extension
+  // (OTEL JS SDK LogRecord shape with event.name:"gen_ai.client.inference.operation.details")
+  // mark chat completions with gen_ai.operation.name === "chat".
+  if (opName === "chat") return true;
+  if (record.type === "span" && typeof record.name === "string" && record.name.startsWith("chat ")) {
+    return true;
+  }
+  return false;
+}
+
+function copilotOtelTimeToMs(value) {
+  if (!Array.isArray(value) || value.length < 2) return null;
+  const seconds = Number(value[0]);
+  const nanos = Number(value[1]);
+  if (!Number.isFinite(seconds)) return null;
+  const ns = Number.isFinite(nanos) ? nanos : 0;
+  return Math.round(seconds * 1000 + ns / 1_000_000);
+}
+
+function pickCopilotModel(attrs) {
+  const candidates = [attrs?.["gen_ai.response.model"], attrs?.["gen_ai.request.model"]];
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim()) return c.trim();
+  }
+  return null;
+}
+
+const COPILOT_PARSER_VERSION = 2;
+
+function isCopilotV1ChatSpan(record) {
+  if (!record || record.type !== "span") return false;
+  const opName = record?.attributes?.["gen_ai.operation.name"];
+  if (opName === "chat") return true;
+  return typeof record.name === "string" && record.name.startsWith("chat ");
+}
+
+function copilotLineHash(line) {
+  return crypto.createHash("sha256").update(line).digest("hex");
+}
+
+function incrementMapCount(map, key, amount = 1) {
+  map.set(key, (map.get(key) || 0) + amount);
+}
+
+function getCopilotDedupKey(record, attrs = record?.attributes || {}) {
+  const traceId = record?.traceId || record?.spanContext?.traceId || "";
+  const spanId = record?.spanId || record?.spanContext?.spanId || "";
+  const responseId =
+    typeof attrs["gen_ai.response.id"] === "string" ? attrs["gen_ai.response.id"] : "";
+  return traceId && spanId ? `${traceId}:${spanId}` : responseId ? `resp:${responseId}` : null;
+}
+
+// Migration helper: stream the bytes v1 already saw (0 -> prevSize), classify
+// whether the file contains old CLI spans v1 processed, and whether it also
+// contains v2-only chat records v1 skipped. Mixed files must be replayed, but
+// their old CLI lines are skipped by hash so history does not double-count.
+async function scanCopilotV1MigrationFile(filePath, maxBytes) {
+  const result = {
+    v1Processed: false,
+    v2OnlyChat: false,
+    v1LineHashes: new Map(),
+  };
+  if (!maxBytes || maxBytes <= 0) return result;
+  try {
+    const stream = fssync.createReadStream(filePath, {
+      encoding: "utf8",
+      start: 0,
+      end: maxBytes - 1,
+    });
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+    try {
+      for await (const line of rl) {
+        if (!line || !line.trim()) continue;
+        let record;
+        try {
+          record = JSON.parse(line);
+        } catch (_e) {
+          continue;
+        }
+        // Must mirror v1's isCopilotChatSpan exactly: BOTH the
+        // gen_ai.operation.name path AND the legacy name-prefix fallback.
+        // Missing the second path lets metric-free files of name-only CLI spans
+        // look like "v1 skipped" -> offset reset -> re-read -> double-count.
+        if (isCopilotV1ChatSpan(record)) {
+          result.v1Processed = true;
+          incrementMapCount(result.v1LineHashes, copilotLineHash(line));
+        } else if (isCopilotChatSpan(record)) {
+          result.v2OnlyChat = true;
+        }
+      }
+    } finally {
+      rl.close();
+      stream.destroy();
+    }
+  } catch (_e) {}
+  return result;
+}
+
+async function parseCopilotIncremental({ otelPaths, cursors, queuePath, onProgress, env } = {}) {
+  await ensureDir(path.dirname(queuePath));
+  const copilotState = cursors.copilot && typeof cursors.copilot === "object" ? cursors.copilot : {};
+  const seenIds = new Set(Array.isArray(copilotState.seenIds) ? copilotState.seenIds : []);
+  const priorVersion = Number(copilotState.version) || 1;
+  const fileOffsetsRaw =
+    copilotState.fileOffsets && typeof copilotState.fileOffsets === "object"
+      ? copilotState.fileOffsets
+      : {};
+  const fileOffsets = { ...fileOffsetsRaw };
+  const migrationSkipLineHashes = new Map();
+  // One-shot v1->v2 migration:
+  // - pure v2-only files: clear offset and re-read all skipped Chat records
+  // - pure v1 CLI files: preserve offset to avoid replaying history beyond seenIds
+  // - mixed files: clear offset, but skip old v1 CLI lines by hash during replay
+  if (priorVersion < COPILOT_PARSER_VERSION) {
+    for (const filePath of Object.keys(fileOffsets)) {
+      const prevSize = Number(fileOffsets[filePath]?.size) || 0;
+      const scan = await scanCopilotV1MigrationFile(filePath, prevSize);
+      if (!scan.v1Processed) {
+        delete fileOffsets[filePath];
+      } else if (scan.v2OnlyChat) {
+        delete fileOffsets[filePath];
+        migrationSkipLineHashes.set(filePath, scan.v1LineHashes);
+      }
+    }
+  }
+
+  const files = Array.isArray(otelPaths) && otelPaths.length > 0
+    ? otelPaths
+    : resolveCopilotOtelPaths(env || process.env);
+  if (files.length === 0) {
+    cursors.copilot = {
+      ...copilotState,
+      version: COPILOT_PARSER_VERSION,
+      seenIds: Array.from(seenIds),
+      fileOffsets,
+      updatedAt: new Date().toISOString(),
+    };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
+
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const touchedBuckets = new Set();
+  const cb = typeof onProgress === "function" ? onProgress : null;
+  let recordsProcessed = 0;
+  let eventsAggregated = 0;
+
+  for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+    const filePath = files[fileIdx];
+    let stat;
+    try {
+      stat = fssync.statSync(filePath);
+    } catch (_e) {
+      continue;
+    }
+    const prevEntry = fileOffsets[filePath] || {};
+    const prevSize = Number(prevEntry.size) || 0;
+    const prevIno = prevEntry.ino;
+    // Re-read from start if (a) file shrunk (truncate/rewrite in place) or
+    // (b) inode changed (rotator deleted + recreated at same path). Without
+    // the inode check, a rotator producing a same-or-larger file would leave
+    // the old offset stuck and skip the new file's prefix forever.
+    const inodeChanged = typeof prevIno === "number" && prevIno !== stat.ino;
+    const startOffset = stat.size < prevSize || inodeChanged ? 0 : prevSize;
+    if (stat.size <= startOffset) continue;
+
+    let stream;
+    try {
+      stream = fssync.createReadStream(filePath, { encoding: "utf8", start: startOffset });
+    } catch (_e) {
+      continue;
+    }
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+    for await (const line of rl) {
+      if (!line || !line.trim()) continue;
+      const skipLineHashes = migrationSkipLineHashes.get(filePath);
+      if (skipLineHashes && skipLineHashes.size > 0) {
+        const lineHash = copilotLineHash(line);
+        const skipCount = skipLineHashes.get(lineHash) || 0;
+        if (skipCount > 0) {
+          if (skipCount === 1) skipLineHashes.delete(lineHash);
+          else skipLineHashes.set(lineHash, skipCount - 1);
+          continue;
+        }
+      }
+      let record;
+      try {
+        record = JSON.parse(line);
+      } catch (_e) {
+        continue;
+      }
+      recordsProcessed++;
+      if (!isCopilotChatSpan(record)) continue;
+
+      const attrs = record.attributes || {};
+      // Dedup: CLI puts traceId/spanId at the top level; the Chat extension
+      // file exporter writes LogRecord-shaped entries without either, but
+      // gen_ai.response.id is per-LLM-call unique.
+      const dedupKey = getCopilotDedupKey(record, attrs);
+      if (dedupKey && seenIds.has(dedupKey)) continue;
+
+      const inputRaw = toNonNegativeInt(attrs["gen_ai.usage.input_tokens"]);
+      const output = toNonNegativeInt(attrs["gen_ai.usage.output_tokens"]);
+      const cacheRead = toNonNegativeInt(attrs["gen_ai.usage.cache_read.input_tokens"]);
+      // Copilot CLI: cache_write.input_tokens; Copilot Chat extension: cache_creation.input_tokens
+      const cacheWrite = toNonNegativeInt(
+        attrs["gen_ai.usage.cache_write.input_tokens"] ??
+          attrs["gen_ai.usage.cache_creation.input_tokens"],
+      );
+      // Copilot CLI: reasoning.output_tokens; Copilot Chat extension: reasoning_tokens
+      const reasoning = toNonNegativeInt(
+        attrs["gen_ai.usage.reasoning.output_tokens"] ?? attrs["gen_ai.usage.reasoning_tokens"],
+      );
+      // OTEL input_tokens INCLUDES cache_read — subtract per project convention
+      const cacheReadClamped = Math.min(cacheRead, inputRaw);
+      const input = Math.max(0, inputRaw - cacheReadClamped);
+      const totalInteresting = input + output + cacheReadClamped + cacheWrite + reasoning;
+      if (totalInteresting === 0) continue;
+
+      // CLI Span uses endTime/startTime; Chat extension LogRecord uses hrTime/hrTimeObserved.
+      const tsMs =
+        copilotOtelTimeToMs(record.endTime) ||
+        copilotOtelTimeToMs(record.startTime) ||
+        copilotOtelTimeToMs(record.hrTime) ||
+        copilotOtelTimeToMs(record.hrTimeObserved);
+      if (!tsMs) continue;
+      const tsIso = new Date(tsMs).toISOString();
+      const bucketStart = toUtcHalfHourStart(tsIso);
+      if (!bucketStart) continue;
+
+      const model = normalizeModelInput(pickCopilotModel(attrs)) || "github-copilot";
+
+      const delta = {
+        input_tokens: input,
+        cached_input_tokens: cacheReadClamped,
+        cache_creation_input_tokens: cacheWrite,
+        output_tokens: output,
+        reasoning_output_tokens: reasoning,
+        total_tokens: input + output + cacheReadClamped + cacheWrite + reasoning,
+        conversation_count: 1,
+      };
+
+      const bucket = getHourlyBucket(hourlyState, "copilot", model, bucketStart);
+      addTotals(bucket.totals, delta);
+      touchedBuckets.add(bucketKey("copilot", model, bucketStart));
+      eventsAggregated++;
+      if (dedupKey) seenIds.add(dedupKey);
+
+      if (cb) {
+        cb({
+          index: fileIdx + 1,
+          total: files.length,
+          recordsProcessed,
+          eventsAggregated,
+          bucketsQueued: touchedBuckets.size,
+        });
+      }
+    }
+
+    // Re-stat after readline drains: file may have been appended during the
+    // parse loop. Without this, those new lines would be replayed next run
+    // (dedup catches records with traceId+spanId, but spans missing either
+    // would be double-counted).
+    let postStat = stat;
+    try {
+      postStat = fssync.statSync(filePath);
+    } catch (_e) {}
+    fileOffsets[filePath] = { size: postStat.size, mtimeMs: postStat.mtimeMs, ino: postStat.ino };
+  }
+
+  // Cap dedup set to last 10k IDs to bound state size
+  const seenArr = Array.from(seenIds);
+  const cappedSeen = seenArr.length > 10_000 ? seenArr.slice(seenArr.length - 10_000) : seenArr;
+
+  const bucketsQueued = await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets });
+  const updatedAt = new Date().toISOString();
+  hourlyState.updatedAt = updatedAt;
+  cursors.hourly = hourlyState;
+  cursors.copilot = {
+    ...copilotState,
+    version: COPILOT_PARSER_VERSION,
+    seenIds: cappedSeen,
+    fileOffsets,
+    updatedAt,
+  };
+
+  return { recordsProcessed, eventsAggregated, bucketsQueued };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Grok Build (xAI) — passive reader for ~/.grok/sessions/**/signals.json + summary.json
+// Triggered either by full scan in sync or by the SessionEnd hook writing a signal.
+// Grok exposes contextTokensUsed, which appears to be a snapshot rather than
+// per-call telemetry, so these rows are estimates and only enqueue observed
+// increases for a session.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const GROK_ESTIMATED_INPUT_RATIO = 0.8;
+const GROK_CURSOR_VERSION = 2;
+
+function resolveGrokBuildHome(env = process.env) {
+  return (
+    env.TOKENTRACKER_GROK_HOME ||
+    env.GROK_HOME ||
+    path.join(require("node:os").homedir(), ".grok")
+  );
+}
+
+function resolveGrokBuildSessions(env = process.env) {
+  const home = resolveGrokBuildHome(env);
+  const sessionsRoot = path.join(home, "sessions");
+  if (!fssync.existsSync(sessionsRoot)) return [];
+
+  const results = [];
+  let cwdDirs = [];
+  try {
+    cwdDirs = fssync.readdirSync(sessionsRoot);
+  } catch {
+    return [];
+  }
+
+  for (const cwdDir of cwdDirs) {
+    const cwdPath = path.join(sessionsRoot, cwdDir);
+    let stat;
+    try { stat = fssync.statSync(cwdPath); } catch { continue; }
+    if (!stat.isDirectory()) continue;
+
+    let sessionIds = [];
+    try { sessionIds = fssync.readdirSync(cwdPath); } catch { continue; }
+
+    for (const sid of sessionIds) {
+      const sessionDir = path.join(cwdPath, sid);
+      const signalsPath = path.join(sessionDir, "signals.json");
+      if (fssync.existsSync(signalsPath)) {
+        results.push({
+          sessionDir,
+          signalsPath,
+          summaryPath: path.join(sessionDir, "summary.json"),
+          sessionId: sid,
+          encodedCwd: cwdDir
+        });
+      }
+    }
+  }
+  return results;
+}
+
+function normalizeGrokSessionSnapshots(grokState) {
+  const snapshots = {};
+  if (grokState?.sessionSnapshots && typeof grokState.sessionSnapshots === "object") {
+    for (const [sessionId, snapshot] of Object.entries(grokState.sessionSnapshots)) {
+      const safeSessionId = normalizeModelInput(sessionId);
+      if (!safeSessionId || !snapshot || typeof snapshot !== "object") continue;
+      const totalTokens = normalizeNonNegativeNumber(snapshot.totalTokens);
+      snapshots[safeSessionId] = {
+        totalTokens,
+        messageCount: normalizeNonNegativeNumber(snapshot.messageCount),
+        model: normalizeModelInput(snapshot.model) || null,
+        updatedAt: normalizeModelInput(snapshot.updatedAt) || null,
+      };
+    }
+  }
+
+  if (Array.isArray(grokState?.seenSessions)) {
+    for (const sessionId of grokState.seenSessions) {
+      const safeSessionId = normalizeModelInput(sessionId);
+      if (!safeSessionId || snapshots[safeSessionId]) continue;
+      snapshots[safeSessionId] = {
+        totalTokens: Number.MAX_SAFE_INTEGER,
+        messageCount: 0,
+        model: null,
+        updatedAt: normalizeModelInput(grokState.updatedAt) || null,
+        legacySeen: true,
+      };
+    }
+  }
+
+  return snapshots;
+}
+
+function capGrokSessionSnapshots(sessionSnapshots) {
+  const entries = Object.entries(sessionSnapshots);
+  if (entries.length <= 10_000) return sessionSnapshots;
+  return Object.fromEntries(entries.slice(entries.length - 10_000));
+}
+
+function readGrokJsonFile(filePath) {
+  if (!filePath) return null;
+  try {
+    return JSON.parse(fssync.readFileSync(filePath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function grokSessionIdFor(sess) {
+  return (
+    normalizeModelInput(sess?.sessionId) ||
+    (normalizeModelInput(sess?.sessionDir) ? path.basename(sess.sessionDir) : null)
+  );
+}
+
+function grokModelFromSignals(signals) {
+  return (
+    normalizeModelInput(signals?.primaryModelId) ||
+    normalizeModelInput(Array.isArray(signals?.modelsUsed) ? signals.modelsUsed[0] : null) ||
+    normalizeModelInput(signals?.model) ||
+    "grok-build"
+  );
+}
+
+function grokLastActiveFromSignals(signals, summary) {
+  return (
+    normalizeModelInput(signals?.lastActiveAt) ||
+    normalizeModelInput(signals?.updatedAt) ||
+    normalizeModelInput(signals?.lastActive) ||
+    normalizeModelInput(summary?.updated_at) ||
+    normalizeModelInput(summary?.updatedAt) ||
+    new Date().toISOString()
+  );
+}
+
+function estimateGrokTokenDelta(totalTokens, conversationCount) {
+  const total = Math.trunc(normalizeNonNegativeNumber(totalTokens));
+  const inputTokens = Math.round(total * GROK_ESTIMATED_INPUT_RATIO);
+  const outputTokens = Math.max(0, total - inputTokens);
+  const conversations = Math.max(1, Math.trunc(normalizeNonNegativeNumber(conversationCount)));
+
+  return {
+    input_tokens: inputTokens,
+    cached_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+    output_tokens: outputTokens,
+    reasoning_output_tokens: 0,
+    total_tokens: total,
+    billable_total_tokens: total,
+    conversation_count: conversations,
+  };
+}
+
+async function parseGrokBuildIncremental({
+  sessions,
+  cursors = {},
+  queuePath,
+  onProgress,
+  env = process.env
+} = {}) {
+  if (queuePath) await ensureDir(path.dirname(queuePath));
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const grokState = cursors.grok && typeof cursors.grok === "object" ? { ...cursors.grok } : {};
+  let sessionSnapshots = normalizeGrokSessionSnapshots(grokState);
+  const touchedBuckets = new Set();
+
+  const sessionList = Array.isArray(sessions) && sessions.length > 0
+    ? sessions
+    : resolveGrokBuildSessions(env);
+
+  let eventsAggregated = 0;
+
+  for (const sess of sessionList) {
+    const sessionId = grokSessionIdFor(sess);
+    if (!sessionId) continue;
+
+    const signals = sess?.signals && typeof sess.signals === "object"
+      ? sess.signals
+      : readGrokJsonFile(sess?.signalsPath);
+    if (!signals || typeof signals !== "object") continue;
+
+    const summary = sess?.summary && typeof sess.summary === "object"
+      ? sess.summary
+      : readGrokJsonFile(sess?.summaryPath) || {};
+    const totalTokens = normalizeNonNegativeNumber(signals.contextTokensUsed ?? signals.totalTokens);
+    if (totalTokens <= 0) {
+      continue;
+    }
+
+    const previous = sessionSnapshots[sessionId] || {};
+    const previousTotal = normalizeNonNegativeNumber(previous.totalTokens);
+    const deltaTokens = totalTokens > previousTotal ? totalTokens - previousTotal : 0;
+    if (deltaTokens <= 0) continue;
+
+    const messageCount = normalizeNonNegativeNumber(
+      signals.assistantMessageCount ?? signals.num_chat_messages ?? signals.messageCount,
+    );
+    const previousMessageCount = normalizeNonNegativeNumber(previous.messageCount);
+    const deltaMessageCount =
+      messageCount > previousMessageCount ? messageCount - previousMessageCount : 1;
+    const model = grokModelFromSignals(signals);
+    const lastActive = grokLastActiveFromSignals(signals, summary);
+    const hourStartStr = toUtcHalfHourStart(lastActive) || toUtcHalfHourStart(Date.now());
+    if (!hourStartStr) continue;
+
+    const delta = estimateGrokTokenDelta(deltaTokens, deltaMessageCount);
+    const bucket = getHourlyBucket(hourlyState, "grok", model, hourStartStr);
+    addTotals(bucket.totals, delta);
+    touchedBuckets.add(bucketKey("grok", model, hourStartStr));
+
+    eventsAggregated++;
+    sessionSnapshots[sessionId] = {
+      totalTokens: Math.max(previousTotal, totalTokens),
+      messageCount: Math.max(previousMessageCount, messageCount),
+      model,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  const bucketsQueued = queuePath
+    ? await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
+    : 0;
+  hourlyState.updatedAt = new Date().toISOString();
+  cursors.hourly = hourlyState;
+  sessionSnapshots = capGrokSessionSnapshots(sessionSnapshots);
+
+  cursors.grok = {
+    ...grokState,
+    version: GROK_CURSOR_VERSION,
+    sessionSnapshots,
+    seenSessions: Object.keys(sessionSnapshots),
+    updatedAt: new Date().toISOString()
+  };
+
+  return {
+    recordsProcessed: eventsAggregated,
+    eventsAggregated,
+    bucketsQueued
+  };
 }
 
 module.exports = {
@@ -3027,6 +6142,7 @@ module.exports = {
   resolveKiroDbPath,
   resolveKiroJsonlPath,
   resolveHermesDbPath,
+  resolveCopilotOtelPaths,
   parseRolloutIncremental,
   parseClaudeIncremental,
   parseGeminiIncremental,
@@ -3036,4 +6152,54 @@ module.exports = {
   parseCursorApiIncremental,
   parseKiroIncremental,
   parseHermesIncremental,
+  parseCopilotIncremental,
+  resolveKimiWireFiles,
+  resolveKimiDefaultModel,
+  parseKimiIncremental,
+  resolveCodebuddyHome,
+  resolveCodebuddyProjectFiles,
+  resolveCodebuddyDefaultModel,
+  parseCodebuddyIncremental,
+  resolveKiroCliSessionFiles,
+  resolveKiroCliDbPath,
+  parseKiroCliIncremental,
+  resolveOmpHome,
+  resolveOmpAgentDir,
+  resolveOmpSessionFiles,
+  resolveOmpDefaultModel,
+  parseOmpIncremental,
+  resolveKilocodeRoots,
+  resolveKilocodeTaskFiles,
+  normalizeKilocodeProviderToModel,
+  parseKilocodeIncremental,
+  resolvePiHome,
+  resolvePiAgentDir,
+  resolvePiSessionFiles,
+  resolvePiDefaultModel,
+  parsePiIncremental,
+  piAgentDirCollidesWithOmp,
+  resolveCraftConfigDir,
+  resolveCraftWorkspaceRoots,
+  resolveCraftSessionFiles,
+  resolveCraftDefaultModel,
+  parseCraftIncremental,
+  // Exposed for regression tests covering cache-token accounting.
+  normalizeGeminiTokens,
+  normalizeOpencodeTokens,
+  sameGeminiTotals,
+  diffGeminiTotals,
+  // Exposed so the queue-repair migration can mutate cursors state in the
+  // same key format sync uses elsewhere.
+  bucketKey,
+  totalsKey,
+  claudeMessageDedupKey,
+  groupBucketKey,
+  // Exposed for regression tests covering nested-group remote URLs.
+  canonicalizeProjectRef,
+  deriveProjectKeyFromRef,
+
+  // Grok Build (xAI) — SessionEnd hook + passive signals.json reader
+  resolveGrokBuildHome,
+  resolveGrokBuildSessions,
+  parseGrokBuildIncremental,
 };

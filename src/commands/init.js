@@ -22,6 +22,7 @@ const {
 const {
   upsertClaudeHook,
   buildClaudeHookCommand,
+  buildHookCommand,
   isClaudeHookConfigured,
 } = require("../lib/claude-config");
 const {
@@ -42,7 +43,20 @@ const {
   installOpenclawSessionPlugin,
   probeOpenclawSessionPluginState,
 } = require("../lib/openclaw-session-plugin");
+const {
+  resolveGrokHome,
+  resolveGrokHooksDir,
+  upsertGrokHook,
+  probeGrokHookState,
+  removeGrokHook,
+  GROK_HOOK_FILENAME
+} = require("../lib/grok-hook");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
+const {
+  resolveOmpAgentDir,
+  resolvePiAgentDir,
+  piAgentDirCollidesWithOmp,
+} = require("../lib/rollout");
 const { resolveRuntimeConfig, DEFAULT_BASE_URL } = require("../lib/runtime-config");
 const {
   BOLD,
@@ -72,7 +86,28 @@ const ASCII_LOGO = [
 ].join("\n");
 
 const DIVIDER = "----------------------------------------------";
-const DEFAULT_DASHBOARD_URL = "https://token.rynn.me";
+const DEFAULT_DASHBOARD_URL = "https://www.tokentracker.cc";
+
+// Single source of truth for the welcome screen's provider count + sample list.
+// Keep in sync with the supported-tools table in CLAUDE.md.
+const SUPPORTED_PROVIDERS = [
+  "Claude Code",
+  "Codex CLI",
+  "Cursor",
+  "Gemini CLI",
+  "OpenCode",
+  "OpenClaw",
+  "Every Code",
+  "Kiro",
+  "Hermes Agent",
+  "GitHub Copilot",
+  "Kimi Code",
+  "oh-my-pi",
+  "CodeBuddy",
+  "Grok Build",
+  "Kilo CLI",
+  "Kilo Code",
+];
 
 async function cmdInit(argv) {
   const opts = parseArgs(argv);
@@ -157,54 +192,81 @@ async function cmdInit(argv) {
 
   renderLocalReport({ summary: setup.summary, isDryRun: false });
 
-  renderLocalSuccess();
-
+  // Run first sync inline (with a generous timeout) so we can render the
+  // *actual* token total in the success message — the aha moment. If the
+  // sync exceeds the timeout we surrender the wait but leave it running, so
+  // the dashboard still picks up data shortly after.
+  const ahaSpinner = createSpinner({ text: "Running first sync..." });
+  ahaSpinner.start();
+  let firstSync = null;
   try {
-    spawnInitSync({ trackerBinPath, packageName: "tokentracker" });
+    firstSync = await runFirstSyncAndRead({
+      trackerBinPath,
+      trackerDir,
+      packageName: "tokentracker",
+    });
   } catch (err) {
     const msg = err && err.message ? err.message : "unknown error";
-    process.stderr.write(`Initial sync spawn failed: ${msg}\n`);
+    process.stderr.write(`Initial sync issue: ${msg}\n`);
+  } finally {
+    ahaSpinner.stop();
   }
+
+  renderLocalSuccess({ firstSync });
 }
 
 function renderWelcome() {
+  const providerCount = SUPPORTED_PROVIDERS.length;
+  // Show first 5 by name for grounding, then "+N more" so the line stays one row.
+  const previewNames = SUPPORTED_PROVIDERS.slice(0, 5).join(", ");
+  const remaining = providerCount - 5;
+  const providerLine =
+    remaining > 0
+      ? `${previewNames} +${remaining} more`
+      : previewNames;
   process.stdout.write(
     [
       ASCII_LOGO,
       "",
-      `${BOLD}Welcome to Token Tracker${RESET}`,
+      `${BOLD}Token Tracker${RESET}  ${color("Local-first usage across " + providerCount + " AI CLIs", DIM)}`,
       DIVIDER,
-      `${CYAN}Privacy First: Your data stays local. Only token counts are tracked — never prompts or responses.${RESET}`,
+      `${CYAN}Nothing leaves your machine — token counts only, never prompts or responses.${RESET}`,
       DIVIDER,
       "",
-      "This tool will:",
-      "  - Detect your AI CLI tools (Codex, Claude, Gemini, OpenCode, Cursor, OpenClaw)",
-      "  - Set up lightweight hooks to track token usage",
-      "  - View your dashboard at http://localhost:7680",
-      "",
-      "(Nothing will be changed until you confirm below)",
+      `  Tracks: ${providerLine}`,
+      `  Dashboard: http://localhost:7680`,
       "",
     ].join("\n"),
   );
 }
 
-function renderLocalSuccess() {
-  process.stdout.write(
-    [
-      "",
-      `${BOLD}Setup complete!${RESET}`,
-      "",
-      "  Token data will be collected automatically via hooks.",
-      "  Launching dashboard...",
-      "",
-      // One-shot, post-success star CTA. `init` is run once per machine, so
-      // this is the only place a CLI user naturally sees the project's
-      // GitHub URL — and they're at peak satisfaction. No prompts in
-      // status/doctor/sync/etc, which run in scripts and would be noisy.
-      `  ${color("⭐ Liking it? Star us at https://github.com/mm7894215/TokenTracker", DIM)}`,
-      "",
-    ].join("\n"),
+function renderLocalSuccess({ firstSync } = {}) {
+  const lines = ["", `${BOLD}Setup complete!${RESET}`, ""];
+
+  if (firstSync && firstSync.totalTokens > 0) {
+    const tokens = firstSync.totalTokens.toLocaleString("en-US");
+    const sourceCount = firstSync.sources.length;
+    const sourceWord = sourceCount === 1 ? "provider" : "providers";
+    lines.push(
+      `  ${BOLD}${tokens}${RESET} tokens tracked across ${sourceCount} ${sourceWord}.`,
+    );
+  } else {
+    lines.push(
+      "  No usage history yet — run any AI CLI and tokens appear within a minute.",
+    );
+  }
+
+  lines.push(
+    "",
+    `  Dashboard: ${CYAN}http://localhost:7680${RESET}`,
+    "",
+    // One-shot, post-success star CTA. `init` is run once per machine, so
+    // this is the only place a CLI user naturally sees the project's GitHub
+    // URL — and they're at peak satisfaction.
+    `  ${color("⭐ Star us if useful: https://github.com/mm7894215/TokenTracker", DIM)}`,
+    "",
   );
+  process.stdout.write(lines.join("\n"));
 }
 
 function renderAccountNotLinked({ context } = {}) {
@@ -303,6 +365,12 @@ function buildIntegrationTargets({ home, trackerDir, notifyPath }) {
   const claudeDir = path.join(home, ".claude");
   const claudeSettingsPath = path.join(claudeDir, "settings.json");
   const claudeHookCommand = buildClaudeHookCommand(notifyPath);
+  // CodeBuddy CLI (Tencent) is a Claude-Code fork — same settings.json hook
+  // schema, same SessionEnd event. We install the same hook with a different
+  // --source token so notify.cjs / sync know which provider triggered.
+  const codebuddyDir = process.env.CODEBUDDY_HOME || path.join(home, ".codebuddy");
+  const codebuddySettingsPath = path.join(codebuddyDir, "settings.json");
+  const codebuddyHookCommand = buildHookCommand(notifyPath, "codebuddy");
   const geminiConfigDir = resolveGeminiConfigDir({ home, env: process.env });
   const geminiSettingsPath = resolveGeminiSettingsPath({ configDir: geminiConfigDir });
   const geminiHookCommand = buildGeminiHookCommand(notifyPath);
@@ -319,6 +387,9 @@ function buildIntegrationTargets({ home, trackerDir, notifyPath }) {
     claudeDir,
     claudeSettingsPath,
     claudeHookCommand,
+    codebuddyDir,
+    codebuddySettingsPath,
+    codebuddyHookCommand,
     geminiConfigDir,
     geminiSettingsPath,
     geminiHookCommand,
@@ -402,6 +473,105 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
     }
   } else {
     summary.push({ label: "Cursor", status: "skipped", detail: "Not installed" });
+  }
+
+  // Kimi: passive reader — no hook installation needed.
+  // TokenTracker reads ~/.kimi/sessions/**/wire.jsonl directly.
+  {
+    const kimiHome = process.env.KIMI_HOME || path.join(home, ".kimi");
+    const kimiSessions = path.join(kimiHome, "sessions");
+    const fssync = require("node:fs");
+    if (fssync.existsSync(kimiSessions)) {
+      summary.push({ label: "Kimi Code", status: "detected", detail: "Passive reader (no hook needed)" });
+    }
+  }
+
+  // oh-my-pi: passive reader — no hook installation needed.
+  // TokenTracker reads ~/.omp/agent/sessions/**/*.jsonl directly.
+  {
+    const ompSessions = path.join(resolveOmpAgentDir(process.env), "sessions");
+    if (fssync.existsSync(ompSessions)) {
+      summary.push({ label: "oh-my-pi", status: "detected", detail: "Passive reader (no hook needed)" });
+    }
+  }
+
+  // pi (@mariozechner/pi-coding-agent): passive reader — no hook installation needed.
+  // TokenTracker reads ~/.pi/agent/sessions/**/*.jsonl directly. Skip when its
+  // agent dir collides with omp's so the summary matches what sync will scan.
+  if (!piAgentDirCollidesWithOmp(process.env)) {
+    const piSessions = path.join(resolvePiAgentDir(process.env), "sessions");
+    if (fssync.existsSync(piSessions)) {
+      summary.push({ label: "pi", status: "detected", detail: "Passive reader (no hook needed)" });
+    }
+  }
+
+  // Craft Agents: passive reader — no hook installation needed.
+  // TokenTracker reads ~/.craft-agent/workspaces/<id>/sessions/**/session.jsonl
+  // (and any user-relocated workspace listed in ~/.craft-agent/config.json).
+  {
+    const craftConfigDir = process.env.CRAFT_CONFIG_DIR || path.join(home, ".craft-agent");
+    if (fssync.existsSync(craftConfigDir)) {
+      summary.push({ label: "Craft Agents", status: "detected", detail: "Passive reader (no hook needed)" });
+    }
+  }
+
+  // Grok Build (xAI): SessionEnd hook in ~/.grok/hooks/ + handler in ~/.tokentracker/bin/
+  {
+    try {
+      const grokState = await probeGrokHookState({ home, trackerDir, env: process.env });
+      if (grokState.hasGrokInstall) {
+        const grokRes = await upsertGrokHook({ home, trackerDir, env: process.env });
+        summary.push({
+          label: "Grok Build",
+          status: grokRes.configured ? "installed" : "detected",
+          detail: grokRes.configured ? "SessionEnd hook installed (99-tokentracker-usage.json)" : "Grok detected"
+        });
+      }
+    } catch (err) {
+      summary.push({ label: "Grok Build", status: "error", detail: String(err?.message || err) });
+    }
+  }
+
+  // Kilo CLI (kilo.ai @kilocode/plugin): passive reader — no hook installation
+  // needed. Reuses OpenCode-fork SQLite schema at ~/.local/share/kilo/kilo.db
+  // (override via KILO_HOME).
+  {
+    const xdgDataHome = process.env.XDG_DATA_HOME || path.join(home, ".local", "share");
+    const kiloHome = process.env.KILO_HOME || path.join(xdgDataHome, "kilo");
+    const kiloDbPath = path.join(kiloHome, "kilo.db");
+    if (fssync.existsSync(kiloDbPath)) {
+      summary.push({ label: "Kilo CLI", status: "detected", detail: "Passive reader (no hook needed)" });
+    }
+  }
+
+  // Kilo Code VS Code extension (kilocode.kilo-code): passive reader — no hook
+  // installation needed. Scans ui_messages.json under every detected VS Code-
+  // family install (Code, Cursor, CodeBuddy, Windsurf, …).
+  {
+    const { resolveKilocodeTaskFiles } = require("../lib/rollout");
+    const taskFiles = resolveKilocodeTaskFiles(process.env);
+    if (taskFiles.length > 0) {
+      const ides = Array.from(new Set(taskFiles.map((t) => t.ide))).join(", ");
+      summary.push({
+        label: "Kilo Code (VS Code extension)",
+        status: "detected",
+        detail: `Passive reader · ${taskFiles.length} task${taskFiles.length !== 1 ? "s" : ""} in ${ides}`,
+      });
+    }
+  }
+
+  // CodeBuddy: Claude-Code fork. Install the SessionEnd hook so finished
+  // sessions trigger notify.cjs → tracker sync; passive scan still runs as a
+  // safety net for sessions that don't fire SessionEnd cleanly.
+  const codebuddyDirExists = await isDir(context.codebuddyDir);
+  if (codebuddyDirExists) {
+    await upsertClaudeHook({
+      settingsPath: context.codebuddySettingsPath,
+      hookCommand: context.codebuddyHookCommand,
+    });
+    summary.push({ label: "CodeBuddy", status: "installed", detail: "Hooks installed" });
+  } else {
+    summary.push({ label: "CodeBuddy", status: "skipped", detail: "Config not found" });
   }
 
   const openclawBefore = await probeOpenclawSessionPluginState({
@@ -510,6 +680,21 @@ async function previewIntegrations({ context }) {
     });
   } else {
     summary.push({ label: "Claude", status: "skipped", detail: "Config not found" });
+  }
+
+  const codebuddyDirExists = await isDir(context.codebuddyDir);
+  if (codebuddyDirExists) {
+    const configured = await isClaudeHookConfigured({
+      settingsPath: context.codebuddySettingsPath,
+      hookCommand: context.codebuddyHookCommand,
+    });
+    summary.push({
+      label: "CodeBuddy",
+      status: "installed",
+      detail: configured ? "Hooks already installed" : "Will install hooks",
+    });
+  } else {
+    summary.push({ label: "CodeBuddy", status: "skipped", detail: "Config not found" });
   }
 
   const geminiConfigExists = await isDir(context.geminiConfigDir);
@@ -760,13 +945,13 @@ try {
   const originalPath =
     source === 'every-code'
       ? codeOriginalPath
-      : source === 'claude' || source === 'opencode' || source === 'gemini'
+      : source === 'claude' || source === 'opencode' || source === 'gemini' || source === 'codebuddy'
         ? null
         : codexOriginalPath;
   if (originalPath) {
     const original = JSON.parse(fs.readFileSync(originalPath, 'utf8'));
     const cmd = Array.isArray(original?.notify) ? original.notify : null;
-    if (cmd && cmd.length > 0 && !isSelfNotify(cmd)) {
+    if (cmd && cmd.length > 0 && !isSelfNotify(cmd) && shouldChainNotify(cmd)) {
       const args = cmd.slice(1);
       if (payloadArgs.length > 0) args.push(...payloadArgs);
       spawnDetached([cmd[0], ...args]);
@@ -802,10 +987,34 @@ function isSelfNotify(cmd) {
   }
   return false;
 }
+
+function shouldChainNotify(cmd) {
+  if (!Array.isArray(cmd) || cmd.length === 0) return false;
+  if (containsSkyComputerUseClient(cmd)) return false;
+  return isRunnableCommand(cmd[0]);
+}
+
+function containsSkyComputerUseClient(cmd) {
+  return cmd.some((part) => typeof part === 'string' && part.includes('SkyComputerUseClient'));
+}
+
+function isRunnableCommand(command) {
+  if (typeof command !== 'string' || command.length === 0) return false;
+  const explicitPath = command.startsWith('~/') || command.includes('/');
+  if (!explicitPath) return true;
+  const resolved = resolveMaybeHome(command);
+  if (!resolved) return false;
+  try {
+    fs.accessSync(resolved, fs.constants.X_OK);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
 `;
 }
 
-module.exports = { cmdInit };
+module.exports = { cmdInit, buildNotifyHandler, installLocalTrackerApp };
 
 async function probeFile(p) {
   try {
@@ -834,7 +1043,9 @@ async function installLocalTrackerApp({ appDir }) {
   const packageRoot = path.resolve(__dirname, "../..");
   const srcFrom = path.join(packageRoot, "src");
   const binFrom = path.join(packageRoot, "bin", "tracker.js");
+  const packageJsonFrom = path.join(packageRoot, "package.json");
   const nodeModulesFrom = path.join(packageRoot, "node_modules");
+  const dashboardDistFrom = path.join(packageRoot, "dashboard", "dist");
 
   // When running from the installed local runtime (or when appDir is symlinked to this package),
   // source and destination resolve to the same place. Do not delete appDir in that case.
@@ -846,6 +1057,7 @@ async function installLocalTrackerApp({ appDir }) {
   const binToDir = path.join(appDir, "bin");
   const binTo = path.join(binToDir, "tracker.js");
   const nodeModulesTo = path.join(appDir, "node_modules");
+  const dashboardDistTo = path.join(appDir, "dashboard", "dist");
 
   await fs.rm(appDir, { recursive: true, force: true }).catch(() => {});
   await ensureDir(appDir);
@@ -853,6 +1065,10 @@ async function installLocalTrackerApp({ appDir }) {
   await ensureDir(binToDir);
   await fs.copyFile(binFrom, binTo);
   await fs.chmod(binTo, 0o755).catch(() => {});
+  await fs.copyFile(packageJsonFrom, path.join(appDir, "package.json")).catch(() => {});
+  if (await isDir(dashboardDistFrom)) {
+    await fs.cp(dashboardDistFrom, dashboardDistTo, { recursive: true });
+  }
   await copyRuntimeDependencies({ from: nodeModulesFrom, to: nodeModulesTo });
 }
 
@@ -871,25 +1087,88 @@ async function safeRealpath(p) {
   }
 }
 
-function spawnInitSync({ trackerBinPath, packageName }) {
+// Run the first sync inline so we can show the user their real token total
+// immediately. Caps wall-time at FIRST_SYNC_TIMEOUT_MS — past that we let the
+// child continue detached and surrender the wait. Returns aggregate stats
+// derived from queue.jsonl after the wait window closes.
+const FIRST_SYNC_TIMEOUT_MS = 15_000;
+
+async function runFirstSyncAndRead({ trackerBinPath, trackerDir, packageName }) {
   const fallbackPkg = packageName || "tokentracker-cli";
   const argv = ["sync", "--drain"];
   const hasLocalRuntime = typeof trackerBinPath === "string" && fssync.existsSync(trackerBinPath);
   const cmd = hasLocalRuntime
     ? [process.execPath, trackerBinPath, ...argv]
     : ["npx", "--yes", fallbackPkg, ...argv];
-  const child = cp.spawn(cmd[0], cmd.slice(1), {
-    detached: true,
-    stdio: "ignore",
-    env: process.env,
+
+  await new Promise((resolve) => {
+    let settled = false;
+    let timer = null;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve();
+    };
+    let child;
+    try {
+      child = cp.spawn(cmd[0], cmd.slice(1), {
+        // detached so we can let it keep running past our timeout — the user
+        // still gets data later via dashboard auto-refresh.
+        detached: true,
+        stdio: "ignore",
+        env: process.env,
+      });
+    } catch (err) {
+      if (isDebugEnabled()) {
+        process.stderr.write(`first-sync spawn failed: ${err?.message || err}\n`);
+      }
+      settle();
+      return;
+    }
+    child.on("error", () => settle());
+    child.on("exit", () => settle());
+    timer = setTimeout(() => {
+      try {
+        child.unref();
+      } catch (_e) {}
+      settle();
+    }, FIRST_SYNC_TIMEOUT_MS);
   });
-  child.on("error", (err) => {
-    const msg = err && err.message ? err.message : "unknown error";
-    const detail = isDebugEnabled() ? ` (${msg})` : "";
-    process.stderr.write(`Minor issue: Background sync could not start${detail}.\n`);
-    process.stderr.write("Run: npx --yes tokentracker-cli sync\n");
-  });
-  child.unref();
+
+  return readFirstSyncTotals(trackerDir);
+}
+
+function readFirstSyncTotals(trackerDir) {
+  const queuePath = path.join(trackerDir, "queue.jsonl");
+  let raw;
+  try {
+    raw = fssync.readFileSync(queuePath, "utf8");
+  } catch (_e) {
+    return { totalTokens: 0, sources: [] };
+  }
+  let totalTokens = 0;
+  const sources = new Set();
+  // Each sync appends cumulative totals per (source, model, hour_start); keep
+  // the last entry per bucket to match what the dashboard shows.
+  const latest = new Map();
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const row = JSON.parse(trimmed);
+      const key = `${row.source || ""}|${row.model || ""}|${row.hour_start || ""}`;
+      latest.set(key, row);
+    } catch {
+      // skip malformed
+    }
+  }
+  for (const row of latest.values()) {
+    const n = Number(row.total_tokens);
+    if (Number.isFinite(n) && n > 0) totalTokens += n;
+    if (row.source) sources.add(row.source);
+  }
+  return { totalTokens, sources: Array.from(sources) };
 }
 
 async function copyRuntimeDependencies({ from, to }) {

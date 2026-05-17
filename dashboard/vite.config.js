@@ -286,104 +286,35 @@ async function runLocalSyncCommand(extraEnv = {}) {
   });
 }
 
-// Per-model pricing (USD per million tokens)
-// Rates per million tokens (USD). Sources: LiteLLM, OpenAI, Google, OpenRouter.
-const MODEL_PRICING = {
-  // ── Anthropic Claude ──
-  "claude-opus-4-6": { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
-  "claude-opus-4-5-20250414": { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
-  "claude-sonnet-4-6": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
-  "claude-sonnet-4-5-20250514": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
-  "claude-sonnet-4-20250514": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
-  "claude-haiku-4-5-20251001": { input: 1, output: 5, cache_read: 0.1, cache_write: 1.25 },
-  "claude-3-5-sonnet-20241022": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
-  "claude-3-5-haiku-20241022": { input: 1, output: 5, cache_read: 0.1, cache_write: 1.25 },
-  // ── OpenAI GPT / Codex ──
-  "gpt-5": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5-fast": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5-high": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5-high-fast": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5-codex": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5-codex-high-fast": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5.1-codex": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5.1-codex-mini": { input: 0.25, output: 2, cache_read: 0.025 },
-  "gpt-5.1-codex-max": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5.1-codex-max-high-fast": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5.1-codex-max-xhigh-fast": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5.1-codex-high": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5.1-codex-max-high": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5.2": { input: 1.75, output: 14, cache_read: 0.175 },
-  "gpt-5.2-high": { input: 1.75, output: 14, cache_read: 0.175 },
-  "gpt-5.2-high-fast": { input: 1.75, output: 14, cache_read: 0.175 },
-  "gpt-5.2-codex": { input: 1.75, output: 14, cache_read: 0.175 },
-  "gpt-5.2-codex-high": { input: 1.75, output: 14, cache_read: 0.175 },
-  "gpt-5.3-codex": { input: 1.75, output: 14, cache_read: 0.175 },
-  "gpt-5.3-codex-high": { input: 1.75, output: 14, cache_read: 0.175 },
-  "gpt-5.4": { input: 2.5, output: 15, cache_read: 0.25 },
-  "gpt-5.4-mini": { input: 0.75, output: 4.5, cache_read: 0.075 },
-  "gpt-5.4-medium": { input: 1.5, output: 10, cache_read: 0.15 },
-  "o3": { input: 2, output: 8, cache_read: 0.5 },
-  // ── Google Gemini (official: ai.google.dev/pricing) ──
-  "gemini-2.5-pro": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gemini-2.5-pro-preview-06-05": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gemini-2.5-pro-preview-05-06": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gemini-2.5-flash": { input: 0.3, output: 2.5, cache_read: 0.03 },
-  "gemini-3-flash-preview": { input: 0.5, output: 3, cache_read: 0.05 },
-  "gemini-3-pro-preview": { input: 2, output: 12, cache_read: 0.2 },
-  "gemini-3.1-pro-preview": { input: 2, output: 12, cache_read: 0.2 },
-  // ── Cursor Composer ──
-  "composer-1": { input: 1.25, output: 10, cache_read: 0.125 },
-  "composer-1.5": { input: 3.5, output: 17.5, cache_read: 0.35 },
-  "composer-2": { input: 0.5, output: 2.5, cache_read: 0.2 },
-  "composer-2-fast": { input: 1.5, output: 7.5, cache_read: 0.15 },
-  // ── Moonshot Kimi (official: platform.moonshot.ai) ──
-  "kimi-for-coding": { input: 0.6, output: 2, cache_read: 0.15 },
-  "kimi-k2.5": { input: 0.6, output: 2, cache_read: 0.15 },
-  "kimi-k2.5-free": { input: 0, output: 0, cache_read: 0 },
-  // ── Misc / Free ──
-  "glm-4.7-free": { input: 0, output: 0, cache_read: 0 },
-  "nemotron-3-super-free": { input: 0, output: 0, cache_read: 0 },
-  "mimo-v2-pro-free": { input: 0, output: 0, cache_read: 0 },
-  "minimax-m2.1-free": { input: 0, output: 0, cache_read: 0 },
-  "MiniMax-M2.1": { input: 0.5, output: 3, cache_read: 0.05 },
-};
-const ZERO_PRICING = { input: 0, output: 0, cache_read: 0, cache_write: 0 };
-
-function getModelPricing(model) {
-  if (!model) return ZERO_PRICING;
-  const exact = MODEL_PRICING[model];
-  if (exact) return exact;
-  const lower = model.toLowerCase();
-  if (lower.includes("opus")) return MODEL_PRICING["claude-opus-4-6"];
-  if (lower.includes("haiku")) return MODEL_PRICING["claude-haiku-4-5-20251001"];
-  if (lower.includes("sonnet")) return MODEL_PRICING["claude-sonnet-4-6"];
-  if (lower.includes("gpt-5.4")) return MODEL_PRICING["gpt-5.4"];
-  if (lower.includes("gpt-5.3")) return MODEL_PRICING["gpt-5.3-codex"];
-  if (lower.includes("gpt-5.2")) return MODEL_PRICING["gpt-5.2"];
-  if (lower.includes("gpt-5.1")) return MODEL_PRICING["gpt-5.1-codex"];
-  if (lower.includes("gpt-5")) return MODEL_PRICING["gpt-5"];
-  if (lower.includes("gemini-3")) return MODEL_PRICING["gemini-3-flash-preview"];
-  if (lower.includes("gemini-2.5")) return MODEL_PRICING["gemini-2.5-pro"];
-  if (lower.includes("kimi")) return MODEL_PRICING["kimi-k2.5"];
-  if (lower.includes("composer")) return MODEL_PRICING["composer-1"];
-  if (lower.includes("kiro")) return MODEL_PRICING["claude-sonnet-4-6"];
-  return ZERO_PRICING;
-}
-
-function computeRowCost(row) {
-  const pricing = getModelPricing(row.model);
-  return (
-    ((row.input_tokens || 0) * (pricing.input || 0) +
-      (row.output_tokens || 0) * (pricing.output || 0) +
-      (row.cached_input_tokens || 0) * (pricing.cache_read || 0) +
-      (row.cache_creation_input_tokens || 0) * (pricing.cache_write || 0) +
-      (row.reasoning_output_tokens || 0) * (pricing.output || 0)) /
-    1_000_000
-  );
-}
+// Per-model pricing — delegated to src/lib/pricing/ (CJS). vite.config.js is
+// ESM but createRequire (already imported above) gives us first-class CJS
+// interop. The pricing module loads its bundled seed snapshot synchronously
+// at require-time, so dev-server mocks still get LiteLLM-backed cost data.
+const __viteRequire = createRequire(import.meta.url);
+const __pricing = __viteRequire(path.resolve(REPO_ROOT, "src/lib/pricing"));
+const { getModelPricing, computeRowCost } = __pricing;
 
 async function handleLocalApi(req, res, url) {
   const QUEUE_PATH = path.join(os.homedir(), ".tokentracker", "tracker", "queue.jsonl");
+
+  function isLegacyInclusiveCodexRow(row) {
+    if (!row || (row.source !== "codex" && row.source !== "every-code")) return false;
+    const inputTokens = Number(row.input_tokens || 0);
+    const cachedInputTokens = Number(row.cached_input_tokens || 0);
+    const outputTokens = Number(row.output_tokens || 0);
+    const totalTokens = Number(row.total_tokens || 0);
+    if (!Number.isFinite(inputTokens) || !Number.isFinite(cachedInputTokens)) return false;
+    if (cachedInputTokens <= 0 || inputTokens < cachedInputTokens) return false;
+    return totalTokens === inputTokens + outputTokens;
+  }
+
+  function normalizeQueueRow(row) {
+    if (!isLegacyInclusiveCodexRow(row)) return row;
+    return {
+      ...row,
+      input_tokens: Number(row.input_tokens || 0) - Number(row.cached_input_tokens || 0),
+    };
+  }
 
   function readQueueData() {
     try {
@@ -395,7 +326,7 @@ async function handleLocalApi(req, res, url) {
       const seen = new Map();
       for (const row of parsed) {
         const key = `${row.source || ""}|${row.model || ""}|${row.hour_start || ""}`;
-        seen.set(key, row);
+        seen.set(key, normalizeQueueRow(row));
       }
       return Array.from(seen.values());
     } catch (error) {
@@ -698,14 +629,11 @@ async function handleLocalApi(req, res, url) {
     // 转换为最终格式
     const sources = Array.from(bySource.values()).map(s => {
       s.models = Array.from(s.models.values()).map(m => {
-        const p = getModelPricing(m.model);
-        const cost =
-          ((m.totals.input_tokens || 0) * (p.input || 0) +
-            (m.totals.output_tokens || 0) * (p.output || 0) +
-            (m.totals.cached_input_tokens || 0) * (p.cache_read || 0) +
-            (m.totals.cache_creation_input_tokens || 0) * (p.cache_write || 0) +
-            (m.totals.reasoning_output_tokens || 0) * (p.output || 0)) /
-          1_000_000;
+        const cost = computeRowCost({
+          ...m.totals,
+          model: m.model,
+          source: s.source,
+        });
         return { ...m, totals: { ...m.totals, total_cost_usd: cost.toFixed(6) } };
       }).sort((a, b) => b.totals.total_tokens - a.totals.total_tokens);
       const sourceCost = s.models.reduce((sum, m) => sum + Number(m.totals.total_cost_usd), 0);
@@ -721,9 +649,85 @@ async function handleLocalApi(req, res, url) {
     return true;
   }
 
+  // 处理 usage-category-breakdown — Claude Code only
+  // Reuse the CLI's claude-categorizer module so dev server returns the
+  // same shape as the production endpoint.
+  if (pathname === "/functions/tokentracker-usage-category-breakdown") {
+    const from = url.searchParams.get("from") || "";
+    const to = url.searchParams.get("to") || "";
+    const requestedSource = (url.searchParams.get("source") || "claude").trim().toLowerCase();
+    try {
+      const categorizerPath = path.join(ROOT_DIR, "..", "src", "lib", "claude-categorizer");
+      // Bust the require cache so dev edits to the categorizer module
+      // surface without restarting the vite server.
+      const resolved = __viteRequire.resolve(categorizerPath);
+      delete __viteRequire.cache[resolved];
+      const { computeClaudeCategoryBreakdown, unsupportedSourcePayload } = __viteRequire(categorizerPath);
+      if (requestedSource !== "claude") {
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ from, to, ...unsupportedSourcePayload(requestedSource) }));
+        return true;
+      }
+      const result = await computeClaudeCategoryBreakdown({ from, to, projectDir: process.cwd() });
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ from, to, ...result }));
+    } catch (e) {
+      console.warn("[vite-mock] usage-category-breakdown failed:", e?.message || e);
+      res.statusCode = 500;
+      res.end(JSON.stringify({ error: e?.message || "compute_failed" }));
+    }
+    return true;
+  }
+
   // 处理 project-usage-summary
   if (pathname === "/functions/tokentracker-project-usage-summary") {
-    // 从原始日志解析项目数据
+    // 优先读 ~/.tokentracker/tracker/project.queue.jsonl（与 7680 真实归因一致）
+    const projectQueuePath = path.join(os.homedir(), ".tokentracker", "tracker", "project.queue.jsonl");
+    try {
+      const projectRaw = fs.readFileSync(projectQueuePath, "utf8");
+      const dedup = new Map();
+      for (const line of projectRaw.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const row = JSON.parse(trimmed);
+          const k = `${row.project_key || ""}|${row.source || ""}|${row.hour_start || ""}`;
+          dedup.set(k, row);
+        } catch { /* skip malformed */ }
+      }
+      const byProject = new Map();
+      for (const row of dedup.values()) {
+        const key = row.project_key || "unknown";
+        if (!byProject.has(key)) {
+          byProject.set(key, {
+            project_key: key,
+            project_ref: row.project_ref || key,
+            total_tokens: 0,
+            billable_total_tokens: 0,
+          });
+        }
+        const agg = byProject.get(key);
+        agg.total_tokens += Number(row.total_tokens || 0);
+        agg.billable_total_tokens += Number(row.total_tokens || 0);
+        if (!agg.project_ref && row.project_ref) agg.project_ref = row.project_ref;
+      }
+      if (byProject.size > 0) {
+        const entries = Array.from(byProject.values())
+          .sort((a, b) => b.billable_total_tokens - a.billable_total_tokens)
+          .map((e) => ({
+            ...e,
+            total_tokens: String(e.total_tokens),
+            billable_total_tokens: String(e.billable_total_tokens),
+          }));
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ generated_at: new Date().toISOString(), entries }));
+        return true;
+      }
+    } catch (e) {
+      if (e?.code !== "ENOENT") console.warn("[vite-mock] project.queue.jsonl read failed:", e?.message || e);
+    }
+
+    // Fallback：扫 raw 日志按 session count 估算（旧逻辑）
     const projectMap = new Map();
 
     function parseGitUrl(url) {
@@ -933,6 +937,36 @@ async function handleLocalApi(req, res, url) {
   return null;
 }
 
+async function proxyToLocalCli(req, res) {
+  const target = `http://127.0.0.1:7680${req.url}`;
+  const headers = { ...req.headers };
+  delete headers.host;
+  delete headers.connection;
+  const init = { method: req.method, headers };
+  if (req.method && !["GET", "HEAD"].includes(req.method.toUpperCase())) {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    init.body = Buffer.concat(chunks);
+  }
+  try {
+    const upstream = await fetch(target, init);
+    res.statusCode = upstream.status;
+    upstream.headers.forEach((value, key) => {
+      if (key === "content-encoding" || key === "content-length") return;
+      res.setHeader(key, value);
+    });
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    res.end(buf);
+  } catch (error) {
+    res.statusCode = 502;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({
+      error: `Local CLI not reachable on :7680 — start it with: node bin/tracker.js serve --no-sync --no-open`,
+      detail: String(error?.message || error),
+    }));
+  }
+}
+
 function localDataApiPlugin() {
   return {
     name: "tokentracker-local-data-api",
@@ -944,7 +978,8 @@ function localDataApiPlugin() {
           Promise.resolve(handleLocalApi(req, res, url))
             .then((handled) => {
               if (handled) return;
-              next();
+              // Mock 没识别的 endpoint → 转发到仓库 CLI（7680）
+              return proxyToLocalCli(req, res);
             })
             .catch(next);
           return;

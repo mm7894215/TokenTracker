@@ -12,8 +12,8 @@ struct TopModelsWidget: Widget {
             TopModelsWidgetView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
         }
-        .configurationDisplayName("Top Models")
-        .description("Models with the highest token usage.")
+        .configurationDisplayName(WidgetStrings.topModelsName)
+        .description(WidgetStrings.topModelsDescription)
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }
@@ -34,7 +34,7 @@ struct TopModelsWidgetView: View {
         let models = Array(entry.snapshot.topModels.prefix(limit))
 
         if models.isEmpty {
-            WidgetEmptyState(message: "No model usage yet")
+            WidgetEmptyState(message: WidgetStrings.noModelUsage)
         } else {
             VStack(alignment: .leading, spacing: family == .systemSmall ? 10 : 13) {
                 ForEach(Array(models.enumerated()), id: \.element.id) { idx, m in

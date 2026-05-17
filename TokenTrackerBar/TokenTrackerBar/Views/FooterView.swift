@@ -30,7 +30,7 @@ struct FooterView: View {
             Spacer()
 
             Button {
-                NSApplication.shared.terminate(nil)
+                AppDelegate.requestQuit()
             } label: {
                 HStack(spacing: 3) {
                     Image(systemName: "power")

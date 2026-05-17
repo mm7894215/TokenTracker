@@ -1,219 +1,303 @@
 {
-  "generatedAt": "2026-04-11T16:15:03.811Z",
+  "generatedAt": "2026-05-17T15:02:22.188Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
     "rawText": "JSX text nodes containing letters or digits"
   },
   "totals": {
-    "colors": 83,
-    "rawText": 52
+    "colors": 118,
+    "rawText": 80
   },
   "files": {
-    "dashboard/src/App.jsx": {
-      "colors": 1,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/components/ErrorBoundary.jsx": {
-      "colors": 6,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/components/Sparkline.jsx": {
-      "colors": 2,
+    "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
+      "colors": 0,
       "rawText": 1,
       "rawTextTokens": [
-        "typeof n === \"number\"); if (values.length"
+        ") : avatarUrl ? ("
+      ]
+    },
+    "dashboard/src/components/LoginModal.jsx": {
+      "colors": 4,
+      "rawText": 2,
+      "rawTextTokens": [
+        "); const GITHUB_ICON = (",
+        "Token Tracker"
+      ]
+    },
+    "dashboard/src/components/SortableColumnHeader.jsx": {
+      "colors": 4,
+      "rawText": 0,
+      "rawTextTokens": []
+    },
+    "dashboard/src/components/settings/AccountSection.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        "; return ("
+      ]
+    },
+    "dashboard/src/components/settings/MenuBarSection.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        "GitHub"
+      ]
+    },
+    "dashboard/src/contexts/LoginModalContext.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        "setIsOpen(false), []); return ("
       ]
     },
     "dashboard/src/pages/DashboardPage.jsx": {
       "colors": 2,
-      "rawText": 2,
-      "rawTextTokens": [
-        ") ) : signedIn ? (",
-        ") : null; const headerRight = ("
-      ]
-    },
-    "dashboard/src/ui/foundation/MatrixAvatar.jsx": {
-      "colors": 6,
       "rawText": 0,
       "rawTextTokens": []
     },
-    "dashboard/src/ui/foundation/MatrixShell.jsx": {
-      "colors": 6,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/matrix-a/components/ActivityHeatmap.jsx": {
-      "colors": 5,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/matrix-a/components/CostAnalysisModal.jsx": {
+    "dashboard/src/pages/IpCheckPage.jsx": {
       "colors": 1,
-      "rawText": 1,
-      "rawTextTokens": [
-        "acc + fleet.usdValue, 0 ); const totalUsdLabel = formatUsdValue(totalUsd); return ("
-      ]
+      "rawText": 0,
+      "rawTextTokens": []
     },
-    "dashboard/src/ui/matrix-a/components/GithubStar.jsx": {
-      "colors": 1,
-      "rawText": 1,
-      "rawTextTokens": [
-        "STAR"
-      ]
-    },
-    "dashboard/src/ui/matrix-a/components/IdentityCard.jsx": {
+    "dashboard/src/pages/LeaderboardProfilePage.jsx": {
       "colors": 0,
       "rawText": 1,
       "rawTextTokens": [
-        ") : ( title ); return ("
+        "Token Tracker"
       ]
     },
-    "dashboard/src/ui/matrix-a/components/IdentityPanel.jsx": {
-      "colors": 1,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/matrix-a/components/MatrixConstants.ts": {
-      "colors": 3,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/matrix-a/components/MatrixRain.jsx": {
+    "dashboard/src/pages/SkillDetailPanel.jsx": {
       "colors": 2,
       "rawText": 0,
       "rawTextTokens": []
     },
-    "dashboard/src/ui/matrix-a/components/NeuralAdaptiveFleet.jsx": {
-      "colors": 1,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/matrix-a/components/NeuralDivergenceMap.jsx": {
-      "colors": 0,
-      "rawText": 1,
+    "dashboard/src/pages/SkillsPage.jsx": {
+      "colors": 4,
+      "rawText": 8,
       "rawTextTokens": [
-        "1 && count % 2 !== 0 && index === 0; const itemClass = isFirstAndOdd ? \"md:col-span-2\" : \"\"; return ("
+        ") : null; const hintNode = !manageOpen && !isSkillsSh && repos.length",
+        ") : null; contentNode = (",
+        "); const browseLoadingNode = (",
+        "0 ? (",
+        "0 || browseAnyFilter) ? (",
+        "t.id === id)?.label || id) .join(\", \") : copy(\"skills.action.choose_targets\"); return (",
+        "t.label).join(\", \"); return ("
       ]
     },
-    "dashboard/src/ui/matrix-a/components/SystemHeader.jsx": {
-      "colors": 1,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/matrix-a/components/TrendChart.jsx": {
-      "colors": 1,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/ui/matrix-a/components/TrendMonitor.jsx": {
-      "colors": 7,
-      "rawText": 1,
+    "dashboard/src/pages/WidgetsPage.jsx": {
+      "colors": 25,
+      "rawText": 9,
       "rawTextTokens": [
-        "0"
+        "$129.56 ±0%",
+        "$673.61",
+        "0 ? (",
+        "10.3B",
+        "203.2M",
+        "7 DAYS",
+        "880.9M",
+        "TODAY",
+        "tokens · 202 active days"
       ]
     },
-    "dashboard/src/ui/matrix-a/components/UpgradeAlertModal.jsx": {
+    "dashboard/src/ui/components/ConfirmModal.jsx": {
       "colors": 2,
       "rawText": 0,
       "rawTextTokens": []
     },
-    "dashboard/src/ui/matrix-a/components/UsagePanel.jsx": {
+    "dashboard/src/ui/components/Counter.jsx": {
       "colors": 1,
-      "rawText": 0,
-      "rawTextTokens": []
+      "rawText": 1,
+      "rawTextTokens": [
+        "/\\d/.test(char) && (decimalIndex === -1 || index"
+      ]
     },
-    "dashboard/src/ui/matrix-a/components/VersionBadge.jsx": {
-      "colors": 1,
-      "rawText": 0,
-      "rawTextTokens": []
+    "dashboard/src/ui/components/HeaderGithubStar.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        "Star"
+      ]
     },
-    "dashboard/src/ui/matrix-a/views/DashboardView.jsx": {
-      "colors": 20,
+    "dashboard/src/ui/components/Shell.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        "Token Tracker"
+      ]
+    },
+    "dashboard/src/ui/components/Sidebar.jsx": {
+      "colors": 0,
       "rawText": 3,
       "rawTextTokens": [
-        ") : linkCodeError ? (",
-        ") : showAuthGate ? (",
+        "Star",
+        "Token Tracker",
+        "getNavGroups(), [resolvedLocale]); return ("
+      ]
+    },
+    "dashboard/src/ui/dashboard/components/ActivityHeatmap.jsx": {
+      "colors": 10,
+      "rawText": 0,
+      "rawTextTokens": []
+    },
+    "dashboard/src/ui/dashboard/components/ContextBreakdownPanel.jsx": {
+      "colors": 0,
+      "rawText": 7,
+      "rawTextTokens": [
+        "(b.totals?.total_tokens || 0) - (a.totals?.total_tokens || 0), ); return (",
+        "); const labelInner = (",
+        "); const labelSuffix = isSystemPrefix ? (",
+        "0 && (",
+        "0 || codexQueueFallback)) || (isCustomAgents && hasCustomAgents && subagentsSet); const rowOpen = Boolean(openRows[cat.key]); const bucketBase = bucketColor(cat.key, source); const colorSquare = (",
+        "0; const clampedShare = hasFill ? Math.max(0, Math.min(100, share)) : 0; return (",
+        "isExecToolName(t.name)); const catOpen = Boolean(openCats[cat.name]); return ("
+      ]
+    },
+    "dashboard/src/ui/dashboard/components/CostAnalysisModal.jsx": {
+      "colors": 2,
+      "rawText": 3,
+      "rawTextTokens": [
+        "Cost",
+        "Model",
+        "No spend recorded."
+      ]
+    },
+    "dashboard/src/ui/dashboard/components/DataDetails.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
         "1 ? ("
       ]
     },
-    "dashboard/src/ui/matrix-a/views/LandingView.jsx": {
-      "colors": 7,
-      "rawText": 1,
+    "dashboard/src/ui/dashboard/components/DateRangePopover.jsx": {
+      "colors": 0,
+      "rawText": 2,
       "rawTextTokens": [
-        "); return ("
+        "Apply",
+        "Cancel"
       ]
     },
-    "dashboard/src/ui/share/variants/BroadsheetCard.jsx": {
+    "dashboard/src/ui/dashboard/components/ProviderIcon.jsx": {
+      "colors": 2,
+      "rawText": 0,
+      "rawTextTokens": []
+    },
+    "dashboard/src/ui/dashboard/components/StatsPanel.jsx": {
+      "colors": 0,
+      "rawText": 5,
+      "rawTextTokens": [
+        "0 && (",
+        "30d",
+        "7d",
+        "avg"
+      ]
+    },
+    "dashboard/src/ui/dashboard/components/TrendMonitor.jsx": {
+      "colors": 1,
+      "rawText": 1,
+      "rawTextTokens": [
+        "No data yet"
+      ]
+    },
+    "dashboard/src/ui/dashboard/components/UsageLimitsPanel.jsx": {
       "colors": 0,
       "rawText": 10,
       "rawTextTokens": [
-        "0; return (",
-        "An empty week — the press was quiet.",
-        "By",
-        "Models in regular rotation",
-        "The Roster",
-        "The Token Tracker",
-        "The Year in Print",
-        "Total tokens",
-        "Tracked since",
-        "→ tokentracker.cc"
+        "); case \"antigravity\": return (",
+        "); case \"codex\": return (",
+        "); case \"copilot\": return (",
+        "); case \"cursor\": return (",
+        "); case \"gemini\": return (",
+        "); case \"kimi\": return (",
+        "); case \"kiro\": return (",
+        "0 && rounded === 0 ? \"",
+        "0 ? groups :",
+        "renderProviderGroup(id, dataById[id])) .filter(Boolean); return ("
       ]
     },
-    "dashboard/src/ui/share/variants/LedgerCard.jsx": {
+    "dashboard/src/ui/dashboard/components/UsageLimitsPanel.test.jsx": {
       "colors": 0,
-      "rawText": 13,
+      "rawText": 1,
       "rawTextTokens": [
-        "0; return (",
-        "ACCOUNT HOLDER",
-        "ACTIVITY LOG — 52 WEEKS · 7 DAYS",
-        "BREAKDOWN BY MODEL — RANK / NAME / TOKENS / SHARE",
-        "GLOBAL POSITION",
-        "OPENED",
-        "Open your own · tokentracker.cc",
-        "STATEMENT PERIOD",
-        "TOKEN TRACKER",
-        "TRACKED",
-        "This is an unaudited self-generated statement of AI token consumption, produced by the account holder for personal record.",
-        "— No activity on file —",
-        "— Statement of Usage —"
+        ", ); expect(screen.getByText(\"Kimi\")).toBeInTheDocument(); expect(screen.getByText(\"Weekly\")).toBeInTheDocument(); expect(screen.getByText(\"5h\")).toBeInTheDocument(); expect(screen.getByText(\"Total\")).toBeInTheDocument(); expect(screen.getByText(\"Parallel: 20\")).toBeInTheDocument(); expect(screen.getByText(\"64%\")).toBeInTheDocument(); expect(screen.getByText(\"4%\")).toBeInTheDocument(); expect(screen.getByText(\"1%\")).toBeInTheDocument(); rerender("
       ]
     },
-    "dashboard/src/ui/share/variants/RisographCard.jsx": {
+    "dashboard/src/ui/dashboard/components/UsageOverview.jsx": {
+      "colors": 10,
+      "rawText": 2,
+      "rawTextTokens": [
+        "0 && (",
+        "0); return ("
+      ]
+    },
+    "dashboard/src/ui/dashboard/views/DashboardView.jsx": {
       "colors": 0,
-      "rawText": 12,
+      "rawText": 1,
       "rawTextTokens": [
-        "/// Impression log",
-        "/// The roster · hand-set",
-        "/// Total tokens printed",
-        "0; return (",
-        "3 titles",
-        "Edition of one",
-        "Ink spent",
-        "Press days",
-        "Printer",
-        "The press was quiet this period.",
-        "Token Report",
-        "→ tokentracker.cc"
+        "D_LEFT_BASE + STEP * leftIdx++; const D_DATA_DETAILS = D_LEFT_BASE + STEP * 5; // 留给右列底部 return ("
       ]
     },
-    "dashboard/src/ui/share/ShareModal.tsx": {
+    "dashboard/src/ui/foundation/__tests__/LocaleProvider.test.jsx": {
+      "colors": 0,
+      "rawText": 2,
+      "rawTextTokens": [
+        "en",
+        "zh"
+      ]
+    },
+    "dashboard/src/ui/marketing/MarketingLanding.jsx": {
+      "colors": 16,
+      "rawText": 2,
+      "rawTextTokens": [
+        "&rarr;",
+        "Token Tracker"
+      ]
+    },
+    "dashboard/src/ui/marketing/components/LaserFlow.jsx": {
       "colors": 1,
-      "rawText": 4,
-      "rawTextTokens": [
-        "(\"broadsheet\"); const [busy, setBusy] = useState",
-        "(null); const cardRef = useRef",
-        "(null); const timerRef = useRef",
-        "PNG"
-      ]
+      "rawText": 0,
+      "rawTextTokens": []
+    },
+    "dashboard/src/ui/marketing/components/LightRays.jsx": {
+      "colors": 1,
+      "rawText": 0,
+      "rawTextTokens": []
     },
     "dashboard/src/ui/share/HeatmapStrip.jsx": {
       "colors": 5,
       "rawText": 1,
       "rawTextTokens": [
         "= 7) return null; const level = normalizeLevel(cell); const x = wi * (cellSize + gap); const y = di * (cellSize + gap); const fill = level === null ? empty : innerPalette[level]; return ("
+      ]
+    },
+    "dashboard/src/ui/share/ShareModal.tsx": {
+      "colors": 1,
+      "rawText": 5,
+      "rawTextTokens": [
+        "(\"\"); const [variant, setVariant] = useState",
+        "(\"annual-report\"); const cardRef = useRef",
+        "(null); const [handleOverride, setHandleOverride] = useState",
+        "(null); const timerRef = useRef",
+        "PNG"
+      ]
+    },
+    "dashboard/src/ui/share/variants/AnnualReportCard.jsx": {
+      "colors": 24,
+      "rawText": 4,
+      "rawTextTokens": [
+        "!v||v",
+        "Token Tracker",
+        "tokentracker.cc"
+      ]
+    },
+    "dashboard/src/ui/share/variants/BroadsheetCard.jsx": {
+      "colors": 0,
+      "rawText": 3,
+      "rawTextTokens": [
+        "0; return (",
+        "The Token Tracker",
+        "→ tokentracker.cc"
       ]
     }
   }

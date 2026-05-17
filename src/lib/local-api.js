@@ -2,110 +2,38 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
+const crypto = require("node:crypto");
+const { DEFAULT_BASE_URL, resolveRuntimeConfig } = require("./runtime-config");
+const {
+  filterRowsByUsageScope,
+  getSourceScope,
+  listExcludedSources,
+  normalizeUsageScope,
+} = require("./source-metadata");
 
 const SYNC_TIMEOUT_MS = 120_000;
 const TRACKER_BIN = path.resolve(__dirname, "../../bin/tracker.js");
 
 // ---------------------------------------------------------------------------
-// Per-model pricing (USD per million tokens)
+// Per-model pricing — delegated to src/lib/pricing/
+//   - CURATED overrides (kiro-*, hy3-*, composer-*, kimi-for-coding, etc.)
+//   - LiteLLM live data (mainstream claude / gpt-5 / gemini), 24h disk-cached
+//   - Bundled seed snapshot for first-install / offline fallback
 // ---------------------------------------------------------------------------
 
-// Rates per million tokens (USD). Sources: LiteLLM, OpenAI, Google, OpenRouter.
-const MODEL_PRICING = {
-  // ── Anthropic Claude ──
-  "claude-opus-4-6": { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
-  "claude-opus-4-5-20250414": { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
-  "claude-sonnet-4-6": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
-  "claude-sonnet-4-5-20250514": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
-  "claude-sonnet-4-20250514": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
-  "claude-haiku-4-5-20251001": { input: 1, output: 5, cache_read: 0.1, cache_write: 1.25 },
-  "claude-3-5-sonnet-20241022": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
-  "claude-3-5-haiku-20241022": { input: 1, output: 5, cache_read: 0.1, cache_write: 1.25 },
-  // ── OpenAI GPT / Codex ──
-  "gpt-5": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5-fast": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5-high": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5-high-fast": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5-codex": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5-codex-high-fast": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5.1-codex": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5.1-codex-mini": { input: 0.25, output: 2, cache_read: 0.025 },
-  "gpt-5.1-codex-max": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5.1-codex-max-high-fast": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5.1-codex-max-xhigh-fast": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5.1-codex-high": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5.1-codex-max-high": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5.2": { input: 1.75, output: 14, cache_read: 0.175 },
-  "gpt-5.2-high": { input: 1.75, output: 14, cache_read: 0.175 },
-  "gpt-5.2-high-fast": { input: 1.75, output: 14, cache_read: 0.175 },
-  "gpt-5.2-codex": { input: 1.75, output: 14, cache_read: 0.175 },
-  "gpt-5.2-codex-high": { input: 1.75, output: 14, cache_read: 0.175 },
-  "gpt-5.3-codex": { input: 1.75, output: 14, cache_read: 0.175 },
-  "gpt-5.3-codex-high": { input: 1.75, output: 14, cache_read: 0.175 },
-  "gpt-5.4": { input: 2.5, output: 15, cache_read: 0.25 },
-  "gpt-5.4-mini": { input: 0.75, output: 4.5, cache_read: 0.075 },
-  "gpt-5.4-medium": { input: 1.5, output: 10, cache_read: 0.15 },
-  "o3": { input: 2, output: 8, cache_read: 0.5 },
-  // ── Google Gemini (official: ai.google.dev/pricing) ──
-  "gemini-2.5-pro": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gemini-2.5-pro-preview-06-05": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gemini-2.5-pro-preview-05-06": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gemini-2.5-flash": { input: 0.3, output: 2.5, cache_read: 0.03 },
-  "gemini-3-flash-preview": { input: 0.5, output: 3, cache_read: 0.05 },
-  "gemini-3-pro-preview": { input: 2, output: 12, cache_read: 0.2 },
-  "gemini-3.1-pro-preview": { input: 2, output: 12, cache_read: 0.2 },
-  // ── Cursor Composer ──
-  "composer-1": { input: 1.25, output: 10, cache_read: 0.125 },
-  "composer-1.5": { input: 3.5, output: 17.5, cache_read: 0.35 },
-  "composer-2": { input: 0.5, output: 2.5, cache_read: 0.2 },
-  "composer-2-fast": { input: 1.5, output: 7.5, cache_read: 0.15 },
-  // ── Moonshot Kimi (official: platform.moonshot.ai) ──
-  "kimi-for-coding": { input: 0.6, output: 2, cache_read: 0.15 },
-  "kimi-k2.5": { input: 0.6, output: 2, cache_read: 0.15 },
-  "kimi-k2.5-free": { input: 0, output: 0, cache_read: 0 },
-  // ── Misc / Free ──
-  "glm-4.7-free": { input: 0, output: 0, cache_read: 0 },
-  "nemotron-3-super-free": { input: 0, output: 0, cache_read: 0 },
-  "mimo-v2-pro-free": { input: 0, output: 0, cache_read: 0 },
-  "minimax-m2.1-free": { input: 0, output: 0, cache_read: 0 },
-  "MiniMax-M2.1": { input: 0.5, output: 3, cache_read: 0.05 },
-};
+const {
+  MODEL_PRICING,
+  getModelPricing,
+  computeRowCost,
+  ensurePricingLoaded,
+} = require("./pricing");
 
-const ZERO_PRICING = { input: 0, output: 0, cache_read: 0, cache_write: 0 };
+const {
+  computeClaudeCategoryBreakdown,
+  unsupportedSourcePayload: unsupportedCategoryPayload,
+} = require("./claude-categorizer");
 
-function getModelPricing(model) {
-  if (!model) return ZERO_PRICING;
-  const exact = MODEL_PRICING[model];
-  if (exact) return exact;
-  // Fuzzy match for common model families
-  const lower = model.toLowerCase();
-  if (lower.includes("opus")) return MODEL_PRICING["claude-opus-4-6"];
-  if (lower.includes("haiku")) return MODEL_PRICING["claude-haiku-4-5-20251001"];
-  if (lower.includes("sonnet")) return MODEL_PRICING["claude-sonnet-4-6"];
-  if (lower.includes("gpt-5.4")) return MODEL_PRICING["gpt-5.4"];
-  if (lower.includes("gpt-5.3")) return MODEL_PRICING["gpt-5.3-codex"];
-  if (lower.includes("gpt-5.2")) return MODEL_PRICING["gpt-5.2"];
-  if (lower.includes("gpt-5.1")) return MODEL_PRICING["gpt-5.1-codex"];
-  if (lower.includes("gpt-5")) return MODEL_PRICING["gpt-5"];
-  if (lower.includes("gemini-3")) return MODEL_PRICING["gemini-3-flash-preview"];
-  if (lower.includes("gemini-2.5")) return MODEL_PRICING["gemini-2.5-pro"];
-  if (lower.includes("kimi")) return MODEL_PRICING["kimi-k2.5"];
-  if (lower.includes("composer")) return MODEL_PRICING["composer-1"];
-  if (lower === "auto") return MODEL_PRICING["composer-1"];
-  return ZERO_PRICING;
-}
-
-function computeRowCost(row) {
-  const pricing = getModelPricing(row.model);
-  return (
-    ((row.input_tokens || 0) * (pricing.input || 0) +
-      (row.output_tokens || 0) * (pricing.output || 0) +
-      (row.cached_input_tokens || 0) * (pricing.cache_read || 0) +
-      (row.cache_creation_input_tokens || 0) * (pricing.cache_write || 0) +
-      (row.reasoning_output_tokens || 0) * (pricing.output || 0)) /
-    1_000_000
-  );
-}
+const { computeCodexContextBreakdown } = require("./codex-context-breakdown");
 
 // ---------------------------------------------------------------------------
 // Queue data helpers
@@ -116,30 +44,113 @@ function resolveQueuePath() {
   return path.join(home, ".tokentracker", "tracker", "queue.jsonl");
 }
 
-function readQueueData(queuePath) {
+function readProjectQueueData(projectQueuePath) {
+  let raw;
   try {
-    const raw = fs.readFileSync(queuePath, "utf8");
-    const lines = raw.split("\n").filter((l) => l.trim());
-    const parsed = lines.map((l) => JSON.parse(l));
-    // Deduplicate: each sync appends cumulative totals per bucket, so for
-    // each (source, model, hour_start) keep only the latest (last) entry.
-    const seen = new Map();
-    for (const row of parsed) {
-      const key = `${row.source || ""}|${row.model || ""}|${row.hour_start || ""}`;
-      seen.set(key, row);
+    raw = fs.readFileSync(projectQueuePath, "utf8");
+  } catch (e) {
+    if (e?.code !== "ENOENT") {
+      console.error("[LocalAPI] readProjectQueueData: failed to read:", e?.message || e);
     }
-    return Array.from(seen.values());
-  } catch (_e) {
     return [];
   }
+  const lines = raw.split("\n").filter((l) => l.trim());
+  const seen = new Map();
+  for (const line of lines) {
+    try {
+      const row = JSON.parse(line);
+      const key = `${row.project_key || ""}|${row.source || ""}|${row.hour_start || ""}`;
+      seen.set(key, row);
+    } catch {
+      // skip malformed
+    }
+  }
+  return Array.from(seen.values());
 }
 
-function aggregateByDay(rows) {
+function isLegacyInclusiveCodexRow(row) {
+  if (!row || (row.source !== "codex" && row.source !== "every-code")) return false;
+  const inputTokens = Number(row.input_tokens || 0);
+  const cachedInputTokens = Number(row.cached_input_tokens || 0);
+  const outputTokens = Number(row.output_tokens || 0);
+  const totalTokens = Number(row.total_tokens || 0);
+  if (!Number.isFinite(inputTokens) || !Number.isFinite(cachedInputTokens)) return false;
+  if (cachedInputTokens <= 0 || inputTokens < cachedInputTokens) return false;
+  // Legacy Codex queue rows stored input inclusive of cache reads, while
+  // total_tokens remained input + output. Canonical rows keep input as pure
+  // non-cached input, so cache-heavy legacy rows can be identified by this
+  // exact invariant.
+  return totalTokens === inputTokens + outputTokens;
+}
+
+function normalizeQueueRow(row) {
+  if (!isLegacyInclusiveCodexRow(row)) return row;
+  return {
+    ...row,
+    input_tokens: Number(row.input_tokens || 0) - Number(row.cached_input_tokens || 0),
+  };
+}
+
+function readQueueData(queuePath) {
+  let raw;
+  try {
+    raw = fs.readFileSync(queuePath, "utf8");
+  } catch (e) {
+    // ENOENT is legitimate (never synced yet); anything else is a signal we
+    // don't want to hide behind an empty array forever — the dashboard would
+    // otherwise render "0 tokens" with no clue the queue was unreadable.
+    if (e?.code !== "ENOENT") {
+      console.error("[LocalAPI] readQueueData: failed to read queue:", e?.message || e);
+    }
+    return [];
+  }
+  const lines = raw.split("\n").filter((l) => l.trim());
+  // Parse row-by-row so a single corrupted line (partial write, disk-full
+  // truncation, …) does not wipe out every other row with it.
+  const parsed = [];
+  let malformed = 0;
+  for (const line of lines) {
+    try {
+      parsed.push(JSON.parse(line));
+    } catch {
+      malformed += 1;
+    }
+  }
+  if (malformed > 0) {
+    console.error(
+      `[LocalAPI] readQueueData: skipped ${malformed}/${lines.length} malformed line(s) in ${queuePath}`,
+    );
+  }
+  // Deduplicate: each sync appends cumulative totals per bucket, so for
+  // each (source, model, hour_start) keep only the latest (last) entry.
+  const seen = new Map();
+  for (const row of parsed) {
+    const key = `${row.source || ""}|${row.model || ""}|${row.hour_start || ""}`;
+    seen.set(key, normalizeQueueRow(row));
+  }
+  return Array.from(seen.values());
+}
+
+function rowDayKey(row, timeZoneContext) {
+  const hs = row.hour_start;
+  if (!hs) return "";
+  if (
+    timeZoneContext &&
+    (timeZoneContext.timeZone || Number.isFinite(timeZoneContext.offsetMinutes))
+  ) {
+    const parts = getZonedParts(new Date(hs), timeZoneContext);
+    const key = formatPartsDayKey(parts);
+    if (key) return key;
+  }
+  return hs.slice(0, 10);
+}
+
+function aggregateByDay(rows, timeZoneContext = null) {
   const byDay = new Map();
   for (const row of rows) {
-    const hs = row.hour_start;
-    if (!hs) continue;
-    const day = hs.slice(0, 10);
+    if (!row.hour_start) continue;
+    const day = rowDayKey(row, timeZoneContext);
+    if (!day) continue;
     if (!byDay.has(day)) {
       byDay.set(day, {
         day,
@@ -156,7 +167,7 @@ function aggregateByDay(rows) {
     }
     const a = byDay.get(day);
     a.total_tokens += row.total_tokens || 0;
-    a.billable_total_tokens += row.total_tokens || 0;
+    a.billable_total_tokens += row.billable_total_tokens ?? row.total_tokens ?? 0;
     a.total_cost_usd += computeRowCost(row);
     a.input_tokens += row.input_tokens || 0;
     a.output_tokens += row.output_tokens || 0;
@@ -166,6 +177,117 @@ function aggregateByDay(rows) {
     a.conversation_count += row.conversation_count || 0;
   }
   return Array.from(byDay.values()).sort((a, b) => a.day.localeCompare(b.day));
+}
+
+function buildCodexCategoryFallbackFromQueue(queueRows, { from, to, timeZoneContext }) {
+  const totals = {
+    input_tokens: 0,
+    cached_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+    output_tokens: 0,
+    reasoning_output_tokens: 0,
+    total_tokens: 0,
+  };
+  let conversationCount = 0;
+
+  for (const row of queueRows || []) {
+    if ((row?.source || "") !== "codex") continue;
+    if (!row.hour_start) continue;
+    const day = rowDayKey(row, timeZoneContext);
+    if (from && day < from) continue;
+    if (to && day > to) continue;
+    totals.input_tokens += Number(row.input_tokens || 0);
+    totals.cached_input_tokens += Number(row.cached_input_tokens || 0);
+    totals.cache_creation_input_tokens += Number(row.cache_creation_input_tokens || 0);
+    totals.output_tokens += Number(row.output_tokens || 0);
+    totals.reasoning_output_tokens += Number(row.reasoning_output_tokens || 0);
+    totals.total_tokens += Number(row.total_tokens || 0);
+    conversationCount += Number(row.conversation_count || 0);
+  }
+
+  return {
+    source: "codex",
+    scope: "supported",
+    breakdown_status: "queue_fallback",
+    totals,
+    session_count: 0,
+    message_count: conversationCount,
+    fallback: "queue_totals",
+    message_breakdown: {
+      categories: [
+        {
+          key: "user_input",
+          name: "User input",
+          totals: {
+            input_tokens: totals.input_tokens,
+            cached_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+            output_tokens: 0,
+            reasoning_output_tokens: 0,
+            total_tokens: totals.input_tokens,
+          },
+        },
+        {
+          key: "conversation_history",
+          name: "Conversation history",
+          totals: {
+            input_tokens: 0,
+            cached_input_tokens: totals.cached_input_tokens,
+            cache_creation_input_tokens: totals.cache_creation_input_tokens,
+            output_tokens: 0,
+            reasoning_output_tokens: 0,
+            total_tokens: totals.cached_input_tokens + totals.cache_creation_input_tokens,
+          },
+        },
+        {
+          key: "assistant_response",
+          name: "Assistant response",
+          totals: {
+            input_tokens: 0,
+            cached_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+            output_tokens: Math.max(0, totals.output_tokens - totals.reasoning_output_tokens),
+            reasoning_output_tokens: 0,
+            total_tokens: Math.max(0, totals.output_tokens - totals.reasoning_output_tokens),
+          },
+        },
+      ].sort((a, b) => Number(b.totals.total_tokens || 0) - Number(a.totals.total_tokens || 0)),
+      privacy: {
+        includes_content: false,
+        note: "Queue fallback includes aggregated token categories only; message text is never returned.",
+      },
+    },
+    tool_calls_breakdown: {
+      total_calls: 0,
+      tools: [],
+      categories: [],
+      tools_total: 0,
+      privacy: {
+        includes_inputs: false,
+        note: "Codex rollout sessions were unavailable; totals come from TokenTracker queue rows.",
+      },
+    },
+    exec_command_breakdown: {
+      by_type: [],
+      by_exit: [],
+    },
+  };
+}
+
+function getRequestedUsageScope(url) {
+  if (url.searchParams.get("include_account_level") === "1") return "all";
+  return normalizeUsageScope(url.searchParams.get("scope"));
+}
+
+function scopedQueueRows(queuePath, url) {
+  const scope = getRequestedUsageScope(url);
+  const allRows = readQueueData(queuePath);
+  return {
+    scope,
+    allRows,
+    rows: filterRowsByUsageScope(allRows, scope),
+    excludedSources: listExcludedSources(allRows, scope),
+  };
 }
 
 function getTimeZoneContext(url) {
@@ -280,6 +402,67 @@ function aggregateHourlyByDay(rows, dayKey, timeZoneContext) {
 function trimOutput(value, max = 4000) {
   const t = String(value || "");
   return t.length <= max ? t : t.slice(t.length - max);
+}
+
+function normalizeRemoteHttpBaseUrl(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    url.username = "";
+    url.password = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch (_e) {
+    return null;
+  }
+}
+
+function resolveAllowedInsforgeBaseUrl(value) {
+  const requested = normalizeRemoteHttpBaseUrl(value);
+  if (!requested) return null;
+
+  const runtime = resolveRuntimeConfig();
+  const allowed = new Set(
+    [runtime.baseUrl, DEFAULT_BASE_URL]
+      .map((entry) => normalizeRemoteHttpBaseUrl(entry))
+      .filter(Boolean),
+  );
+
+  return allowed.has(requested) ? requested : null;
+}
+
+function parseCookieHeader(value) {
+  const out = new Map();
+  if (typeof value !== "string" || !value.trim()) return out;
+  for (const part of value.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx < 1) continue;
+    const key = part.slice(0, idx).trim();
+    const rawValue = part.slice(idx + 1).trim();
+    if (key) out.set(key, rawValue);
+  }
+  return out;
+}
+
+function isLoopbackHostname(hostname) {
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1" || hostname === "[::1]";
+}
+
+function hasAllowedLoopbackOrigin(headers = {}) {
+  const candidates = [headers.origin, headers.referer];
+  for (const raw of candidates) {
+    if (raw == null || raw === "") continue;
+    try {
+      const url = new URL(String(raw));
+      if (url.protocol !== "http:" || !isLoopbackHostname(url.hostname)) return false;
+    } catch (_e) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function readJsonBody(req) {
@@ -447,7 +630,7 @@ function scanClaudeProjects(projectMap) {
 // ---------------------------------------------------------------------------
 
 function json(res, data, status) {
-  res.writeHead(status || 200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+  res.writeHead(status || 200, { "Content-Type": "application/json" });
   res.end(JSON.stringify(data));
 }
 
@@ -514,6 +697,7 @@ function createLocalApiHandler({ queuePath }) {
   // so that both browser and WKWebView share the same login session via the proxy.
   // Persisted to disk so cookies survive server restarts.
   let relayCookies = new Map();
+  const localAuthToken = crypto.randomBytes(24).toString("hex");
   const trackerDataDir = path.join(os.homedir(), ".tokentracker", "tracker");
   const cookiePath = path.join(trackerDataDir, "relay-cookies.json");
 
@@ -540,12 +724,24 @@ function createLocalApiHandler({ queuePath }) {
     try {
       // Sticky semantics: never replace an existing on-disk session with an empty cookie map.
       if (relayCookies.size === 0) return;
-      
+
       const json = JSON.stringify(Object.fromEntries(relayCookies));
       fs.writeFileSync(cookiePath, json, { encoding: "utf8", mode: 0o600 });
     } catch (e) {
       console.error("[LocalAPI] Failed to persist relay cookies:", e.message);
     }
+  }
+
+  function clearRelayCookies(reason) {
+    if (relayCookies.size === 0) return;
+    relayCookies.clear();
+    try {
+      if (fs.existsSync(cookiePath)) fs.unlinkSync(cookiePath);
+    } catch (e) {
+      console.error("[LocalAPI] Failed to clear relay cookies:", e.message);
+      return;
+    }
+    if (reason) console.warn(`[LocalAPI] Cleared relay cookies: ${reason}`);
   }
 
   function captureSetCookies(headerValue) {
@@ -581,11 +777,17 @@ function createLocalApiHandler({ queuePath }) {
     if (changed) persistRelayCookies();
   }
 
+  function normalizeCookieHeader(value) {
+    if (Array.isArray(value)) return value.filter(Boolean).join("; ");
+    return typeof value === "string" ? value : "";
+  }
+
   function buildRelayCookieHeader(clientCookieHeader) {
-    if (relayCookies.size === 0) return clientCookieHeader || "";
+    const normalizedClientCookieHeader = normalizeCookieHeader(clientCookieHeader);
+    if (relayCookies.size === 0) return normalizedClientCookieHeader;
     const clientPairs = new Map();
-    if (clientCookieHeader) {
-      for (const part of clientCookieHeader.split(";")) {
+    if (normalizedClientCookieHeader) {
+      for (const part of normalizedClientCookieHeader.split(";")) {
         const eqIdx = part.indexOf("=");
         if (eqIdx < 1) continue;
         const n = part.substring(0, eqIdx).trim();
@@ -608,48 +810,40 @@ function createLocalApiHandler({ queuePath }) {
   let _nativeAuthPending = false;
   let _nativeAuthExpiry = 0;
 
+  function isAuthorizedLocalMutation(req) {
+    const headerToken = req?.headers?.["x-tokentracker-local-auth"];
+    const cookieToken = parseCookieHeader(req?.headers?.cookie).get("tokentracker_local_auth");
+    const token = typeof headerToken === "string" && headerToken.trim()
+      ? headerToken.trim()
+      : cookieToken || "";
+    if (!token || token !== localAuthToken) return false;
+    return hasAllowedLoopbackOrigin(req?.headers || {});
+  }
+
   return async function handleLocalApi(req, res, url) {
     const p = url.pathname;
 
-    // --- Account view toggle (syncs browser cloud-sync preference to config
-    // so that the menu-bar / widgets see the same aggregated-vs-local mode). ---
-    if (p === "/api/account-view" && String(req.method || "GET").toUpperCase() === "POST") {
-      try {
-        const body = await readJsonBody(req);
-        const enabled = Boolean(body?.enabled);
-        const cfgPath = path.join(os.homedir(), ".tokentracker", "tracker", "config.json");
-        const cfg = fs.existsSync(cfgPath) ? JSON.parse(fs.readFileSync(cfgPath, "utf8")) : {};
-        cfg.accountView = enabled;
-        fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
-        try { fs.chmodSync(cfgPath, 0o600); } catch {}
-        json(res, { ok: true, accountView: enabled });
-      } catch (err) {
-        json(res, { ok: false, error: err?.message || String(err) }, 500);
-      }
-      return true;
-    }
-
-    // --- Cloud account-wide proxy ---
-    // When cloud sync is enabled (deviceToken set), forward usage queries to
-    // the account-aggregation edge function so every client (dashboard,
-    // menu bar, widgets) sees the same cross-device totals. Failures fall
-    // through to the local queue-based implementation below.
-    if (req.method === "GET" && CLOUD_PROXY_MAP[p]) {
-      const proxied = await tryCloudAccountProxy(p, url);
-      if (proxied && proxied.status >= 200 && proxied.status < 300) {
-        res.writeHead(proxied.status, {
-          "content-type": proxied.contentType,
-          "access-control-allow-origin": "*",
-        });
-        res.end(proxied.body);
+    if (p === "/api/local-auth") {
+      if (String(req.method || "GET").toUpperCase() !== "GET") {
+        json(res, { error: "Method Not Allowed" }, 405);
         return true;
       }
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+      });
+      res.end(JSON.stringify({ token: localAuthToken }));
+      return true;
     }
 
     // --- Auth bridge: native OAuth flag (WebView ↔ system browser) ---
     if (p === "/api/auth-bridge/verifier") {
       const method = String(req.method || "GET").toUpperCase();
       if (method === "PUT" || method === "POST") {
+        if (!isAuthorizedLocalMutation(req)) {
+          json(res, { error: "Unauthorized" }, 401);
+          return true;
+        }
         const body = await readJsonBody(req);
         _nativeAuthPending = Boolean(body?.native);
         _nativeAuthExpiry = Date.now() + 5 * 60 * 1000; // 5 min TTL
@@ -669,20 +863,8 @@ function createLocalApiHandler({ queuePath }) {
 
     // --- auth proxy: forward /api/auth/* to InsForge cloud ---
     if (p.startsWith("/api/auth/")) {
-      const { DEFAULT_BASE_URL } = require("./runtime-config.js");
-      let insforgeBase = process.env.TOKENTRACKER_INSFORGE_BASE_URL
-        || process.env.INSFORGE_BASE_URL
-        || "";
-      if (!insforgeBase) {
-        try {
-          const cfgPath = path.join(os.homedir(), ".tokentracker", "tracker", "config.json");
-          const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
-          insforgeBase = cfg?.baseUrl || "";
-        } catch { /* ignore */ }
-      }
-      if (!insforgeBase) {
-        insforgeBase = DEFAULT_BASE_URL;
-      }
+      const runtime = resolveRuntimeConfig();
+      const insforgeBase = runtime.baseUrl || DEFAULT_BASE_URL;
       try {
         const targetUrl = `${insforgeBase.replace(/\/$/, "")}${p}${url.search || ""}`;
         const proxyHeaders = {};
@@ -690,8 +872,18 @@ function createLocalApiHandler({ queuePath }) {
           if (key === "host" || key === "connection") continue;
           proxyHeaders[key] = value;
         }
-        // Inject relay cookies so WebView benefits from browser's login session
-        const mergedCookie = buildRelayCookieHeader(proxyHeaders["cookie"]);
+        const hasClientCookie = normalizeCookieHeader(proxyHeaders["cookie"]).trim().length > 0;
+        const hasCsrfHeader = typeof proxyHeaders["x-csrf-token"] === "string" && proxyHeaders["x-csrf-token"].trim().length > 0;
+        const shouldInjectRelayCookies =
+          p !== "/api/auth/refresh" || hasClientCookie || hasCsrfHeader;
+
+        // Inject relay cookies so WebView benefits from browser's login session.
+        // Refresh requests need either a browser cookie or an explicit CSRF token;
+        // otherwise replaying a stale persisted refresh cookie just manufactures
+        // Invalid CSRF errors on startup.
+        const mergedCookie = shouldInjectRelayCookies
+          ? buildRelayCookieHeader(proxyHeaders["cookie"])
+          : normalizeCookieHeader(proxyHeaders["cookie"]);
         if (mergedCookie) proxyHeaders["cookie"] = mergedCookie;
 
         const bodyChunks = [];
@@ -715,8 +907,17 @@ function createLocalApiHandler({ queuePath }) {
             return [k, v];
           });
         res.writeHead(proxyRes.status, Object.fromEntries(responseHeaders));
-        const resBody = await proxyRes.arrayBuffer();
-        res.end(Buffer.from(resBody));
+        const resBody = Buffer.from(await proxyRes.arrayBuffer());
+        if (
+          p === "/api/auth/refresh"
+          && proxyRes.status === 403
+          && !hasClientCookie
+          && !hasCsrfHeader
+          && /invalid csrf token/i.test(resBody.toString("utf8"))
+        ) {
+          clearRelayCookies("stale refresh cookie without local CSRF context");
+        }
+        res.end(resBody);
       } catch (e) {
         json(res, { error: `Auth proxy error: ${e?.message || e}` }, 502);
       }
@@ -727,6 +928,10 @@ function createLocalApiHandler({ queuePath }) {
     if (p === "/functions/tokentracker-local-sync") {
       if (String(req.method || "GET").toUpperCase() !== "POST") {
         json(res, { ok: false, error: "Method Not Allowed" }, 405);
+        return true;
+      }
+      if (!isAuthorizedLocalMutation(req)) {
+        json(res, { ok: false, error: "Unauthorized" }, 401);
         return true;
       }
       try {
@@ -740,8 +945,13 @@ function createLocalApiHandler({ queuePath }) {
         if (typeof body.deviceToken === "string" && body.deviceToken.trim()) {
           extraEnv.TOKENTRACKER_DEVICE_TOKEN = body.deviceToken.trim();
         }
-        if (typeof body.insforgeBaseUrl === "string" && /^https?:\/\//i.test(body.insforgeBaseUrl.trim())) {
-          extraEnv.TOKENTRACKER_INSFORGE_BASE_URL = body.insforgeBaseUrl.trim();
+        if (body.insforgeBaseUrl != null) {
+          const allowedBaseUrl = resolveAllowedInsforgeBaseUrl(body.insforgeBaseUrl);
+          if (!allowedBaseUrl) {
+            json(res, { ok: false, error: "Unsupported insforgeBaseUrl override" }, 400);
+            return true;
+          }
+          extraEnv.TOKENTRACKER_INSFORGE_BASE_URL = allowedBaseUrl;
         }
         // Persist deviceToken + baseUrl to config.json so the account-view
         // proxy (see tryCloudAccountProxy) can serve aggregated data to
@@ -778,8 +988,9 @@ function createLocalApiHandler({ queuePath }) {
     if (p === "/functions/tokentracker-usage-summary") {
       const from = url.searchParams.get("from") || "";
       const to = url.searchParams.get("to") || "";
-      const rows = readQueueData(qp);
-      const daily = aggregateByDay(rows).filter((d) => d.day >= from && d.day <= to);
+      const timeZoneContext = getTimeZoneContext(url);
+      const { rows, scope, excludedSources } = scopedQueueRows(qp, url);
+      const daily = aggregateByDay(rows, timeZoneContext).filter((d) => d.day >= from && d.day <= to);
       const totals = daily.reduce(
         (acc, r) => {
           acc.total_tokens += r.total_tokens;
@@ -797,16 +1008,19 @@ function createLocalApiHandler({ queuePath }) {
       );
       const totalCost = totals.total_cost_usd;
 
-      const today = new Date();
-      const todayStr = today.toISOString().slice(0, 10);
-      const allDaily = aggregateByDay(rows);
+      const todayParts = getZonedParts(new Date(), timeZoneContext);
+      const todayStr = formatPartsDayKey(todayParts) || new Date().toISOString().slice(0, 10);
+      const allDaily = aggregateByDay(rows, timeZoneContext);
 
+      const shiftDay = (dayStr, delta) => {
+        const d = new Date(`${dayStr}T00:00:00Z`);
+        d.setUTCDate(d.getUTCDate() + delta);
+        return d.toISOString().slice(0, 10);
+      };
       const collectDays = (n) => {
         const out = [];
         for (let i = n - 1; i >= 0; i--) {
-          const d = new Date(today);
-          d.setUTCDate(d.getUTCDate() - i);
-          const ds = d.toISOString().slice(0, 10);
+          const ds = shiftDay(todayStr, -i);
           const dd = allDaily.find((x) => x.day === ds);
           if (dd) out.push(dd);
         }
@@ -823,17 +1037,15 @@ function createLocalApiHandler({ queuePath }) {
       const l30 = collectDays(30);
       const l7t = sumDays(l7);
       const l30t = sumDays(l30);
-      const l7from = new Date(today);
-      l7from.setUTCDate(l7from.getUTCDate() - 6);
-      const l30from = new Date(today);
-      l30from.setUTCDate(l30from.getUTCDate() - 29);
+      const l7fromStr = shiftDay(todayStr, -6);
+      const l30fromStr = shiftDay(todayStr, -29);
 
       json(res, {
-        from, to, days: daily.length,
+        from, to, days: daily.length, scope, excluded_sources: excludedSources,
         totals: { ...totals, total_cost_usd: totalCost.toFixed(6) },
         rolling: {
-          last_7d: { from: l7from.toISOString().slice(0, 10), to: todayStr, active_days: l7.length, totals: l7t },
-          last_30d: { from: l30from.toISOString().slice(0, 10), to: todayStr, active_days: l30.length, totals: l30t, avg_per_active_day: l30.length > 0 ? Math.round(l30t.billable_total_tokens / l30.length) : 0 },
+          last_7d: { from: l7fromStr, to: todayStr, active_days: l7.length, totals: l7t },
+          last_30d: { from: l30fromStr, to: todayStr, active_days: l30.length, totals: l30t, avg_per_active_day: l30.length > 0 ? Math.round(l30t.billable_total_tokens / l30.length) : 0 },
         },
       });
       return true;
@@ -843,19 +1055,22 @@ function createLocalApiHandler({ queuePath }) {
     if (p === "/functions/tokentracker-usage-daily") {
       const from = url.searchParams.get("from") || "";
       const to = url.searchParams.get("to") || "";
-      const rows = readQueueData(qp);
-      const daily = aggregateByDay(rows).filter((d) => d.day >= from && d.day <= to);
-      json(res, { from, to, data: daily });
+      const timeZoneContext = getTimeZoneContext(url);
+      const { rows, scope, excludedSources } = scopedQueueRows(qp, url);
+      const daily = aggregateByDay(rows, timeZoneContext).filter((d) => d.day >= from && d.day <= to);
+      json(res, { from, to, scope, excluded_sources: excludedSources, data: daily });
       return true;
     }
 
     // --- usage-heatmap ---
     if (p === "/functions/tokentracker-usage-heatmap") {
       const weeks = parseInt(url.searchParams.get("weeks") || "52", 10);
-      const rows = readQueueData(qp);
-      const daily = aggregateByDay(rows);
-      const today = new Date();
-      const end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+      const timeZoneContext = getTimeZoneContext(url);
+      const { rows, scope, excludedSources } = scopedQueueRows(qp, url);
+      const daily = aggregateByDay(rows, timeZoneContext);
+      const todayParts = getZonedParts(new Date(), timeZoneContext);
+      const todayStr = formatPartsDayKey(todayParts) || new Date().toISOString().slice(0, 10);
+      const end = new Date(`${todayStr}T00:00:00Z`);
       const start = new Date(end);
       start.setUTCDate(start.getUTCDate() - weeks * 7 + 1);
       const from = start.toISOString().slice(0, 10);
@@ -888,7 +1103,7 @@ function createLocalApiHandler({ queuePath }) {
       for (let i = 0; i < cells.length; i += 7) {
         weeksArr.push(cells.slice(i, i + 7));
       }
-      json(res, { from, to, week_starts_on: "sun", active_days: cells.filter((c) => c.billable_total_tokens > 0).length, streak_days: 0, weeks: weeksArr });
+      json(res, { from, to, scope, excluded_sources: excludedSources, week_starts_on: "sun", active_days: cells.filter((c) => c.billable_total_tokens > 0).length, streak_days: 0, weeks: weeksArr });
       return true;
     }
 
@@ -896,9 +1111,11 @@ function createLocalApiHandler({ queuePath }) {
     if (p === "/functions/tokentracker-usage-model-breakdown") {
       const from = url.searchParams.get("from") || "";
       const to = url.searchParams.get("to") || "";
-      const rows = readQueueData(qp).filter((r) => {
+      const timeZoneContext = getTimeZoneContext(url);
+      const { rows: scopedRows, scope, excludedSources } = scopedQueueRows(qp, url);
+      const rows = scopedRows.filter((r) => {
         if (!r.hour_start) return false;
-        const d = r.hour_start.slice(0, 10);
+        const d = rowDayKey(r, timeZoneContext);
         return d >= from && d <= to;
       });
 
@@ -907,10 +1124,10 @@ function createLocalApiHandler({ queuePath }) {
         const src = row.source || "unknown";
         const mdl = row.model || "unknown";
         if (!bySource.has(src))
-          bySource.set(src, { source: src, totals: { total_tokens: 0, billable_total_tokens: 0, input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_output_tokens: 0, total_cost_usd: "0" }, models: new Map() });
+          bySource.set(src, { source: src, source_scope: getSourceScope(src), totals: { total_tokens: 0, billable_total_tokens: 0, input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_output_tokens: 0, total_cost_usd: "0" }, models: new Map() });
         const sa = bySource.get(src);
         sa.totals.total_tokens += row.total_tokens || 0;
-        sa.totals.billable_total_tokens += row.total_tokens || 0;
+        sa.totals.billable_total_tokens += row.billable_total_tokens ?? row.total_tokens ?? 0;
         sa.totals.input_tokens += row.input_tokens || 0;
         sa.totals.output_tokens += row.output_tokens || 0;
         sa.totals.cached_input_tokens += row.cached_input_tokens || 0;
@@ -920,7 +1137,7 @@ function createLocalApiHandler({ queuePath }) {
           sa.models.set(mdl, { model: mdl, model_id: mdl, totals: { total_tokens: 0, billable_total_tokens: 0, input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_output_tokens: 0, total_cost_usd: "0" } });
         const ma = sa.models.get(mdl);
         ma.totals.total_tokens += row.total_tokens || 0;
-        ma.totals.billable_total_tokens += row.total_tokens || 0;
+        ma.totals.billable_total_tokens += row.billable_total_tokens ?? row.total_tokens ?? 0;
         ma.totals.input_tokens += row.input_tokens || 0;
         ma.totals.output_tokens += row.output_tokens || 0;
         ma.totals.cached_input_tokens += row.cached_input_tokens || 0;
@@ -931,14 +1148,11 @@ function createLocalApiHandler({ queuePath }) {
       const sources = Array.from(bySource.values()).map((s) => {
         s.models = Array.from(s.models.values())
           .map((m) => {
-            const p = getModelPricing(m.model);
-            const cost =
-              ((m.totals.input_tokens || 0) * (p.input || 0) +
-                (m.totals.output_tokens || 0) * (p.output || 0) +
-                (m.totals.cached_input_tokens || 0) * (p.cache_read || 0) +
-                (m.totals.cache_creation_input_tokens || 0) * (p.cache_write || 0) +
-                (m.totals.reasoning_output_tokens || 0) * (p.output || 0)) /
-              1_000_000;
+            const cost = computeRowCost({
+              ...m.totals,
+              model: m.model,
+              source: s.source,
+            });
             return { ...m, totals: { ...m.totals, total_cost_usd: cost.toFixed(6) } };
           })
           .sort((a, b) => b.totals.total_tokens - a.totals.total_tokens);
@@ -948,43 +1162,133 @@ function createLocalApiHandler({ queuePath }) {
       });
 
       json(res, {
-        from, to, days: 0, sources,
+        from, to, days: 0, scope, excluded_sources: excludedSources, sources,
         pricing: { model: "per-model", pricing_mode: "per_token_type", source: "litellm", effective_from: new Date().toISOString().slice(0, 10) },
       });
       return true;
     }
 
+    // --- usage-category-breakdown (Claude + Codex) ---
+    // Claude: splits historical Claude usage into seven semantic categories
+    // mirroring Claude Code's /context view (approx).
+    // Codex: provides a tool-oriented breakdown, attributing per-turn token
+    // deltas to observed tool calls (heuristic).
+    if (p === "/functions/tokentracker-usage-category-breakdown") {
+      const from = url.searchParams.get("from") || "";
+      const to = url.searchParams.get("to") || "";
+      const requestedSource = (url.searchParams.get("source") || "claude").trim().toLowerCase();
+      if (requestedSource === "claude") {
+        try {
+          const result = await computeClaudeCategoryBreakdown({ from, to, projectDir: process.cwd() });
+          json(res, { from, to, ...result });
+        } catch (e) {
+          console.error("[LocalAPI] usage-category-breakdown:", e?.message || e);
+          json(res, { from, to, ...unsupportedCategoryPayload("claude"), error: "compute_failed" }, 500);
+        }
+        return true;
+      }
+
+      if (requestedSource === "codex") {
+        try {
+          const timeZoneContext = getTimeZoneContext(url);
+          const result = await computeCodexContextBreakdown({
+            from,
+            to,
+            top: 50,
+            timeZoneContext,
+          });
+          if (!Number(result?.totals?.total_tokens || 0)) {
+            const fallback = buildCodexCategoryFallbackFromQueue(readQueueData(qp), {
+              from,
+              to,
+              timeZoneContext,
+            });
+            json(res, { from, to, ...fallback });
+            return true;
+          }
+          json(res, { from, to, ...result });
+        } catch (e) {
+          console.error("[LocalAPI] usage-category-breakdown(codex):", e?.message || e);
+          json(res, { from, to, ...unsupportedCategoryPayload("codex"), error: "compute_failed" }, 500);
+        }
+        return true;
+      }
+
+      json(res, { from, to, ...unsupportedCategoryPayload(requestedSource) });
+      return true;
+    }
+
     // --- project-usage-summary ---
     if (p === "/functions/tokentracker-project-usage-summary") {
-      const projectMap = new Map();
-      scanCodexProjects(projectMap);
-      scanClaudeProjects(projectMap);
+      // Use the per-project bucket log that rollout.js emits — it already
+      // carries the actual tokens attributed to each (project_key, source,
+      // hour_start). Falling back to "session-file count × total tokens"
+      // (the old behavior) produced pure fiction: every short-and-hot
+      // project got the same weight as every long-and-cold one.
+      const projectQueuePath = path.join(
+        path.dirname(qp),
+        "project.queue.jsonl",
+      );
+      const projectRows = readProjectQueueData(projectQueuePath);
 
-      const rows = readQueueData(qp);
-      const totalTokens = rows.reduce((s, r) => s + (r.total_tokens || 0), 0);
-      const entries = [];
+      const byProject = new Map();
+      for (const row of projectRows) {
+        const key = row.project_key || "unknown";
+        if (!byProject.has(key)) {
+          byProject.set(key, {
+            project_key: key,
+            project_ref: row.project_ref || key,
+            total_tokens: 0,
+            billable_total_tokens: 0,
+          });
+        }
+        const agg = byProject.get(key);
+        agg.total_tokens += Number(row.total_tokens || 0);
+        agg.billable_total_tokens += Number(row.total_tokens || 0);
+        if (!agg.project_ref && row.project_ref) agg.project_ref = row.project_ref;
+      }
 
-      if (projectMap.size === 0) {
+      // If no project-attributed rows exist yet (user hasn't synced project
+      // attribution, or never used a project-capable CLI), fall back to
+      // per-source aggregation over the main queue so the panel isn't
+      // totally empty. This path used to also exist for the non-empty case
+      // and produce wrong numbers; keep it only as the empty fallback.
+      let entries;
+      if (byProject.size === 0) {
+        const rows = readQueueData(qp);
         const bySrc = new Map();
         for (const row of rows) {
           const src = row.source || "unknown";
-          if (!bySrc.has(src)) bySrc.set(src, { project_key: src, project_ref: `https://${src}.ai`, total_tokens: 0, billable_total_tokens: 0 });
+          if (!bySrc.has(src)) {
+            bySrc.set(src, {
+              project_key: src,
+              // Synthetic source-only row: leave project_ref empty rather than
+              // fabricating `https://${src}.ai`, which resolves to unrelated
+              // domains (e.g. codex.ai, cursor.ai) and was sent to the
+              // dashboard as a clickable href before v0.11.1 / this commit.
+              project_ref: "",
+              total_tokens: 0,
+              billable_total_tokens: 0,
+            });
+          }
           bySrc.get(src).total_tokens += row.total_tokens || 0;
           bySrc.get(src).billable_total_tokens += row.total_tokens || 0;
         }
-        entries.push(
-          ...Array.from(bySrc.values())
-            .sort((a, b) => b.billable_total_tokens - a.billable_total_tokens)
-            .map((e) => ({ ...e, total_tokens: String(e.total_tokens), billable_total_tokens: String(e.billable_total_tokens) })),
-        );
+        entries = Array.from(bySrc.values())
+          .sort((a, b) => b.billable_total_tokens - a.billable_total_tokens)
+          .map((e) => ({
+            ...e,
+            total_tokens: String(e.total_tokens),
+            billable_total_tokens: String(e.billable_total_tokens),
+          }));
       } else {
-        const totalCount = Array.from(projectMap.values()).reduce((s, p) => s + p.count, 0);
-        for (const [, proj] of projectMap) {
-          const ratio = totalCount > 0 ? proj.count / totalCount : 1 / projectMap.size;
-          const tokens = Math.floor(totalTokens * ratio);
-          entries.push({ project_key: proj.project_key, project_ref: proj.project_ref, total_tokens: String(tokens), billable_total_tokens: String(tokens) });
-        }
-        entries.sort((a, b) => Number(b.billable_total_tokens) - Number(a.billable_total_tokens));
+        entries = Array.from(byProject.values())
+          .sort((a, b) => b.billable_total_tokens - a.billable_total_tokens)
+          .map((e) => ({
+            ...e,
+            total_tokens: String(e.total_tokens),
+            billable_total_tokens: String(e.billable_total_tokens),
+          }));
       }
 
       json(res, { generated_at: new Date().toISOString(), entries });
@@ -1005,9 +1309,9 @@ function createLocalApiHandler({ queuePath }) {
     if (p === "/functions/tokentracker-usage-hourly") {
       const day = url.searchParams.get("day") || new Date().toISOString().slice(0, 10);
       const timeZoneContext = getTimeZoneContext(url);
-      const rows = readQueueData(qp);
+      const { rows, scope, excludedSources } = scopedQueueRows(qp, url);
       const data = aggregateHourlyByDay(rows, day, timeZoneContext);
-      json(res, { day, data });
+      json(res, { day, scope, excluded_sources: excludedSources, data });
       return true;
     }
 
@@ -1015,12 +1319,13 @@ function createLocalApiHandler({ queuePath }) {
     if (p === "/functions/tokentracker-usage-monthly") {
       const from = url.searchParams.get("from") || "";
       const to = url.searchParams.get("to") || "";
-      const rows = readQueueData(qp);
+      const timeZoneContext = getTimeZoneContext(url);
+      const { rows, scope, excludedSources } = scopedQueueRows(qp, url);
       const byMonth = new Map();
       for (const row of rows) {
         if (!row.hour_start) continue;
-        const day = row.hour_start.slice(0, 10);
-        if (day < from || day > to) continue;
+        const day = rowDayKey(row, timeZoneContext);
+        if (!day || day < from || day > to) continue;
         const month = day.slice(0, 7);
         if (!byMonth.has(month))
           byMonth.set(month, { month, total_tokens: 0, billable_total_tokens: 0, input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_output_tokens: 0, conversation_count: 0 });
@@ -1034,7 +1339,90 @@ function createLocalApiHandler({ queuePath }) {
         a.reasoning_output_tokens += row.reasoning_output_tokens || 0;
         a.conversation_count += row.conversation_count || 0;
       }
-      json(res, { from, to, data: Array.from(byMonth.values()).sort((a, b) => a.month.localeCompare(b.month)) });
+      json(res, { from, to, scope, excluded_sources: excludedSources, data: Array.from(byMonth.values()).sort((a, b) => a.month.localeCompare(b.month)) });
+      return true;
+    }
+
+    // --- skills manager ---
+    if (p === "/functions/tokentracker-skills") {
+      const method = String(req.method || "GET").toUpperCase();
+      const skills = require("./skills-manager");
+      try {
+        if (method === "GET") {
+          const mode = url.searchParams.get("mode") || "installed";
+          if (mode === "installed") {
+            json(res, { targets: skills.targetList(), skills: skills.listInstalledSkills() });
+            return true;
+          }
+          if (mode === "repos") {
+            json(res, { repos: skills.listRepos() });
+            return true;
+          }
+          if (mode === "discover") {
+            const force = url.searchParams.get("force") === "1";
+            json(res, await skills.discoverSkills({ force }));
+            return true;
+          }
+          if (mode === "search") {
+            const data = await skills.searchSkillsSh(
+              url.searchParams.get("q") || "",
+              Number(url.searchParams.get("limit") || 20),
+              Number(url.searchParams.get("offset") || 0),
+            );
+            json(res, data);
+            return true;
+          }
+          json(res, { error: "Unknown skills mode" }, 400);
+          return true;
+        }
+
+        if (method === "POST") {
+          if (!isAuthorizedLocalMutation(req)) {
+            json(res, { ok: false, error: "Unauthorized" }, 401);
+            return true;
+          }
+          const body = await readJsonBody(req);
+          const action = String(body?.action || "");
+          if (action === "install") {
+            json(res, { ok: true, skill: await skills.installSkill(body.skill, body.targets || ["claude", "codex"]) });
+            return true;
+          }
+          if (action === "uninstall") {
+            json(res, { ok: true, ...(skills.uninstallSkill(body.id) || {}) });
+            return true;
+          }
+          if (action === "restore") {
+            json(res, { ok: true, skill: skills.restoreSkill(body.id) });
+            return true;
+          }
+          if (action === "set_targets") {
+            json(res, { ok: true, skill: skills.setSkillTargets(body.id, body.targets || []) });
+            return true;
+          }
+          if (action === "import_local") {
+            json(res, { ok: true, skill: skills.importLocalSkill(body.directory, body.targets || []) });
+            return true;
+          }
+          if (action === "delete_local") {
+            json(res, { ok: true, ...(skills.deleteLocalSkill(body.directory, body.targets || []) || {}) });
+            return true;
+          }
+          if (action === "add_repo") {
+            json(res, { ok: true, repo: skills.addRepo(body.repo) });
+            return true;
+          }
+          if (action === "remove_repo") {
+            json(res, { ok: true, ...(skills.removeRepo(body.owner, body.name) || {}) });
+            return true;
+          }
+          json(res, { ok: false, error: "Unknown skills action" }, 400);
+          return true;
+        }
+
+        json(res, { ok: false, error: "Method Not Allowed" }, 405);
+      } catch (e) {
+        json(res, { ok: false, error: e?.message || "Unknown skills error" }, 500);
+      }
       return true;
     }
 
@@ -1062,4 +1450,13 @@ function createLocalApiHandler({ queuePath }) {
   };
 }
 
-module.exports = { createLocalApiHandler, resolveQueuePath };
+module.exports = {
+  createLocalApiHandler,
+  resolveAllowedInsforgeBaseUrl,
+  resolveQueuePath,
+  // Exported for cross-consumer tests (pricing + native contract lock).
+  MODEL_PRICING,
+  getModelPricing,
+  computeRowCost,
+  ensurePricingLoaded,
+};

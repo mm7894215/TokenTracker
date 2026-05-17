@@ -1,0 +1,2 @@
+{"source":"kiro","model":"kiro-agent","hour_start":"2026-04-20T10:00:00.000Z","input_tokens":1000,"output_tokens":200,"cached_input_tokens":0,"cache_creation_input_tokens":0,"reasoning_output_tokens":0,"total_tokens":1200,"conversation_count":1}
+{"source":"kiro","model":"kiro-cli-agent","hour_start":"2026-04-20T10:30:00.000Z","input_tokens":500,"output_tokens":100,"cached_input_tokens":0,"cache_creation_input_tokens":0,"reasoning_output_tokens":0,"total_tokens":600,"conversation_count":1}

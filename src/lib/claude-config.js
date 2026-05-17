@@ -71,9 +71,17 @@ async function isClaudeHookConfigured({ settingsPath, hookCommand, event = DEFAU
   return hasHook(entries, hookCommand);
 }
 
-function buildClaudeHookCommand(notifyPath) {
+// Generic Session-hook command builder. CodeBuddy CLI is a Claude-Code fork
+// and uses the exact same settings.json hook schema, so this function works
+// for any source that accepts the `node notify.cjs --source=<name>` contract.
+function buildHookCommand(notifyPath, source) {
   const cmd = typeof notifyPath === "string" ? notifyPath : "";
-  return `/usr/bin/env node ${quoteArg(cmd)} --source=claude`;
+  const src = typeof source === "string" && source ? source : "claude";
+  return `/usr/bin/env node ${quoteArg(cmd)} --source=${src}`;
+}
+
+function buildClaudeHookCommand(notifyPath) {
+  return buildHookCommand(notifyPath, "claude");
 }
 
 function normalizeSettings(raw) {
@@ -187,4 +195,10 @@ module.exports = {
   removeClaudeHook,
   isClaudeHookConfigured,
   buildClaudeHookCommand,
+  buildHookCommand,
+  // Aliases for callers that want a name unbiased toward Claude (the schema
+  // applies equally to CodeBuddy and any future Claude-Code fork).
+  upsertSessionHook: upsertClaudeHook,
+  removeSessionHook: removeClaudeHook,
+  isSessionHookConfigured: isClaudeHookConfigured,
 };

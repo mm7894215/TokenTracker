@@ -1,6 +1,7 @@
-import { Button } from "@base-ui/react/button";
 import React from "react";
+import { AlertTriangle, RefreshCw } from "lucide-react";
 import { copy } from "../lib/copy";
+import { Button } from "../ui/components/Button.jsx";
 
 export class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -36,19 +37,30 @@ export class ErrorBoundary extends React.Component {
       : copy("error.boundary.no_details");
 
     return (
-      <div className="min-h-screen bg-black text-[#00FF41] font-mono flex items-center justify-center p-6">
-        <div className="w-full max-w-xl border border-[#00FF41]/30 bg-black/70 p-6 text-center space-y-4">
-          <div className="text-[10px] uppercase tracking-[0.6em] opacity-60">
+      <div className="flex min-h-screen items-center justify-center bg-oai-white p-6 font-oai text-oai-black antialiased dark:bg-oai-gray-950 dark:text-oai-white">
+        <div className="w-full max-w-lg rounded-xl border border-oai-gray-200 bg-white p-6 text-center shadow-sm dark:border-oai-gray-800 dark:bg-oai-gray-900">
+          <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-amber-50 text-amber-600 dark:bg-amber-950/30 dark:text-amber-300">
+            <AlertTriangle className="h-5 w-5" aria-hidden />
+          </div>
+          <div className="mt-4 text-xs font-medium uppercase text-oai-gray-500 dark:text-oai-gray-400">
             {copy("error.boundary.title")}
           </div>
-          <div className="text-2xl font-black text-white">{copy("error.boundary.subtitle")}</div>
-          <div className="text-[10px] opacity-60">{copy("error.boundary.hint")}</div>
-          <div className="text-[10px] text-[#00FF41]/80 break-words">{errorLabel}</div>
+          <h1 className="mt-2 text-xl font-semibold text-oai-black dark:text-white">
+            {copy("error.boundary.subtitle")}
+          </h1>
+          <p className="mt-2 text-sm text-oai-gray-500 dark:text-oai-gray-400">
+            {copy("error.boundary.hint")}
+          </p>
+          <div className="mt-4 max-h-32 overflow-auto rounded-lg border border-oai-gray-200 bg-oai-gray-50 px-3 py-2 text-left text-xs leading-5 text-oai-gray-600 dark:border-oai-gray-800 dark:bg-oai-gray-950 dark:text-oai-gray-300">
+            {errorLabel}
+          </div>
           <Button
             type="button"
+            size="md"
             onClick={this.handleReload}
-            className="inline-flex items-center justify-center px-4 py-2 border border-[#00FF41] text-[10px] font-black uppercase tracking-[0.4em] text-[#00FF41] hover:bg-[#00FF41] hover:text-black transition-colors"
+            className="mt-5"
           >
+            <RefreshCw className="mr-2 h-4 w-4" aria-hidden />
             {copy("error.boundary.action.reload")}
           </Button>
         </div>

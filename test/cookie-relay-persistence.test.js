@@ -138,3 +138,97 @@ test("empty in-memory relay cookies do not wipe an existing on-disk session file
     assert.deepEqual(saved, { session: "keep-me" });
   });
 });
+
+test("refresh requests without browser auth context do not inject persisted relay cookies", async () => {
+  await withTempHome(async (home) => {
+    const cookiePath = getCookiePath(home);
+    await fs.mkdir(path.dirname(cookiePath), { recursive: true });
+    await fs.writeFile(
+      cookiePath,
+      JSON.stringify({
+        refresh: "refresh=stale-token; Path=/; HttpOnly",
+      }),
+      "utf8",
+    );
+
+    let proxiedCookieHeader = null;
+    globalThis.fetch = async (_url, options = {}) => {
+      proxiedCookieHeader = options.headers?.cookie || "";
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    };
+
+    const handler = createLocalApiHandler({ queuePath: path.join(home, "queue.jsonl") });
+    const req = createRequest({ method: "POST", headers: {} });
+    const res = createResponse();
+
+    const handled = await handler(req, res, new URL("http://localhost/api/auth/refresh"));
+
+    assert.equal(handled, true);
+    assert.equal(res.statusCode, 200);
+    assert.equal(proxiedCookieHeader, "");
+  });
+});
+
+test("refresh requests with csrf context still receive persisted relay cookies", async () => {
+  await withTempHome(async (home) => {
+    const cookiePath = getCookiePath(home);
+    await fs.mkdir(path.dirname(cookiePath), { recursive: true });
+    await fs.writeFile(
+      cookiePath,
+      JSON.stringify({
+        refresh: "refresh=valid-token; Path=/; HttpOnly",
+      }),
+      "utf8",
+    );
+
+    let proxiedCookieHeader = null;
+    globalThis.fetch = async (_url, options = {}) => {
+      proxiedCookieHeader = options.headers?.cookie || "";
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    };
+
+    const handler = createLocalApiHandler({ queuePath: path.join(home, "queue.jsonl") });
+    const req = createRequest({
+      method: "POST",
+      headers: {
+        "x-csrf-token": "csrf-123",
+      },
+    });
+    const res = createResponse();
+
+    const handled = await handler(req, res, new URL("http://localhost/api/auth/refresh"));
+
+    assert.equal(handled, true);
+    assert.equal(res.statusCode, 200);
+    assert.match(proxiedCookieHeader, /refresh=valid-token/);
+  });
+});
+
+test("stale refresh errors clear persisted relay cookies when no browser auth context exists", async () => {
+  await withTempHome(async (home) => {
+    const cookiePath = getCookiePath(home);
+    await fs.mkdir(path.dirname(cookiePath), { recursive: true });
+    await fs.writeFile(
+      cookiePath,
+      JSON.stringify({
+        refresh: "refresh=stale-token; Path=/; HttpOnly",
+      }),
+      "utf8",
+    );
+
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ message: "Invalid CSRF token" }), {
+        status: 403,
+        headers: { "content-type": "application/json" },
+      });
+
+    const handler = createLocalApiHandler({ queuePath: path.join(home, "queue.jsonl") });
+    const req = createRequest({ method: "POST", headers: {} });
+    const res = createResponse();
+
+    const handled = await handler(req, res, new URL("http://localhost/api/auth/refresh"));
+
+    assert.equal(handled, true);
+    await assert.rejects(fs.readFile(cookiePath, "utf8"), { code: "ENOENT" });
+  });
+});

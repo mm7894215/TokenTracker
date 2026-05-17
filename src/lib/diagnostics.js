@@ -15,7 +15,22 @@ const { resolveOpencodeConfigDir, isOpencodePluginInstalled } = require("./openc
 const { normalizeState: normalizeUploadState } = require("./upload-throttle");
 const { probeOpenclawHookState } = require("./openclaw-hook");
 const { probeOpenclawSessionPluginState } = require("./openclaw-session-plugin");
+const { probeGrokHookState } = require("./grok-hook");
 const { resolveTrackerPaths } = require("./tracker-paths");
+// TASK-011: Kiro CLI DB path inlined here to avoid pulling the ~4000-line
+// rollout module on every `tokentracker status` / `diagnostics` call.
+// rollout.js still exports resolveKiroCliDbPath for external callers.
+function resolveKiroCliDbPathInline(env, home) {
+  if (env.KIRO_CLI_DB_PATH) return env.KIRO_CLI_DB_PATH;
+  const effectiveHome = env.HOME || home;
+  return path.join(
+    effectiveHome,
+    "Library",
+    "Application Support",
+    "kiro-cli",
+    "data.sqlite3",
+  );
+}
 
 async function collectTrackerDiagnostics({
   home = os.homedir(),
@@ -38,6 +53,10 @@ async function collectTrackerDiagnostics({
   const geminiConfigDir = resolveGeminiConfigDir({ home, env: process.env });
   const geminiSettingsPath = resolveGeminiSettingsPath({ configDir: geminiConfigDir });
   const opencodeConfigDir = resolveOpencodeConfigDir({ home, env: process.env });
+  const grokHome =
+    process.env.TOKENTRACKER_GROK_HOME ||
+    process.env.GROK_HOME ||
+    path.join(home, ".grok");
 
   const config = await readJson(configPath);
   const cursors = await readJson(cursorsPath);
@@ -80,6 +99,26 @@ async function collectTrackerDiagnostics({
     env: process.env,
   });
   const openclawHookState = await probeOpenclawHookState({ home, trackerDir, env: process.env });
+  const grokHookState = await probeGrokHookState({ home, trackerDir, env: process.env });
+
+  // Kiro IDE and Kiro CLI sub-path presence — merged under one "kiro" source
+  // at token/cost aggregation level; operators need visibility of both
+  // sub-paths here for debugging.
+  const kiroIdeDevDataDir = path.join(
+    home,
+    "Library",
+    "Application Support",
+    "Kiro",
+    "User",
+    "globalStorage",
+    "kiro.kiroagent",
+    "dev_data",
+  );
+  const kiroIdePresent =
+    (await safeStatSize(path.join(kiroIdeDevDataDir, "devdata.sqlite"))) > 0 ||
+    (await safeStatSize(path.join(kiroIdeDevDataDir, "tokens_generated.jsonl"))) > 0;
+  const kiroCliDbPath = resolveKiroCliDbPathInline(process.env, home);
+  const kiroCliPresent = require("node:fs").existsSync(kiroCliDbPath);
 
   const lastSuccessAt = uploadThrottle.lastSuccessMs
     ? new Date(uploadThrottle.lastSuccessMs).toISOString()
@@ -104,6 +143,19 @@ async function collectTrackerDiagnostics({
       claude_config: redactValue(claudeConfigPath, home),
       gemini_config: redactValue(geminiSettingsPath, home),
       opencode_config: redactValue(opencodeConfigDir, home),
+      grok_home: redactValue(grokHome, home),
+      grok_hooks: redactValue(grokHookState?.grokHooksDir, home),
+      grok_handler: redactValue(grokHookState?.handlerPath, home),
+      kiro_ide_dev_data: redactValue(kiroIdeDevDataDir, home),
+      kiro_cli_db: redactValue(kiroCliDbPath, home),
+    },
+    kiro: {
+      ide_present: kiroIdePresent,
+      cli_present: kiroCliPresent,
+      cli_approximation:
+        "Kiro CLI does not persist explicit token counts (billing is credit-based on Bedrock). Tokens are approximated at 4 chars/token from user prompt chars and assistant response chars. Source rows that came through this path have model='kiro-cli-agent' when the underlying model is unknown (auto-routing); known Bedrock ARNs canonicalize to their short name (e.g. claude-sonnet-4).",
+      merge_policy:
+        "Kiro IDE and Kiro CLI both emit source='kiro' in queue.jsonl so token, cost, heatmap, and leaderboard aggregations merge transparently. Use this block to distinguish sub-path contributions.",
     },
     config: {
       base_url: typeof config?.baseUrl === "string" ? config.baseUrl : null,
@@ -141,6 +193,10 @@ async function collectTrackerDiagnostics({
       openclaw_hook_configured: Boolean(openclawHookState?.configured),
       openclaw_hook_linked: Boolean(openclawHookState?.linked),
       openclaw_hook_enabled: Boolean(openclawHookState?.enabled),
+      grok_hook_configured: Boolean(grokHookState?.configured),
+      grok_hook_exists: Boolean(grokHookState?.hookExists),
+      grok_hook_handler_exists: Boolean(grokHookState?.handlerExists),
+      grok_sessions_dir: redactValue(grokHookState?.sessionsDir, home),
     },
     upload: {
       last_success_at: lastSuccessAt,

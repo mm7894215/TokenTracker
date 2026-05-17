@@ -341,8 +341,49 @@ async function readCodexAccessToken({ home, env } = {}) {
   }
 }
 
+// Returns the access token + ChatGPT account id + plan type + auth.json path so callers can
+// also trigger a refresh if the tokens are stale (issue #52: stale tokens → wham 401 →
+// "Fetch failed" error after ~7-8 days of not running `codex`).
+async function readCodexAuthBundle({ home, env } = {}) {
+  try {
+    const codexHome = resolveCodexHome({ home, env });
+    const authPath = path.join(codexHome, "auth.json");
+    const auth = await readJson(authPath);
+    if (!auth || typeof auth !== "object") return null;
+
+    const accessToken = normalizeString(auth?.tokens?.access_token);
+    if (!accessToken) return null;
+
+    const accessPayload = decodeJwtPayload(auth?.tokens?.access_token);
+    const idPayload = decodeJwtPayload(auth?.tokens?.id_token);
+    const accountId =
+      normalizeString(auth?.tokens?.account_id) ||
+      normalizeString(extractOpenAiAuthNamespace(accessPayload)?.chatgpt_account_id) ||
+      normalizeString(extractOpenAiAuthNamespace(idPayload)?.chatgpt_account_id) ||
+      null;
+
+    const accessInfo = extractChatgptSubscriptionFromPayload(accessPayload);
+    const idInfo = extractChatgptSubscriptionFromPayload(idPayload);
+    const merged = mergeSubscription(accessInfo, idInfo);
+    const planType = merged?.planType ? merged.planType.toLowerCase() : null;
+
+    return {
+      accessToken,
+      accountId,
+      planType,
+      refreshToken: normalizeString(auth?.tokens?.refresh_token) || null,
+      lastRefresh: normalizeString(auth?.last_refresh) || null,
+      authPath,
+      authJson: auth,
+    };
+  } catch (_e) {
+    return null;
+  }
+}
+
 module.exports = {
   collectLocalSubscriptions,
   readClaudeCodeAccessToken,
   readCodexAccessToken,
+  readCodexAuthBundle,
 };

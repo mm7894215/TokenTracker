@@ -498,10 +498,14 @@ export function getMockLeaderboard({
     const total = Math.max(0, base + id * 1200);
     const gpt = Math.floor(total * 0.28);
     const claude = Math.floor(total * 0.18);
-    const gemini = Math.floor(total * 0.12);
-    const cursor = Math.floor(total * 0.12);
-    const opencode = Math.floor(total * 0.1);
-    const openclaw = Math.max(0, total - gpt - claude - gemini - cursor - opencode);
+    const gemini = Math.floor(total * 0.1);
+    const cursor = Math.floor(total * 0.1);
+    const opencode = Math.floor(total * 0.08);
+    const hermes = Math.floor(total * 0.03);
+    const kiro = Math.floor(total * 0.02);
+    const copilot = Math.floor(total * 0.04);
+    const kimi = Math.floor(total * 0.03);
+    const openclaw = Math.max(0, total - gpt - claude - gemini - cursor - opencode - hermes - kiro - copilot - kimi);
     const isPublic = id % 7 !== 0;
     return {
       id,
@@ -516,6 +520,10 @@ export function getMockLeaderboard({
       cursor_tokens: cursor,
       opencode_tokens: opencode,
       openclaw_tokens: openclaw,
+      hermes_tokens: hermes,
+      kiro_tokens: kiro,
+      copilot_tokens: copilot,
+      kimi_tokens: kimi,
       other_tokens: 0,
       total_tokens: total,
     };
@@ -537,7 +545,15 @@ export function getMockLeaderboard({
               ? "opencode_tokens"
               : safeMetric === "openclaw"
                 ? "openclaw_tokens"
-                : "total_tokens";
+                : safeMetric === "hermes"
+                  ? "hermes_tokens"
+                  : safeMetric === "kiro"
+                    ? "kiro_tokens"
+                    : safeMetric === "copilot"
+                      ? "copilot_tokens"
+                      : safeMetric === "kimi"
+                        ? "kimi_tokens"
+                        : "total_tokens";
 
   const sorted = raw
     .slice()
@@ -554,6 +570,10 @@ export function getMockLeaderboard({
       cursor_tokens: String(entry.cursor_tokens),
       opencode_tokens: String(entry.opencode_tokens),
       openclaw_tokens: String(entry.openclaw_tokens),
+      hermes_tokens: String(entry.hermes_tokens ?? 0),
+      kiro_tokens: String(entry.kiro_tokens ?? 0),
+      copilot_tokens: String(entry.copilot_tokens ?? 0),
+      kimi_tokens: String(entry.kimi_tokens ?? 0),
       other_tokens: String(entry.other_tokens ?? 0),
       total_tokens: String(entry.total_tokens),
       is_public: Boolean(entry.is_public),
@@ -569,6 +589,10 @@ export function getMockLeaderboard({
         cursor_tokens: meRow.cursor_tokens,
         opencode_tokens: meRow.opencode_tokens,
         openclaw_tokens: meRow.openclaw_tokens,
+        hermes_tokens: meRow.hermes_tokens,
+        kiro_tokens: meRow.kiro_tokens,
+        copilot_tokens: meRow.copilot_tokens,
+        kimi_tokens: meRow.kimi_tokens,
         other_tokens: meRow.other_tokens,
         total_tokens: meRow.total_tokens,
       }
@@ -580,6 +604,10 @@ export function getMockLeaderboard({
         cursor_tokens: "0",
         opencode_tokens: "0",
         openclaw_tokens: "0",
+        hermes_tokens: "0",
+        kiro_tokens: "0",
+        copilot_tokens: "0",
+        kimi_tokens: "0",
         other_tokens: "0",
         total_tokens: "0",
       };
@@ -692,5 +720,281 @@ export function getMockUsageModelBreakdown({ from, to, seed }: AnyRecord = {}) {
         reasoning_output: "14.000000",
       },
     },
+  };
+}
+
+export function getMockUsageCategoryBreakdown({ from, to, source = "claude" }: AnyRecord = {}) {
+  if (source === "codex") {
+    const totals = {
+      input_tokens: 1_420_000,
+      cached_input_tokens: 5_880_000,
+      cache_creation_input_tokens: 920_000,
+      output_tokens: 2_560_000,
+      reasoning_output_tokens: 610_000,
+      total_tokens: 10_780_000,
+    };
+    return {
+      from,
+      to,
+      source: "codex",
+      scope: "supported",
+      totals,
+      session_count: 188,
+      message_count: 5_436,
+      tool_calls_breakdown: {
+        categories: [
+          {
+            name: "Execution",
+            calls: 742,
+            totals: {
+              input_tokens: 320_000,
+              cached_input_tokens: 1_040_000,
+              cache_creation_input_tokens: 110_000,
+              output_tokens: 460_000,
+              reasoning_output_tokens: 120_000,
+              total_tokens: 1_930_000,
+            },
+            tools: [
+              {
+                name: "exec_command",
+                calls: 510,
+                totals: {
+                  input_tokens: 250_000,
+                  cached_input_tokens: 820_000,
+                  cache_creation_input_tokens: 80_000,
+                  output_tokens: 370_000,
+                  reasoning_output_tokens: 90_000,
+                  total_tokens: 1_520_000,
+                },
+              },
+              {
+                name: "write_stdin",
+                calls: 232,
+                totals: {
+                  input_tokens: 70_000,
+                  cached_input_tokens: 220_000,
+                  cache_creation_input_tokens: 30_000,
+                  output_tokens: 90_000,
+                  reasoning_output_tokens: 30_000,
+                  total_tokens: 410_000,
+                },
+              },
+            ],
+          },
+          {
+            name: "Browser",
+            calls: 406,
+            totals: {
+              input_tokens: 210_000,
+              cached_input_tokens: 880_000,
+              cache_creation_input_tokens: 90_000,
+              output_tokens: 420_000,
+              reasoning_output_tokens: 100_000,
+              total_tokens: 1_700_000,
+            },
+            tools: [
+              {
+                name: "take_snapshot",
+                calls: 180,
+                totals: {
+                  input_tokens: 100_000,
+                  cached_input_tokens: 400_000,
+                  cache_creation_input_tokens: 40_000,
+                  output_tokens: 180_000,
+                  reasoning_output_tokens: 40_000,
+                  total_tokens: 760_000,
+                },
+              },
+              {
+                name: "click",
+                calls: 126,
+                totals: {
+                  input_tokens: 60_000,
+                  cached_input_tokens: 250_000,
+                  cache_creation_input_tokens: 30_000,
+                  output_tokens: 120_000,
+                  reasoning_output_tokens: 35_000,
+                  total_tokens: 495_000,
+                },
+              },
+              {
+                name: "evaluate_script",
+                calls: 100,
+                totals: {
+                  input_tokens: 50_000,
+                  cached_input_tokens: 230_000,
+                  cache_creation_input_tokens: 20_000,
+                  output_tokens: 120_000,
+                  reasoning_output_tokens: 25_000,
+                  total_tokens: 445_000,
+                },
+              },
+            ],
+          },
+        ],
+        tools_total: 3_630_000,
+        privacy: {
+          includes_inputs: false,
+          note: "Aggregated tool names only; no tool arguments or outputs are included.",
+        },
+      },
+      exec_command_breakdown: {
+        by_type: [
+          {
+            name: "test",
+            calls: 168,
+            failures: 14,
+            duration_ms: 482_000,
+            max_duration_ms: 18_400,
+            output_chars: 450_000,
+            output_lines: 8_600,
+            totals: {
+              input_tokens: 90_000,
+              cached_input_tokens: 320_000,
+              output_tokens: 160_000,
+              reasoning_output_tokens: 42_000,
+              total_tokens: 612_000,
+            },
+          },
+          {
+            name: "build",
+            calls: 116,
+            failures: 9,
+            duration_ms: 392_000,
+            max_duration_ms: 22_100,
+            output_chars: 310_000,
+            output_lines: 5_200,
+            totals: {
+              input_tokens: 70_000,
+              cached_input_tokens: 240_000,
+              output_tokens: 130_000,
+              reasoning_output_tokens: 30_000,
+              total_tokens: 470_000,
+            },
+          },
+        ],
+        by_exit: [
+          {
+            name: "completed:0",
+            calls: 438,
+            failures: 0,
+            duration_ms: 1_040_000,
+            max_duration_ms: 22_100,
+            output_chars: 830_000,
+            output_lines: 13_100,
+            totals: {
+              input_tokens: 220_000,
+              cached_input_tokens: 780_000,
+              output_tokens: 350_000,
+              reasoning_output_tokens: 82_000,
+              total_tokens: 1_432_000,
+            },
+          },
+          {
+            name: "completed:1",
+            calls: 72,
+            failures: 72,
+            duration_ms: 155_000,
+            max_duration_ms: 11_800,
+            output_chars: 120_000,
+            output_lines: 2_300,
+            totals: {
+              input_tokens: 30_000,
+              cached_input_tokens: 110_000,
+              output_tokens: 55_000,
+              reasoning_output_tokens: 8_000,
+              total_tokens: 195_000,
+            },
+          },
+        ],
+      },
+    };
+  }
+
+  if (source !== "claude") {
+    return {
+      from,
+      to,
+      source,
+      scope: "unsupported",
+      totals: {
+        input_tokens: 0,
+        cached_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        output_tokens: 0,
+        reasoning_output_tokens: 0,
+        total_tokens: 0,
+      },
+      categories: [
+        "system_prefix",
+        "conversation_history",
+        "user_input",
+        "tool_calls",
+        "subagents",
+        "reasoning",
+        "assistant_response",
+      ].map((key) => ({
+        key,
+        totals: {
+          input_tokens: 0,
+          cached_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+          output_tokens: 0,
+          reasoning_output_tokens: 0,
+          total_tokens: 0,
+        },
+        percent: 0,
+      })),
+      session_count: 0,
+      message_count: 0,
+    };
+  }
+
+  const buckets: Array<{ key: string; total: number }> = [
+    { key: "system_prefix", total: 12_896_539 },
+    { key: "conversation_history", total: 320_207_200 },
+    { key: "user_input", total: 998_025 },
+    { key: "tool_calls", total: 4_808_739 },
+    { key: "subagents", total: 1_022_828 },
+    { key: "reasoning", total: 11_073_118 },
+    { key: "assistant_response", total: 1_289_174 },
+  ];
+  const grandTotal = buckets.reduce((a, b) => a + b.total, 0);
+  const categories = buckets.map(({ key, total }) => ({
+    key,
+    totals: {
+      input_tokens: key === "user_input" ? total : 0,
+      cached_input_tokens: key === "conversation_history" ? Math.round(total * 0.95) : 0,
+      cache_creation_input_tokens:
+        key === "system_prefix"
+          ? total
+          : key === "conversation_history"
+          ? Math.round(total * 0.05)
+          : 0,
+      output_tokens: ["tool_calls", "subagents", "reasoning", "assistant_response"].includes(key)
+        ? total
+        : 0,
+      reasoning_output_tokens: key === "reasoning" ? total : 0,
+      total_tokens: total,
+    },
+    percent: Number(((total / grandTotal) * 100).toFixed(2)),
+  }));
+
+  return {
+    from,
+    to,
+    source: "claude",
+    scope: "supported",
+    totals: {
+      input_tokens: 998_025,
+      cached_input_tokens: Math.round(320_207_200 * 0.95),
+      cache_creation_input_tokens: 12_896_539 + Math.round(320_207_200 * 0.05),
+      output_tokens: 4_808_739 + 1_022_828 + 11_073_118 + 1_289_174,
+      reasoning_output_tokens: 11_073_118,
+      total_tokens: grandTotal,
+    },
+    categories,
+    session_count: 312,
+    message_count: 12_046,
   };
 }

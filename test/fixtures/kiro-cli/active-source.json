@@ -1,0 +1,49 @@
+{
+  "_fixture_provenance": "PENDING LIVE VALIDATION — spec-derived from kiro-cli binary strings (crates/fig_* + crates/amzn-codewhisperer-client/src/operation/*.rs, plus the observed live session-state layout at ~/.kiro/sessions/cli/{uuid}.json on 2026-04-20). The .jsonl sibling is 0 bytes in the wild at plan execution time; token metadata is hypothesized to flow into session_state.conversation_metadata.user_turn_metadatas[] with per-turn token counts and an ISO timestamp. When a real completed Kiro CLI session is captured, diff this fixture against the real .json and patch parseKiroCliIncremental + this header accordingly. Two user_turn_metadatas entries are placed in different UTC half-hour buckets so bucket aggregation can be verified.",
+  "session_id": "fixture-active-0000-0000-0000-000000000001",
+  "cwd": "/tmp/fake-cwd",
+  "created_at": "2026-04-20T10:00:00.000Z",
+  "updated_at": "2026-04-20T10:45:00.000Z",
+  "title": null,
+  "session_state": {
+    "version": "v1",
+    "conversation_metadata": {
+      "user_turn_metadatas": [
+        {
+          "message_id": "msg-0001",
+          "timestamp": "2026-04-20T10:05:00.000Z",
+          "input_tokens": 1200,
+          "output_tokens": 450,
+          "cache_read_input_tokens": 800,
+          "cache_creation_input_tokens": 100,
+          "model_id": "anthropic.claude-sonnet-4-20250514-v1:0"
+        },
+        {
+          "message_id": "msg-0002",
+          "timestamp": "2026-04-20T10:40:00.000Z",
+          "input_tokens": 300,
+          "output_tokens": 120,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0,
+          "model_id": "anthropic.claude-sonnet-4-20250514-v1:0"
+        }
+      ],
+      "user_turn_start_request": null,
+      "last_request": null
+    },
+    "rts_model_state": {
+      "conversation_id": "fixture-active-0000-0000-0000-000000000001",
+      "model_info": {
+        "model_id": "anthropic.claude-sonnet-4-20250514-v1:0"
+      },
+      "context_usage_percentage": 12.5
+    },
+    "permissions": {
+      "filesystem": { "allowed_read_paths": [], "allowed_write_paths": [], "denied_read_paths": [], "denied_write_paths": [] },
+      "trusted_tools": [],
+      "denied_tools": [],
+      "allowed_commands": []
+    },
+    "agent_name": null
+  }
+}

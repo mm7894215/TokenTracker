@@ -1,10 +1,28 @@
 import copyRaw from "../content/copy.csv?raw";
+import zhCore from "../content/i18n/zh/core.json";
+import zhDashboard from "../content/i18n/zh/dashboard.json";
+import zhMarketing from "../content/i18n/zh/marketing.json";
+import {
+  getInitialLocalePreference,
+  normalizeResolvedLocale,
+  resolvePreferredLocale,
+  ZH_CN_LOCALE,
+} from "./locale";
 
 const REQUIRED_COLUMNS = ["key", "module", "page", "component", "slot", "text"];
+const LOCALE_REGISTRIES: Record<string, TranslationRegistry> = {
+  [ZH_CN_LOCALE]: {
+    ...zhCore,
+    ...zhDashboard,
+    ...zhMarketing,
+  },
+};
 
 type AnyRecord = Record<string, any>;
+type TranslationRegistry = Record<string, string>;
 
 let cachedRegistry: any = null;
+let currentLocale = resolvePreferredLocale(getInitialLocalePreference());
 
 function parseCsv(raw: any) {
   const rows: any[] = [];
@@ -44,25 +62,17 @@ function parseCsv(raw: any) {
     if (ch === "\n") {
       row.push(field);
       field = "";
-      if (!row.every((cell) => cell.trim() === "")) {
-        rows.push(row);
-      }
+      if (!row.every((cell) => cell.trim() === "")) rows.push(row);
       row = [];
       continue;
     }
 
-    if (ch === "\r") {
-      continue;
-    }
-
+    if (ch === "\r") continue;
     field += ch;
   }
 
   row.push(field);
-  if (!row.every((cell) => cell.trim() === "")) {
-    rows.push(row);
-  }
-
+  if (!row.every((cell) => cell.trim() === "")) rows.push(row);
   return rows;
 }
 
@@ -74,7 +84,6 @@ function buildRegistry(raw: any) {
   const missing = REQUIRED_COLUMNS.filter((col) => !header.includes(col));
   if (missing.length) {
     if (import.meta?.env?.DEV) {
-      // eslint-disable-next-line no-console
       console.error("Copy registry missing columns:", missing.join(", "));
     }
     return { map: new Map(), rows: [] };
@@ -95,9 +104,7 @@ function buildRegistry(raw: any) {
     };
 
     if (!record.key) return;
-
     if (map.has(record.key) && import.meta?.env?.DEV) {
-      // eslint-disable-next-line no-console
       console.warn(`Duplicate copy key: ${record.key} (row ${rowIndex + 2})`);
     }
 
@@ -109,10 +116,17 @@ function buildRegistry(raw: any) {
 }
 
 function getRegistry() {
-  if (!cachedRegistry) {
-    cachedRegistry = buildRegistry(copyRaw);
-  }
+  if (!cachedRegistry) cachedRegistry = buildRegistry(copyRaw);
   return cachedRegistry;
+}
+
+function getLocaleRegistry() {
+  return (LOCALE_REGISTRIES[currentLocale] || {}) as TranslationRegistry;
+}
+
+function getTranslatedText(key: any) {
+  const value = getLocaleRegistry()[String(key)];
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 function interpolate(text: any, params?: AnyRecord) {
@@ -127,18 +141,21 @@ function normalizeText(text: any) {
   return String(text).replace(/\\n/g, "\n");
 }
 
+function resolveCopyValue(record: any, key: any) {
+  return getTranslatedText(key) || record?.text || key;
+}
+
+export function setCopyLocale(locale: any) {
+  currentLocale = normalizeResolvedLocale(locale);
+}
+
 export function copy(key: any, params?: AnyRecord) {
   const registry = getRegistry();
   const record = registry.map.get(key);
-  const value = record?.text || key;
-
   if (!record && import.meta?.env?.DEV) {
-    // eslint-disable-next-line no-console
     console.warn(`Missing copy key: ${key}`);
   }
-
-  const normalized = normalizeText(value);
-  return interpolate(normalized, params);
+  return interpolate(normalizeText(resolveCopyValue(record, key)), params);
 }
 
 export function getCopyRegistry() {

@@ -82,7 +82,7 @@ export default async function (req: Request): Promise<Response> {
     return json({ error: "Too many buckets (max 500)" }, 400);
   }
 
-  const rows = buckets.map((b: Record<string, unknown>) => ({
+  const mappedRows = buckets.map((b: Record<string, unknown>) => ({
     user_id: userId,
     device_id: deviceId,
     hour_start: b.hour_start,
@@ -98,6 +98,23 @@ export default async function (req: Request): Promise<Response> {
     total_cost_usd: Number(b.total_cost_usd) || 0,
     conversations: b.conversations || 0,
   }));
+
+  // Dedupe within the batch by (hour_start, source, model), keeping the row
+  // with the largest total_tokens. The CLI's queue.jsonl is append-only and
+  // re-emits the same logical bucket multiple times as a session fills out
+  // (each emission carries the cumulative running total, so MAX wins). Two
+  // rows sharing the conflict key in one upsert make Postgres throw
+  // "ON CONFLICT DO UPDATE command cannot affect row a second time" and
+  // reject the entire batch — which stalled all clients until this dedupe.
+  const dedupedMap = new Map<string, typeof mappedRows[number]>();
+  for (const r of mappedRows) {
+    const key = `${r.hour_start}|${r.source}|${r.model}`;
+    const prev = dedupedMap.get(key);
+    if (!prev || (Number(r.total_tokens) || 0) > (Number(prev.total_tokens) || 0)) {
+      dedupedMap.set(key, r);
+    }
+  }
+  const rows = Array.from(dedupedMap.values());
 
   const { error: upsertErr } = await client.database
     .from("tokentracker_hourly")

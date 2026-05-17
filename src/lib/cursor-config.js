@@ -8,18 +8,31 @@ const { readJson } = require("./fs");
 
 // ── Path resolution ──
 
-function resolveCursorPaths({ home } = {}) {
+function resolveCursorPaths({ home, platform = process.platform, env = process.env } = {}) {
   const h = home || os.homedir();
-  const appSupport = path.join(h, "Library", "Application Support", "Cursor");
+  let appDir;
+  if (platform === "darwin") {
+    appDir = path.join(h, "Library", "Application Support", "Cursor");
+  } else if (platform === "win32") {
+    const appData =
+      (typeof env.APPDATA === "string" && env.APPDATA.trim()) ||
+      path.join(h, "AppData", "Roaming");
+    appDir = path.join(appData, "Cursor");
+  } else {
+    const xdg =
+      (typeof env.XDG_CONFIG_HOME === "string" && env.XDG_CONFIG_HOME.trim()) ||
+      path.join(h, ".config");
+    appDir = path.join(xdg, "Cursor");
+  }
   return {
-    appDir: appSupport,
-    stateDbPath: path.join(appSupport, "User", "globalStorage", "state.vscdb"),
+    appDir,
+    stateDbPath: path.join(appDir, "User", "globalStorage", "state.vscdb"),
     cliConfigPath: path.join(h, ".cursor", "cli-config.json"),
   };
 }
 
-function isCursorInstalled({ home } = {}) {
-  const { appDir } = resolveCursorPaths({ home });
+function isCursorInstalled({ home, platform, env } = {}) {
+  const { appDir } = resolveCursorPaths({ home, platform, env });
   try {
     return fs.statSync(appDir).isDirectory();
   } catch {
@@ -29,6 +42,56 @@ function isCursorInstalled({ home } = {}) {
 
 // ── Auth token extraction ──
 
+const CURSOR_ACCESS_TOKEN_SQL =
+  "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken';";
+
+function cursorDebugLog(message, env = process.env) {
+  const dbg = String((env && env.TOKENTRACKER_DEBUG) || "").toLowerCase();
+  if (dbg === "1" || dbg === "true") {
+    process.stderr.write(`[cursor] ${message}\n`);
+  }
+}
+
+function readCursorAccessTokenFromStateDb(stateDbPath, deps = {}) {
+  const execFileSync = deps.execFileSync || cp.execFileSync;
+  const requireFn = deps.requireFn || require;
+  const env = deps.env || process.env;
+
+  try {
+    return execFileSync("sqlite3", [stateDbPath, CURSOR_ACCESS_TOKEN_SQL], {
+      encoding: "utf8",
+      timeout: 5000,
+      stdio: ["pipe", "pipe", "pipe"],
+    }).trim();
+  } catch (sqliteCliErr) {
+    cursorDebugLog(
+      `sqlite3 CLI token read failed for ${stateDbPath}: ${sqliteCliErr?.message || sqliteCliErr}`,
+      env,
+    );
+  }
+
+  try {
+    const { DatabaseSync } = requireFn("node:sqlite");
+    if (typeof DatabaseSync !== "function") {
+      cursorDebugLog("node:sqlite DatabaseSync is unavailable", env);
+      return null;
+    }
+    const db = new DatabaseSync(stateDbPath, { readOnly: true });
+    try {
+      const row = db.prepare(CURSOR_ACCESS_TOKEN_SQL).get();
+      return typeof row?.value === "string" ? row.value.trim() : null;
+    } finally {
+      db.close();
+    }
+  } catch (nodeSqliteErr) {
+    cursorDebugLog(
+      `node:sqlite token read failed for ${stateDbPath}: ${nodeSqliteErr?.message || nodeSqliteErr}`,
+      env,
+    );
+    return null;
+  }
+}
+
 /**
  * Extract Cursor session cookie from local SQLite + cli-config.json.
  * Returns { cookie, userId } or null on failure.
@@ -37,21 +100,15 @@ function isCursorInstalled({ home } = {}) {
  * - JWT from state.vscdb → ItemTable → cursorAuth/accessToken
  * - userId from cli-config.json → authInfo.authId → "auth0|user_XXXXX"
  */
-function extractCursorSessionToken({ home } = {}) {
+function extractCursorSessionToken({ home, deps } = {}) {
   const { stateDbPath, cliConfigPath } = resolveCursorPaths({ home });
 
   // 1. Extract JWT from SQLite
-  let jwt;
-  try {
-    jwt = cp
-      .execSync(
-        `sqlite3 "${stateDbPath}" "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken';"`,
-        { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] },
-      )
-      .trim();
-  } catch {
+  if (!fs.existsSync(stateDbPath)) {
+    cursorDebugLog(`Cursor state DB not found at ${stateDbPath}`, deps?.env);
     return null;
   }
+  const jwt = readCursorAccessTokenFromStateDb(stateDbPath, deps);
   if (!jwt || jwt.length < 10) return null;
 
   // 2. Extract userId — try cli-config.json first, fall back to JWT decode
@@ -94,6 +151,7 @@ function extractUserIdFromJwt(jwt) {
 
 const CURSOR_CSV_URL = "https://cursor.com/api/dashboard/export-usage-events-csv?strategy=tokens";
 const CURSOR_SUMMARY_URL = "https://cursor.com/api/usage-summary";
+const CURSOR_SOURCE_SCOPE = "account";
 
 /**
  * Fetch full usage CSV from Cursor API.
@@ -220,62 +278,65 @@ function fetchUrlRaw({ urlStr, cookie, timeoutMs }) {
 /**
  * Parse Cursor usage CSV into structured records.
  *
- * New format columns:
- *   Date, Kind, Model, Max Mode, Input (w/ Cache Write), Input (w/o Cache Write),
- *   Cache Read, Output Tokens, Total Tokens, Cost
+ * Column order has changed multiple times (e.g. new "Cloud Agent ID",
+ * "Automation ID" columns inserted before "Kind"). Resolve columns by
+ * header name instead of fixed index so the parser keeps working across
+ * future Cursor updates.
  *
- * Old format columns:
- *   Date, Model, Input (w/ Cache Write), Input (w/o Cache Write),
- *   Cache Read, Output Tokens, Total Tokens, Cost, Cost to you
+ * Known required columns: Date, Model, Input (w/ Cache Write),
+ * Input (w/o Cache Write), Cache Read, Output Tokens, Total Tokens, Cost.
+ * Optional: Kind, Max Mode.
  */
 function parseCursorCsv(csvText) {
   const lines = csvText.split("\n").filter((l) => l.trim().length > 0);
   if (lines.length < 2) return [];
 
-  const header = lines[0];
-  const isNewFormat = header.includes("Kind");
+  const headerFields = parseCsvLine(lines[0]).map((f) => stripQuotes(f));
+  const columnIndex = new Map();
+  for (let i = 0; i < headerFields.length; i++) {
+    columnIndex.set(headerFields[i], i);
+  }
+
+  const dateIdx = columnIndex.get("Date");
+  const modelIdx = columnIndex.get("Model");
+  const inputWithIdx = columnIndex.get("Input (w/ Cache Write)");
+  const inputWithoutIdx = columnIndex.get("Input (w/o Cache Write)");
+  const cacheReadIdx = columnIndex.get("Cache Read");
+  const outputIdx = columnIndex.get("Output Tokens");
+  const totalIdx = columnIndex.get("Total Tokens");
+  const costIdx = columnIndex.get("Cost");
+  const kindIdx = columnIndex.get("Kind");
+  const maxModeIdx = columnIndex.get("Max Mode");
+
+  const required = [dateIdx, modelIdx, inputWithIdx, inputWithoutIdx, cacheReadIdx, outputIdx, totalIdx, costIdx];
+  if (required.some((idx) => idx === undefined)) return [];
+
+  const minFields = Math.max(...required) + 1;
 
   const records = [];
   for (let i = 1; i < lines.length; i++) {
     const fields = parseCsvLine(lines[i]);
-    if (!fields || fields.length < 8) continue;
+    if (!fields || fields.length < minFields) continue;
 
-    let record;
-    if (isNewFormat) {
-      // Date,Kind,Model,Max Mode,Input (w/ Cache Write),Input (w/o Cache Write),Cache Read,Output Tokens,Total Tokens,Cost
-      const inputWithCache = toNum(fields[4]);
-      const inputWithoutCache = toNum(fields[5]);
-      record = {
-        date: stripQuotes(fields[0]),
-        kind: stripQuotes(fields[1]),
-        model: stripQuotes(fields[2]),
-        maxMode: stripQuotes(fields[3]),
-        inputTokens: inputWithoutCache,
-        cacheWriteTokens: Math.max(0, inputWithCache - inputWithoutCache),
-        cacheReadTokens: toNum(fields[6]),
-        outputTokens: toNum(fields[7]),
-        totalTokens: toNum(fields[8]),
-        cost: toFloat(fields[9]),
-      };
-    } else {
-      // Date,Model,Input (w/ Cache Write),Input (w/o Cache Write),Cache Read,Output Tokens,Total Tokens,Cost,Cost to you
-      const inputWithCache = toNum(fields[2]);
-      const inputWithoutCache = toNum(fields[3]);
-      record = {
-        date: stripQuotes(fields[0]),
-        kind: "unknown",
-        model: stripQuotes(fields[1]),
-        maxMode: "No",
-        inputTokens: inputWithoutCache,
-        cacheWriteTokens: Math.max(0, inputWithCache - inputWithoutCache),
-        cacheReadTokens: toNum(fields[4]),
-        outputTokens: toNum(fields[5]),
-        totalTokens: toNum(fields[6]),
-        cost: toFloat(fields[7]),
-      };
-    }
+    const inputWithCache = toNum(fields[inputWithIdx]);
+    const inputWithoutCache = toNum(fields[inputWithoutIdx]);
+    const record = {
+      date: stripQuotes(fields[dateIdx]),
+      kind: kindIdx !== undefined ? stripQuotes(fields[kindIdx]) : "unknown",
+      model: stripQuotes(fields[modelIdx]),
+      maxMode: maxModeIdx !== undefined ? stripQuotes(fields[maxModeIdx]) : "No",
+      sourceScope: CURSOR_SOURCE_SCOPE,
+      billableKind: isCursorBillableKind(kindIdx !== undefined ? fields[kindIdx] : "unknown")
+        ? "billable"
+        : "non_billable",
+      inputTokens: inputWithoutCache,
+      cacheWriteTokens: Math.max(0, inputWithCache - inputWithoutCache),
+      cacheReadTokens: toNum(fields[cacheReadIdx]),
+      outputTokens: toNum(fields[outputIdx]),
+      totalTokens: toNum(fields[totalIdx]),
+      cost: toFloat(fields[costIdx]),
+    };
 
-    // Skip records with no tokens
     if (record.totalTokens <= 0 && record.inputTokens <= 0 && record.outputTokens <= 0) continue;
 
     records.push(record);
@@ -300,7 +361,16 @@ function normalizeCursorUsage(record) {
     output_tokens: outputTokens,
     reasoning_output_tokens: 0,
     total_tokens: totalTokens,
+    billable_total_tokens: isCursorBillableKind(record?.kind) ? totalTokens : 0,
   };
+}
+
+function isCursorBillableKind(kind) {
+  const normalized = String(kind || "").trim().toLowerCase();
+  if (!normalized) return true;
+  if (normalized.includes("no charge")) return false;
+  if (normalized === "free") return false;
+  return true;
 }
 
 // ── CSV helpers ──
@@ -348,9 +418,11 @@ function toFloat(s) {
 module.exports = {
   resolveCursorPaths,
   isCursorInstalled,
+  readCursorAccessTokenFromStateDb,
   extractCursorSessionToken,
   fetchCursorUsageCsv,
   fetchCursorUsageSummary,
   parseCursorCsv,
+  isCursorBillableKind,
   normalizeCursorUsage,
 };

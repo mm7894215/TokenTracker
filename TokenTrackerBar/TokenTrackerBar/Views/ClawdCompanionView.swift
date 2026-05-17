@@ -10,13 +10,16 @@ struct ClawdCompanionView: View {
     @State private var currentAction: CharacterAction = .none
     @State private var quipIndex = 0
     @State private var armWave = false
-    @State private var syncRotation: Double = 0
+    @State private var syncSpinActive = false
+    @State private var syncSpinStart = Date()
+    @State private var syncSpinStopTask: Task<Void, Never>?
     @State private var hoveringSync = false
     @State private var hoveringCharacter = false
     @State private var tapOverrideState: ClawdState?
     @State private var idleVariant: ClawdState = .idleLiving
 
     private let px: CGFloat = 4.0
+    private let syncSpinPeriod: TimeInterval = 0.8
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
@@ -81,31 +84,70 @@ struct ClawdCompanionView: View {
     // MARK: - Sync Button
 
     private var syncButton: some View {
-        Button {
-            Task { await viewModel.triggerSync() }
-        } label: {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !syncSpinActive)) { timeline in
             Image(systemName: "arrow.triangle.2.circlepath")
                 .font(.system(size: 11))
                 .foregroundStyle(viewModel.isSyncing ? .tertiary : (hoveringSync ? .primary : .secondary))
-                .rotationEffect(.degrees(syncRotation))
+                .rotationEffect(.degrees(syncRotationDegrees(at: timeline.date)))
                 .scaleEffect(hoveringSync && !viewModel.isSyncing ? 1.15 : 1.0)
                 .animation(.easeOut(duration: 0.15), value: hoveringSync)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+                .onTapGesture { triggerManualSync() }
+                .onHover { h in
+                    hoveringSync = h
+                    if h { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
+                .accessibilityLabel(viewModel.isSyncing ? Strings.syncingUsageData : Strings.syncUsageData)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { triggerManualSync() }
+                .onChange(of: viewModel.isSyncing) { syncing in
+                    if syncing {
+                        startSyncSpin()
+                    } else {
+                        stopSyncSpinAfterCurrentTurn()
+                    }
+                }
+                .onDisappear {
+                    syncSpinStopTask?.cancel()
+                    syncSpinStopTask = nil
+                }
         }
-        .frame(width: 24, height: 24)
-        .contentShape(Rectangle())
-        .buttonStyle(.plain)
-        .onHover { h in
-            hoveringSync = h
-            if h { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
-        .disabled(viewModel.isSyncing)
-        .accessibilityLabel(viewModel.isSyncing ? "Syncing usage data" : "Sync usage data")
-        .onChange(of: viewModel.isSyncing) { syncing in
-            if syncing {
-                withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) { syncRotation = 360 }
-            } else {
-                withAnimation(.default) { syncRotation = 0 }
+    }
+
+    private func triggerManualSync() {
+        guard !viewModel.isSyncing else { return }
+        Task { await viewModel.triggerSync() }
+    }
+
+    private func syncRotationDegrees(at date: Date) -> Double {
+        guard syncSpinActive else { return 0 }
+        let elapsed = max(0, date.timeIntervalSince(syncSpinStart))
+        return (elapsed / syncSpinPeriod * 360).truncatingRemainder(dividingBy: 360)
+    }
+
+    private func startSyncSpin() {
+        syncSpinStopTask?.cancel()
+        syncSpinStopTask = nil
+        syncSpinStart = Date()
+        syncSpinActive = true
+    }
+
+    private func stopSyncSpinAfterCurrentTurn() {
+        guard syncSpinActive else { return }
+        syncSpinStopTask?.cancel()
+
+        let elapsed = max(0, Date().timeIntervalSince(syncSpinStart))
+        let remainder = elapsed.truncatingRemainder(dividingBy: syncSpinPeriod)
+        let delay = remainder == 0 ? 0 : syncSpinPeriod - remainder
+
+        syncSpinStopTask = Task { @MainActor in
+            if delay > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             }
+            guard !Task.isCancelled, !viewModel.isSyncing else { return }
+            syncSpinActive = false
+            syncSpinStopTask = nil
         }
     }
 
@@ -725,7 +767,7 @@ struct ClawdCompanionView: View {
         }
     }
 
-    // MARK: - Quip Pool (30+ English lines)
+    // MARK: - Quip Pool
 
     private var currentQuip: String {
         let pool = quipPool
@@ -739,47 +781,34 @@ struct ClawdCompanionView: View {
         let f = TokenFormatter.formatCompact(tokens)
 
         if viewModel.isSyncing {
-            return [
-                "⏳ Crunching numbers...",
-                "📡 Fetching latest data!",
-                "🔄 One moment, syncing...",
-                "🧮 Counting your tokens~",
-            ]
+            return Strings.syncingQuips
         }
 
         var pool: [String] = []
 
         // === Today data ===
         if tokens == 0 {
-            pool += [
-                "😴 No tokens yet today",
-                "💬 Start chatting to wake me up!",
-                "🌙 Quiet day so far...",
-                "⌨️ Waiting for your first prompt",
-                "💤 Zzz... nothing to count",
-                "🌅 The calm before the storm?",
-                "✨ I'm ready when you are!",
-            ]
+            pool += Strings.emptyTodayQuips
         } else {
-            pool.append("📊 Today: \(f) tokens")
+            pool.append(Strings.tokensToday(f))
             if cost != "$0.00" && cost != "$0" {
                 pool += [
-                    "📈 \(f) tokens — \(cost) spent today",
-                    "💰 \(cost) invested in AI so far",
-                    "🧾 Today's bill: \(cost) for \(f) tokens",
-                    "💳 AI tab today: \(cost)",
+                    Strings.tokensSpentToday(tokens: f, cost: cost),
+                    Strings.aiInvestedToday(cost),
+                    Strings.billToday(cost: cost, tokens: f),
+                    Strings.aiTabToday(cost),
                 ]
             }
             if tokens < 50_000 {
-                pool += ["☕ Just warming up!", "🌱 A gentle start"]
+                pool += Strings.warmupQuips
             } else if tokens < 200_000 {
-                pool += ["🎯 Getting into the flow!", "💪 Solid progress today"]
+                pool += Strings.flowQuips
             } else if tokens < 500_000 {
-                pool += ["🔥 Busy day!", "⚡ You're on a roll!"]
+                pool += Strings.busyQuips
             } else if tokens < 2_000_000 {
-                pool += ["🚀 Heavy usage today!", "🖨️ Token machine goes brrr"]
+                pool += Strings.heavyQuips
             } else {
-                pool += ["🤯 MASSIVE day!", "🔥 Token counter on fire!"]
+                pool += Strings.massiveQuips
             }
         }
 
@@ -790,18 +819,18 @@ struct ClawdCompanionView: View {
         let avg = viewModel.last30dAvgPerDay
 
         if w7 > 0 {
-            pool.append("📅 7-day total: \(TokenFormatter.formatCompact(w7)) tokens")
+            pool.append(Strings.sevenDayTotal(TokenFormatter.formatCompact(w7)))
             if d7 > 0 {
-                pool.append("🗓️ \(d7) active days this week")
+                pool.append("🗓️ \(Strings.activeDaysThisWeek(d7))")
                 if d7 >= 7 {
-                    pool.append("🏆 7/7 active days — perfect streak!")
+                    pool.append(Strings.perfectStreak)
                 }
             }
         }
         if m30 > 0 {
-            pool.append("📆 30-day total: \(TokenFormatter.formatCompact(m30)) tokens")
+            pool.append(Strings.thirtyDayTotal(TokenFormatter.formatCompact(m30)))
             if avg > 0 {
-                pool.append("📊 Averaging ~\(TokenFormatter.formatCompact(avg))/day this month")
+                pool.append(Strings.averagingPerDay(TokenFormatter.formatCompact(avg)))
             }
         }
 
@@ -810,48 +839,42 @@ struct ClawdCompanionView: View {
             let streak = heatmap.streakDays
             let totalActive = heatmap.activeDays
             if streak > 1 {
-                pool.append("🔥 \(streak)-day streak! Keep it going")
+                pool.append(Strings.streakDays(streak))
             }
             if totalActive > 30 {
-                pool.append("📈 \(totalActive) active days all-time!")
+                pool.append(Strings.activeDaysAllTime(totalActive))
             }
         }
 
         // === Top model insights ===
         let models = viewModel.topModels
         if let top = models.first {
-            pool.append("🥇 Top model: \(top.name) (\(top.percent))")
+            pool.append(Strings.topModel(top.name, top.percent))
             if models.count >= 2 {
-                pool.append("🥈 Runner-up: \(models[1].name) at \(models[1].percent)")
+                pool.append(Strings.runnerUp(models[1].name, models[1].percent))
             }
             if models.count >= 3 {
-                pool.append("🧰 Using \(models.count) different models")
+                pool.append(Strings.modelCount(models.count))
             }
             // Source variety
             let sources = Set(models.map { $0.source })
             if sources.count >= 2 {
                 let names = sources.map { $0.capitalized }.sorted().joined(separator: " + ")
-                pool.append("🔀 Multi-tool setup: \(names)")
+                pool.append(Strings.multiToolSetup(names))
             }
         }
 
         // === Conversation count ===
         let convos = viewModel.todaySummary?.totals.conversationCount ?? 0
         if convos > 0 {
-            pool.append("💬 \(convos) conversation\(convos == 1 ? "" : "s") today")
+            pool.append(Strings.conversationsToday(convos))
             if convos >= 10 {
-                pool.append("🗣️ \(convos) chats! Busy talker today")
+                pool.append(Strings.busyTalker(convos))
             }
         }
 
         // === Personality (always) ===
-        pool += [
-            "👆 Tap me for more!",
-            "📋 I count so you don't have to",
-            "✨ Every token tells a story",
-            "🤝 Your AI spending buddy",
-            "👋 Hey there~",
-        ]
+        pool += Strings.personalityQuips
 
         return pool
     }

@@ -2,6 +2,9 @@ import Foundation
 
 actor APIClient {
     static let shared = APIClient()
+    private struct LocalAuthResponse: Decodable {
+        let token: String
+    }
 
     private let baseURL = Constants.serverBaseURL
     private let session: URLSession
@@ -119,10 +122,26 @@ actor APIClient {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if path == "/functions/tokentracker-local-sync" {
+            request.setValue(try await fetchLocalAuthToken(), forHTTPHeaderField: "x-tokentracker-local-auth")
+        }
         request.httpBody = Data("{}".utf8)
         let (data, response) = try await session.data(for: request)
         try validateResponse(response)
         return try decoder.decode(T.self, from: data)
+    }
+
+    private func fetchLocalAuthToken() async throws -> String {
+        guard let url = URL(string: baseURL + "/api/local-auth") else {
+            throw APIError.invalidURL
+        }
+        let (data, response) = try await session.data(from: url)
+        try validateResponse(response)
+        let payload = try decoder.decode(LocalAuthResponse.self, from: data)
+        guard !payload.token.isEmpty else {
+            throw APIError.invalidResponse
+        }
+        return payload.token
     }
 
     private func validateResponse(_ response: URLResponse) throws {

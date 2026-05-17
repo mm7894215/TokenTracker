@@ -63,10 +63,10 @@ enum DateHelpers {
 
         var label: String {
             switch self {
-            case .day:   return "Day"
-            case .week:  return "Week"
-            case .month: return "Month"
-            case .total: return "Total"
+            case .day:   return Strings.periodDayLabel
+            case .week:  return Strings.periodWeekLabel
+            case .month: return Strings.periodMonthLabel
+            case .total: return Strings.periodTotalLabel
             }
         }
     }

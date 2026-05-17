@@ -3,12 +3,7 @@ import { isAccessTokenReady, resolveAuthAccessToken } from "../lib/auth-token";
 import { formatDateLocal, formatDateUTC } from "../lib/date-range";
 import { isMockEnabled } from "../lib/mock-data";
 import { getLocalDayKey, getTimeZoneCacheKey } from "../lib/timezone";
-import {
-  fetchCloudUsageDaily,
-  fetchCloudUsageSummary,
-  getUsageDaily,
-  getUsageSummary,
-} from "../lib/api";
+import { getUsageDaily, getUsageSummary } from "../lib/api";
 
 export function useUsageData({
   baseUrl,
@@ -21,11 +16,7 @@ export function useUsageData({
   timeZone,
   tzOffsetMinutes,
   now,
-  accountView = false,
-  accountAccessToken = null,
-  accountRevision = 0,
 }: any = {}) {
-  const useCloud = Boolean(accountView && accountAccessToken);
   const [daily, setDaily] = useState<any[]>([]);
   const [summary, setSummary] = useState<any | null>(null);
   const [rolling, setRolling] = useState<any | null>(null);
@@ -42,8 +33,7 @@ export function useUsageData({
     const host = safeHost(baseUrl) || "default";
     const dailyKey = includeDaily ? "daily" : "summary";
     const tzKey = getTimeZoneCacheKey({ timeZone, offsetMinutes: tzOffsetMinutes });
-    const scope = useCloud ? "cloud" : "local";
-    return `tokentracker.usage.${cacheKey}.${scope}.${host}.${from}.${to}.${dailyKey}.${tzKey}`;
+    return `tokentracker.usage.${cacheKey}.${host}.${from}.${to}.${dailyKey}.${tzKey}`;
   })();
 
   const readCache = useCallback(() => {
@@ -86,28 +76,25 @@ export function useUsageData({
   const refresh = useCallback(async () => {
     const resolvedToken = await resolveAuthAccessToken(accessToken);
     // 本地模式允许空 token
-    if (!resolvedToken && !mockEnabled && !isLocalMode && !useCloud) return;
+    if (!resolvedToken && !mockEnabled && !isLocalMode) return;
     setLoading(true);
     setError(null);
     try {
-      const dailyFetcher = useCloud ? fetchCloudUsageDaily : getUsageDaily;
-      const summaryFetcher = useCloud ? fetchCloudUsageSummary : getUsageSummary;
-      const tokenForFetch = useCloud ? accountAccessToken : resolvedToken;
       let dailyRes = null;
       let summaryRes = null;
       if (includeDaily) {
         const [dailyResult, summaryResult] = await Promise.allSettled([
-          dailyFetcher({
+          getUsageDaily({
             baseUrl,
-            accessToken: tokenForFetch,
+            accessToken: resolvedToken,
             from,
             to,
             timeZone,
             tzOffsetMinutes,
           }),
-          summaryFetcher({
+          getUsageSummary({
             baseUrl,
-            accessToken: tokenForFetch,
+            accessToken: resolvedToken,
             from,
             to,
             timeZone,
@@ -119,9 +106,9 @@ export function useUsageData({
         dailyRes = dailyResult.value;
         summaryRes = summaryResult.status === "fulfilled" ? summaryResult.value : null;
       } else {
-        summaryRes = await summaryFetcher({
+        summaryRes = await getUsageSummary({
           baseUrl,
-          accessToken: tokenForFetch,
+          accessToken: resolvedToken,
           from,
           to,
           timeZone,
@@ -142,9 +129,9 @@ export function useUsageData({
       let nextRolling = summaryRes?.rolling || dailyRes?.summary?.rolling || null;
       if (includeDaily && !nextSummary && !summaryRes) {
         try {
-          const fallback = await summaryFetcher({
+          const fallback = await getUsageSummary({
             baseUrl,
-            accessToken: tokenForFetch,
+            accessToken: resolvedToken,
             from,
             to,
             timeZone,
@@ -234,9 +221,6 @@ export function useUsageData({
     clearCache,
     writeCache,
     isLocalMode,
-    useCloud,
-    accountAccessToken,
-    accountRevision,
   ]);
 
   useEffect(() => {
@@ -244,7 +228,7 @@ export function useUsageData({
       (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
     const isLocalModeCheck = typeof window !== "undefined" &&
       (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-    if (!tokenReady && !guestAllowed && !mockEnabled && !isLocalModeCheck && !useCloud) {
+    if (!tokenReady && !guestAllowed && !mockEnabled && !isLocalModeCheck) {
       setDaily([]);
       setSummary(null);
       setRolling(null);

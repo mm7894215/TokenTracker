@@ -3,6 +3,8 @@ import { AnimatePresence, motion } from "motion/react";
 import { X, Mail } from "lucide-react";
 import { useInsforgeAuth } from "../contexts/InsforgeAuthContext.jsx";
 import { useLoginModal } from "../contexts/LoginModalContext.jsx";
+import { useLocale } from "../hooks/useLocale.js";
+import { copy } from "../lib/copy";
 import { cn } from "../lib/cn";
 
 const GOOGLE_ICON = (
@@ -35,6 +37,8 @@ function providerLabel(key) {
 }
 
 export function LoginModal() {
+  // Subscribe to locale so the modal re-renders when the user switches language.
+  useLocale();
   const { isOpen, closeLoginModal } = useLoginModal();
   const {
     enabled,
@@ -105,7 +109,14 @@ export function LoginModal() {
 
   const redirectUrl = useMemo(() => {
     if (typeof window === "undefined") return "";
-    return window.location.origin + "/";
+    // In the macOS app WebView, route OAuth back through /auth/callback so
+    // NativeAuthCallbackPage can detect the native flag and bounce the code
+    // into the app via the tokentracker:// URL scheme. Plain web visitors
+    // can land directly on / since the SDK auto-exchanges insforge_code.
+    const isNativeContext = Boolean(window.webkit?.messageHandlers?.nativeOAuth);
+    return isNativeContext
+      ? `${window.location.origin}/auth/callback`
+      : `${window.location.origin}/`;
   }, []);
 
   const handleOAuth = useCallback(async (provider) => {
@@ -132,7 +143,7 @@ export function LoginModal() {
         });
         if (err) { setError(err.message || String(err)); return; }
         if (data?.requireEmailVerification) {
-          setBanner("Check your email for a verification link.");
+          setBanner(copy("login.verify_email_pending"));
           setMode("signin");
           return;
         }
@@ -200,7 +211,7 @@ export function LoginModal() {
                 <img src="/app-icon.png" alt="" width={28} height={28} className="rounded-md" />
                 <span className="text-lg font-semibold text-oai-black dark:text-white">Token Tracker</span>
               </div>
-              <p className="text-sm text-oai-gray-500">Sign in to join the leaderboard</p>
+              <p className="text-sm text-oai-gray-500">{copy("login_modal.subtitle")}</p>
             </div>
 
             {/* Banner */}
@@ -233,7 +244,7 @@ export function LoginModal() {
                     )}
                   >
                     {PROVIDER_ICONS[p] || null}
-                    Continue with {providerLabel(p)}
+                    {copy("login.oauth.continue", { provider: providerLabel(p) })}
                   </button>
                 ))
               )}
@@ -247,7 +258,7 @@ export function LoginModal() {
                     <span className="w-full border-t border-oai-gray-200 dark:border-oai-gray-800" />
                   </div>
                   <div className="relative flex justify-center text-xs uppercase tracking-wider">
-                    <span className="bg-white dark:bg-oai-gray-950 px-3 text-oai-gray-400 dark:text-oai-gray-600">or</span>
+                    <span className="bg-white dark:bg-oai-gray-950 px-3 text-oai-gray-400 dark:text-oai-gray-600">{copy("login.divider")}</span>
                   </div>
                 </div>
                 <button
@@ -260,7 +271,7 @@ export function LoginModal() {
                   )}
                 >
                   <Mail className="h-[18px] w-[18px] text-oai-gray-500 dark:text-oai-gray-400" strokeWidth={1.75} />
-                  Continue with Email
+                  {copy("login_modal.continue_email")}
                 </button>
               </>
             ) : (
@@ -271,7 +282,7 @@ export function LoginModal() {
                     <span className="w-full border-t border-oai-gray-200 dark:border-oai-gray-800" />
                   </div>
                   <div className="relative flex justify-center text-xs uppercase tracking-wider">
-                    <span className="bg-white dark:bg-oai-gray-950 px-3 text-oai-gray-400 dark:text-oai-gray-600">email</span>
+                    <span className="bg-white dark:bg-oai-gray-950 px-3 text-oai-gray-400 dark:text-oai-gray-600">{copy("login_modal.divider_email")}</span>
                   </div>
                 </div>
 
@@ -287,7 +298,7 @@ export function LoginModal() {
                     )}
                     onClick={() => { setMode("signin"); setError(null); }}
                   >
-                    Sign In
+                    {copy("login.tab.sign_in")}
                   </button>
                   <button
                     type="button"
@@ -299,7 +310,7 @@ export function LoginModal() {
                     )}
                     onClick={() => { setMode("signup"); setError(null); }}
                   >
-                    Sign Up
+                    {copy("login.tab.sign_up")}
                   </button>
                 </div>
 
@@ -307,7 +318,7 @@ export function LoginModal() {
                 <form onSubmit={handleEmailAuth} className="space-y-3">
                   {mode === "signup" && (
                     <div>
-                      <label htmlFor="modal-name" className="block text-xs font-medium text-oai-gray-500 mb-1">Name</label>
+                      <label htmlFor="modal-name" className="block text-xs font-medium text-oai-gray-500 mb-1">{copy("login.field.name")}</label>
                       <input
                         id="modal-name"
                         type="text"
@@ -315,12 +326,12 @@ export function LoginModal() {
                         value={name}
                         onChange={(e) => setName(e.target.value)}
                         className="w-full h-10 rounded-lg border border-oai-gray-200 dark:border-oai-gray-800 bg-oai-gray-50 dark:bg-oai-gray-900 px-3 text-sm text-oai-black dark:text-white placeholder-oai-gray-400 dark:placeholder-oai-gray-600 focus:outline-none focus:ring-2 focus:ring-oai-brand-500"
-                        placeholder="Optional"
+                        placeholder={copy("login.field.name_placeholder")}
                       />
                     </div>
                   )}
                   <div>
-                    <label htmlFor="modal-email" className="block text-xs font-medium text-oai-gray-500 mb-1">Email</label>
+                    <label htmlFor="modal-email" className="block text-xs font-medium text-oai-gray-500 mb-1">{copy("login.field.email")}</label>
                     <input
                       id="modal-email"
                       type="email"
@@ -332,7 +343,7 @@ export function LoginModal() {
                     />
                   </div>
                   <div>
-                    <label htmlFor="modal-password" className="block text-xs font-medium text-oai-gray-500 mb-1">Password</label>
+                    <label htmlFor="modal-password" className="block text-xs font-medium text-oai-gray-500 mb-1">{copy("login.field.password")}</label>
                     <input
                       id="modal-password"
                       type="password"
@@ -344,7 +355,7 @@ export function LoginModal() {
                       className="w-full h-10 rounded-lg border border-oai-gray-200 dark:border-oai-gray-800 bg-oai-gray-50 dark:bg-oai-gray-900 px-3 text-sm text-oai-black dark:text-white placeholder-oai-gray-400 dark:placeholder-oai-gray-600 focus:outline-none focus:ring-2 focus:ring-oai-brand-500"
                     />
                     {mode === "signup" && (
-                      <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-600">At least {passwordMinLength} characters</p>
+                      <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-600">{copy("login.password_hint", { min: String(passwordMinLength) })}</p>
                     )}
                   </div>
                   <button
@@ -352,7 +363,7 @@ export function LoginModal() {
                     disabled={busy}
                     className="w-full h-10 rounded-lg bg-oai-gray-900 dark:bg-white text-white dark:text-oai-gray-950 text-sm font-semibold hover:bg-oai-gray-800 dark:hover:bg-oai-gray-100 transition-colors disabled:opacity-50"
                   >
-                    {mode === "signup" ? "Create Account" : "Sign In"}
+                    {mode === "signup" ? copy("login.submit.sign_up") : copy("login.submit.sign_in")}
                   </button>
                 </form>
               </>

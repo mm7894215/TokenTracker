@@ -2,6 +2,7 @@ import React, { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useInsforgeAuth } from "../contexts/InsforgeAuthContext.jsx";
 import { useLoginModal } from "../contexts/LoginModalContext.jsx";
+import { useLocale } from "../hooks/useLocale.js";
 import { copy } from "../lib/copy";
 import { cn } from "../lib/cn";
 
@@ -26,6 +27,8 @@ function initialsFromName(name) {
  * preferences live there now. Sign-in shows the login modal as before.
  */
 export function InsforgeUserHeaderControls({ className, variant = "header", collapsed = false, onAfterAction }) {
+  // Subscribe to locale so labels re-render on language switch.
+  useLocale();
   const isSidebar = variant === "sidebar";
   const { enabled, loading, signedIn, user, displayName } = useInsforgeAuth();
   const { openLoginModal } = useLoginModal();
@@ -55,7 +58,7 @@ export function InsforgeUserHeaderControls({ className, variant = "header", coll
             className,
           )}
           aria-label={copy("header.auth.sign_in_aria")}
-          title={collapsed ? "Sign In" : undefined}
+          title={collapsed ? copy("header.auth.sign_in_aria") : undefined}
         >
           <span className="flex h-5 w-5 shrink-0 items-center justify-center">
             <img
@@ -66,7 +69,7 @@ export function InsforgeUserHeaderControls({ className, variant = "header", coll
               className="h-[18px] w-[18px] rounded"
             />
           </span>
-          {!collapsed && <span className="truncate flex-1 text-left">Sign in</span>}
+          {!collapsed && <span className="truncate flex-1 text-left">{copy("header.auth.sign_in_aria")}</span>}
         </button>
       );
     }
@@ -80,7 +83,7 @@ export function InsforgeUserHeaderControls({ className, variant = "header", coll
         )}
         aria-label={copy("header.auth.sign_in_aria")}
       >
-        Sign In
+        {copy("header.auth.sign_in_aria")}
       </button>
     );
   }

@@ -33,9 +33,11 @@ enum WidgetTheme {
         case "opencode":    return .orange
         case "openclaw":    return .pink
         case "cursor":      return .yellow
+        case "kimi":        return .purple
         case "everycode":   return .cyan
         case "kiro":        return .mint
         case "antigravity": return .indigo
+        case "copilot":     return .teal
         default:            return .gray
         }
     }
@@ -82,10 +84,10 @@ enum WidgetFormat {
 
     static func relativeUpdated(_ date: Date) -> String {
         let interval = Date().timeIntervalSince(date)
-        if interval < 60 { return "just now" }
-        if interval < 3600 { return "\(Int(interval / 60))m ago" }
-        if interval < 86400 { return "\(Int(interval / 3600))h ago" }
-        return "\(Int(interval / 86400))d ago"
+        if interval < 60 { return WidgetStrings.justNow }
+        if interval < 3600 { return WidgetStrings.minutesAgo(Int(interval / 60)) }
+        if interval < 86400 { return WidgetStrings.hoursAgo(Int(interval / 3600)) }
+        return WidgetStrings.daysAgo(Int(interval / 86400))
     }
 
     /// "▲ 12%" / "▼ 5%" / "—" — short signed delta string for hero numbers.
@@ -113,13 +115,13 @@ enum WidgetFormat {
         let interval = date.timeIntervalSince(Date())
         if interval <= 0 { return nil }
         if interval < 3600 {
-            return "in \(Int(interval / 60))m"
+            return WidgetStrings.resetInMinutes(Int(interval / 60))
         }
         if interval < 86400 {
             let h = Int(interval / 3600)
             let m = Int((interval.truncatingRemainder(dividingBy: 3600)) / 60)
-            return m > 0 ? "in \(h)h \(m)m" : "in \(h)h"
+            return WidgetStrings.resetInHours(h, minutes: m)
         }
-        return "in \(Int(interval / 86400))d"
+        return WidgetStrings.resetInDays(Int(interval / 86400))
     }
 }

@@ -320,14 +320,24 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         }
     }
 
+    func closeWindow() {
+        window?.close()
+    }
+
     // MARK: - NSWindowDelegate
 
     func windowWillClose(_ notification: Notification) {
         // Keep webView and window alive so cookies/login state persist.
-        DispatchQueue.main.async {
-            let hasVisibleWindows = NSApp.windows.contains { $0.isVisible && !$0.isKind(of: NSPanel.self) }
-            if !hasVisibleWindows {
+        DispatchQueue.main.async { [weak self] in
+            let closingWindow = self?.window
+            let hasOtherVisibleWindows = NSApp.windows.contains {
+                $0.isVisible
+                && !$0.isKind(of: NSPanel.self)
+                && $0 != closingWindow
+            }
+            if !hasOtherVisibleWindows {
                 NSApp.setActivationPolicy(.accessory)
+                NSApp.hide(nil)
             }
         }
     }
@@ -355,6 +365,14 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
               let url = URL(string: urlString) else { return }
         // Open OAuth in system browser where user has saved Google/GitHub sessions
         NSWorkspace.shared.open(url)
+    }
+
+    /// Open the dashboard and navigate directly to the Settings page.
+    func showSettings() {
+        showWindow()
+        if let url = URL(string: Constants.serverBaseURL + "/settings?app=1") {
+            webView?.load(URLRequest(url: url))
+        }
     }
 
     /// Called when `tokentracker://auth/done` deep link is received after browser login.
@@ -394,6 +412,10 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
 
     // MARK: - WKNavigationDelegate
 
+    private func isLocalDashboardURL(_ url: URL) -> Bool {
+        url.host == "localhost" || url.host == "127.0.0.1"
+    }
+
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
@@ -404,13 +426,18 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
             return
         }
         // Allow local dashboard navigation
-        if url.host == "localhost" || url.host == "127.0.0.1" {
+        if isLocalDashboardURL(url) {
             decisionHandler(.allow)
             return
         }
-        // External links → open in system browser (only user-initiated clicks, not resource loads)
+
+        let isMainFrameNavigation = navigationAction.targetFrame?.isMainFrame ?? true
+        // Only promote top-level user clicks to the system browser. Subframe
+        // clicks (e.g. the Cloud IP Check iframe) should stay inside the
+        // iframe so embedded tools can navigate normally.
         if (url.scheme == "http" || url.scheme == "https"),
-           navigationAction.navigationType == .linkActivated {
+           navigationAction.navigationType == .linkActivated,
+           isMainFrameNavigation {
             NSWorkspace.shared.open(url)
             decisionHandler(.cancel)
             return

@@ -42,7 +42,7 @@ struct ActivityHeatmapView: View {
                 // Legend
                 HStack(spacing: 4) {
                     Spacer()
-                    Text("Less")
+                    Text(Strings.heatmapLegendLess)
                         .font(.system(size: 9))
                         .foregroundStyle(.tertiary)
                     ForEach(0..<5, id: \.self) { level in
@@ -50,7 +50,7 @@ struct ActivityHeatmapView: View {
                             .fill(colorForLevel(level))
                             .frame(width: 8, height: 8)
                     }
-                    Text("More")
+                    Text(Strings.heatmapLegendMore)
                         .font(.system(size: 9))
                         .foregroundStyle(.tertiary)
                 }

@@ -20,13 +20,20 @@ function resolveModelName(model: any, fallback: any) {
   return fallback;
 }
 
+export function resolveDisplayTokens(totals: any, fallback = 0) {
+  const billableTokens = toFiniteNumber(totals?.billable_total_tokens);
+  const totalTokens = toFiniteNumber(totals?.total_tokens);
+  if (billableTokens != null && billableTokens > 0) return billableTokens;
+  if (totalTokens != null && totalTokens > 0) return totalTokens;
+  return billableTokens ?? totalTokens ?? fallback;
+}
+
 export function buildFleetData(modelBreakdown: any, { copyFn }: AnyRecord = {}) {
   const safeCopy = typeof copyFn === "function" ? copyFn : (key: string) => key;
   const sources: any[] = Array.isArray(modelBreakdown?.sources) ? modelBreakdown.sources : [];
   const normalizedSources = sources
     .map((entry: any) => {
-      const totalTokens =
-        toFiniteNumber(entry?.totals?.billable_total_tokens ?? entry?.totals?.total_tokens) ?? 0;
+      const totalTokens = resolveDisplayTokens(entry?.totals);
       const totalCost = toFiniteNumber(entry?.totals?.total_cost_usd) ?? 0;
       return {
         source: entry?.source,
@@ -56,9 +63,7 @@ export function buildFleetData(modelBreakdown: any, { copyFn }: AnyRecord = {}) 
       const totalPercent = Number.isFinite(totalPercentRaw) ? totalPercentRaw.toFixed(1) : "0.0";
       const models = entry.models
         .map((model: any) => {
-          const modelTokens =
-            toFiniteNumber(model?.totals?.billable_total_tokens ?? model?.totals?.total_tokens) ??
-            0;
+          const modelTokens = resolveDisplayTokens(model?.totals);
           if (!Number.isFinite(modelTokens) || modelTokens <= 0) return null;
           const share =
             entry.totalTokens > 0 ? Math.round((modelTokens / entry.totalTokens) * 1000) / 10 : 0;
@@ -72,6 +77,7 @@ export function buildFleetData(modelBreakdown: any, { copyFn }: AnyRecord = {}) 
         })
         .filter(Boolean);
       return {
+        source: entry.source,
         label,
         totalPercent: String(totalPercent),
         usd: entry.totalCost,
@@ -94,7 +100,7 @@ export function buildTopModels(modelBreakdown: any, { limit = 3, copyFn }: AnyRe
   for (const source of sources) {
     const models: any[] = Array.isArray(source?.models) ? source.models : [];
     for (const model of models) {
-      const tokens = toFiniteNumber(model?.totals?.billable_total_tokens) ?? 0;
+      const tokens = resolveDisplayTokens(model?.totals);
       if (!Number.isFinite(tokens) || tokens <= 0) continue;
       totalTokensAll += tokens;
       const name = resolveModelName(model, safeCopy("shared.placeholder.short"));

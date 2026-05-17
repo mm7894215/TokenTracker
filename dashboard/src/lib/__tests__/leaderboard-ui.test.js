@@ -22,7 +22,7 @@ describe("getPaginationFlags", () => {
 });
 
 describe("injectMeIntoFirstPage", () => {
-  it("injects me at position 5 and keeps real rank", () => {
+  it("pins me at the end with an ellipsis separator when rank is not contiguous", () => {
     const entries = Array.from({ length: 20 }, (_, i) => ({
       rank: i + 1,
       is_me: false,
@@ -36,12 +36,42 @@ describe("injectMeIntoFirstPage", () => {
     const me = { rank: 399, gpt_tokens: "10", claude_tokens: "20", total_tokens: "30" };
     const injected = injectMeIntoFirstPage({ entries, me, meLabel: "YOU", limit: 20 });
 
+    // length stays at 20: trim last 2 natural rows, add ellipsis row + me row
     expect(injected).toHaveLength(20);
-    expect(injected[3]?.rank).toBe(5);
-    expect(injected.some((entry) => entry.rank === 4)).toBe(false);
-    expect(injected[4]?.is_me).toBe(true);
-    expect(injected[4]?.rank).toBe(399);
-    expect(injected[4]?.total_tokens).toBe("30");
+    // First 18 rows are untouched (ranks 1-18)
+    expect(injected[0]?.rank).toBe(1);
+    expect(injected[17]?.rank).toBe(18);
+    // Ranks 19 and 20 are displaced to make room for separator + me
+    expect(injected.some((entry) => entry.rank === 19)).toBe(false);
+    expect(injected.some((entry) => entry.rank === 20)).toBe(false);
+    // Penultimate row is the ellipsis separator
+    expect(injected[18]?.is_ellipsis).toBe(true);
+    // Last row is me
+    expect(injected[19]?.is_me).toBe(true);
+    expect(injected[19]?.rank).toBe(399);
+    expect(injected[19]?.total_tokens).toBe("30");
+  });
+
+  it("appends me without separator when rank is contiguous with last row", () => {
+    const entries = Array.from({ length: 20 }, (_, i) => ({
+      rank: i + 1,
+      is_me: false,
+      display_name: "Anonymous",
+      avatar_url: null,
+      gpt_tokens: "1",
+      claude_tokens: "2",
+      total_tokens: "3",
+    }));
+
+    const me = { rank: 21, gpt_tokens: "10", claude_tokens: "20", total_tokens: "30" };
+    const injected = injectMeIntoFirstPage({ entries, me, meLabel: "YOU", limit: 20 });
+
+    expect(injected).toHaveLength(20);
+    // First 19 natural rows kept; rank 20 displaced by me at rank 21
+    expect(injected[18]?.rank).toBe(19);
+    expect(injected[19]?.is_me).toBe(true);
+    expect(injected[19]?.rank).toBe(21);
+    expect(injected.some((entry) => entry.is_ellipsis)).toBe(false);
   });
 
   it("does not inject when current page already includes me", () => {

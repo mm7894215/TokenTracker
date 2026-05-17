@@ -38,7 +38,7 @@ final class ServerManager: ObservableObject {
             // Fall back to system-installed CLI
             launchServer(at: binaryPath)
         } else {
-            status = .failed("TokenTracker server not available.\nPlease reinstall the app or install: npm install -g tokentracker-cli")
+            status = .failed(Strings.serverNotAvailableMessage)
             return
         }
 
@@ -48,7 +48,7 @@ final class ServerManager: ObservableObject {
             status = .running
             startHealthCheckLoop()
         } else {
-            status = .failed("Server started but not responding on port \(Constants.serverPort).")
+            status = .failed(Strings.serverNotResponding(port: Constants.serverPort))
         }
     }
 
@@ -191,7 +191,7 @@ final class ServerManager: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 if self.status == .running {
-                    self.status = .failed("Server process exited unexpectedly.")
+                    self.status = .failed(Strings.serverExitedUnexpectedly)
                 }
             }
         }
@@ -200,7 +200,7 @@ final class ServerManager: ObservableObject {
             try process.run()
             serverProcess = process
         } catch {
-            status = .failed("Failed to launch embedded server: \(error.localizedDescription)")
+            status = .failed(Strings.embeddedServerLaunchFailed(error.localizedDescription))
         }
     }
 
@@ -220,7 +220,7 @@ final class ServerManager: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 if self.status == .running {
-                    self.status = .failed("Server process exited unexpectedly.")
+                    self.status = .failed(Strings.serverExitedUnexpectedly)
                 }
             }
         }
@@ -229,7 +229,7 @@ final class ServerManager: ObservableObject {
             try process.run()
             serverProcess = process
         } catch {
-            status = .failed("Failed to launch server: \(error.localizedDescription)")
+            status = .failed(Strings.serverLaunchFailed(error.localizedDescription))
         }
     }
 
@@ -261,7 +261,7 @@ final class ServerManager: ObservableObject {
                 if healthy {
                     self.status = .running
                 } else {
-                    self.status = .failed("Server became unreachable.")
+                    self.status = .failed(Strings.serverBecameUnreachable)
                 }
             }
         }

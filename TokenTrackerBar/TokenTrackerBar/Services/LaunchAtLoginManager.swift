@@ -20,12 +20,18 @@ final class LaunchAtLoginManager: ObservableObject {
 
         isEnabled = SMAppService.mainApp.status == .enabled
 
-        // Auto-enable on first launch
+        // First-run default: enable launch-at-login so users see usage
+        // updates without re-opening the app. Only set the persistence flag
+        // once registration has actually settled, so a transient failure
+        // (e.g. signing issue on a dev build) retries on next launch instead
+        // of being permanently swallowed.
         if !UserDefaults.standard.bool(forKey: Self.didAutoEnableKey) {
-            UserDefaults.standard.set(true, forKey: Self.didAutoEnableKey)
             if !isEnabled {
                 try? SMAppService.mainApp.register()
                 isEnabled = SMAppService.mainApp.status == .enabled
+            }
+            if isEnabled {
+                UserDefaults.standard.set(true, forKey: Self.didAutoEnableKey)
             }
         }
     }

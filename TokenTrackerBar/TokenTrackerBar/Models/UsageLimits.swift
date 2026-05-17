@@ -6,12 +6,14 @@ struct UsageLimitsResponse: Codable, Equatable {
     let codex: CodexLimits
     let cursor: CursorLimits
     let gemini: GeminiLimits
+    let kimi: KimiLimits?
     let kiro: KiroLimits
     let antigravity: AntigravityLimits
+    let copilot: CopilotLimits?
 
     enum CodingKeys: String, CodingKey {
         case fetchedAt = "fetched_at"
-        case claude, codex, cursor, gemini, kiro, antigravity
+        case claude, codex, cursor, gemini, kimi, kiro, antigravity, copilot
     }
 }
 
@@ -108,6 +110,27 @@ struct CursorLimits: Codable, Equatable {
     }
 }
 
+struct KimiLimits: Codable, Equatable {
+    let configured: Bool
+    let error: String?
+    let membershipLevel: String?
+    let subscriptionType: String?
+    let parallelLimit: Int?
+    let primaryWindow: GenericLimitWindow?
+    let secondaryWindow: GenericLimitWindow?
+    let tertiaryWindow: GenericLimitWindow?
+
+    enum CodingKeys: String, CodingKey {
+        case configured, error
+        case membershipLevel = "membership_level"
+        case subscriptionType = "subscription_type"
+        case parallelLimit = "parallel_limit"
+        case primaryWindow = "primary_window"
+        case secondaryWindow = "secondary_window"
+        case tertiaryWindow = "tertiary_window"
+    }
+}
+
 struct KiroLimits: Codable, Equatable {
     let configured: Bool
     let error: String?
@@ -139,6 +162,21 @@ struct GeminiLimits: Codable, Equatable {
         case primaryWindow = "primary_window"
         case secondaryWindow = "secondary_window"
         case tertiaryWindow = "tertiary_window"
+    }
+}
+
+struct CopilotLimits: Codable, Equatable {
+    let configured: Bool
+    let error: String?
+    let planName: String?
+    let primaryWindow: GenericLimitWindow?
+    let secondaryWindow: GenericLimitWindow?
+
+    enum CodingKeys: String, CodingKey {
+        case configured, error
+        case planName = "plan_name"
+        case primaryWindow = "primary_window"
+        case secondaryWindow = "secondary_window"
     }
 }
 

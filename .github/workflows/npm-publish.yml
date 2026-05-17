@@ -48,8 +48,8 @@ jobs:
       - name: Build dashboard
         if: steps.version-check.outputs.exists == 'false'
         env:
-          VITE_INSFORGE_BASE_URL: https://b46ug8xu.us-east.insforge.app
-          VITE_INSFORGE_ANON_KEY: ik_68e892cf2095c194c6a3e35d1960bc84
+          VITE_INSFORGE_BASE_URL: https://srctyff5.us-east.insforge.app
+          VITE_INSFORGE_ANON_KEY: ik_9f35735991b684f7cf57fa00bb4d0487
         run: npm run dashboard:build
 
       - name: Publish to npm

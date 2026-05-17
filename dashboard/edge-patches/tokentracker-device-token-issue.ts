@@ -17,28 +17,48 @@ function json(data: unknown, status = 200) {
   });
 }
 
-function extractUserIdFromSessionBody(body: unknown): string | null {
-  if (!body || typeof body !== "object") return null;
-  const o = body as Record<string, unknown>;
-  const u =
-    (o.user as Record<string, unknown> | undefined) ??
-    ((o.data as Record<string, unknown> | undefined)?.user as Record<string, unknown> | undefined);
-  if (!u || typeof u !== "object") return null;
-  const id = u.id ?? u.user_id;
-  return typeof id === "string" && id.length > 0 ? id : null;
+function b64urlToBytes(s: string): Uint8Array {
+  const b64 = s.replace(/-/g, "+").replace(/_/g, "/");
+  const pad = (4 - (b64.length % 4)) % 4;
+  const raw = atob(b64 + "=".repeat(pad));
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
 }
 
-function userIdFromAccessTokenJwt(token: string): string | null {
+/**
+ * Verify a HS256 JWT signature locally with JWT_SECRET and return its `sub`.
+ *
+ * Previously this function only decoded the payload without verifying the
+ * signature, which let any caller forge `{"sub":"<victim>"}` and obtain a
+ * service-role-signed device token bound to that victim's account. The
+ * companion endpoint `tokentracker-leaderboard-profile.ts` already verifies
+ * signatures here for the same reason — InsForge does NOT validate JWTs at
+ * the gateway, so edge functions must do it themselves.
+ *
+ * Returns null on any failure (bad shape, bad signature, expired); the
+ * caller surfaces that as 401.
+ */
+async function verifiedUserIdFromJwt(token: string): Promise<string | null> {
+  const secret = Deno.env.get("JWT_SECRET");
+  if (!secret) return null;
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
   try {
-    const parts = token.split(".");
-    if (parts.length < 2) return null;
-    let b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const pad = (4 - (b64.length % 4)) % 4;
-    b64 += "=".repeat(pad);
-    const atobFn = globalThis.atob as ((s: string) => string) | undefined;
-    if (typeof atobFn !== "function") return null;
-    const raw = atobFn(b64);
-    const payload = JSON.parse(raw) as Record<string, unknown>;
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"],
+    );
+    const data = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
+    const sig = b64urlToBytes(parts[2]);
+    const ok = await crypto.subtle.verify("HMAC", key, sig, data);
+    if (!ok) return null;
+    const payloadStr = new TextDecoder().decode(b64urlToBytes(parts[1]));
+    const payload = JSON.parse(payloadStr) as Record<string, unknown>;
+    if (typeof payload.exp === "number" && Date.now() / 1000 > payload.exp) return null;
     const sub = payload.sub;
     if (typeof sub === "string" && sub.length > 0) return sub;
     const uid = payload.user_id;
@@ -49,39 +69,8 @@ function userIdFromAccessTokenJwt(token: string): string | null {
   return null;
 }
 
-async function getUserIdFromSession(
-  baseUrl: string,
-  token: string,
-  anonKey: string | undefined,
-): Promise<string | null> {
-  const root = baseUrl.replace(/\/$/, "");
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/json",
-  };
-  if (anonKey) headers.apikey = anonKey;
-  try {
-    const res = await fetch(`${root}/api/auth/sessions/current`, { headers });
-    if (res.ok) {
-      const body = await res.json().catch(() => null);
-      const fromApi = extractUserIdFromSessionBody(body);
-      if (fromApi) return fromApi;
-    }
-  } catch {
-    /* network / runtime */
-  }
-  return userIdFromAccessTokenJwt(token);
-}
-
-/** 优先 JWT（不依赖 sessions/current）；避免 Edge 内 fetch 失败或网关与 API 不一致时误 401 */
-function resolveUserIdForUserMode(
-  baseUrl: string,
-  bearer: string,
-  anonKey: string | undefined,
-): Promise<string | null> {
-  const fromJwt = userIdFromAccessTokenJwt(bearer);
-  if (fromJwt) return Promise.resolve(fromJwt);
-  return getUserIdFromSession(baseUrl, bearer, anonKey);
+function resolveUserIdForUserMode(bearer: string): Promise<string | null> {
+  return verifiedUserIdFromJwt(bearer);
 }
 
 async function sha256Hex(input: string): Promise<string> {
@@ -126,9 +115,9 @@ export default async function (req: Request): Promise<Response> {
       ...(anonKey ? { headers: { apikey: anonKey } } : {}),
     });
   } else {
-    userId = await resolveUserIdForUserMode(baseUrl, bearer, anonKey);
+    userId = await resolveUserIdForUserMode(bearer);
     if (!userId) return json({ error: "Unauthorized" }, 401);
-    // 用 service role key 操作 DB：用户身份已通过 JWT 验证（提取 user_id），
+    // 用 service role key 操作 DB：用户身份已通过 JWT 签名验证（HS256 + JWT_SECRET），
     // 不再依赖用户的短期 access token（15 min 过期）做 DB 写入。
     const dbToken = serviceRoleKey || bearer;
     dbClient = createClient({
@@ -146,24 +135,66 @@ export default async function (req: Request): Promise<Response> {
     32,
   );
 
-  const deviceId = crypto.randomUUID();
+  // Reuse an existing active device for the same (user, platform, device_name)
+  // instead of minting a fresh one on every issue. Client localStorage is
+  // isolated across Safari / Chrome / WKWebView, so the client asks for a new
+  // token on every environment — if we created a fresh device_id each time,
+  // `tokentracker_hourly` ends up with the same logical bucket written under
+  // many device_ids, and leaderboard SUM would double-count. Keeping a single
+  // device_id per logical device means every sync upserts onto the same row.
+  //
+  // Concurrency: two parallel calls (tab + webview on first login) must not
+  // each INSERT a fresh row. The partial unique index
+  // `tokentracker_devices_active_unique` on (user_id, platform, device_name)
+  // WHERE revoked_at IS NULL guarantees one active row per logical device.
+  // We INSERT with ON CONFLICT DO NOTHING; if the insert loses the race it
+  // returns zero rows, and we SELECT to get the winner's id.
+  const newDeviceId = crypto.randomUUID();
+  const { data: insertedDevice } = await dbClient.database
+    .from("tokentracker_devices")
+    .insert([{ id: newDeviceId, user_id: userId, device_name: deviceName, platform }], {
+      onConflict: "user_id,platform,device_name",
+      ignoreDuplicates: true,
+    })
+    .select("id");
+
+  let deviceId: string;
+  if (Array.isArray(insertedDevice) && insertedDevice.length > 0) {
+    deviceId = (insertedDevice[0] as { id: string }).id;
+  } else {
+    const { data: winner, error: lookupErr } = await dbClient.database
+      .from("tokentracker_devices")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("platform", platform)
+      .eq("device_name", deviceName)
+      .is("revoked_at", null)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (lookupErr || !winner) {
+      return json(
+        { error: "Failed to issue device token", detail: lookupErr?.message || "device lookup failed" },
+        500,
+      );
+    }
+    deviceId = (winner as { id: string }).id;
+  }
+
   const tokenId = crypto.randomUUID();
   const token =
     crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
   const tokenHash = await sha256Hex(token);
   const createdAt = new Date().toISOString();
 
-  const { error: deviceErr } = await dbClient.database.from("tokentracker_devices").insert([
-    {
-      id: deviceId,
-      user_id: userId,
-      device_name: deviceName,
-      platform,
-    },
-  ]);
+  const { error: revokeErr } = await dbClient.database
+    .from("tokentracker_device_tokens")
+    .update({ revoked_at: createdAt })
+    .eq("device_id", deviceId)
+    .is("revoked_at", null);
 
-  if (deviceErr) {
-    return json({ error: "Failed to issue device token", detail: deviceErr.message }, 500);
+  if (revokeErr) {
+    return json({ error: "Failed to rotate device token", detail: revokeErr.message }, 500);
   }
 
   const { error: tokenErr } = await dbClient.database.from("tokentracker_device_tokens").insert([

@@ -33,3 +33,12 @@ test("App.jsx routes to /login page", () => {
   assert.equal(source.includes('"/login"'), true, "/login route should exist");
   assert.equal(source.includes("LoginPage"), true, "LoginPage should be referenced");
 });
+
+test("App.jsx keeps menu bar configuration inside /widgets", () => {
+  const appPath = path.join(repoRoot, "dashboard/src/App.jsx");
+  const source = fs.readFileSync(appPath, "utf8");
+  assert.equal(source.includes('"/widgets"'), true, "/widgets route should exist");
+  assert.equal(source.includes("WidgetsPage"), true, "WidgetsPage should be referenced");
+  assert.equal(source.includes('"/menubar"'), false, "/menubar should not be a separate route");
+  assert.equal(source.includes("MenuBarPage"), false, "MenuBarPage should not be referenced");
+});

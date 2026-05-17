@@ -90,3 +90,18 @@ dist/
 build/
 .tmp/
 *.tsbuildinfo
+
+# InsForge & AI agent skills
+.insforge
+.agents
+.augment
+.claude
+.kilocode
+.qoder
+.qwen
+.roo
+.trae
+.windsurf
+
+# Kilo CLI per-project plans/state (used during development)
+.kilo/

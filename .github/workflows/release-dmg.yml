@@ -30,12 +30,28 @@ jobs:
         with:
           node-version: 20
 
-      # Verify version matches package.json
+      # Verify version matches package.json AND TokenTrackerBar/project.yml.
+      # Skipping the project.yml check once shipped v0.5.77 as a DMG whose
+      # Info.plist still advertised 0.5.76 — keep both in lockstep.
       - name: Verify version
         run: |
           PKG_VERSION=$(node -p "require('./package.json').version")
           if [[ "$PKG_VERSION" != "${{ inputs.version }}" ]]; then
             echo "::error::package.json version ($PKG_VERSION) does not match input (${{ inputs.version }})"
+            exit 1
+          fi
+
+          # Every MARKETING_VERSION in project.yml (app + widget targets) must
+          # equal the requested release version; otherwise the built .app
+          # carries a CFBundleShortVersionString that disagrees with the tag.
+          PROJECT_YML="TokenTrackerBar/project.yml"
+          # BSD sed on macOS runners does NOT understand \s — use [[:space:]].
+          MISMATCHED=$(grep -E '^[[:space:]]*MARKETING_VERSION:' "$PROJECT_YML" \
+            | sed -E 's/.*MARKETING_VERSION:[[:space:]]*"([^"]+)".*/\1/' \
+            | sort -u \
+            | grep -v "^${{ inputs.version }}$" || true)
+          if [ -n "$MISMATCHED" ]; then
+            echo "::error::$PROJECT_YML has MARKETING_VERSION value(s) not matching ${{ inputs.version }}: $MISMATCHED"
             exit 1
           fi
 
@@ -50,8 +66,8 @@ jobs:
       # `dashboard/.env.local` is gitignored so CI cannot read it — inject here.
       - name: Build dashboard
         env:
-          VITE_INSFORGE_BASE_URL: https://b46ug8xu.us-east.insforge.app
-          VITE_INSFORGE_ANON_KEY: ik_68e892cf2095c194c6a3e35d1960bc84
+          VITE_INSFORGE_BASE_URL: https://srctyff5.us-east.insforge.app
+          VITE_INSFORGE_ANON_KEY: ik_9f35735991b684f7cf57fa00bb4d0487
         run: npm run dashboard:build
 
       # 2. Bundle EmbeddedServer (Node.js + tokentracker source)

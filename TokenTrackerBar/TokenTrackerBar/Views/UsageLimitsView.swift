@@ -14,8 +14,10 @@ struct UsageLimitsView: View {
             (limits.codex.configured, limits.codex.error),
             (limits.cursor.configured, limits.cursor.error),
             (limits.gemini.configured, limits.gemini.error),
+            (limits.kimi?.configured ?? false, limits.kimi?.error),
             (limits.kiro.configured, limits.kiro.error),
             (limits.antigravity.configured, limits.antigravity.error),
+            (limits.copilot?.configured ?? false, limits.copilot?.error),
         ]
         return providers.contains { $0.0 && $0.1 == nil }
     }
@@ -33,7 +35,7 @@ struct UsageLimitsView: View {
 
                 if visibleGroups.isEmpty {
                     // All hidden by user — show hint so they know gear exists
-                    Text("All providers hidden")
+                    Text(Strings.allProvidersHidden)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 } else {
@@ -69,10 +71,18 @@ struct UsageLimitsView: View {
                 groups.append(AnyView(toolSection(title: "Cursor", assetName: "CursorLogo") { cursorContent(limits.cursor) }))
             case "gemini" where limits.gemini.configured && limits.gemini.error == nil:
                 groups.append(AnyView(toolSection(title: "Gemini", assetName: "GeminiLogo") { geminiContent(limits.gemini) }))
+            case "kimi":
+                if let kimi = limits.kimi, kimi.configured, kimi.error == nil {
+                    groups.append(AnyView(toolSection(title: "Kimi", assetName: "KimiLogo") { kimiContent(kimi) }))
+                }
             case "kiro" where limits.kiro.configured && limits.kiro.error == nil:
                 groups.append(AnyView(toolSection(title: "Kiro", assetName: "KiroLogo") { kiroContent(limits.kiro) }))
             case "antigravity" where limits.antigravity.configured && limits.antigravity.error == nil:
                 groups.append(AnyView(toolSection(title: "Antigravity", assetName: "AntigravityLogo") { antigravityContent(limits.antigravity) }))
+            case "copilot":
+                if let copilot = limits.copilot, copilot.configured, copilot.error == nil {
+                    groups.append(AnyView(toolSection(title: "GitHub Copilot", assetName: "CopilotLogo") { copilotContent(copilot) }))
+                }
             default:
                 break
             }
@@ -135,10 +145,10 @@ struct UsageLimitsView: View {
     private func cursorContent(_ cursor: CursorLimits) -> some View {
         VStack(spacing: 4) {
             if let w = cursor.primaryWindow {
-                limitRow(label: "Plan", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Cursor")
+                limitRow(label: Strings.cursorPlanLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Cursor")
             }
             if let w = cursor.secondaryWindow {
-                limitRow(label: "Auto", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Cursor")
+                limitRow(label: Strings.cursorAutoLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Cursor")
             }
             if let w = cursor.tertiaryWindow {
                 limitRow(label: "API", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Cursor")
@@ -162,15 +172,49 @@ struct UsageLimitsView: View {
         }
     }
 
+    // MARK: - Kimi
+
+    private func kimiContent(_ kimi: KimiLimits) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let w = kimi.primaryWindow {
+                limitRow(label: Strings.kimiWeeklyLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Kimi")
+            }
+            if let w = kimi.secondaryWindow {
+                limitRow(label: Strings.kimiFiveHourLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Kimi")
+            }
+            if let w = kimi.tertiaryWindow {
+                limitRow(label: Strings.kimiTotalLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Kimi")
+            }
+            if let parallelLimit = kimi.parallelLimit {
+                Text(Strings.kimiParallelLabel(parallelLimit))
+                    .font(.system(.caption2, design: .default))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
     // MARK: - Kiro
 
     private func kiroContent(_ kiro: KiroLimits) -> some View {
         VStack(spacing: 4) {
             if let w = kiro.primaryWindow {
-                limitRow(label: "Month", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Kiro")
+                limitRow(label: Strings.kiroMonthLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Kiro")
             }
             if let w = kiro.secondaryWindow {
-                limitRow(label: "Bonus", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Kiro")
+                limitRow(label: Strings.kiroBonusLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Kiro")
+            }
+        }
+    }
+
+    // MARK: - Copilot
+
+    private func copilotContent(_ copilot: CopilotLimits) -> some View {
+        VStack(spacing: 4) {
+            if let w = copilot.primaryWindow {
+                limitRow(label: "Premium", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "GitHub Copilot")
+            }
+            if let w = copilot.secondaryWindow {
+                limitRow(label: "Chat", pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "GitHub Copilot")
             }
         }
     }
@@ -196,16 +240,18 @@ struct UsageLimitsView: View {
     private func limitRow(label: String, pct: Double, reset: String?, toolName: String) -> some View {
         let clamped = min(max(pct, 0), 100)
         let fraction = clamped / 100.0
-        let a11yParts = [
-            "\(toolName) \(label) limit, \(Int(clamped.rounded()))%",
-            reset.map { "resets in \($0)" }
-        ].compactMap { $0 }
+        let accessibilityLabel = Strings.limitAccessibility(
+            toolName: toolName,
+            label: label,
+            percent: Int(clamped.rounded()),
+            reset: reset
+        )
 
         return HStack(spacing: 5) {
             Text(label)
                 .font(.system(.caption, design: .default))
                 .foregroundStyle(.secondary)
-                .frame(width: 42, alignment: .leading)
+                .frame(width: 34, alignment: .leading)
 
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -233,7 +279,7 @@ struct UsageLimitsView: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(a11yParts.joined(separator: ", "))
+        .accessibilityLabel(accessibilityLabel)
     }
 
     // MARK: - Helpers
@@ -256,7 +302,7 @@ struct UsageLimitsView: View {
 
     private func relativeString(from date: Date) -> String {
         let s = date.timeIntervalSince(Date())
-        guard s > 0 else { return "now" }
+        guard s > 0 else { return Strings.limitResetNow }
         let h = Int(s) / 3600
         if h > 24 { return "\(h / 24)d" }
         if h > 0 { return "\(h)h" }
@@ -266,8 +312,15 @@ struct UsageLimitsView: View {
     @ViewBuilder
     private func brandIcon(_ name: String) -> some View {
         switch name {
-        case "CursorLogo", "KiroLogo":
-            let filename = name == "CursorLogo" ? "cursor.svg" : "kiro.svg"
+        case "CursorLogo", "KimiLogo", "KiroLogo", "CopilotLogo":
+            let filename: String = {
+                switch name {
+                case "CursorLogo": return "cursor.svg"
+                case "KimiLogo": return "kimi.svg"
+                case "KiroLogo": return "kiro.svg"
+                default: return "copilot.svg"
+                }
+            }()
             if let image = bundledSVGIcon(
                 named: filename,
                 replacingCurrentColorWith: colorScheme == .dark ? "#FFFFFF" : "#111111"
@@ -388,7 +441,7 @@ private struct LimitsSkeleton: View {
                     }
                     ForEach(0..<2, id: \.self) { _ in
                         HStack(spacing: 5) {
-                            skeletonRect(width: 42, height: 8, radius: 2)
+                            skeletonRect(width: 28, height: 8, radius: 2)
                             skeletonRect(height: 5, radius: 2)
                             skeletonRect(width: 28, height: 8, radius: 2)
                         }

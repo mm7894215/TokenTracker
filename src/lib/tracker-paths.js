@@ -7,6 +7,7 @@ async function resolveTrackerPaths({ home = os.homedir() } = {}) {
     rootDir,
     trackerDir: path.join(rootDir, "tracker"),
     binDir: path.join(rootDir, "bin"),
+    cacheDir: path.join(rootDir, "cache"),
   };
 }
 

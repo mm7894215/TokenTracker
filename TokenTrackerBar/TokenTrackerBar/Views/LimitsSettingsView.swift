@@ -8,7 +8,7 @@ struct LimitsSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Limits Display")
+            Text(Strings.limitsDisplayTitle)
                 .font(.system(.headline, design: .default))
                 .padding(.horizontal, 12)
                 .padding(.top, 10)
@@ -73,8 +73,15 @@ struct LimitsSettingsView: View {
     @ViewBuilder
     private func providerIcon(id: String) -> some View {
         switch id {
-        case "cursor", "kiro":
-            let filename = id == "cursor" ? "cursor.svg" : "kiro.svg"
+        case "cursor", "kimi", "kiro", "copilot":
+            let filename: String = {
+                switch id {
+                case "cursor": return "cursor.svg"
+                case "kimi": return "kimi.svg"
+                case "kiro": return "kiro.svg"
+                default: return "copilot.svg"
+                }
+            }()
             if let image = bundledSVGIcon(named: filename, color: colorScheme == .dark ? "#FFFFFF" : "#111111") {
                 Image(nsImage: image)
                     .resizable()

@@ -1,7 +1,23 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
+import { ChevronDown } from "lucide-react";
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import { restrictToHorizontalAxis } from "@dnd-kit/modifiers";
+import {
+  SortableContext,
+  horizontalListSortingStrategy,
+  sortableKeyboardCoordinates,
+} from "@dnd-kit/sortable";
 import { useInsforgeAuth } from "../contexts/InsforgeAuthContext.jsx";
 import { useLoginModal } from "../contexts/LoginModalContext.jsx";
+import { ProviderIcon } from "../ui/dashboard/components/ProviderIcon.jsx";
 import { isAccessTokenReady, resolveAuthAccessTokenWithRetry } from "../lib/auth-token";
 import { copy } from "../lib/copy";
 import { toDisplayNumber } from "../lib/format";
@@ -24,6 +40,8 @@ import { runCloudUsageSyncNow } from "../lib/cloud-sync";
 import { LeaderboardAvatar } from "../components/LeaderboardAvatar.jsx";
 import { LeaderboardProviderColumnHeader } from "../components/LeaderboardProviderColumnHeader.jsx";
 import { LeaderboardSkeleton } from "../components/LeaderboardSkeleton.jsx";
+import { SortableColumnHeader } from "../components/SortableColumnHeader.jsx";
+import { useColumnOrder } from "../hooks/use-column-order.js";
 import {
   LB_STICKY_TH_RANK,
   LB_STICKY_TH_USER,
@@ -32,7 +50,21 @@ import {
   lbStickyTdUser,
 } from "../lib/leaderboard-columns.js";
 
-const PAGE_LIMIT = 20;
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+const DEFAULT_PAGE_SIZE = 20;
+const PAGE_SIZE_STORAGE_KEY = "tokentracker:leaderboard:pageSize";
+
+function readStoredPageSize() {
+  if (typeof window === "undefined") return DEFAULT_PAGE_SIZE;
+  try {
+    const raw = window.localStorage.getItem(PAGE_SIZE_STORAGE_KEY);
+    const n = Number(raw);
+    if (PAGE_SIZE_OPTIONS.includes(n)) return n;
+  } catch {
+    // ignore storage errors (private mode, disabled, etc.)
+  }
+  return DEFAULT_PAGE_SIZE;
+}
 
 function formatCost(value) {
   const n = Number(value);
@@ -42,15 +74,19 @@ function formatCost(value) {
   return `$${n.toFixed(2)}`;
 }
 
-function leaderboardTokenCells(entry, isMe) {
+function leaderboardTokenCells(entry, isMe, orderedColumns) {
   const numCls = isMe
     ? "text-oai-gray-700 dark:text-oai-gray-300"
     : "text-oai-gray-500 dark:text-oai-gray-400";
   const cellBg = isMe
     ? "bg-oai-brand-50 dark:bg-oai-brand-900/10"
     : "bg-white dark:bg-oai-gray-950 group-hover:bg-oai-gray-50 dark:group-hover:bg-oai-gray-900/60";
-  return LEADERBOARD_TOKEN_COLUMNS.map((col) => (
-    <td key={col.key} className={cn("px-4 py-4 whitespace-nowrap text-right tabular-nums", numCls, cellBg)}>
+  return orderedColumns.map((col) => (
+    <td
+      key={col.key}
+      data-column-key={col.key}
+      className={cn("px-4 py-4 whitespace-nowrap text-right tabular-nums", numCls, cellBg)}
+    >
       {toDisplayNumber(entry?.[col.key])}
     </td>
   ));
@@ -119,6 +155,64 @@ function leaderboardAvatarSeed(entry, displayName) {
   return `${entry?.rank ?? ""}:${displayName}`;
 }
 
+/**
+ * Small GitHub icon that expands into a tooltip on hover. The tooltip carries a
+ * clickable "Settings" link so users who haven't configured their own GitHub yet
+ * know where to turn it on. Uses a named Tailwind group (`group/gh`) so hover
+ * state is scoped to this span — leaderboard rows already have their own
+ * `group` for row-hover backgrounds and we don't want to collide.
+ */
+function GithubLinkWithTooltip({ githubUrl }) {
+  return (
+    <span className="relative inline-flex items-center group/gh shrink-0">
+      <a
+        href={githubUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        aria-label={copy("leaderboard.github.aria")}
+        className="text-oai-black hover:text-oai-gray-500 dark:text-white dark:hover:text-oai-gray-400 transition-colors"
+      >
+        <ProviderIcon provider="GITHUB" size={16} />
+      </a>
+      <span
+        role="tooltip"
+        // Render above the icon so the next row's sticky <td> can't cover the
+        // tooltip (later rows paint higher in the stacking order). left-0 keeps
+        // it inside the user column.
+        //
+        // CRITICAL for hover persistence:
+        //  1. NO margin between tooltip and icon. A margin is dead space — the
+        //     cursor leaves the group bounding box while traveling across it,
+        //     hover breaks, tooltip disappears mid-motion.
+        //  2. NO pointer-events-none on the tooltip. It's a descendant of the
+        //     group; :hover must reach it for group-hover to stay true.
+        //  3. ::before bridge extends the tooltip's hit-area down to the
+        //     icon's top edge so the cursor's path from icon up into the
+        //     tooltip text stays inside the group the whole time.
+        // right-0 so the tooltip grows leftward from the icon (icon now sits
+        // on the right side of the cell after the name). mb-2 gives an 8px
+        // visual gap; ::before h-2.5 (10px) bridges it for hit-testing so the
+        // cursor never leaves the group while moving from icon into tooltip.
+        className="invisible opacity-0 group-hover/gh:visible group-hover/gh:opacity-100 absolute right-0 bottom-full mb-2 whitespace-nowrap rounded-md bg-oai-black dark:bg-oai-gray-700 px-2.5 py-1.5 text-[11px] leading-relaxed text-white shadow-lg transition-opacity duration-150 z-50 before:content-[''] before:absolute before:inset-x-0 before:top-full before:h-2.5"
+      >
+        <span className="block">{copy("leaderboard.github.tooltipAction")}</span>
+        <span className="block text-oai-gray-300 dark:text-oai-gray-400">
+          {copy("leaderboard.github.tooltipPrefix")}{" "}
+          <Link
+            to="/settings"
+            onClick={(e) => e.stopPropagation()}
+            className="text-white underline underline-offset-2 decoration-oai-gray-400 hover:text-oai-brand-300 hover:decoration-oai-brand-300"
+          >
+            {copy("leaderboard.github.tooltipSettingsLink")}
+          </Link>
+          {copy("leaderboard.github.tooltipSuffix")}
+        </span>
+      </span>
+    </span>
+  );
+}
+
 export function LeaderboardPage({
   auth,
   signedIn,
@@ -142,7 +236,48 @@ export function LeaderboardPage({
   const authTokenReady = authTokenAllowed && isAccessTokenReady(effectiveAuthToken);
 
   const placeholder = copy("shared.placeholder.short");
+
+  const defaultColumnKeys = useMemo(
+    () => LEADERBOARD_TOKEN_COLUMNS.map((c) => c.key),
+    [],
+  );
+  const { order: columnOrder, reorder: reorderColumns } = useColumnOrder(defaultColumnKeys);
+  const columnsByKey = useMemo(() => {
+    const map = new Map();
+    for (const c of LEADERBOARD_TOKEN_COLUMNS) map.set(c.key, c);
+    return map;
+  }, []);
+  const orderedColumns = useMemo(
+    () => columnOrder.map((k) => columnsByKey.get(k)).filter(Boolean),
+    [columnOrder, columnsByKey],
+  );
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const handleDragEnd = useCallback(
+    (event) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      reorderColumns(String(active.id), String(over.id));
+    },
+    [reorderColumns],
+  );
+
   const [listPage, setListPage] = useState(1);
+  const [pageSize, setPageSizeState] = useState(readStoredPageSize);
+
+  const setPageSize = useCallback((next) => {
+    const normalized = PAGE_SIZE_OPTIONS.includes(next) ? next : DEFAULT_PAGE_SIZE;
+    setPageSizeState(normalized);
+    setListPage(1);
+    try {
+      window.localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(normalized));
+    } catch {
+      // ignore
+    }
+  }, []);
   const [listReloadToken, setListReloadToken] = useState(0);
   const [listState, setListState] = useState(() => ({
     loading: false,
@@ -152,7 +287,6 @@ export function LeaderboardPage({
 
   const [cloudSyncOn, setCloudSyncOn] = useState(() => getCloudSyncEnabled());
   const [syncing, setSyncing] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
 
   const period = useMemo(() => {
     const params = new URLSearchParams(location?.search || "");
@@ -185,8 +319,8 @@ export function LeaderboardPage({
 
   const listOffset = useMemo(() => {
     const safePage = clampInt(listPage, { min: 1, max: 1_000_000, fallback: 1 });
-    return (safePage - 1) * PAGE_LIMIT;
-  }, [listPage]);
+    return (safePage - 1) * pageSize;
+  }, [listPage, pageSize]);
 
   useEffect(() => {
     // Mock leaderboard uses local getMockLeaderboard(); real data needs InsForge URL from getLeaderboardBaseUrl().
@@ -198,7 +332,7 @@ export function LeaderboardPage({
         baseUrl: leaderboardBaseUrl,
         userId: cloudUser?.id || null,
         period,
-        limit: PAGE_LIMIT,
+        limit: pageSize,
         offset: listOffset,
       });
       if (!active) return;
@@ -217,6 +351,7 @@ export function LeaderboardPage({
     listReloadToken,
     mockEnabled,
     period,
+    pageSize,
   ]);
 
   const listData = listState.data;
@@ -245,9 +380,9 @@ export function LeaderboardPage({
       entries: rows,
       me,
       meLabel,
-      limit: PAGE_LIMIT,
+      limit: pageSize,
     });
-  }, [currentPage, listData?.entries, me, meLabel]);
+  }, [currentPage, listData?.entries, me, meLabel, pageSize]);
 
   const handleEnableSync = async () => {
     setSyncing(true);
@@ -256,7 +391,7 @@ export function LeaderboardPage({
       setCloudSyncOn(true);
       await runCloudUsageSyncNow(() => resolveAuthAccessTokenWithRetry(effectiveAuthToken));
       const token = await resolveAuthAccessTokenWithRetry(effectiveAuthToken);
-      if (token) await refreshLeaderboard({ accessToken: token });
+      if (token) await refreshLeaderboard({ accessToken: token, period, source: "leaderboard-enable-sync" });
       setListReloadToken((v) => v + 1);
     } catch (e) {
       console.warn("[tokentracker] sync:", e);
@@ -265,28 +400,12 @@ export function LeaderboardPage({
     }
   };
 
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    try {
-      const token = await resolveAuthAccessTokenWithRetry(effectiveAuthToken);
-      if (cloudSyncOn && token) {
-        await runCloudUsageSyncNow(() => Promise.resolve(token));
-      }
-      if (token) await refreshLeaderboard({ accessToken: token });
-      setListReloadToken((v) => v + 1);
-    } catch (e) {
-      console.warn("[tokentracker] refresh:", e);
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
   const { canPrev, canNext } = getPaginationFlags({ page: currentPage, totalPages });
 
   const hasEntries = Array.isArray(displayEntries) && displayEntries.length !== 0;
   let listBody = null;
   if (listState.loading) {
-    listBody = <LeaderboardSkeleton rows={PAGE_LIMIT} />;
+    listBody = <LeaderboardSkeleton rows={pageSize} />;
   } else if (listState.error) {
     listBody = (
       <div className="px-6 py-12 text-center">
@@ -295,6 +414,12 @@ export function LeaderboardPage({
     );
   } else if (hasEntries) {
     listBody = (
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        modifiers={[restrictToHorizontalAxis]}
+        onDragEnd={handleDragEnd}
+      >
       <div className="w-full overflow-x-auto">
         <table className="min-w-max w-full text-left text-sm">
           <thead className="border-b border-oai-gray-200 dark:border-oai-gray-800">
@@ -309,19 +434,36 @@ export function LeaderboardPage({
                 {copy("leaderboard.column.total")}
               </th>
               <th className="px-4 py-4 text-[11px] font-semibold uppercase tracking-wider text-oai-gray-400 dark:text-oai-gray-500 whitespace-nowrap text-right align-middle" title="Based on estimated API pricing, not actual billing">
-                Est. Cost
+                {copy("leaderboard.column.est_cost")}
               </th>
-              {LEADERBOARD_TOKEN_COLUMNS.map((col) => (
-                <th key={col.key} className="px-4 py-4 text-[11px] font-semibold uppercase tracking-wider text-oai-gray-400 dark:text-oai-gray-500 whitespace-nowrap align-middle">
-                  <div className="flex items-center justify-end gap-2">
+              <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
+                {orderedColumns.map((col) => (
+                  <SortableColumnHeader
+                    key={col.key}
+                    id={col.key}
+                    thClassName="px-4 py-4 text-[11px] font-semibold uppercase tracking-wider text-oai-gray-400 dark:text-oai-gray-500 whitespace-nowrap align-middle"
+                  >
                     <LeaderboardProviderColumnHeader iconSrc={col.icon} label={copy(col.copyKey)} />
-                  </div>
-                </th>
-              ))}
+                  </SortableColumnHeader>
+                ))}
+              </SortableContext>
             </tr>
           </thead>
           <tbody className="divide-y divide-oai-gray-100 dark:divide-oai-gray-800/50">
-            {displayEntries.map((entry) => {
+            {displayEntries.map((entry, entryIdx) => {
+              if (entry?.is_ellipsis) {
+                const colSpan = 4 + orderedColumns.length;
+                return (
+                  <tr key={`ellipsis-${entryIdx}`} aria-hidden="true">
+                    <td
+                      colSpan={colSpan}
+                      className="px-4 py-2 text-center text-oai-gray-400 dark:text-oai-gray-600 bg-white dark:bg-oai-gray-950 select-none tracking-[0.4em] text-xs"
+                    >
+                      ···
+                    </td>
+                  </tr>
+                );
+              }
               const isMe = Boolean(entry?.is_me);
               const profileUserId = typeof entry?.user_id === "string" ? entry.user_id : null;
               const rawName = normalizeName(entry?.display_name);
@@ -343,13 +485,14 @@ export function LeaderboardPage({
                       <RankCell rank={entry?.rank} placeholder={placeholder} />
                     </td>
                     <td className={lbStickyTdUser(true)}>
-                      <div className="flex min-w-0 max-w-[min(160px,40vw)] items-center gap-4">
+                      <div className="flex min-w-0 items-center gap-2">
                         <LeaderboardAvatar
                           avatarUrl={entry?.avatar_url}
                           displayName={name}
                           seed={leaderboardAvatarSeed(entry, name)}
                         />
                         <span className="truncate font-semibold text-oai-black dark:text-oai-white">{name}</span>
+                        {entry?.github_url && <GithubLinkWithTooltip githubUrl={entry.github_url} />}
                       </div>
                     </td>
                     <td className="px-4 py-4 font-medium text-oai-black dark:text-oai-white whitespace-nowrap text-right tabular-nums bg-oai-brand-50 dark:bg-oai-brand-900/10">
@@ -358,7 +501,7 @@ export function LeaderboardPage({
                     <td className="px-4 py-4 font-medium text-oai-brand-600 dark:text-oai-brand-400 whitespace-nowrap text-right tabular-nums bg-oai-brand-50 dark:bg-oai-brand-900/10" title="Based on estimated API pricing, not actual billing">
                       {formatCost(entry?.estimated_cost_usd)}
                     </td>
-                    {leaderboardTokenCells(entry, true)}
+                    {leaderboardTokenCells(entry, true, orderedColumns)}
                   </tr>
                 );
               }
@@ -372,13 +515,14 @@ export function LeaderboardPage({
                     <RankCell rank={entry?.rank} placeholder={placeholder} />
                   </td>
                   <td className={lbStickyTdUser(false)}>
-                    <div className="flex min-w-0 max-w-[min(160px,40vw)] items-center gap-4">
+                    <div className="flex min-w-0 items-center gap-2">
                       <LeaderboardAvatar
                         avatarUrl={entry?.avatar_url}
                         displayName={name}
                         seed={leaderboardAvatarSeed(entry, name)}
                       />
                       <span className="truncate font-medium text-oai-gray-800 dark:text-oai-gray-200">{name}</span>
+                      {entry?.github_url && <GithubLinkWithTooltip githubUrl={entry.github_url} />}
                     </div>
                   </td>
                   <td className="px-4 py-4 font-semibold text-oai-gray-800 dark:text-oai-gray-200 whitespace-nowrap text-right tabular-nums bg-white dark:bg-oai-gray-950 group-hover:bg-oai-gray-50 dark:group-hover:bg-oai-gray-900/60">
@@ -387,13 +531,14 @@ export function LeaderboardPage({
                   <td className="px-4 py-4 text-oai-gray-500 dark:text-oai-gray-400 whitespace-nowrap text-right tabular-nums bg-white dark:bg-oai-gray-950 group-hover:bg-oai-gray-50 dark:group-hover:bg-oai-gray-900/60" title="Based on estimated API pricing, not actual billing">
                     {formatCost(entry?.estimated_cost_usd)}
                   </td>
-                  {leaderboardTokenCells(entry, false)}
+                  {leaderboardTokenCells(entry, false, orderedColumns)}
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
+      </DndContext>
     );
   } else {
     listBody = (
@@ -463,16 +608,7 @@ export function LeaderboardPage({
               </p>
             </div>
 
-            <div className="flex items-center gap-3">
-              {authTokenAllowed && authTokenReady && (
-                <button
-                  onClick={handleRefresh}
-                  disabled={refreshing || listState.loading}
-                  className="text-sm text-oai-gray-500 dark:text-oai-gray-400 hover:text-oai-black dark:hover:text-white transition-colors disabled:opacity-50"
-                >
-                  {refreshing ? "Refreshing..." : "\u21BB"}
-                </button>
-              )}
+            <div className="flex items-center gap-2">
               <div className="inline-flex p-1 border border-oai-gray-200 dark:border-oai-gray-800 rounded-lg">
                 {["week", "month", "total"].map((p) => (
                   <button
@@ -495,25 +631,25 @@ export function LeaderboardPage({
 
           {!signedIn && (
             <div className="mb-6 flex items-center justify-between text-sm">
-              <p className="text-oai-gray-500 dark:text-oai-gray-400">Sign in to join the leaderboard</p>
+              <p className="text-oai-gray-500 dark:text-oai-gray-400">{copy("leaderboard.signin_prompt")}</p>
               <button
                 onClick={openLoginModal}
                 className="px-3 py-1.5 text-sm font-medium text-oai-gray-600 dark:text-oai-gray-300 border border-oai-gray-300 dark:border-oai-gray-700 rounded-md hover:text-oai-black dark:hover:text-white hover:border-oai-gray-400 dark:hover:border-oai-gray-600 transition-colors"
               >
-                Sign In
+                {copy("leaderboard.signin_button")}
               </button>
             </div>
           )}
 
           {authTokenAllowed && authTokenReady && !cloudSyncOn && (
             <div className="mb-6 flex items-center justify-between text-sm">
-              <p className="text-oai-gray-500 dark:text-oai-gray-400">Enable Cloud Sync to appear in rankings</p>
+              <p className="text-oai-gray-500 dark:text-oai-gray-400">{copy("leaderboard.sync_prompt")}</p>
               <button
                 onClick={handleEnableSync}
                 disabled={syncing}
                 className="px-3 py-1.5 text-sm font-medium text-oai-gray-600 dark:text-oai-gray-300 border border-oai-gray-300 dark:border-oai-gray-700 rounded-md hover:text-oai-black dark:hover:text-white hover:border-oai-gray-400 dark:hover:border-oai-gray-600 disabled:opacity-50 transition-colors"
               >
-                {syncing ? "Syncing..." : "Enable & Sync"}
+                {syncing ? copy("leaderboard.sync_button.busy") : copy("leaderboard.sync_button.idle")}
               </button>
             </div>
           )}
@@ -521,34 +657,56 @@ export function LeaderboardPage({
           <div className="rounded-xl border border-oai-gray-200 dark:border-oai-gray-800 overflow-hidden">
             {listBody}
 
-            <div className="px-6 py-3 border-t border-oai-gray-200 dark:border-oai-gray-800 flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
-                <button
-                  className={cn(
-                    "px-3 py-1.5 text-sm font-medium text-oai-gray-500 dark:text-oai-gray-400 rounded-md transition-colors",
-                    canPrev && !listState.loading
-                      ? "hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white"
-                      : "opacity-50 cursor-not-allowed"
-                  )}
-                  onClick={() => setListPage((p) => Math.max(1, p - 1))}
-                  disabled={!canPrev || listState.loading}
-                >
-                  {copy("leaderboard.pagination.prev")}
-                </button>
-                <button
-                  className={cn(
-                    "px-3 py-1.5 text-sm font-medium text-oai-gray-500 dark:text-oai-gray-400 rounded-md transition-colors",
-                    canNext && !listState.loading
-                      ? "hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white"
-                      : "opacity-50 cursor-not-allowed"
-                  )}
-                  onClick={() => setListPage((p) => p + 1)}
-                  disabled={!canNext || listState.loading}
-                >
-                  {copy("leaderboard.pagination.next")}
-                </button>
+            <div className="px-6 py-3 border-t border-oai-gray-200 dark:border-oai-gray-800 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+              <div className="flex items-center gap-2 text-sm text-oai-gray-500 dark:text-oai-gray-400">
+                <label htmlFor="leaderboard-page-size" className="whitespace-nowrap">
+                  {copy("leaderboard.pagination.page_size_label")}
+                </label>
+                <div className="relative">
+                  <select
+                    id="leaderboard-page-size"
+                    value={pageSize}
+                    onChange={(e) => setPageSize(Number(e.target.value))}
+                    disabled={listState.loading}
+                    className="appearance-none pl-3 pr-8 py-1 rounded-md bg-white dark:bg-oai-gray-950 border border-oai-gray-300 dark:border-oai-gray-700 text-oai-gray-700 dark:text-oai-gray-300 hover:border-oai-gray-400 dark:hover:border-oai-gray-600 focus:outline-none focus:ring-2 focus:ring-oai-brand-500 disabled:opacity-50 transition-colors"
+                  >
+                    {PAGE_SIZE_OPTIONS.map((n) => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
+                  <ChevronDown
+                    className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-oai-gray-500 dark:text-oai-gray-400"
+                    strokeWidth={2}
+                    aria-hidden="true"
+                  />
+                </div>
               </div>
+              <div className="h-5 w-px bg-oai-gray-200 dark:bg-oai-gray-800" aria-hidden="true" />
+              <button
+                className={cn(
+                  "px-3 py-1.5 text-sm font-medium text-oai-gray-500 dark:text-oai-gray-400 rounded-md transition-colors",
+                  canPrev && !listState.loading
+                    ? "hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white"
+                    : "opacity-50 cursor-not-allowed"
+                )}
+                onClick={() => setListPage((p) => Math.max(1, p - 1))}
+                disabled={!canPrev || listState.loading}
+              >
+                {copy("leaderboard.pagination.prev")}
+              </button>
               <div className="flex flex-wrap items-center gap-1">{pageButtons}</div>
+              <button
+                className={cn(
+                  "px-3 py-1.5 text-sm font-medium text-oai-gray-500 dark:text-oai-gray-400 rounded-md transition-colors",
+                  canNext && !listState.loading
+                    ? "hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white"
+                    : "opacity-50 cursor-not-allowed"
+                )}
+                onClick={() => setListPage((p) => p + 1)}
+                disabled={!canNext || listState.loading}
+              >
+                {copy("leaderboard.pagination.next")}
+              </button>
             </div>
           </div>
         </div>

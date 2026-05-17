@@ -987,7 +987,7 @@ Response:
 Manual refresh runbook:
 
 ```bash
-BASE_URL="https://b46ug8xu.us-east.insforge.app"
+BASE_URL="https://srctyff5.us-east.insforge.app"
 ADMIN_TOKEN="<service_role_key>"
 
 curl -s -X POST "$BASE_URL/functions/vibeusage-leaderboard-refresh?period=week" \

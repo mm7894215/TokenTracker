@@ -1,4 +1,5 @@
 import { toFiniteNumber } from "../../lib/format";
+import { copy } from "../../lib/copy";
 
 type AnyRec = Record<string, any>;
 
@@ -140,20 +141,32 @@ export function buildShareCardData(params: {
   };
 }
 
-const MONTH_SHORT = [
-  "JAN",
-  "FEB",
-  "MAR",
-  "APR",
-  "MAY",
-  "JUN",
-  "JUL",
-  "AUG",
-  "SEP",
-  "OCT",
-  "NOV",
-  "DEC",
+const MONTH_SHORT_KEYS = [
+  "share.month_short.jan",
+  "share.month_short.feb",
+  "share.month_short.mar",
+  "share.month_short.apr",
+  "share.month_short.may",
+  "share.month_short.jun",
+  "share.month_short.jul",
+  "share.month_short.aug",
+  "share.month_short.sep",
+  "share.month_short.oct",
+  "share.month_short.nov",
+  "share.month_short.dec",
 ];
+
+function monthShortLabel(monthIdx: number): string {
+  const key = MONTH_SHORT_KEYS[monthIdx];
+  return key ? copy(key) : "—";
+}
+
+function formatMonthYear(monthIdx: number, year: string | number): string {
+  return copy("share.date.month_year", {
+    month: monthShortLabel(monthIdx),
+    year,
+  });
+}
 
 export function formatShortDate(isoDay: string | null): string {
   if (!isoDay) return "—";
@@ -162,11 +175,11 @@ export function formatShortDate(isoDay: string | null): string {
   const [y, m] = parts;
   const monthIdx = Number(m) - 1;
   if (monthIdx < 0 || monthIdx > 11) return isoDay;
-  return `${MONTH_SHORT[monthIdx]} ${y}`;
+  return formatMonthYear(monthIdx, y);
 }
 
 export function formatIssueLabel(data: ShareCardData): string {
-  if (data.period === "total") return "ALL TIME";
+  if (data.period === "total") return copy("share.issue.all_time");
   if (data.period === "day" && data.periodTo) return data.periodTo.replace(/-/g, ".");
   if (data.period === "custom" && data.periodFrom && data.periodTo) {
     return `${data.periodFrom.replace(/-/g, ".")} — ${data.periodTo.replace(/-/g, ".")}`;
@@ -174,10 +187,10 @@ export function formatIssueLabel(data: ShareCardData): string {
   if (data.periodTo) {
     const d = new Date(`${data.periodTo}T00:00:00Z`);
     if (!Number.isNaN(d.getTime())) {
-      return `${MONTH_SHORT[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+      return formatMonthYear(d.getUTCMonth(), d.getUTCFullYear());
     }
   }
-  return String(data.period).toUpperCase();
+  return copy(`usage.period.${data.period}`);
 }
 
 export function formatTokens(n: number): string {
@@ -199,23 +212,35 @@ export function buildShareHook(data: ShareCardData): string {
   if (top) {
     const pct = parseFloat(top.percent);
     if (Number.isFinite(pct) && pct >= 60) {
-      return `${Math.round(pct)}% loyal to ${top.name}.`;
+      return copy("share.hook.top_loyal", {
+        percent: Math.round(pct),
+        name: top.name,
+      });
     }
     if (data.activeDays >= 60) {
-      return `${data.activeDays} days on the record.`;
+      return copy("share.hook.days_record", { days: data.activeDays });
     }
     if (Number.isFinite(pct) && pct >= 30) {
-      return `Led by ${top.name} (${Math.round(pct)}%).`;
+      return copy("share.hook.top_led", {
+        name: top.name,
+        percent: Math.round(pct),
+      });
     }
     if (data.topModels.length > 1) {
-      return `Across ${data.topModels.length} models, ${data.activeDays} days.`;
+      return copy("share.hook.multi_models", {
+        count: data.topModels.length,
+        days: data.activeDays,
+      });
     }
-    return `${data.activeDays} days with ${top.name}.`;
+    return copy("share.hook.days_with_model", {
+      days: data.activeDays,
+      name: top.name,
+    });
   }
   if (data.activeDays > 0) {
-    return `${data.activeDays} days on the record.`;
+    return copy("share.hook.days_record", { days: data.activeDays });
   }
-  return "The beginning of a new chapter.";
+  return copy("share.hook.new_chapter");
 }
 
 // Dynamically compute hero font size so long numbers still fit the card.

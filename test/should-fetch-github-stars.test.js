@@ -4,7 +4,7 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
 const modulePath = pathToFileURL(
-  path.resolve("dashboard/src/ui/matrix-a/util/should-fetch-github-stars.js"),
+  path.resolve("dashboard/src/ui/dashboard/util/should-fetch-github-stars.js"),
 ).href;
 
 test("shouldFetchGithubStars skips in reduced motion or screenshot capture", async () => {

@@ -3,16 +3,32 @@
   <channel>
     <title>Token Tracker Updates</title>
     <link>https://www.tokentracker.cc/</link>
-    <description>Product updates for Token Tracker token tracking.</description>
+    <description>Product updates for Token Tracker — the local-first token usage tracker for AI coding agent CLIs.</description>
     <language>en-us</language>
-    <lastBuildDate>Tue, 24 Feb 2026 00:00:00 GMT</lastBuildDate>
+    <lastBuildDate>Thu, 07 May 2026 00:00:00 GMT</lastBuildDate>
 
     <item>
-      <title>Token Tracker Homepage</title>
+      <title>v0.6.4 — Project usage attribution and token formatting fixes</title>
       <link>https://www.tokentracker.cc/</link>
-      <guid isPermaLink="true">https://www.tokentracker.cc/</guid>
-      <pubDate>Tue, 24 Feb 2026 00:00:00 GMT</pubDate>
-      <description>Track token usage across AI coding agents with Token Tracker.</description>
+      <guid isPermaLink="false">https://www.tokentracker.cc/#v0.6.4</guid>
+      <pubDate>Thu, 07 May 2026 00:00:00 GMT</pubDate>
+      <description>Auto-verify projects from canonical git owner/repo paths, align dev and production endpoints for project attribution, and format token numbers with thousands separators across the dashboard.</description>
+    </item>
+
+    <item>
+      <title>v0.6.3 — Domain migrated to www.tokentracker.cc</title>
+      <link>https://www.tokentracker.cc/</link>
+      <guid isPermaLink="false">https://www.tokentracker.cc/#v0.6.3</guid>
+      <pubDate>Sun, 04 May 2026 00:00:00 GMT</pubDate>
+      <description>Production domain migrated to www.tokentracker.cc with apex 307 redirect and updated canonical URLs.</description>
+    </item>
+
+    <item>
+      <title>13 AI coding agent CLIs supported</title>
+      <link>https://www.tokentracker.cc/</link>
+      <guid isPermaLink="false">https://www.tokentracker.cc/#providers-13</guid>
+      <pubDate>Mon, 28 Apr 2026 00:00:00 GMT</pubDate>
+      <description>Track Claude Code, Codex, Cursor, Gemini, OpenCode, OpenClaw, Every Code, Kiro, Hermes Agent, GitHub Copilot, Kimi Code, oh-my-pi, and CodeBuddy in one unified dashboard.</description>
     </item>
   </channel>
 </rss>

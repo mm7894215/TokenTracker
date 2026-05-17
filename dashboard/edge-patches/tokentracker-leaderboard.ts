@@ -108,8 +108,19 @@ export default async function (req: Request): Promise<Response> {
     from_day = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
     to_day = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
   } else {
-    from_day = "2024-01-01";
-    to_day = now.toISOString().slice(0, 10);
+    // period === "total": find the most recent (from_day, to_day) pair written
+    // by the refresh job. Hardcoding (2024-01-01, today) used to 404 whenever
+    // today's snapshot hadn't been generated yet, so the UI saw "no data".
+    const { data: latest } = await client.database
+      .from("tokentracker_leaderboard_snapshots")
+      .select("from_day, to_day")
+      .eq("period", "total")
+      .order("to_day", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const row = latest as { from_day?: string; to_day?: string } | null;
+    from_day = (row?.from_day ?? "2024-01-01").slice(0, 10);
+    to_day = (row?.to_day ?? now.toISOString()).slice(0, 10);
   }
 
   const {

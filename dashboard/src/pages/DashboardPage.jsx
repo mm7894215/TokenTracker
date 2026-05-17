@@ -1,6 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useAccountView } from "../contexts/AccountViewContext.jsx";
-import { useInsforgeAuth } from "../contexts/InsforgeAuthContext.jsx";
 import { useActivityHeatmap } from "../hooks/use-activity-heatmap.js";
 import { useProjectUsageSummary } from "../hooks/use-project-usage-summary";
 import { useTrendData } from "../hooks/use-trend-data.js";
@@ -13,6 +11,7 @@ import {
   resolveAuthAccessToken,
 } from "../lib/auth-token";
 import { copy } from "../lib/copy";
+import { useLocale } from "../hooks/useLocale.js";
 import { getDetailsSortColumns, sortDailyRows } from "../lib/daily";
 import { formatDateUTC, getRangeForPeriod } from "../lib/date-range";
 import { DETAILS_PAGE_SIZE, paginateRows, trimLeadingZeroMonths } from "../lib/details";
@@ -24,7 +23,7 @@ import {
 } from "../lib/format";
 import { shouldShowInstallCard } from "../lib/install-status";
 import { getMockNow, isMockEnabled } from "../lib/mock-data";
-import { buildFleetData, buildTopModels } from "../lib/model-breakdown";
+import { buildFleetData, buildTopModels, resolveDisplayTokens } from "../lib/model-breakdown";
 import { safeWriteClipboard, safeWriteClipboardImage } from "../lib/safe-browser";
 import { isScreenshotModeEnabled } from "../lib/screenshot-mode";
 import {
@@ -38,11 +37,9 @@ import {
   getUserStatus,
   triggerLocalSync,
 } from "../lib/api";
-import { AsciiBox } from "../ui/foundation/AsciiBox.jsx";
-import { MatrixButton } from "../ui/foundation/MatrixButton.jsx";
-import { ActivityHeatmap } from "../ui/matrix-a/components/ActivityHeatmap.jsx";
-import { ProjectUsagePanel } from "../ui/matrix-a/components/ProjectUsagePanel.jsx";
-import { DashboardView } from "../ui/matrix-a/views/DashboardView.jsx";
+import { ActivityHeatmap } from "../ui/dashboard/components/ActivityHeatmap.jsx";
+import { ProjectUsagePanel } from "../ui/dashboard/components/ProjectUsagePanel.jsx";
+import { DashboardView } from "../ui/dashboard/views/DashboardView.jsx";
 import { ShareModal } from "../ui/share/ShareModal";
 import { useShareCardData } from "../ui/share/use-share-card-data";
 
@@ -72,7 +69,7 @@ function hasUsageValue(value, level) {
 
 function getBillableTotal(row) {
   if (!row) return null;
-  return row?.billable_total_tokens ?? row?.total_tokens;
+  return resolveDisplayTokens(row, null);
 }
 
 function getHeatmapValue(cell) {
@@ -98,7 +95,7 @@ function addUtcDays(date, days) {
 
 function isProductionHost(hostname) {
   if (!hostname) return false;
-  return hostname === "token.rynn.me";
+  return hostname === "www.tokentracker.cc" || hostname === "tokentracker.cc";
 }
 
 function isForceInstallEnabled() {
@@ -120,6 +117,7 @@ export function DashboardPage({
   signInUrl = "/sign-in",
   signUpUrl = "/sign-up",
 }) {
+  const { resolvedLocale } = useLocale();
   const [costModalOpen, setCostModalOpen] = useState(false);
   const [linkCode, setLinkCode] = useState(null);
   const [linkCodeExpiresAt, setLinkCodeExpiresAt] = useState(null);
@@ -128,27 +126,6 @@ export function DashboardPage({
   const [linkCodeExpiryTick, setLinkCodeExpiryTick] = useState(0);
   const [linkCodeRefreshToken, setLinkCodeRefreshToken] = useState(0);
   const [userStatus, setUserStatus] = useState(null);
-  const { accountView, revision: accountRevision } = useAccountView();
-  const insforgeAuth = useInsforgeAuth();
-  const [accountAccessToken, setAccountAccessToken] = useState(null);
-  useEffect(() => {
-    if (!accountView || !insforgeAuth?.enabled || !insforgeAuth?.signedIn) {
-      setAccountAccessToken(null);
-      return;
-    }
-    let active = true;
-    (async () => {
-      try {
-        const token = await insforgeAuth.getAccessToken();
-        if (active) setAccountAccessToken(typeof token === "string" && token ? token : null);
-      } catch {
-        if (active) setAccountAccessToken(null);
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [accountView, accountRevision, insforgeAuth]);
   const [compactSummary, setCompactSummary] = useState(() => {
     if (typeof window === "undefined" || !window.matchMedia) return false;
     return window.matchMedia("(max-width: 640px)").matches;
@@ -421,9 +398,6 @@ export function DashboardPage({
     timeZone,
     tzOffsetMinutes,
     now: mockNow,
-    accountView,
-    accountAccessToken,
-    accountRevision,
   });
   const {
     daily: dailyBreakdownDaily,
@@ -440,9 +414,6 @@ export function DashboardPage({
     timeZone,
     tzOffsetMinutes,
     now: mockNow,
-    accountView,
-    accountAccessToken,
-    accountRevision,
   });
 
   const {
@@ -458,9 +429,6 @@ export function DashboardPage({
     cacheKey,
     timeZone,
     tzOffsetMinutes,
-    accountView,
-    accountAccessToken,
-    accountRevision,
   });
 
   const [projectUsageLimit, setProjectUsageLimit] = useState(3);
@@ -507,9 +475,6 @@ export function DashboardPage({
     now: mockNow,
     sharedRows: shareDailyToTrend ? daily : null,
     sharedRange: shareDailyToTrend ? { from, to } : null,
-    accountView,
-    accountAccessToken,
-    accountRevision,
   });
 
   const {
@@ -526,9 +491,6 @@ export function DashboardPage({
     timeZone,
     tzOffsetMinutes,
     now: mockNow,
-    accountView,
-    accountAccessToken,
-    accountRevision,
   });
 
   const {
@@ -782,18 +744,13 @@ export function DashboardPage({
       if (isLocalMode) {
         await triggerLocalSync();
       }
-      // Account-wide view depends on the cloud having received the latest
-      // batch. Give the indexing pipeline ~3s before invalidating queries.
-      if (accountView) {
-        await new Promise((resolve) => setTimeout(resolve, 3000));
-      }
       await refreshAll();
     } catch (error) {
       console.error("[DashboardPage] Refresh failed:", error);
     } finally {
       setManualSyncLoading(false);
     }
-  }, [isLocalMode, refreshAll, accountView]);
+  }, [isLocalMode, refreshAll]);
 
   const usageLoadingState =
     manualSyncLoading ||
@@ -808,7 +765,7 @@ export function DashboardPage({
       copy("shared.data_source", {
         source: String(usageSource || "edge").toUpperCase(),
       }),
-    [usageSource],
+    [usageSource, resolvedLocale],
   );
   const identityRawName = useMemo(() => {
     if (typeof auth?.name !== "string") return "";
@@ -951,9 +908,7 @@ export function DashboardPage({
     let topSourceTokens = 0;
 
     for (const source of sources) {
-      const tokens = toFiniteNumber(
-        source?.totals?.billable_total_tokens ?? source?.totals?.total_tokens,
-      );
+      const tokens = resolveDisplayTokens(source?.totals);
       if (!Number.isFinite(tokens) || tokens <= 0) continue;
       if (tokens > topSourceTokens) {
         topSourceTokens = tokens;
@@ -970,9 +925,7 @@ export function DashboardPage({
       const models = Array.isArray(topSource?.models) ? topSource.models : [];
       let topModelTokens = 0;
       for (const model of models) {
-        const tokens = toFiniteNumber(
-          model?.totals?.billable_total_tokens ?? model?.totals?.total_tokens,
-        );
+        const tokens = resolveDisplayTokens(model?.totals);
         if (!Number.isFinite(tokens) || tokens <= 0) continue;
         if (tokens > topModelTokens) {
           topModelTokens = tokens;
@@ -1211,7 +1164,10 @@ export function DashboardPage({
     window.setTimeout(() => setSessionExpiredCopied(false), 2000);
   }, [installInitCmdBase]);
 
-  const dailyEmptyTemplate = useMemo(() => copy("dashboard.daily.empty", { cmd: "{{cmd}}" }), []);
+  const dailyEmptyTemplate = useMemo(
+    () => copy("dashboard.daily.empty", { cmd: "{{cmd}}" }),
+    [resolvedLocale],
+  );
   const [dailyEmptyPrefix, dailyEmptySuffix] = useMemo(() => {
     const parts = dailyEmptyTemplate.split("{{cmd}}");
     if (parts.length === 1) return [dailyEmptyTemplate, ""];
@@ -1262,6 +1218,8 @@ export function DashboardPage({
       trendRowsForDisplay={trendRowsForDisplay}
       trendFromForDisplay={trendFromForDisplay}
       trendToForDisplay={trendToForDisplay}
+      usageFrom={from}
+      usageTo={to}
       period={period}
       trendTimeZoneLabel={trendTimeZoneLabel}
       activityHeatmapBlock={activityHeatmapBlock}
@@ -1324,8 +1282,6 @@ export function DashboardPage({
       setDetailsPage={setDetailsPage}
       costModalOpen={costModalOpen}
       closeCostModal={closeCostModal}
-      accountView={accountView}
-      accountViewBadgeLabel={accountView ? copy("dashboard.account_view.badge") : ""}
     />
     <ShareModal
       open={shareModalOpen}

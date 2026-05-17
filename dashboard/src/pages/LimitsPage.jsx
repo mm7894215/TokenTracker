@@ -1,11 +1,11 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { Settings as SettingsIcon } from "lucide-react";
-import { useUsageLimits } from "../hooks/use-usage-limits.js";
+import { useUsageLimits } from "../hooks/use-usage-limits";
 import { useLimitsDisplayPrefs } from "../hooks/use-limits-display-prefs.js";
 import { copy } from "../lib/copy";
 import { LimitsPageSkeleton } from "../components/LimitsPageSkeleton.jsx";
-import { UsageLimitsPanel } from "../ui/matrix-a/components/UsageLimitsPanel.jsx";
+import { UsageLimitsPanel } from "../ui/dashboard/components/UsageLimitsPanel.jsx";
 
 export function LimitsPage() {
   const { data: usageLimits, error, isLoading } = useUsageLimits({ initialRefresh: true });
@@ -48,8 +48,10 @@ export function LimitsPage() {
                 codex={usageLimits?.codex}
                 cursor={usageLimits?.cursor}
                 gemini={usageLimits?.gemini}
+                kimi={usageLimits?.kimi}
                 kiro={usageLimits?.kiro}
                 antigravity={usageLimits?.antigravity}
+                copilot={usageLimits?.copilot}
                 order={prefs.order}
                 visibility={prefs.visibility}
               />

@@ -1,7 +1,7 @@
 {
   "name": "tokentracker-cli",
-  "version": "0.5.61",
-  "description": "Token usage tracker for AI agent CLIs (Claude Code, Codex, Cursor, Kiro, Gemini, OpenCode, OpenClaw, Hermes)",
+  "version": "0.16.0",
+  "description": "Token usage tracker for AI agent CLIs (Claude Code, Codex, Cursor, Gemini, Kiro, OpenCode, OpenClaw, Every Code, Hermes, GitHub Copilot, Kimi Code, CodeBuddy, Grok Build, oh-my-pi, pi, Craft Agents, Kilo CLI, Kilo Code)",
   "main": "src/cli.js",
   "bin": {
     "tokentracker-cli": "bin/tracker.js",
@@ -29,15 +29,20 @@
     "dashboard:open": "bash scripts/open-dashboard.sh",
     "dashboard:preview": "npm --prefix dashboard run preview",
     "dev:shim": "node scripts/dev-bin-shim.cjs",
+    "audit:tokens": "node scripts/audit-token-correctness.cjs",
     "graph:auto-index": "node scripts/graph/auto-index.cjs",
     "graph:scip": "node scripts/graph/generate-scip.cjs",
+    "pricing:build-seed": "node scripts/build-pricing-seed.cjs",
+    "prepublishOnly": "node scripts/build-pricing-seed.cjs",
     "test": "node --test test/*.test.js",
     "validate:copy": "node scripts/validate-copy-registry.cjs",
     "validate:guardrails": "node scripts/validate-architecture-guardrails.cjs",
     "validate:retros": "node scripts/validate-retros.cjs",
     "validate:ui-hardcode": "node scripts/ops/validate-ui-hardcode.cjs"
   },
-  "dependencies": {},
+  "dependencies": {
+    "undici": "^8.2.0"
+  },
   "devDependencies": {
     "@sourcegraph/scip-typescript": "^0.3.6",
     "esbuild": "0.27.2"
@@ -46,7 +51,7 @@
     "type": "git",
     "url": "git+https://github.com/mm7894215/TokenTracker.git"
   },
-  "homepage": "https://token.rynn.me",
+  "homepage": "https://www.tokentracker.cc",
   "bugs": {
     "url": "https://github.com/mm7894215/TokenTracker/issues"
   },

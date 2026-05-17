@@ -202,7 +202,7 @@ struct UsageTrendChart: View {
 					}
 				}
 				.frame(height: 140)
-				.accessibilityLabel("Token usage trend chart")
+				.accessibilityLabel(Strings.trendAccessibilityLabel)
 			}
 		}
 	}

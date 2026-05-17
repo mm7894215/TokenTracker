@@ -97,6 +97,14 @@ export function LoginPage() {
     };
   }, [enabled, getPublicAuthConfig]);
 
+  const isNativeLogin = useMemo(() => {
+    return searchParams.get("native") === "1";
+  }, [searchParams]);
+
+  const autoProvider = useMemo(() => {
+    return searchParams.get("provider") || null;
+  }, [searchParams]);
+
   useEffect(() => {
     if (!enabled || authLoading) return;
     if (signedIn) {
@@ -113,14 +121,6 @@ export function LoginPage() {
     if (!enabled) return;
     refreshUser();
   }, [enabled, refreshUser]);
-
-  const isNativeLogin = useMemo(() => {
-    return searchParams.get("native") === "1";
-  }, [searchParams]);
-
-  const autoProvider = useMemo(() => {
-    return searchParams.get("provider") || null;
-  }, [searchParams]);
 
   const redirectAfterOAuth = useMemo(() => {
     if (typeof window === "undefined") return "";
@@ -193,7 +193,11 @@ export function LoginPage() {
   // Mark native login in sessionStorage so /auth/callback knows to redirect to app
   useEffect(() => {
     if (isNativeLogin && typeof window !== "undefined") {
-      try { window.sessionStorage.setItem("tokentracker_native_login", "1"); } catch {}
+      try {
+        window.sessionStorage.setItem("tokentracker_native_login", "1");
+      } catch {
+        // Ignore storage failures; OAuth can still proceed without the marker.
+      }
     }
   }, [isNativeLogin]);
 

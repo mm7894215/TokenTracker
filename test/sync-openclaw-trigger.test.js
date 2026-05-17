@@ -51,6 +51,139 @@ test("sync --from-openclaw records last OpenClaw trigger marker", async () => {
   }
 });
 
+test("sync keeps Grok hook signal when another sync owns the lock", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-sync-grok-lock-"));
+  const prevHome = process.env.HOME;
+  const prevCodexHome = process.env.CODEX_HOME;
+  const prevCodeHome = process.env.CODE_HOME;
+  const prevGeminiHome = process.env.GEMINI_HOME;
+  const prevOpencodeHome = process.env.OPENCODE_HOME;
+  const prevTokenTrackerGrokHome = process.env.TOKENTRACKER_GROK_HOME;
+  const prevGrokHome = process.env.GROK_HOME;
+  const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
+
+  try {
+    process.env.HOME = tmp;
+    process.env.CODEX_HOME = path.join(tmp, ".codex");
+    process.env.CODE_HOME = path.join(tmp, ".code");
+    process.env.GEMINI_HOME = path.join(tmp, ".gemini");
+    process.env.OPENCODE_HOME = path.join(tmp, ".opencode");
+    delete process.env.TOKENTRACKER_GROK_HOME;
+    process.env.GROK_HOME = path.join(tmp, ".grok");
+    delete process.env.TOKENTRACKER_DEVICE_TOKEN;
+
+    const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+    const signalPath = path.join(trackerDir, "grok-last-session.json");
+    await fs.mkdir(path.dirname(signalPath), { recursive: true });
+    await fs.writeFile(
+      signalPath,
+      JSON.stringify({
+        source: "grok",
+        sessionId: "grok-locked",
+        model: "grok-build",
+        totalTokens: 64,
+        messageCount: 2,
+        lastActive: "2026-04-05T14:10:00.000Z",
+      }) + "\n",
+      "utf8",
+    );
+    await fs.writeFile(path.join(trackerDir, "sync.lock"), "locked\n", "utf8");
+
+    await cmdSync(["--auto"]);
+
+    const signal = JSON.parse(await fs.readFile(signalPath, "utf8"));
+    assert.equal(signal.sessionId, "grok-locked");
+  } finally {
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = prevCodexHome;
+    if (prevCodeHome === undefined) delete process.env.CODE_HOME;
+    else process.env.CODE_HOME = prevCodeHome;
+    if (prevGeminiHome === undefined) delete process.env.GEMINI_HOME;
+    else process.env.GEMINI_HOME = prevGeminiHome;
+    if (prevOpencodeHome === undefined) delete process.env.OPENCODE_HOME;
+    else process.env.OPENCODE_HOME = prevOpencodeHome;
+    if (prevTokenTrackerGrokHome === undefined) delete process.env.TOKENTRACKER_GROK_HOME;
+    else process.env.TOKENTRACKER_GROK_HOME = prevTokenTrackerGrokHome;
+    if (prevGrokHome === undefined) delete process.env.GROK_HOME;
+    else process.env.GROK_HOME = prevGrokHome;
+    if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;
+    else process.env.TOKENTRACKER_DEVICE_TOKEN = prevToken;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("sync queues and consumes Grok hook signal after cursor persistence", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-sync-grok-signal-"));
+  const prevHome = process.env.HOME;
+  const prevCodexHome = process.env.CODEX_HOME;
+  const prevCodeHome = process.env.CODE_HOME;
+  const prevGeminiHome = process.env.GEMINI_HOME;
+  const prevOpencodeHome = process.env.OPENCODE_HOME;
+  const prevTokenTrackerGrokHome = process.env.TOKENTRACKER_GROK_HOME;
+  const prevGrokHome = process.env.GROK_HOME;
+  const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
+
+  try {
+    process.env.HOME = tmp;
+    process.env.CODEX_HOME = path.join(tmp, ".codex");
+    process.env.CODE_HOME = path.join(tmp, ".code");
+    process.env.GEMINI_HOME = path.join(tmp, ".gemini");
+    process.env.OPENCODE_HOME = path.join(tmp, ".opencode");
+    delete process.env.TOKENTRACKER_GROK_HOME;
+    process.env.GROK_HOME = path.join(tmp, ".grok");
+    delete process.env.TOKENTRACKER_DEVICE_TOKEN;
+
+    const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+    const signalPath = path.join(trackerDir, "tracker", "grok-last-session.json");
+    await fs.mkdir(path.dirname(signalPath), { recursive: true });
+    await fs.writeFile(
+      signalPath,
+      JSON.stringify({
+        source: "grok",
+        sessionId: "grok-session-hook",
+        model: "grok-build",
+        totalTokens: 99,
+        messageCount: 3,
+        lastActive: "2026-04-05T14:45:00.000Z",
+      }) + "\n",
+      "utf8",
+    );
+
+    await cmdSync(["--auto"]);
+
+    const rows = await readJsonl(path.join(trackerDir, "queue.jsonl"));
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].source, "grok");
+    assert.equal(rows[0].hour_start, "2026-04-05T14:30:00.000Z");
+    assert.equal(rows[0].total_tokens, 99);
+    assert.equal(rows[0].conversation_count, 3);
+    await assert.rejects(fs.stat(signalPath), /ENOENT/);
+
+    const cursors = JSON.parse(await fs.readFile(path.join(trackerDir, "cursors.json"), "utf8"));
+    assert.deepEqual(cursors.grok.seenSessions, ["grok-session-hook"]);
+  } finally {
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = prevCodexHome;
+    if (prevCodeHome === undefined) delete process.env.CODE_HOME;
+    else process.env.CODE_HOME = prevCodeHome;
+    if (prevGeminiHome === undefined) delete process.env.GEMINI_HOME;
+    else process.env.GEMINI_HOME = prevGeminiHome;
+    if (prevOpencodeHome === undefined) delete process.env.OPENCODE_HOME;
+    else process.env.OPENCODE_HOME = prevOpencodeHome;
+    if (prevTokenTrackerGrokHome === undefined) delete process.env.TOKENTRACKER_GROK_HOME;
+    else process.env.TOKENTRACKER_GROK_HOME = prevTokenTrackerGrokHome;
+    if (prevGrokHome === undefined) delete process.env.GROK_HOME;
+    else process.env.GROK_HOME = prevGrokHome;
+    if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;
+    else process.env.TOKENTRACKER_DEVICE_TOKEN = prevToken;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("sync --from-openclaw falls back to previous session totals when jsonl has zero usage", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-sync-openclaw-fallback-"));
   const prevHome = process.env.HOME;

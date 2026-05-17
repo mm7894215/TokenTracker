@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
-import { useInsforgeAuth } from "../contexts/InsforgeAuthContext.jsx";
+import { useInsforgeAuth } from "../contexts/InsforgeAuthContext";
 import { getCloudSyncEnabled, isLocalDashboardHost } from "../lib/cloud-sync-prefs";
 import { runCloudUsageSyncIfDue } from "../lib/cloud-sync";
 

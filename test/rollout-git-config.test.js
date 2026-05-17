@@ -4,7 +4,11 @@ const os = require("node:os");
 const path = require("node:path");
 const { test } = require("node:test");
 
-const { parseRolloutIncremental } = require("../src/lib/rollout");
+const {
+  parseRolloutIncremental,
+  canonicalizeProjectRef,
+  deriveProjectKeyFromRef,
+} = require("../src/lib/rollout");
 
 test("parseRolloutIncremental ignores non-remote url sections in git config", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-gitcfg-"));
@@ -97,4 +101,41 @@ test("parseRolloutIncremental resolves worktree gitdir via commondir config", as
 
   assert.ok(captured, "resolver should be called");
   assert.equal(captured.projectRef, "https://github.com/acme/repo");
+});
+
+test("deriveProjectKeyFromRef preserves full path for GitLab nested groups", () => {
+  // GitHub: classic owner/repo, unchanged
+  assert.equal(
+    deriveProjectKeyFromRef("https://github.com/acme/repo"),
+    "acme/repo",
+  );
+
+  // GitLab single-level group: behaves like GitHub
+  assert.equal(
+    deriveProjectKeyFromRef("https://gitlab.com/acme/repo"),
+    "acme/repo",
+  );
+
+  // GitLab nested group — bug from issue #69
+  assert.equal(
+    deriveProjectKeyFromRef("https://gitlab.com/acme/team/repo"),
+    "acme/team/repo",
+  );
+
+  // Deeper nesting (3+ subgroups)
+  assert.equal(
+    deriveProjectKeyFromRef("https://gitlab.example.com/org/dept/team/svc"),
+    "org/dept/team/svc",
+  );
+
+  // Single segment is rejected (need at least owner/repo)
+  assert.equal(deriveProjectKeyFromRef("https://gitlab.com/orphan"), null);
+  assert.equal(deriveProjectKeyFromRef(null), null);
+  assert.equal(deriveProjectKeyFromRef("not-a-url"), null);
+});
+
+test("canonicalizeProjectRef + deriveProjectKeyFromRef round-trip for SSH-style GitLab nested groups", () => {
+  const ref = canonicalizeProjectRef("git@gitlab.com:acme/team/repo.git");
+  assert.equal(ref, "https://gitlab.com/acme/team/repo");
+  assert.equal(deriveProjectKeyFromRef(ref), "acme/team/repo");
 });

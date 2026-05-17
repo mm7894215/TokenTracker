@@ -15,8 +15,8 @@ struct SummaryWidget: Widget {
             SummaryWidgetView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
         }
-        .configurationDisplayName("Usage")
-        .description("Today's tokens at a glance, with trend.")
+        .configurationDisplayName(WidgetStrings.usageName)
+        .description(WidgetStrings.usageDescription)
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge])
     }
 }
@@ -45,7 +45,7 @@ private struct SmallView: View {
         let hasData = snap.today.tokens > 0
 
         VStack(alignment: .leading, spacing: 0) {
-            Text("TODAY")
+            Text(WidgetStrings.today)
                 .font(.system(size: 10, weight: .semibold))
                 .tracking(0.6)
                 .foregroundColor(.secondary)
@@ -65,7 +65,7 @@ private struct SmallView: View {
 
             Spacer(minLength: 0)
 
-            Text("vs. yesterday")
+            Text(WidgetStrings.vsYesterday)
                 .font(.system(size: 10))
                 .foregroundColor(.secondary)
         }
@@ -82,13 +82,13 @@ private struct MediumView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
                 HeroBlock(
-                    label: "TODAY",
+                    label: WidgetStrings.today,
                     value: WidgetFormat.compact(snap.today.tokens),
                     subText: todaySubText(snap: snap)
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
                 HeroBlock(
-                    label: "7 DAYS",
+                    label: WidgetStrings.sevenDays,
                     value: WidgetFormat.compact(snap.last7d.tokens),
                     subText: costSubText(snap.last7d.costUsd)
                 )
@@ -113,21 +113,21 @@ private struct LargeView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
                 HeroBlock(
-                    label: "TODAY",
+                    label: WidgetStrings.today,
                     value: WidgetFormat.compact(snap.today.tokens),
                     subText: todaySubText(snap: snap),
                     size: .compact
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
                 HeroBlock(
-                    label: "7 DAYS",
+                    label: WidgetStrings.sevenDays,
                     value: WidgetFormat.compact(snap.last7d.tokens),
                     subText: costSubText(snap.last7d.costUsd),
                     size: .compact
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
                 HeroBlock(
-                    label: "30 DAYS",
+                    label: WidgetStrings.thirtyDays,
                     value: WidgetFormat.compact(snap.last30d.tokens),
                     subText: costSubText(snap.last30d.costUsd),
                     size: .compact

@@ -1,19 +1,35 @@
 import { getInsforgeAnonKey, getInsforgeRemoteUrl } from "./insforge-config";
 import {
+  clearCloudDeviceSession,
   getLastCloudSyncTs,
   getStoredDeviceSession,
   setLastCloudSyncTs,
   setStoredDeviceSession,
   type CloudDeviceSession,
 } from "./cloud-sync-prefs";
+import { getLocalApiAuthHeaders } from "./local-api-auth";
 
 const MIN_SYNC_INTERVAL_MS = 5 * 60 * 1000;
+export const DEVICE_TOKEN_ROTATE_AFTER_MS = 12 * 60 * 60 * 1000;
 
 function isRemoteHttpBase(baseUrl: string): boolean {
   return typeof baseUrl === "string" && /^https?:\/\//i.test(baseUrl.trim());
 }
 
-async function triggerLeaderboardRefresh(accessToken: string): Promise<void> {
+export function shouldRotateStoredDeviceSession(
+  session: CloudDeviceSession | null,
+  nowMs = Date.now(),
+): boolean {
+  if (!session?.token || !session?.deviceId || !session?.issuedAt) return true;
+  const issuedAtMs = Date.parse(session.issuedAt);
+  if (!Number.isFinite(issuedAtMs)) return true;
+  return issuedAtMs + DEVICE_TOKEN_ROTATE_AFTER_MS <= nowMs;
+}
+
+async function triggerLeaderboardRefresh(
+  accessToken: string,
+  source: "cloud-sync-auto" | "cloud-sync-now",
+): Promise<void> {
   const baseUrl = getInsforgeRemoteUrl();
   if (!isRemoteHttpBase(baseUrl) || !accessToken) return;
   const root = baseUrl.replace(/\/$/, "");
@@ -24,11 +40,15 @@ async function triggerLeaderboardRefresh(accessToken: string): Promise<void> {
     Authorization: `Bearer ${accessToken}`,
   };
   if (anon) headers.apikey = anon;
+  // Per-sync refresh is week-only. Month/Total scan tens of thousands of
+  // hourly rows each call and burn InsForge Egress (~5 MB per full refresh
+  // every 5 min per active user blew through the 5 GB plan). Server-side
+  // schedules own the slower-moving month/total snapshots.
   try {
     await fetch(`${root}/functions/tokentracker-leaderboard-refresh`, {
       method: "POST",
       headers,
-      body: "{}",
+      body: JSON.stringify({ period: "week", source }),
     });
   } catch { /* best effort */ }
 }
@@ -88,10 +108,11 @@ export async function postLocalUsageSync(options: {
   const body: Record<string, string> = { deviceToken };
   const bu = insforgeBaseUrl || getInsforgeRemoteUrl();
   if (isRemoteHttpBase(bu)) body.insforgeBaseUrl = bu.trim();
+  const authHeaders = await getLocalApiAuthHeaders();
 
   const res = await fetch("/functions/tokentracker-local-sync", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers: { "Content-Type": "application/json", Accept: "application/json", ...authHeaders },
     body: JSON.stringify(body),
   });
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
@@ -102,6 +123,49 @@ export async function postLocalUsageSync(options: {
   return data as { ok?: boolean; code?: number; stdout?: string; stderr?: string };
 }
 
+async function resolveCloudDeviceSession(getAccessToken: () => Promise<string | null>): Promise<CloudDeviceSession | null> {
+  const accessToken = await getAccessToken();
+  if (!accessToken) return null;
+
+  const current = getStoredDeviceSession();
+  if (current && !shouldRotateStoredDeviceSession(current)) {
+    return current;
+  }
+
+  const issued = await issueDeviceTokenForCloud(accessToken);
+  if (!issued) return null;
+  setStoredDeviceSession(issued);
+  return issued;
+}
+
+async function syncCloudUsageWithRecovery(getAccessToken: () => Promise<string | null>): Promise<string | null> {
+  let accessToken = await getAccessToken();
+  if (!accessToken) return null;
+
+  let session = await resolveCloudDeviceSession(async () => accessToken);
+  if (!session) return accessToken;
+
+  try {
+    await postLocalUsageSync({
+      deviceToken: session.token,
+      insforgeBaseUrl: getInsforgeRemoteUrl(),
+    });
+    return accessToken;
+  } catch (error) {
+    if (!getStoredDeviceSession()) throw error;
+    clearCloudDeviceSession();
+    accessToken = await getAccessToken();
+    if (!accessToken) throw error;
+    session = await resolveCloudDeviceSession(async () => accessToken);
+    if (!session) throw error;
+    await postLocalUsageSync({
+      deviceToken: session.token,
+      insforgeBaseUrl: getInsforgeRemoteUrl(),
+    });
+    return accessToken;
+  }
+}
+
 /**
  * 若开启同步且具备条件：签发（或复用）device token 并运行本地 sync，将 queue 上传到云端。
  */
@@ -109,42 +173,16 @@ export async function runCloudUsageSyncIfDue(getAccessToken: () => Promise<strin
   const last = getLastCloudSyncTs();
   if (Date.now() - last < MIN_SYNC_INTERVAL_MS) return;
 
-  const accessToken = await getAccessToken();
+  const accessToken = await syncCloudUsageWithRecovery(getAccessToken);
   if (!accessToken) return;
-
-  let session = getStoredDeviceSession();
-  if (!session) {
-    const issued = await issueDeviceTokenForCloud(accessToken);
-    if (!issued) return;
-    setStoredDeviceSession(issued);
-    session = issued;
-  }
-
-  await postLocalUsageSync({
-    deviceToken: session.token,
-    insforgeBaseUrl: getInsforgeRemoteUrl(),
-  });
   setLastCloudSyncTs(Date.now());
-  await triggerLeaderboardRefresh(accessToken);
+  await triggerLeaderboardRefresh(accessToken, "cloud-sync-auto");
 }
 
 /** 用户打开「同步到云端」后立即尝试一次（忽略节流） */
 export async function runCloudUsageSyncNow(getAccessToken: () => Promise<string | null>): Promise<void> {
-  const accessToken = await getAccessToken();
+  const accessToken = await syncCloudUsageWithRecovery(getAccessToken);
   if (!accessToken) return;
-
-  let session = getStoredDeviceSession();
-  if (!session) {
-    const issued = await issueDeviceTokenForCloud(accessToken);
-    if (!issued) return;
-    setStoredDeviceSession(issued);
-    session = issued;
-  }
-
-  await postLocalUsageSync({
-    deviceToken: session.token,
-    insforgeBaseUrl: getInsforgeRemoteUrl(),
-  });
   setLastCloudSyncTs(Date.now());
-  await triggerLeaderboardRefresh(accessToken);
+  await triggerLeaderboardRefresh(accessToken, "cloud-sync-now");
 }

@@ -8,7 +8,7 @@ import { getLeaderboardBaseUrl } from "../lib/config";
 import { isMockEnabled } from "../lib/mock-data";
 import { getLeaderboardProfile } from "../lib/api";
 import { InsforgeUserHeaderControls } from "../components/InsforgeUserHeaderControls.jsx";
-import { HeaderGithubStar } from "../ui/openai/components/HeaderGithubStar.jsx";
+import { HeaderGithubStar } from "../ui/components/HeaderGithubStar.jsx";
 import { LeaderboardAvatar } from "../components/LeaderboardAvatar.jsx";
 import { LeaderboardProviderColumnHeader } from "../components/LeaderboardProviderColumnHeader.jsx";
 import { useTheme } from "../hooks/useTheme.js";
@@ -77,16 +77,19 @@ export function LeaderboardProfilePage({
   useEffect(() => {
     if (!leaderboardBaseUrl && !mockEnabled) return;
     if (!userId) return;
-    if (!mockEnabled && (!authTokenAllowed || !authTokenReady)) return;
+    // Public profiles are visible to anonymous visitors: the backend
+    // decides per-target via leaderboard_public. Only wait on the auth
+    // token if we actually have an authenticated session — otherwise an
+    // anonymous click on a shared profile link would stare at an empty
+    // state forever.
+    if (authTokenAllowed && !authTokenReady) return;
     let active = true;
     setProfileState((prev) => ({ ...prev, loading: true, error: null }));
     (async () => {
-      const token = await resolveAuthAccessTokenWithRetry(effectiveAuthToken);
+      const token = authTokenAllowed
+        ? await resolveAuthAccessTokenWithRetry(effectiveAuthToken)
+        : null;
       if (!active) return;
-      if (!token) {
-        setProfileState({ loading: false, error: null, data: null });
-        return;
-      }
       const data = await getLeaderboardProfile({
         baseUrl: leaderboardBaseUrl,
         accessToken: token,
@@ -97,6 +100,14 @@ export function LeaderboardProfilePage({
       setProfileState({ loading: false, error: null, data });
     })().catch((err) => {
       if (!active) return;
+      // 404 means "target hasn't opted in to a public profile" — treat it
+      // as an empty state, not a red error. We intentionally don't leak the
+      // difference between "private" and "never ranked" to anonymous
+      // visitors; both show the same neutral copy.
+      if (err?.status === 404) {
+        setProfileState({ loading: false, error: null, data: null });
+        return;
+      }
       setProfileState({ loading: false, error: normalizeProfileError(err), data: null });
     });
     return () => {

@@ -3,7 +3,7 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 
 const { restoreCodexNotify, restoreEveryCodeNotify } = require("../lib/codex-config");
-const { removeClaudeHook, buildClaudeHookCommand } = require("../lib/claude-config");
+const { removeClaudeHook, buildClaudeHookCommand, buildHookCommand } = require("../lib/claude-config");
 const {
   resolveGeminiConfigDir,
   resolveGeminiSettingsPath,
@@ -13,6 +13,7 @@ const {
 const { resolveOpencodeConfigDir, removeOpencodePlugin } = require("../lib/opencode-config");
 const { removeOpenclawHookConfig } = require("../lib/openclaw-hook");
 const { removeOpenclawSessionPluginConfig } = require("../lib/openclaw-session-plugin");
+const { removeGrokHook } = require("../lib/grok-hook");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
 
 async function cmdUninstall(argv) {
@@ -24,6 +25,8 @@ async function cmdUninstall(argv) {
   const codeHome = process.env.CODE_HOME || path.join(home, ".code");
   const codeConfigPath = path.join(codeHome, "config.toml");
   const claudeSettingsPath = path.join(home, ".claude", "settings.json");
+  const codebuddyDir = process.env.CODEBUDDY_HOME || path.join(home, ".codebuddy");
+  const codebuddySettingsPath = path.join(codebuddyDir, "settings.json");
   const geminiConfigDir = resolveGeminiConfigDir({ home, env: process.env });
   const geminiSettingsPath = resolveGeminiSettingsPath({ configDir: geminiConfigDir });
   const opencodeConfigDir = resolveOpencodeConfigDir({ home, env: process.env });
@@ -33,11 +36,13 @@ async function cmdUninstall(argv) {
   const codexNotifyCmd = ["/usr/bin/env", "node", notifyPath];
   const codeNotifyCmd = ["/usr/bin/env", "node", notifyPath, "--source=every-code"];
   const claudeHookCommand = buildClaudeHookCommand(notifyPath);
+  const codebuddyHookCommand = buildHookCommand(notifyPath, "codebuddy");
   const geminiHookCommand = buildGeminiHookCommand(notifyPath);
 
   const codexConfigExists = await isFile(codexConfigPath);
   const codeConfigExists = await isFile(codeConfigPath);
   const claudeConfigExists = await isFile(claudeSettingsPath);
+  const codebuddyConfigExists = await isFile(codebuddySettingsPath);
   const geminiConfigExists = await isDir(geminiConfigDir);
   const opencodeConfigExists = await isDir(opencodeConfigDir);
   const codexRestore = codexConfigExists
@@ -57,6 +62,12 @@ async function cmdUninstall(argv) {
   const claudeRemove = claudeConfigExists
     ? await removeClaudeHook({ settingsPath: claudeSettingsPath, hookCommand: claudeHookCommand })
     : { removed: false, skippedReason: "config-missing" };
+  const codebuddyRemove = codebuddyConfigExists
+    ? await removeClaudeHook({
+        settingsPath: codebuddySettingsPath,
+        hookCommand: codebuddyHookCommand,
+      })
+    : { removed: false, skippedReason: "config-missing" };
   const geminiRemove = geminiConfigExists
     ? await removeGeminiHook({ settingsPath: geminiSettingsPath, hookCommand: geminiHookCommand })
     : { removed: false, skippedReason: "config-missing" };
@@ -69,6 +80,7 @@ async function cmdUninstall(argv) {
     env: process.env,
   });
   const openclawHookRemove = await removeOpenclawHookConfig({ home, trackerDir, env: process.env });
+  const grokHookRemove = await removeGrokHook({ home, trackerDir, env: process.env });
 
   // Remove installed notify handler.
   await fs.unlink(notifyPath).catch(() => {});
@@ -104,6 +116,13 @@ async function cmdUninstall(argv) {
             ? "- Claude hooks: no change"
             : "- Claude hooks: skipped"
         : "- Claude hooks: skipped (settings.json not found)",
+      codebuddyConfigExists
+        ? codebuddyRemove?.removed
+          ? `- CodeBuddy hooks removed: ${codebuddySettingsPath}`
+          : codebuddyRemove?.skippedReason === "hook-missing"
+            ? "- CodeBuddy hooks: no change"
+            : "- CodeBuddy hooks: skipped"
+        : "- CodeBuddy hooks: skipped (settings.json not found)",
       geminiConfigExists
         ? geminiRemove?.removed
           ? `- Gemini hooks removed: ${geminiSettingsPath}`
@@ -130,6 +149,9 @@ async function cmdUninstall(argv) {
         : openclawHookRemove?.skippedReason === "openclaw-config-missing"
           ? "- OpenClaw hook (legacy): skipped (openclaw config not found)"
           : "- OpenClaw hook (legacy): no change",
+      grokHookRemove?.removed
+        ? `- Grok Build hook removed: ${grokHookRemove.hookPath}`
+        : "- Grok Build hook: no change",
       opts.purge ? `- Purged: ${path.join(home, ".tokentracker")}` : "- Purge: skipped (use --purge)",
       "",
     ].join("\n"),

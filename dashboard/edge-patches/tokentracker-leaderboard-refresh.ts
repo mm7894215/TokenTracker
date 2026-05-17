@@ -18,6 +18,10 @@ function json(data: unknown, status = 200) {
   });
 }
 
+function logRefreshEvent(event: Record<string, unknown>) {
+  console.log(JSON.stringify({ scope: "leaderboard-refresh", ...event }));
+}
+
 type Period = "week" | "month" | "total";
 const ALL_PERIODS: Period[] = ["week", "month", "total"];
 
@@ -56,6 +60,8 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   "gpt-5.4": { input: 2.5, output: 15, cache_read: 0.25 },
   "gpt-5.4-mini": { input: 0.75, output: 4.5, cache_read: 0.075 },
   "gpt-5.4-medium": { input: 1.5, output: 10, cache_read: 0.15 },
+  "gpt-5.5": { input: 5, output: 30, cache_read: 0.5 },
+  "gpt-5-mini": { input: 0.25, output: 2, cache_read: 0.025 },
   "o3": { input: 2, output: 8, cache_read: 0.5 },
   // ── Google Gemini ──
   "gemini-2.5-pro": { input: 1.25, output: 10, cache_read: 0.125 },
@@ -74,6 +80,34 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   "kimi-for-coding": { input: 0.6, output: 2, cache_read: 0.15 },
   "kimi-k2.5": { input: 0.6, output: 2, cache_read: 0.15 },
   "kimi-k2.5-free": { input: 0, output: 0, cache_read: 0 },
+  // ── MiniMax / DeepSeek ──
+  "MiniMax-M2.7": { input: 0.3, output: 1.2, cache_read: 0.06, cache_write: 0.375 },
+  "MiniMax-M2.7-highspeed": { input: 0.6, output: 2.4, cache_read: 0.06, cache_write: 0.375 },
+  "deepseek-v4-flash": { input: 0.14, output: 0.28, cache_read: 0.0028, cache_write: 0.14 },
+  "deepseek-v4-pro": { input: 0.435, output: 0.87, cache_read: 0.003625, cache_write: 0.435 },
+  "deepseek-chat": { input: 0.14, output: 0.28, cache_read: 0.0028, cache_write: 0.14 },
+  "deepseek-reasoner": { input: 0.14, output: 0.28, cache_read: 0.0028, cache_write: 0.14 },
+  // ── xAI Grok (mirrored from src/lib/pricing/curated-overrides.json;
+  //    Grok parser emits cache_creation_input_tokens = 0, so cache_write is
+  //    omitted — same as the canonical table). ──
+  "grok-build": { input: 1.25, output: 2.50, cache_read: 0.20 },
+  "grok-4-0709": { input: 3.00, output: 15.00, cache_read: 0.75 },
+  "grok-4": { input: 3.00, output: 15.00, cache_read: 0.75 },
+  "grok-4-latest": { input: 3.00, output: 15.00, cache_read: 0.75 },
+  "grok-4-fast": { input: 0.20, output: 0.50, cache_read: 0.05 },
+  "grok-4-fast-reasoning": { input: 0.20, output: 0.50, cache_read: 0.05 },
+  "grok-4-fast-non-reasoning": { input: 0.20, output: 0.50, cache_read: 0.05 },
+  "grok-4-1-fast-non-reasoning": { input: 0.20, output: 0.50, cache_read: 0.05 },
+  // ── AWS Kiro (mirrored byte-for-byte from src/lib/local-api.js to
+  //    prevent cloud/local cost drift — Kiro routes through Bedrock,
+  //    most commonly claude-sonnet-4). ──
+  "kiro-agent": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
+  "kiro-cli-agent": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
+  // ── Tencent CodeBuddy (hy3-preview family). Mirrored from
+  //    src/lib/local-api.js — Tencent has not published $/MTok rates so
+  //    these stay at 0. TODO: confirm Tencent hy3 pricing. ──
+  "hy3-preview-agent": { input: 0, output: 0, cache_read: 0 },
+  "hy3-preview": { input: 0, output: 0, cache_read: 0 },
   // ── Misc / Free ──
   "glm-4.7-free": { input: 0, output: 0, cache_read: 0 },
   "nemotron-3-super-free": { input: 0, output: 0, cache_read: 0 },
@@ -92,13 +126,33 @@ function getModelPricing(model: string) {
   if (lower.includes("haiku")) return MODEL_PRICING["claude-haiku-4-5-20251001"];
   if (lower.includes("sonnet")) return MODEL_PRICING["claude-sonnet-4-6"];
   if (lower.includes("gpt-5.4")) return MODEL_PRICING["gpt-5.4"];
+  if (lower.includes("gpt-5.5")) return MODEL_PRICING["gpt-5.5"];
+  if (lower.includes("gpt-5-mini")) return MODEL_PRICING["gpt-5-mini"];
   if (lower.includes("gpt-5.3")) return MODEL_PRICING["gpt-5.3-codex"];
   if (lower.includes("gpt-5.2")) return MODEL_PRICING["gpt-5.2"];
   if (lower.includes("gpt-5.1")) return MODEL_PRICING["gpt-5.1-codex"];
   if (lower.includes("gpt-5")) return MODEL_PRICING["gpt-5"];
   if (lower.includes("gemini-3")) return MODEL_PRICING["gemini-3-flash-preview"];
   if (lower.includes("gemini-2.5")) return MODEL_PRICING["gemini-2.5-pro"];
+  if (lower.includes("minimax-m2.7-highspeed")) return MODEL_PRICING["MiniMax-M2.7-highspeed"];
+  if (lower.includes("minimax-m2.7")) return MODEL_PRICING["MiniMax-M2.7"];
+  if (lower.includes("deepseek-v4-flash")) return MODEL_PRICING["deepseek-v4-flash"];
+  if (lower.includes("deepseek-v4-pro")) return MODEL_PRICING["deepseek-v4-pro"];
+  if (lower.includes("deepseek-reasoner")) return MODEL_PRICING["deepseek-reasoner"];
+  if (lower.includes("deepseek-chat")) return MODEL_PRICING["deepseek-chat"];
+  if (lower.includes("grok-build")) return MODEL_PRICING["grok-build"];
+  if (lower.includes("grok-4-fast")) return MODEL_PRICING["grok-4-fast"];
+  // grok-4-1-fast-* must precede the generic grok-4 matcher. Cloud rows may
+  // carry a provider prefix or `-latest` suffix (e.g. xai/grok-4-1-fast-
+  // non-reasoning-latest), and the substring "grok-4-fast" does NOT match
+  // "grok-4-1-fast" (the "-1-" separates them). Without this specific match
+  // these rows fall through to grok-4 and get billed at $3/$15 MTok instead
+  // of the $0.20/$0.50 MTok fast-tier rate (15x / 30x overestimate).
+  if (lower.includes("grok-4-1-fast")) return MODEL_PRICING["grok-4-1-fast-non-reasoning"];
+  if (lower.includes("grok-4")) return MODEL_PRICING["grok-4"];
   if (lower.includes("kimi")) return MODEL_PRICING["kimi-k2.5"];
+  if (lower.includes("kiro")) return MODEL_PRICING["kiro-cli-agent"];
+  if (lower.includes("hy3")) return MODEL_PRICING["hy3-preview-agent"];
   if (lower.includes("composer")) return MODEL_PRICING["composer-1"];
   if (lower === "auto") return MODEL_PRICING["composer-1"];
   return ZERO_PRICING;
@@ -106,12 +160,21 @@ function getModelPricing(model: string) {
 
 function computeRowCost(row: HourlyRow): number {
   const p = getModelPricing(row.model);
+  // For Codex-family rollouts, `output_tokens` already includes any reasoning
+  // tokens (OpenAI API convention), so `reasoning_output_tokens * output_rate`
+  // would double-charge the reasoning slice. Kept explicit for other sources
+  // where reasoning is NOT guaranteed to be folded into output_tokens.
+  // Must stay in lockstep with local-api.js:computeRowCost.
+  const reasoningIncludedInOutput = row.source === "codex" || row.source === "every-code";
+  const reasoningCost = reasoningIncludedInOutput
+    ? 0
+    : (row.reasoning_output_tokens || 0) * (p.output || 0);
   return (
     ((row.input_tokens || 0) * (p.input || 0) +
       (row.output_tokens || 0) * (p.output || 0) +
       (row.cached_input_tokens || 0) * (p.cache_read || 0) +
       (row.cache_creation_input_tokens || 0) * (p.cache_write || 0) +
-      (row.reasoning_output_tokens || 0) * (p.output || 0)) /
+      reasoningCost) /
     1_000_000
   );
 }
@@ -124,6 +187,10 @@ const SOURCE_COLUMN_MAP: Record<string, string> = {
   cursor: "cursor_tokens",
   opencode: "opencode_tokens",
   openclaw: "openclaw_tokens",
+  hermes: "hermes_tokens",
+  kiro: "kiro_tokens",
+  copilot: "copilot_tokens",
+  kimi: "kimi_tokens",
 };
 
 interface DateRange {
@@ -148,14 +215,17 @@ function computeDateRange(period: Period): DateRange {
       .slice(0, 10);
     return { from_day, to_day };
   }
-  // total
-  return { from_day: "2024-01-01", to_day: now.toISOString().slice(0, 10) };
+  // total — full lifetime. `from_day` is a static epoch sentinel so snapshot
+  // rows always have identical (period, from_day, to_day) and upsert cleanly.
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  return { from_day: "1970-01-01", to_day: end.toISOString().slice(0, 10) };
 }
 
 interface HourlyRow {
   user_id: string;
   source: string;
   model: string;
+  hour_start: string;
   total_tokens: number;
   input_tokens: number;
   output_tokens: number;
@@ -171,6 +241,10 @@ interface UserAgg {
   cursor_tokens: number;
   opencode_tokens: number;
   openclaw_tokens: number;
+  hermes_tokens: number;
+  kiro_tokens: number;
+  copilot_tokens: number;
+  kimi_tokens: number;
   other_tokens: number;
   total_tokens: number;
   estimated_cost_usd: number;
@@ -184,6 +258,10 @@ function newUserAgg(): UserAgg {
     cursor_tokens: 0,
     opencode_tokens: 0,
     openclaw_tokens: 0,
+    hermes_tokens: 0,
+    kiro_tokens: 0,
+    copilot_tokens: 0,
+    kimi_tokens: 0,
     other_tokens: 0,
     total_tokens: 0,
     estimated_cost_usd: 0,
@@ -194,6 +272,7 @@ export default async function (req: Request): Promise<Response> {
   if (req.method === "OPTIONS")
     return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  const requestStartedAt = Date.now();
 
   const baseUrl = Deno.env.get("INSFORGE_BASE_URL")!;
   const incomingApiKey =
@@ -212,6 +291,10 @@ export default async function (req: Request): Promise<Response> {
 
   // Parse requested periods
   const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+  const requestSource =
+    typeof body.source === "string" && body.source.trim().length > 0
+      ? body.source.trim().slice(0, 80)
+      : "unknown";
   let periods: Period[];
   if (body.period && ALL_PERIODS.includes(body.period as Period)) {
     periods = [body.period as Period];
@@ -220,8 +303,10 @@ export default async function (req: Request): Promise<Response> {
   }
 
   const results: Record<string, { upserted: number; skipped?: boolean }> = {};
+  const requestId = crypto.randomUUID();
 
   for (const period of periods) {
+    const periodStartedAt = Date.now();
     const { from_day, to_day } = computeDateRange(period);
 
     // --- Rate limit: skip if generated_at within last 30s ---
@@ -239,6 +324,18 @@ export default async function (req: Request): Promise<Response> {
       const elapsed = Date.now() - new Date(recentSnap.generated_at as string).getTime();
       if (elapsed < 30_000) {
         results[period] = { upserted: 0, skipped: true };
+        logRefreshEvent({
+          event: "period_skipped",
+          request_id: requestId,
+          source: requestSource,
+          period,
+          from_day,
+          to_day,
+          upserted: 0,
+          skipped: true,
+          duration_ms: Date.now() - periodStartedAt,
+          recent_snapshot_age_ms: elapsed,
+        });
         continue;
       }
     }
@@ -250,60 +347,129 @@ export default async function (req: Request): Promise<Response> {
     nextDay.setUTCDate(nextDay.getUTCDate() + 1);
     const rangeEnd = nextDay.toISOString();
 
-    // Paginate through all hourly rows (1000 per page)
-    const aggMap = new Map<string, UserAgg>();
+    // Paginate through all hourly rows (1000 per page).
+    // Dedupe by (user_id, source, model, hour_start) keeping the MAX
+    // total_tokens across devices — the same logical bucket can be recorded
+    // under multiple device_id rows (cloud-sync issues a new device per
+    // session; cumulative queue replays upsert under whichever device ran
+    // the sync). SUM across devices would double-count the same usage.
+    const bucketMap = new Map<string, HourlyRow>();
     let offset = 0;
     const PAGE_SIZE = 1000;
     let hasMore = true;
+    let scannedRows = 0;
+    let pageCount = 0;
 
     while (hasMore) {
       const { data: rows, error } = await client.database
         .from("tokentracker_hourly")
-        .select("user_id, source, model, total_tokens, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens")
+        .select("user_id, source, model, hour_start, total_tokens, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens")
         .gte("hour_start", rangeStart)
         .lt("hour_start", rangeEnd)
         .order("hour_start", { ascending: true })
         .range(offset, offset + PAGE_SIZE - 1);
 
-      if (error) return json({ error: error.message }, 500);
+      if (error) {
+        logRefreshEvent({
+          event: "period_error",
+          request_id: requestId,
+          source: requestSource,
+          period,
+          from_day,
+          to_day,
+          stage: "scan_hourly",
+          error: error.message,
+          scanned_rows: scannedRows,
+          pages_fetched: pageCount,
+          duration_ms: Date.now() - periodStartedAt,
+        });
+        return json({ error: error.message }, 500);
+      }
       if (!rows || rows.length === 0) break;
+      scannedRows += rows.length;
+      pageCount += 1;
 
       for (const row of rows as HourlyRow[]) {
-        let agg = aggMap.get(row.user_id);
-        if (!agg) {
-          agg = newUserAgg();
-          aggMap.set(row.user_id, agg);
+        const key = `${row.user_id}|${row.source}|${row.model}|${row.hour_start}`;
+        const existing = bucketMap.get(key);
+        const incoming = Number(row.total_tokens) || 0;
+        if (!existing || incoming > (Number(existing.total_tokens) || 0)) {
+          bucketMap.set(key, row);
         }
-        const tokens = Number(row.total_tokens) || 0;
-        const col = SOURCE_COLUMN_MAP[row.source] ?? "other_tokens";
-        (agg as unknown as Record<string, number>)[col] += tokens;
-        agg.total_tokens += tokens;
-        agg.estimated_cost_usd += computeRowCost(row);
       }
 
       hasMore = rows.length === PAGE_SIZE;
       offset += PAGE_SIZE;
     }
 
+    const aggMap = new Map<string, UserAgg>();
+    for (const row of bucketMap.values()) {
+      let agg = aggMap.get(row.user_id);
+      if (!agg) {
+        agg = newUserAgg();
+        aggMap.set(row.user_id, agg);
+      }
+      const tokens = Number(row.total_tokens) || 0;
+      const col = SOURCE_COLUMN_MAP[row.source] ?? "other_tokens";
+      (agg as unknown as Record<string, number>)[col] += tokens;
+      agg.total_tokens += tokens;
+      agg.estimated_cost_usd += computeRowCost(row);
+    }
+
     if (aggMap.size === 0) {
       results[period] = { upserted: 0 };
+      logRefreshEvent({
+        event: "period_completed",
+        request_id: requestId,
+        source: requestSource,
+        period,
+        from_day,
+        to_day,
+        scanned_rows: scannedRows,
+        pages_fetched: pageCount,
+        deduped_buckets: bucketMap.size,
+        aggregated_users: 0,
+        upserted: 0,
+        skipped: false,
+        duration_ms: Date.now() - periodStartedAt,
+      });
       continue;
     }
 
     // --- Fetch user settings for public/anonymous flags ---
     const userIds = Array.from(aggMap.keys());
-    const settingsMap = new Map<string, { leaderboard_public: boolean; leaderboard_anonymous: boolean }>();
+    type UserSettingsRow = {
+      user_id: string;
+      leaderboard_public: boolean;
+      leaderboard_anonymous: boolean;
+      github_url: string | null;
+      show_github_url: boolean;
+    };
+    const settingsMap = new Map<string, UserSettingsRow>();
 
-    // Fetch in batches of 100 (IN filter limit)
-    for (let i = 0; i < userIds.length; i += 100) {
-      const batch = userIds.slice(i, i + 100);
-      const { data: settings } = await client.database
+    // Fetch in batches of 25. PostgREST .in() encodes user_ids into the URL
+    // (~42 bytes per UUID after URL-encoding); a batch of 100 produces a
+    // ~4 KB URL that the InsForge gateway silently truncates, returning
+    // {data: null, error}. The bug surfaced once the all-time leaderboard
+    // crossed ~80 users and produced an entirely Anonymous snapshot. 25
+    // keeps the URL well under 1.5 KB regardless of user count.
+    for (let i = 0; i < userIds.length; i += 25) {
+      const batch = userIds.slice(i, i + 25);
+      const { data: settings, error: settingsErr } = await client.database
         .from("tokentracker_user_settings")
-        .select("user_id, leaderboard_public, leaderboard_anonymous")
+        .select("user_id, leaderboard_public, leaderboard_anonymous, github_url, show_github_url")
         .in("user_id", batch);
 
+      if (settingsErr) {
+        logRefreshEvent({
+          event: "user_settings_fetch_error",
+          period,
+          batch_size: batch.length,
+          error: settingsErr.message,
+        });
+      }
       if (settings) {
-        for (const s of settings as { user_id: string; leaderboard_public: boolean; leaderboard_anonymous: boolean }[]) {
+        for (const s of settings as UserSettingsRow[]) {
           settingsMap.set(s.user_id, s);
         }
       }
@@ -311,13 +477,21 @@ export default async function (req: Request): Promise<Response> {
 
     // --- Fetch display_name/avatar_url from auth.users ---
     const userProfiles = new Map<string, { display_name: string | null; avatar_url: string | null }>();
-    for (let i = 0; i < userIds.length; i += 100) {
-      const batch = userIds.slice(i, i + 100);
-      const { data: users } = await client.database
+    for (let i = 0; i < userIds.length; i += 25) {
+      const batch = userIds.slice(i, i + 25);
+      const { data: users, error: profilesErr } = await client.database
         .from("tokentracker_user_profiles")
         .select("user_id, display_name, avatar_url")
         .in("user_id", batch);
 
+      if (profilesErr) {
+        logRefreshEvent({
+          event: "user_profiles_fetch_error",
+          period,
+          batch_size: batch.length,
+          error: profilesErr.message,
+        });
+      }
       if (users) {
         for (const u of users as { user_id: string; display_name: string | null; avatar_url: string | null }[]) {
           userProfiles.set(u.user_id, { display_name: u.display_name, avatar_url: u.avatar_url });
@@ -326,15 +500,23 @@ export default async function (req: Request): Promise<Response> {
     }
 
     // Fallback: existing snapshots for users not in auth.users
-    for (let i = 0; i < userIds.length; i += 100) {
-      if ([...userIds.slice(i, i + 100)].every(id => userProfiles.has(id))) continue;
-      const missing = userIds.slice(i, i + 100).filter(id => !userProfiles.has(id));
+    for (let i = 0; i < userIds.length; i += 25) {
+      if ([...userIds.slice(i, i + 25)].every(id => userProfiles.has(id))) continue;
+      const missing = userIds.slice(i, i + 25).filter(id => !userProfiles.has(id));
       if (missing.length === 0) continue;
-      const { data: existing } = await client.database
+      const { data: existing, error: fallbackErr } = await client.database
         .from("tokentracker_leaderboard_snapshots")
         .select("user_id, display_name, avatar_url")
         .in("user_id", missing)
         .order("generated_at", { ascending: false });
+      if (fallbackErr) {
+        logRefreshEvent({
+          event: "snapshot_fallback_fetch_error",
+          period,
+          batch_size: missing.length,
+          error: fallbackErr.message,
+        });
+      }
       if (existing) {
         for (const e of existing as { user_id: string; display_name: string | null; avatar_url: string | null }[]) {
           if (!userProfiles.has(e.user_id)) {
@@ -355,6 +537,12 @@ export default async function (req: Request): Promise<Response> {
       const profile = userProfiles.get(userId);
       const displayName = isAnonymous ? "Anonymous" : (profile?.display_name ?? "Anonymous");
       const avatarUrl = isAnonymous ? null : (profile?.avatar_url ?? null);
+      // Only surface github_url on the public snapshot when the user opted in
+      // AND isn't in anonymous mode — anonymous takes precedence over any
+      // identifying link.
+      const githubUrl = !isAnonymous && settings?.show_github_url && settings?.github_url
+        ? settings.github_url
+        : null;
 
       return {
         user_id: userId,
@@ -368,11 +556,16 @@ export default async function (req: Request): Promise<Response> {
         cursor_tokens: agg.cursor_tokens,
         opencode_tokens: agg.opencode_tokens,
         openclaw_tokens: agg.openclaw_tokens,
+        hermes_tokens: agg.hermes_tokens,
+        kiro_tokens: agg.kiro_tokens,
+        copilot_tokens: agg.copilot_tokens,
+        kimi_tokens: agg.kimi_tokens,
         other_tokens: agg.other_tokens,
         total_tokens: agg.total_tokens,
         estimated_cost_usd: Math.round(agg.estimated_cost_usd * 100) / 100,
         display_name: displayName,
         avatar_url: avatarUrl,
+        github_url: githubUrl,
         is_public: isPublic,
         generated_at: generatedAt,
       };
@@ -385,11 +578,51 @@ export default async function (req: Request): Promise<Response> {
         .from("tokentracker_leaderboard_snapshots")
         .upsert(batch, { onConflict: "user_id,period,from_day,to_day" });
 
-      if (upsertErr) return json({ error: upsertErr.message }, 500);
+      if (upsertErr) {
+        logRefreshEvent({
+          event: "period_error",
+          request_id: requestId,
+          source: requestSource,
+          period,
+          from_day,
+          to_day,
+          stage: "upsert_snapshot",
+          error: upsertErr.message,
+          scanned_rows: scannedRows,
+          pages_fetched: pageCount,
+          deduped_buckets: bucketMap.size,
+          aggregated_users: aggMap.size,
+          duration_ms: Date.now() - periodStartedAt,
+        });
+        return json({ error: upsertErr.message }, 500);
+      }
     }
 
     results[period] = { upserted: upsertRows.length };
+    logRefreshEvent({
+      event: "period_completed",
+      request_id: requestId,
+      source: requestSource,
+      period,
+      from_day,
+      to_day,
+      scanned_rows: scannedRows,
+      pages_fetched: pageCount,
+      deduped_buckets: bucketMap.size,
+      aggregated_users: aggMap.size,
+      upserted: upsertRows.length,
+      skipped: false,
+      duration_ms: Date.now() - periodStartedAt,
+    });
   }
 
+  logRefreshEvent({
+    event: "request_completed",
+    request_id: requestId,
+    source: requestSource,
+    requested_periods: periods,
+    duration_ms: Date.now() - requestStartedAt,
+    results,
+  });
   return json({ ok: true, results });
 }

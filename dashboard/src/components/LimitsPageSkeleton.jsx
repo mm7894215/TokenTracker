@@ -1,9 +1,9 @@
 import React from "react";
-import { Card } from "../ui/openai/components";
+import { Card } from "../ui/components";
 import { cn } from "../lib/cn";
 
 /** 与 UsageLimitsPanel 的 DEFAULT_ORDER 及每组最多条数一致 */
-const PROVIDER_BAR_COUNTS = [3, 2, 3, 3, 2, 3];
+const PROVIDER_BAR_COUNTS = [3, 2, 3, 3, 2, 2, 3];
 
 function Bone({ className }) {
   return (

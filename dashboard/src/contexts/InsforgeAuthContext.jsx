@@ -2,7 +2,8 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { getOrCreateInsforgeClient, isCloudInsforgeConfigured } from "../lib/insforge-config";
 import { clearCloudDeviceSession } from "../lib/cloud-sync-prefs";
 import { isLikelyExpiredAccessToken } from "../lib/auth-token";
-import { getPublicVisibility, setPublicVisibility } from "../lib/api";
+import { getPublicVisibility } from "../lib/api";
+import { clearLocalApiAuthToken, getLocalApiAuthHeaders } from "../lib/local-api-auth";
 
 const InsforgeAuthContext = createContext(null);
 
@@ -139,19 +140,22 @@ export function InsforgeAuthProvider({ children }) {
         const result = await client.auth.signInWithOAuth({
           provider,
           redirectTo,
-          // @ts-ignore - skipBrowserRedirect is supported but not in types
+          // @ts-expect-error - skipBrowserRedirect is supported but not in types
           skipBrowserRedirect: true,
         });
         if (result.data?.url) {
           // Tell the local server that the next /auth/callback is a native app flow.
           // The callback page (in system browser) checks this flag to relay code back to app.
           try {
+            const authHeaders = await getLocalApiAuthHeaders();
             await fetch("/api/auth-bridge/verifier", {
               method: "PUT",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", ...authHeaders },
               body: JSON.stringify({ native: true }),
             });
-          } catch {}
+          } catch {
+            // Best effort: native OAuth can still continue without the bridge marker.
+          }
           nativeBridge.postMessage(result.data.url);
         }
         return result;
@@ -200,6 +204,7 @@ export function InsforgeAuthProvider({ children }) {
     if (!client) return;
     await client.auth.signOut();
     clearCloudDeviceSession();
+    clearLocalApiAuthToken();
     setUser(null);
   }, [client]);
 
@@ -226,17 +231,6 @@ export function InsforgeAuthProvider({ children }) {
         if (!active || !token) { if (active) setDisplayNameResolved(true); return; }
         const data = await getPublicVisibility({ accessToken: token });
         if (active && data?.display_name) setCloudDisplayName(data.display_name);
-        // Only auto-enable on the very first sign-in: when no settings row
-        // has ever been written, the server returns updated_at === null.
-        // If the user previously disabled it on any device, updated_at will
-        // be set and we must not override their choice.
-        if (active && data?.enabled === false && data?.updated_at == null) {
-          try {
-            await setPublicVisibility({ accessToken: token, enabled: true });
-          } catch (err) {
-            console.warn("[tokentracker] auto-enable public profile failed:", err);
-          }
-        }
       } catch { /* ignore */ }
       if (active) setDisplayNameResolved(true);
     })();

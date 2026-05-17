@@ -3,6 +3,7 @@ import SwiftUI
 struct DashboardView: View {
     @ObservedObject var viewModel: DashboardViewModel
     @ObservedObject var serverManager: ServerManager
+    @ObservedObject private var localization = LocalizationObserver.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -58,7 +59,8 @@ struct DashboardView: View {
             Divider()
             FooterView()
         }
-        .background(.ultraThinMaterial)
+        .background(.regularMaterial)
+        .id(localization.revision)
     }
 
     private var syncingView: some View {
@@ -66,10 +68,10 @@ struct DashboardView: View {
             Spacer()
             ProgressView()
                 .controlSize(.regular)
-            Text("Syncing usage data…")
+            Text(Strings.syncingUsageData)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Text("This may take a moment on first launch")
+            Text(Strings.syncingFirstLaunchHint)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
             Spacer()
