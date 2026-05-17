@@ -1,13 +1,13 @@
 {
-  "generatedAt": "2026-05-10T14:41:00.327Z",
+  "generatedAt": "2026-05-17T15:02:22.188Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
     "rawText": "JSX text nodes containing letters or digits"
   },
   "totals": {
-    "colors": 112,
-    "rawText": 76
+    "colors": 118,
+    "rawText": 80
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -68,14 +68,22 @@
         "Token Tracker"
       ]
     },
-    "dashboard/src/pages/SkillsPage.jsx": {
+    "dashboard/src/pages/SkillDetailPanel.jsx": {
       "colors": 2,
-      "rawText": 4,
+      "rawText": 0,
+      "rawTextTokens": []
+    },
+    "dashboard/src/pages/SkillsPage.jsx": {
+      "colors": 4,
+      "rawText": 8,
       "rawTextTokens": [
+        ") : null; const hintNode = !manageOpen && !isSkillsSh && repos.length",
         ") : null; contentNode = (",
         "); const browseLoadingNode = (",
         "0 ? (",
-        "t.id === id)?.label || id) .join(\", \") : copy(\"skills.action.choose_targets\"); return ("
+        "0 || browseAnyFilter) ? (",
+        "t.id === id)?.label || id) .join(\", \") : copy(\"skills.action.choose_targets\"); return (",
+        "t.label).join(\", \"); return ("
       ]
     },
     "dashboard/src/pages/WidgetsPage.jsx": {

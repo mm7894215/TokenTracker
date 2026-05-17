@@ -8,6 +8,7 @@ export { Sidebar, AppLayout, useSidebarCollapsed } from "./Sidebar";
 export { Badge } from "./Badge";
 export { ConfirmModal } from "./ConfirmModal";
 export { Input } from "./Input";
+export { DismissibleHint } from "./DismissibleHint.jsx";
 export { default as Counter } from "./Counter";
 export {
   AnimatedContainer,
