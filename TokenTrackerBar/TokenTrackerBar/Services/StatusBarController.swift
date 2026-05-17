@@ -316,7 +316,7 @@ final class StatusBarController: NSObject {
 
         animator = MenuBarAnimator(button: button)
         animator?.onImageUpdated = { [weak self] _ in
-            guard let self, self.showStats, self.viewModel.todayTokens > 0 else { return }
+            guard let self, self.showStats, !self.buildMenuBarDisplayValues().isEmpty else { return }
             self.updateStatsDisplay()
         }
         updateStatsDisplay()
@@ -410,31 +410,31 @@ final class StatusBarController: NSObject {
 
             switch metric {
             case .todayTokens:
-                guard viewModel.todayTokens > 0 else { return nil }
+                guard viewModel.todaySummary != nil else { return nil }
                 return MenuBarDisplayValue(
                     id: id,
                     label: metric.menuLabel,
                     value: TokenFormatter.formatCompact(viewModel.todayTokens)
                 )
             case .todayCost:
-                guard viewModel.todayTokens > 0 else { return nil }
+                guard viewModel.todaySummary != nil else { return nil }
                 return MenuBarDisplayValue(id: id, label: metric.menuLabel, value: viewModel.todayCost)
             case .last7dTokens:
-                guard viewModel.last7dTokens > 0 else { return nil }
+                guard viewModel.rollingSummary != nil else { return nil }
                 return MenuBarDisplayValue(
                     id: id,
                     label: metric.menuLabel,
                     value: TokenFormatter.formatCompact(viewModel.last7dTokens)
                 )
             case .totalTokens:
-                guard viewModel.totalTokens > 0 else { return nil }
+                guard viewModel.totalSummary != nil else { return nil }
                 return MenuBarDisplayValue(
                     id: id,
                     label: metric.menuLabel,
                     value: TokenFormatter.formatCompact(viewModel.totalTokens)
                 )
             case .totalCost:
-                guard viewModel.totalTokens > 0 else { return nil }
+                guard viewModel.totalSummary != nil else { return nil }
                 return MenuBarDisplayValue(id: id, label: metric.menuLabel, value: viewModel.totalCost)
             case .claude5h:
                 guard let window = viewModel.usageLimits?.claude.fiveHour,
