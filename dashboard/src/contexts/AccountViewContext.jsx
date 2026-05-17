@@ -44,12 +44,11 @@ export function AccountViewProvider({ children }) {
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
     const refresh = () => {
+      // Only mirror the toggle state here. Revision bumps are owned by the
+      // accountView-flip effect below — bumping in both places caused every
+      // toggle to advance revision by 2 and trigger duplicate refetches.
       const next = getCloudSyncEnabled();
-      setCloudSyncOn((prev) => {
-        if (prev === next) return prev;
-        setRevision((n) => n + 1);
-        return next;
-      });
+      setCloudSyncOn((prev) => (prev === next ? prev : next));
     };
     window.addEventListener(CLOUD_SYNC_CHANGE_EVENT, refresh);
     window.addEventListener("storage", refresh);
@@ -68,7 +67,9 @@ export function AccountViewProvider({ children }) {
     return cloudSyncOn;
   }, [authEnabled, signedIn, localHost, cloudSyncOn]);
 
-  // Bump revision when the mode flips so hooks can wipe stale scope state.
+  // Single source of truth for revision bumps: fire when the *resolved*
+  // accountView flips. Covers signIn/signOut, host change, and the
+  // cloudSyncOn toggle in one place.
   const lastResolved = React.useRef(accountView);
   useEffect(() => {
     if (lastResolved.current !== accountView) {
