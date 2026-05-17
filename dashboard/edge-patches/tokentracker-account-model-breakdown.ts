@@ -17,6 +17,33 @@ function json(data: unknown, status = 200) {
   });
 }
 
+/**
+ * Convert a UTC timestamp to a local YYYY-MM-DD key using either an IANA tz
+ * name or a fixed offset in minutes. Positive offsetMinutes = east of UTC.
+ * Mirrors the helper in the other 5 account-* edge functions.
+ */
+function zonedDayKey(hourStart: string, tz: string | null, offsetMinutes: number | null): string {
+  if (tz) {
+    try {
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: tz,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).formatToParts(new Date(hourStart));
+      const y = parts.find((p) => p.type === "year")?.value;
+      const m = parts.find((p) => p.type === "month")?.value;
+      const d = parts.find((p) => p.type === "day")?.value;
+      if (y && m && d) return `${y}-${m}-${d}`;
+    } catch { /* fall through */ }
+  }
+  if (offsetMinutes != null && Number.isFinite(offsetMinutes)) {
+    const shifted = new Date(new Date(hourStart).getTime() + offsetMinutes * 60000);
+    return shifted.toISOString().slice(0, 10);
+  }
+  return hourStart.slice(0, 10);
+}
+
 function b64urlToBytes(s: string): Uint8Array {
   const b64 = s.replace(/-/g, "+").replace(/_/g, "/");
   const pad = (4 - (b64.length % 4)) % 4;
@@ -185,6 +212,9 @@ export default async function (req: Request): Promise<Response> {
   const from = url.searchParams.get("from") || "";
   const to = url.searchParams.get("to") || "";
   if (!from || !to) return json({ error: "Missing from/to" }, 400);
+  const tz = url.searchParams.get("tz") || null;
+  const tzOffsetRaw = url.searchParams.get("tz_offset_minutes");
+  const tzOffsetMinutes = tzOffsetRaw != null && tzOffsetRaw !== "" ? Number(tzOffsetRaw) : null;
 
   const baseUrl = Deno.env.get("INSFORGE_BASE_URL")!;
   const incomingApiKey =
@@ -211,10 +241,16 @@ export default async function (req: Request): Promise<Response> {
     return json({ error: (e as Error).message }, 500);
   }
 
-  const rangeStart = `${from}T00:00:00Z`;
-  const nextDay = new Date(`${to}T00:00:00Z`);
-  nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-  const rangeEnd = nextDay.toISOString();
+  // Widen the UTC query window by ±1 day so a caller in a non-UTC zone (e.g.
+  // Asia/Shanghai for Day=2026-05-18, which spans UTC 2026-05-17T16:00 to
+  // 2026-05-18T16:00) still gets every hourly row that maps into a local day
+  // in [from, to]. Matches the same widening other account-* aggregators do.
+  const startDate = new Date(`${from}T00:00:00Z`);
+  startDate.setUTCDate(startDate.getUTCDate() - 1);
+  const endDate = new Date(`${to}T00:00:00Z`);
+  endDate.setUTCDate(endDate.getUTCDate() + 2);
+  const rangeStart = startDate.toISOString();
+  const rangeEnd = endDate.toISOString();
 
   const rawRows: HourlyRow[] = [];
   const PAGE_SIZE = 1000;
@@ -259,10 +295,14 @@ export default async function (req: Request): Promise<Response> {
   }
   const rows = Array.from(dedupKey.values());
 
-  // Filter on inclusive [from, to] by day
+  // Filter on inclusive [from, to] by *local* day (honoring tz / tz_offset_minutes),
+  // not raw UTC. Without this, Day=2026-05-18 in Asia/Shanghai (which maps to
+  // UTC 2026-05-17T16:00–2026-05-18T16:00) returns an empty source list because
+  // every relevant row's UTC YYYY-MM-DD lands on 2026-05-17 or 2026-05-18 in a
+  // mix that the strict d>=from && d<=to UTC compare partially drops.
   const filtered = rows.filter((r) => {
     if (!r.hour_start) return false;
-    const d = String(r.hour_start).slice(0, 10);
+    const d = zonedDayKey(String(r.hour_start), tz, tzOffsetMinutes);
     return d >= from && d <= to;
   });
 
