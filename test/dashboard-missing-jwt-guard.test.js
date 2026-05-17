@@ -17,7 +17,11 @@ async function readHookSource(relativePath) {
 }
 
 function assertMissingJwtGuard(source, file) {
-  const guardRegex = /if\s*\(\s*!resolvedToken\s*&&\s*!mockEnabled\s*(?:&&\s*!isLocalMode\s*)?\)\s*return\s*;/;
+  // Cloud (account-view) mode bypasses the local-JWT guard because it
+  // authenticates separately via accountAccessToken; allow `&& !useCloud`
+  // as an optional trailing clause in addition to the historical
+  // `&& !isLocalMode` clause.
+  const guardRegex = /if\s*\(\s*!resolvedToken\s*&&\s*!mockEnabled\s*(?:&&\s*!isLocalMode\s*)?(?:&&\s*!useCloud\s*)?\)\s*return\s*;/;
   assert.ok(
     guardRegex.test(source),
     `expected missing-JWT guard in ${file} ("if (!resolvedToken && !mockEnabled) return;")`,

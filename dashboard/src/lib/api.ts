@@ -401,3 +401,182 @@ export async function getUsageHeatmap({
     ...tzParams,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Cloud (account-wide) fetchers. Hit InsForge directly at
+// `${INSFORGE_BASE_URL}/functions/tokentracker-account-*` with the user's
+// JWT in the Authorization header. The edge functions verify HS256 against
+// JWT_SECRET, then aggregate across the user's active devices (dedup by
+// (hour, source, model), drop revoked-device historical rows).
+//
+// Use the same response schema as the corresponding local /functions/* so
+// hooks can swap fetchers based on `accountView` with no other transform.
+// ---------------------------------------------------------------------------
+
+const ACCOUNT_PATHS = {
+  summary: "tokentracker-account-summary",
+  daily: "tokentracker-account-daily",
+  hourly: "tokentracker-account-hourly",
+  monthly: "tokentracker-account-monthly",
+  heatmap: "tokentracker-account-heatmap",
+  modelBreakdown: "tokentracker-account-model-breakdown",
+} as const;
+
+async function fetchAccountFunction(
+  slug: string,
+  params: AnyRecord | undefined,
+  accessToken: string,
+) {
+  if (!accessToken || !isValidJwtShape(accessToken)) {
+    const err: any = new Error("Account view requires a signed-in user");
+    err.status = 401;
+    throw err;
+  }
+  const baseUrl = getInsforgeRemoteUrl();
+  if (!baseUrl) {
+    const err: any = new Error("InsForge base URL not configured");
+    err.status = 0;
+    throw err;
+  }
+  const root = baseUrl.replace(/\/$/, "");
+  const url = new URL(`${root}/functions/${slug}`);
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value != null && value !== "") url.searchParams.set(key, String(value));
+    }
+  }
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    Authorization: `Bearer ${accessToken}`,
+  };
+  const anonKey = getInsforgeAnonKey();
+  if (anonKey) headers.apikey = anonKey;
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers,
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const err: any = new Error(`Request failed with HTTP ${response.status}`);
+    err.status = response.status;
+    throw err;
+  }
+  return response.json();
+}
+
+export async function fetchCloudUsageSummary({
+  from,
+  to,
+  source,
+  model,
+  timeZone,
+  tzOffsetMinutes,
+  rolling = false,
+  accessToken,
+}: AnyRecord = {}) {
+  const tzParams = buildTimeZoneParams({ timeZone, tzOffsetMinutes });
+  const filterParams = buildFilterParams({ source, model });
+  const rollingParams = rolling ? { rolling: "1" } : {};
+  return fetchAccountFunction(
+    ACCOUNT_PATHS.summary,
+    { from, to, ...filterParams, ...tzParams, ...rollingParams },
+    accessToken,
+  );
+}
+
+export async function fetchCloudUsageDaily({
+  from,
+  to,
+  source,
+  model,
+  timeZone,
+  tzOffsetMinutes,
+  accessToken,
+}: AnyRecord = {}) {
+  const tzParams = buildTimeZoneParams({ timeZone, tzOffsetMinutes });
+  const filterParams = buildFilterParams({ source, model });
+  return fetchAccountFunction(
+    ACCOUNT_PATHS.daily,
+    { from, to, ...filterParams, ...tzParams },
+    accessToken,
+  );
+}
+
+export async function fetchCloudUsageHourly({
+  day,
+  source,
+  model,
+  timeZone,
+  tzOffsetMinutes,
+  accessToken,
+}: AnyRecord = {}) {
+  const tzParams = buildTimeZoneParams({ timeZone, tzOffsetMinutes });
+  const filterParams = buildFilterParams({ source, model });
+  const params = day ? { day, ...filterParams, ...tzParams } : { ...filterParams, ...tzParams };
+  return fetchAccountFunction(ACCOUNT_PATHS.hourly, params, accessToken);
+}
+
+export async function fetchCloudUsageMonthly({
+  months,
+  to,
+  source,
+  model,
+  timeZone,
+  tzOffsetMinutes,
+  accessToken,
+}: AnyRecord = {}) {
+  const tzParams = buildTimeZoneParams({ timeZone, tzOffsetMinutes });
+  const filterParams = buildFilterParams({ source, model });
+  return fetchAccountFunction(
+    ACCOUNT_PATHS.monthly,
+    {
+      ...(months ? { months: String(months) } : {}),
+      ...(to ? { to } : {}),
+      ...filterParams,
+      ...tzParams,
+    },
+    accessToken,
+  );
+}
+
+export async function fetchCloudUsageHeatmap({
+  weeks,
+  to,
+  weekStartsOn,
+  source,
+  model,
+  timeZone,
+  tzOffsetMinutes,
+  accessToken,
+}: AnyRecord = {}) {
+  const tzParams = buildTimeZoneParams({ timeZone, tzOffsetMinutes });
+  const filterParams = buildFilterParams({ source, model });
+  return fetchAccountFunction(
+    ACCOUNT_PATHS.heatmap,
+    {
+      weeks: String(weeks),
+      to,
+      week_starts_on: weekStartsOn,
+      ...filterParams,
+      ...tzParams,
+    },
+    accessToken,
+  );
+}
+
+export async function fetchCloudUsageModelBreakdown({
+  from,
+  to,
+  source,
+  timeZone,
+  tzOffsetMinutes,
+  accessToken,
+}: AnyRecord = {}) {
+  const tzParams = buildTimeZoneParams({ timeZone, tzOffsetMinutes });
+  const filterParams = buildFilterParams({ source });
+  return fetchAccountFunction(
+    ACCOUNT_PATHS.modelBreakdown,
+    { from, to, ...filterParams, ...tzParams },
+    accessToken,
+  );
+}

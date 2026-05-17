@@ -1,9 +1,14 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { isAccessTokenReady, resolveAuthAccessToken } from "../lib/auth-token";
 import { formatDateLocal, formatDateUTC } from "../lib/date-range";
 import { isMockEnabled } from "../lib/mock-data";
 import { getLocalDayKey, getTimeZoneCacheKey } from "../lib/timezone";
-import { getUsageDaily, getUsageSummary } from "../lib/api";
+import {
+  fetchCloudUsageDaily,
+  fetchCloudUsageSummary,
+  getUsageDaily,
+  getUsageSummary,
+} from "../lib/api";
 
 export function useUsageData({
   baseUrl,
@@ -16,7 +21,12 @@ export function useUsageData({
   timeZone,
   tzOffsetMinutes,
   now,
+  accountView = false,
+  accountAccessToken = null,
+  accountRevision = 0,
 }: any = {}) {
+  const useCloud = Boolean(accountView && accountAccessToken);
+  const scopeKey = useCloud ? "cloud" : "local";
   const [daily, setDaily] = useState<any[]>([]);
   const [summary, setSummary] = useState<any | null>(null);
   const [rolling, setRolling] = useState<any | null>(null);
@@ -33,8 +43,24 @@ export function useUsageData({
     const host = safeHost(baseUrl) || "default";
     const dailyKey = includeDaily ? "daily" : "summary";
     const tzKey = getTimeZoneCacheKey({ timeZone, offsetMinutes: tzOffsetMinutes });
-    return `tokentracker.usage.${cacheKey}.${host}.${from}.${to}.${dailyKey}.${tzKey}`;
+    return `tokentracker.usage.${cacheKey}.${scopeKey}.${host}.${from}.${to}.${dailyKey}.${tzKey}`;
   })();
+
+  // Wipe state when the scope flips so the previously-rendered local data
+  // doesn't visually persist while the cloud fetch is in flight (and vice
+  // versa). The dependent fetcher will repopulate via refresh() below.
+  const lastScopeRef = useRef(scopeKey);
+  useEffect(() => {
+    if (lastScopeRef.current === scopeKey) return;
+    lastScopeRef.current = scopeKey;
+    setDaily([]);
+    setSummary(null);
+    setRolling(null);
+    setSource("edge");
+    setFetchedAt(null);
+    setError(null);
+    setLoading(true);
+  }, [scopeKey]);
 
   const readCache = useCallback(() => {
     if (!storageKey || typeof window === "undefined") return null;
@@ -75,8 +101,13 @@ export function useUsageData({
 
   const refresh = useCallback(async () => {
     const resolvedToken = await resolveAuthAccessToken(accessToken);
-    // 本地模式允许空 token
-    if (!resolvedToken && !mockEnabled && !isLocalMode) return;
+    const cloudToken = useCloud ? await resolveAuthAccessToken(accountAccessToken) : null;
+    // 本地模式允许空 token；云端模式必须 resolve 到一个 JWT 字符串
+    if (!resolvedToken && !mockEnabled && !isLocalMode && !useCloud) return;
+    if (useCloud && !cloudToken) return;
+    const dailyFetcher = useCloud ? fetchCloudUsageDaily : getUsageDaily;
+    const summaryFetcher = useCloud ? fetchCloudUsageSummary : getUsageSummary;
+    const tokenForFetch = useCloud ? cloudToken : resolvedToken;
     setLoading(true);
     setError(null);
     try {
@@ -84,17 +115,17 @@ export function useUsageData({
       let summaryRes = null;
       if (includeDaily) {
         const [dailyResult, summaryResult] = await Promise.allSettled([
-          getUsageDaily({
+          dailyFetcher({
             baseUrl,
-            accessToken: resolvedToken,
+            accessToken: tokenForFetch,
             from,
             to,
             timeZone,
             tzOffsetMinutes,
           }),
-          getUsageSummary({
+          summaryFetcher({
             baseUrl,
-            accessToken: resolvedToken,
+            accessToken: tokenForFetch,
             from,
             to,
             timeZone,
@@ -106,9 +137,9 @@ export function useUsageData({
         dailyRes = dailyResult.value;
         summaryRes = summaryResult.status === "fulfilled" ? summaryResult.value : null;
       } else {
-        summaryRes = await getUsageSummary({
+        summaryRes = await summaryFetcher({
           baseUrl,
-          accessToken: resolvedToken,
+          accessToken: tokenForFetch,
           from,
           to,
           timeZone,
@@ -129,9 +160,9 @@ export function useUsageData({
       let nextRolling = summaryRes?.rolling || dailyRes?.summary?.rolling || null;
       if (includeDaily && !nextSummary && !summaryRes) {
         try {
-          const fallback = await getUsageSummary({
+          const fallback = await summaryFetcher({
             baseUrl,
-            accessToken: resolvedToken,
+            accessToken: tokenForFetch,
             from,
             to,
             timeZone,
@@ -221,6 +252,9 @@ export function useUsageData({
     clearCache,
     writeCache,
     isLocalMode,
+    useCloud,
+    accountAccessToken,
+    accountRevision,
   ]);
 
   useEffect(() => {
@@ -228,7 +262,7 @@ export function useUsageData({
       (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
     const isLocalModeCheck = typeof window !== "undefined" &&
       (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-    if (!tokenReady && !guestAllowed && !mockEnabled && !isLocalModeCheck) {
+    if (!tokenReady && !guestAllowed && !mockEnabled && !isLocalModeCheck && !useCloud) {
       setDaily([]);
       setSummary(null);
       setRolling(null);

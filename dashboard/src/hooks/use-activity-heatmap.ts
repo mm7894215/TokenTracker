@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildActivityHeatmap,
   computeActiveStreakDays,
@@ -7,7 +7,12 @@ import {
 import { isAccessTokenReady, resolveAuthAccessToken } from "../lib/auth-token";
 import { isMockEnabled } from "../lib/mock-data";
 import { getTimeZoneCacheKey } from "../lib/timezone";
-import { getUsageDaily, getUsageHeatmap } from "../lib/api";
+import {
+  fetchCloudUsageDaily,
+  fetchCloudUsageHeatmap,
+  getUsageDaily,
+  getUsageHeatmap,
+} from "../lib/api";
 
 export function useActivityHeatmap({
   baseUrl,
@@ -19,7 +24,12 @@ export function useActivityHeatmap({
   timeZone,
   tzOffsetMinutes,
   now,
+  accountView = false,
+  accountAccessToken = null,
+  accountRevision = 0,
 }: any = {}) {
+  const useCloud = Boolean(accountView && accountAccessToken);
+  const scopeKey = useCloud ? "cloud" : "local";
   const range = useMemo(() => {
     return getHeatmapRangeLocal({ weeks, weekStartsOn, now });
   }, [now, weeks, weekStartsOn]);
@@ -38,8 +48,8 @@ export function useActivityHeatmap({
   const storageKey = useMemo(() => {
     if (!cacheKey) return null;
     const tzKey = getTimeZoneCacheKey({ timeZone, offsetMinutes: tzOffsetMinutes });
-    return `tokentracker.heatmap.${cacheKey}.${weeks}.${weekStartsOn}.${tzKey}`;
-  }, [cacheKey, timeZone, tzOffsetMinutes, weeks, weekStartsOn]);
+    return `tokentracker.heatmap.${cacheKey}.${scopeKey}.${weeks}.${weekStartsOn}.${tzKey}`;
+  }, [cacheKey, scopeKey, timeZone, tzOffsetMinutes, weeks, weekStartsOn]);
 
   const readCache = useCallback(() => {
     if (!storageKey || typeof window === "undefined") return null;
@@ -75,16 +85,35 @@ export function useActivityHeatmap({
     }
   }, [storageKey]);
 
+  // Wipe state when the scope flips so cached local heatmap doesn't show
+  // through while the cloud fetch is in flight (and vice versa). Both
+  // heatmap and daily buffers feed the rendered grid, so both must clear.
+  const lastScopeRef = useRef(scopeKey);
+  useEffect(() => {
+    if (lastScopeRef.current === scopeKey) return;
+    lastScopeRef.current = scopeKey;
+    setDaily([]);
+    setHeatmap(null);
+    setSource("edge");
+    setError(null);
+    setLoading(true);
+  }, [scopeKey]);
+
   const refresh = useCallback(async () => {
     const resolvedToken = await resolveAuthAccessToken(accessToken);
-    if (!resolvedToken && !mockEnabled && !isLocalMode) return;
+    const cloudToken = useCloud ? await resolveAuthAccessToken(accountAccessToken) : null;
+    if (!resolvedToken && !mockEnabled && !isLocalMode && !useCloud) return;
+    if (useCloud && !cloudToken) return;
+    const tokenForFetch = useCloud ? cloudToken : resolvedToken;
+    const heatmapFetcher = useCloud ? fetchCloudUsageHeatmap : getUsageHeatmap;
+    const dailyFetcher = useCloud ? fetchCloudUsageDaily : getUsageDaily;
     setLoading(true);
     setError(null);
     try {
       try {
-        const res = await getUsageHeatmap({
+        const res = await heatmapFetcher({
           baseUrl,
-          accessToken: resolvedToken,
+          accessToken: tokenForFetch,
           weeks,
           to: range.to,
           weekStartsOn,
@@ -179,9 +208,9 @@ export function useActivityHeatmap({
         if (status === 401 || status === 403) throw e;
       }
 
-      const dailyRes = await getUsageDaily({
+      const dailyRes = await dailyFetcher({
         baseUrl,
-        accessToken: resolvedToken,
+        accessToken: tokenForFetch,
         from: range.from,
         to: range.to,
         timeZone,
@@ -262,10 +291,13 @@ export function useActivityHeatmap({
     clearCache,
     writeCache,
     isLocalMode,
+    useCloud,
+    accountAccessToken,
+    accountRevision,
   ]);
 
   useEffect(() => {
-    if (!tokenReady && !guestAllowed && !mockEnabled && !isLocalMode) {
+    if (!tokenReady && !guestAllowed && !mockEnabled && !isLocalMode && !useCloud) {
       setDaily([]);
       setLoading(false);
       setError(null);

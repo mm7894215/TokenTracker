@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useAccountView } from "../contexts/AccountViewContext.jsx";
 import { useActivityHeatmap } from "../hooks/use-activity-heatmap.js";
 import { useProjectUsageSummary } from "../hooks/use-project-usage-summary";
 import { useTrendData } from "../hooks/use-trend-data.js";
@@ -156,6 +157,13 @@ export function DashboardPage({
   const accessEnabled = signedIn || mockEnabled || publicMode;
   const authTokenReady = authTokenAllowed && isAccessTokenReady(effectiveAuthToken);
   const guestAllowed = signedIn && sessionSoftExpired && !publicMode;
+
+  // Cloud (cross-device account view) — driven by Settings → Cloud sync toggle
+  // on localhost, mandatory on public hosts (www.tokentracker.cc et al.).
+  // publicMode (shared link) opts out of account view entirely.
+  const { accountView: accountViewBase, revision: accountRevision } = useAccountView();
+  const accountView = accountViewBase && !publicMode;
+  const accountAccessToken = accountView ? effectiveAuthToken : null;
 
 
   useEffect(() => {
@@ -398,6 +406,9 @@ export function DashboardPage({
     timeZone,
     tzOffsetMinutes,
     now: mockNow,
+    accountView,
+    accountAccessToken,
+    accountRevision,
   });
   const {
     daily: dailyBreakdownDaily,
@@ -414,6 +425,9 @@ export function DashboardPage({
     timeZone,
     tzOffsetMinutes,
     now: mockNow,
+    accountView,
+    accountAccessToken,
+    accountRevision,
   });
 
   const {
@@ -429,6 +443,9 @@ export function DashboardPage({
     cacheKey,
     timeZone,
     tzOffsetMinutes,
+    accountView,
+    accountAccessToken,
+    accountRevision,
   });
 
   const [projectUsageLimit, setProjectUsageLimit] = useState(3);
@@ -475,6 +492,9 @@ export function DashboardPage({
     now: mockNow,
     sharedRows: shareDailyToTrend ? daily : null,
     sharedRange: shareDailyToTrend ? { from, to } : null,
+    accountView,
+    accountAccessToken,
+    accountRevision,
   });
 
   const {
@@ -491,6 +511,9 @@ export function DashboardPage({
     timeZone,
     tzOffsetMinutes,
     now: mockNow,
+    accountView,
+    accountAccessToken,
+    accountRevision,
   });
 
   const {

@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isAccessTokenReady, resolveAuthAccessToken } from "../lib/auth-token";
 import { isMockEnabled } from "../lib/mock-data";
 import { getTimeZoneCacheKey } from "../lib/timezone";
-import { getUsageModelBreakdown } from "../lib/api";
+import { fetchCloudUsageModelBreakdown, getUsageModelBreakdown } from "../lib/api";
 
 export function useUsageModelBreakdown({
   baseUrl,
@@ -13,7 +13,12 @@ export function useUsageModelBreakdown({
   cacheKey,
   timeZone,
   tzOffsetMinutes,
+  accountView = false,
+  accountAccessToken = null,
+  accountRevision = 0,
 }: any = {}) {
+  const useCloud = Boolean(accountView && accountAccessToken);
+  const scopeKey = useCloud ? "cloud" : "local";
   const [breakdown, setBreakdown] = useState<any | null>(null);
   const [source, setSource] = useState<string>("edge");
   const [loading, setLoading] = useState(false);
@@ -26,8 +31,8 @@ export function useUsageModelBreakdown({
     if (!cacheKey) return null;
     const host = safeHost(baseUrl) || "default";
     const tzKey = getTimeZoneCacheKey({ timeZone, offsetMinutes: tzOffsetMinutes });
-    return `tokentracker.modelBreakdown.${cacheKey}.${host}.${from}.${to}.${tzKey}`;
-  }, [baseUrl, cacheKey, from, timeZone, to, tzOffsetMinutes]);
+    return `tokentracker.modelBreakdown.${cacheKey}.${scopeKey}.${host}.${from}.${to}.${tzKey}`;
+  }, [baseUrl, cacheKey, from, scopeKey, timeZone, to, tzOffsetMinutes]);
 
   const readCache = useCallback(() => {
     if (!storageKey || typeof window === "undefined") return null;
@@ -66,15 +71,31 @@ export function useUsageModelBreakdown({
   const isLocalMode = typeof window !== "undefined" &&
     (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
 
+  // Wipe state when the scope flips so the prior buckets don't render
+  // while the new fetch is in flight.
+  const lastScopeRef = useRef(scopeKey);
+  useEffect(() => {
+    if (lastScopeRef.current === scopeKey) return;
+    lastScopeRef.current = scopeKey;
+    setBreakdown(null);
+    setSource("edge");
+    setError(null);
+    setLoading(true);
+  }, [scopeKey]);
+
   const refresh = useCallback(async () => {
     const resolvedToken = await resolveAuthAccessToken(accessToken);
-    if (!resolvedToken && !mockEnabled && !isLocalMode) return;
+    const cloudToken = useCloud ? await resolveAuthAccessToken(accountAccessToken) : null;
+    if (!resolvedToken && !mockEnabled && !isLocalMode && !useCloud) return;
+    if (useCloud && !cloudToken) return;
+    const tokenForFetch = useCloud ? cloudToken : resolvedToken;
+    const breakdownFetcher = useCloud ? fetchCloudUsageModelBreakdown : getUsageModelBreakdown;
     setLoading(true);
     setError(null);
     try {
-      const res = await getUsageModelBreakdown({
+      const res = await breakdownFetcher({
         baseUrl,
-        accessToken: resolvedToken,
+        accessToken: tokenForFetch,
         from,
         to,
         timeZone,
@@ -124,10 +145,13 @@ export function useUsageModelBreakdown({
     clearCache,
     writeCache,
     isLocalMode,
+    useCloud,
+    accountAccessToken,
+    accountRevision,
   ]);
 
   useEffect(() => {
-    if (!tokenReady && !guestAllowed && !mockEnabled && !isLocalMode) {
+    if (!tokenReady && !guestAllowed && !mockEnabled && !isLocalMode && !useCloud) {
       setBreakdown(null);
       setSource("edge");
       setError(null);
