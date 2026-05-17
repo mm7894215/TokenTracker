@@ -638,58 +638,6 @@ function json(res, data, status) {
 // Main handler factory
 // ---------------------------------------------------------------------------
 
-// Map local usage endpoint paths → cloud account-wide aggregation slugs.
-// Only these 6 are account-aggregated; usage-limits / user-status /
-// project-usage stay device-local.
-const CLOUD_PROXY_MAP = {
-  "/functions/tokentracker-usage-summary": "tokentracker-account-summary",
-  "/functions/tokentracker-usage-daily": "tokentracker-account-daily",
-  "/functions/tokentracker-usage-hourly": "tokentracker-account-hourly",
-  "/functions/tokentracker-usage-monthly": "tokentracker-account-monthly",
-  "/functions/tokentracker-usage-heatmap": "tokentracker-account-heatmap",
-  "/functions/tokentracker-usage-model-breakdown": "tokentracker-account-model-breakdown",
-};
-
-function readTrackerConfigRaw() {
-  try {
-    const cfgPath = path.join(os.homedir(), ".tokentracker", "tracker", "config.json");
-    if (!fs.existsSync(cfgPath)) return null;
-    return JSON.parse(fs.readFileSync(cfgPath, "utf8"));
-  } catch {
-    return null;
-  }
-}
-
-/**
- * If cloud sync is configured (deviceToken + baseUrl in config) and the
- * request maps to an aggregatable endpoint, forward to the cloud
- * tokentracker-account-* function and stream the JSON back. This keeps the
- * menu-bar (Swift) and dashboard data sources unified.
- */
-async function tryCloudAccountProxy(p, url) {
-  const slug = CLOUD_PROXY_MAP[p];
-  if (!slug) return null;
-  const cfg = readTrackerConfigRaw();
-  const deviceToken = cfg && typeof cfg.deviceToken === "string" && cfg.deviceToken;
-  const baseUrl = cfg && typeof cfg.baseUrl === "string" && cfg.baseUrl;
-  // Explicit opt-out: accountView === false disables account-wide merging.
-  if (cfg && cfg.accountView === false) return null;
-  if (!deviceToken || !baseUrl) return null;
-  const cloudUrl = new URL(`${baseUrl.replace(/\/$/, "")}/functions/${slug}`);
-  for (const [k, v] of url.searchParams) cloudUrl.searchParams.set(k, v);
-  try {
-    const res = await fetch(cloudUrl.toString(), {
-      method: "GET",
-      headers: { Authorization: `Bearer ${deviceToken}`, Accept: "application/json" },
-    });
-    const body = await res.text();
-    return { status: res.status, body, contentType: res.headers.get("content-type") || "application/json" };
-  } catch (err) {
-    if (process.env.TOKENTRACKER_DEBUG) console.warn("[local-api] cloud proxy failed:", err?.message);
-    return null;
-  }
-}
-
 function createLocalApiHandler({ queuePath }) {
   const qp = queuePath || resolveQueuePath();
 
@@ -952,23 +900,6 @@ function createLocalApiHandler({ queuePath }) {
             return true;
           }
           extraEnv.TOKENTRACKER_INSFORGE_BASE_URL = allowedBaseUrl;
-        }
-        // Persist deviceToken + baseUrl to config.json so the account-view
-        // proxy (see tryCloudAccountProxy) can serve aggregated data to
-        // every client (menu bar, widgets, dashboard) without needing
-        // browser context. This runs on every sync so token rotations flow
-        // through automatically.
-        try {
-          if (extraEnv.TOKENTRACKER_DEVICE_TOKEN) {
-            const cfgPath = path.join(os.homedir(), ".tokentracker", "tracker", "config.json");
-            const cfg = fs.existsSync(cfgPath) ? JSON.parse(fs.readFileSync(cfgPath, "utf8")) : {};
-            cfg.deviceToken = extraEnv.TOKENTRACKER_DEVICE_TOKEN;
-            if (extraEnv.TOKENTRACKER_INSFORGE_BASE_URL) cfg.baseUrl = extraEnv.TOKENTRACKER_INSFORGE_BASE_URL;
-            fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
-            try { fs.chmodSync(cfgPath, 0o600); } catch {}
-          }
-        } catch (persistErr) {
-          if (process.env.TOKENTRACKER_DEBUG) console.warn("[local-api] persist deviceToken:", persistErr?.message);
         }
         const result = await runSyncCommand(extraEnv);
         try {
