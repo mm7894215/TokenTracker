@@ -223,6 +223,7 @@ function computeDateRange(period: Period): DateRange {
 
 interface HourlyRow {
   user_id: string;
+  device_id: string;
   source: string;
   model: string;
   hour_start: string;
@@ -347,23 +348,47 @@ export default async function (req: Request): Promise<Response> {
     nextDay.setUTCDate(nextDay.getUTCDate() + 1);
     const rangeEnd = nextDay.toISOString();
 
-    // Paginate through all hourly rows (1000 per page).
-    // Dedupe by (user_id, source, model, hour_start) keeping the MAX
-    // total_tokens across devices — the same logical bucket can be recorded
-    // under multiple device_id rows (cloud-sync issues a new device per
-    // session; cumulative queue replays upsert under whichever device ran
-    // the sync). SUM across devices would double-count the same usage.
-    const bucketMap = new Map<string, HourlyRow>();
+    // Pull the set of currently-active device IDs once per period. We use it
+    // to drop hourly rows owned by revoked devices (historical device_id
+    // churn would otherwise inflate totals — e.g. one user accumulated 17
+    // device_ids before partial-unique-index was enforced).
+    const activeDeviceIds = new Set<string>();
+    {
+      let dOffset = 0;
+      const DPAGE = 1000;
+      while (true) {
+        const { data: devs, error: devErr } = await client.database
+          .from("tokentracker_devices")
+          .select("id")
+          .is("revoked_at", null)
+          .range(dOffset, dOffset + DPAGE - 1);
+        if (devErr) return json({ error: devErr.message }, 500);
+        if (!devs || devs.length === 0) break;
+        for (const d of devs as Array<{ id: string }>) {
+          if (typeof d.id === "string") activeDeviceIds.add(d.id);
+        }
+        if (devs.length < DPAGE) break;
+        dOffset += DPAGE;
+      }
+    }
+
+    // Paginate through hourly rows and SUM across active devices per
+    // (user_id, source, model). Two machines running the same model in the
+    // same hour are independent sessions and must add up — that's the
+    // user-facing leaderboard expectation. Historic device_id churn is
+    // handled by the active-device filter above, not by dedup.
+    const aggMap = new Map<string, UserAgg>();
     let offset = 0;
     const PAGE_SIZE = 1000;
     let hasMore = true;
     let scannedRows = 0;
+    let droppedInactive = 0;
     let pageCount = 0;
 
     while (hasMore) {
       const { data: rows, error } = await client.database
         .from("tokentracker_hourly")
-        .select("user_id, source, model, hour_start, total_tokens, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens")
+        .select("user_id, device_id, source, model, hour_start, total_tokens, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens")
         .gte("hour_start", rangeStart)
         .lt("hour_start", rangeEnd)
         .order("hour_start", { ascending: true })
@@ -390,30 +415,24 @@ export default async function (req: Request): Promise<Response> {
       pageCount += 1;
 
       for (const row of rows as HourlyRow[]) {
-        const key = `${row.user_id}|${row.source}|${row.model}|${row.hour_start}`;
-        const existing = bucketMap.get(key);
-        const incoming = Number(row.total_tokens) || 0;
-        if (!existing || incoming > (Number(existing.total_tokens) || 0)) {
-          bucketMap.set(key, row);
+        if (!activeDeviceIds.has(row.device_id)) {
+          droppedInactive += 1;
+          continue;
         }
+        let agg = aggMap.get(row.user_id);
+        if (!agg) {
+          agg = newUserAgg();
+          aggMap.set(row.user_id, agg);
+        }
+        const tokens = Number(row.total_tokens) || 0;
+        const col = SOURCE_COLUMN_MAP[row.source] ?? "other_tokens";
+        (agg as unknown as Record<string, number>)[col] += tokens;
+        agg.total_tokens += tokens;
+        agg.estimated_cost_usd += computeRowCost(row);
       }
 
       hasMore = rows.length === PAGE_SIZE;
       offset += PAGE_SIZE;
-    }
-
-    const aggMap = new Map<string, UserAgg>();
-    for (const row of bucketMap.values()) {
-      let agg = aggMap.get(row.user_id);
-      if (!agg) {
-        agg = newUserAgg();
-        aggMap.set(row.user_id, agg);
-      }
-      const tokens = Number(row.total_tokens) || 0;
-      const col = SOURCE_COLUMN_MAP[row.source] ?? "other_tokens";
-      (agg as unknown as Record<string, number>)[col] += tokens;
-      agg.total_tokens += tokens;
-      agg.estimated_cost_usd += computeRowCost(row);
     }
 
     if (aggMap.size === 0) {
@@ -427,7 +446,7 @@ export default async function (req: Request): Promise<Response> {
         to_day,
         scanned_rows: scannedRows,
         pages_fetched: pageCount,
-        deduped_buckets: bucketMap.size,
+        dropped_inactive_device_rows: droppedInactive,
         aggregated_users: 0,
         upserted: 0,
         skipped: false,
@@ -590,7 +609,7 @@ export default async function (req: Request): Promise<Response> {
           error: upsertErr.message,
           scanned_rows: scannedRows,
           pages_fetched: pageCount,
-          deduped_buckets: bucketMap.size,
+          dropped_inactive_device_rows: droppedInactive,
           aggregated_users: aggMap.size,
           duration_ms: Date.now() - periodStartedAt,
         });
@@ -608,7 +627,7 @@ export default async function (req: Request): Promise<Response> {
       to_day,
       scanned_rows: scannedRows,
       pages_fetched: pageCount,
-      deduped_buckets: bucketMap.size,
+      dropped_inactive_device_rows: droppedInactive,
       aggregated_users: aggMap.size,
       upserted: upsertRows.length,
       skipped: false,
