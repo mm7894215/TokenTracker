@@ -195,22 +195,7 @@ export default async function (req: Request): Promise<Response> {
     }
   }
 
-  // Collapse same (hour_start, source, model) across device_ids to the
-  // largest-total row. Prevents double-counting when a logical bucket got
-  // written under multiple device_ids (cross-machine cursor reset, or
-  // historic device_id rotation before partial-unique was enforced).
-  const dedupKey = new Map<string, HourlyRow>();
-  for (const row of rawRows) {
-    if (!row.hour_start) continue;
-    const key = `${row.hour_start} ${row.source ?? ""} ${row.model ?? ""}`;
-    const incumbent = dedupKey.get(key);
-    const incumbentTotal = incumbent ? (Number(incumbent.total_tokens) || 0) : -1;
-    const challengerTotal = Number(row.total_tokens) || 0;
-    if (!incumbent || challengerTotal > incumbentTotal) {
-      dedupKey.set(key, row);
-    }
-  }
-  const rows = Array.from(dedupKey.values());
+  const rows = rawRows;
 
   const byDay = new Map<string, { total_tokens: number; billable_total_tokens: number }>();
   for (const row of rows) {

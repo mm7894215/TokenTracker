@@ -13,10 +13,6 @@
  *      considered. tokentracker_devices_active_unique enforces one active
  *      device per (user, platform, device_name), so this filter drops the
  *      historic device_id churn from before partial-unique was enforced.
- *   2. When the same (hour, source, model) appears under multiple device_ids
- *      (e.g. cross-device cursor resets, or transient device_id rotation
- *      mid-history), take the MAX row instead of SUM. Avoids the
- *      "displayed total > sum of both machines" symptom users reported.
  */
 import { createClient } from "npm:@insforge/sdk";
 
@@ -312,28 +308,6 @@ async function fetchAllRows(
   return out;
 }
 
-/**
- * Collapse rows sharing the same (hour_start, source, model) into one row.
- * Picks the row with the largest total_tokens — the entire row is kept so
- * dependent columns stay consistent. Avoids double-counting when the same
- * logical bucket got written under multiple device_ids (cross-machine or
- * historic device_id rotation).
- */
-function dedupMaxByHourSourceModel(rows: HourlyRow[]): HourlyRow[] {
-  const winners = new Map<string, HourlyRow>();
-  for (const row of rows) {
-    if (!row.hour_start) continue;
-    const key = `${row.hour_start} ${row.source ?? ""} ${row.model ?? ""}`;
-    const incumbent = winners.get(key);
-    const incumbentTotal = incumbent ? (Number(incumbent.total_tokens) || 0) : -1;
-    const challengerTotal = Number(row.total_tokens) || 0;
-    if (!incumbent || challengerTotal > incumbentTotal) {
-      winners.set(key, row);
-    }
-  }
-  return Array.from(winners.values());
-}
-
 export default async function (req: Request): Promise<Response> {
   if (req.method === "OPTIONS")
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -403,8 +377,7 @@ export default async function (req: Request): Promise<Response> {
     return json({ error: (e as Error).message }, 500);
   }
 
-  const dedupedRows = dedupMaxByHourSourceModel(allRows);
-  const allDaily = aggregateByDay(dedupedRows, tz, tzOffsetMinutes);
+  const allDaily = aggregateByDay(allRows, tz, tzOffsetMinutes);
   const daily = allDaily.filter((d) => d.day >= from && d.day <= to);
 
   const totals = daily.reduce(
