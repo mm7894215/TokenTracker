@@ -488,7 +488,7 @@ describe("ContextBreakdownPanel", () => {
     expect(screen.queryByText("mcp__chrome-devtools__emulate")).not.toBeInTheDocument();
   });
 
-  it("splits tool_calls and MCP servers totals so grand-total stays invariant", async () => {
+  it("shows MCP servers row with real attribution total, leaving the tool_calls bucket bar untouched", async () => {
     getUsageCategoryBreakdown.mockResolvedValueOnce({
       source: "claude",
       scope: "supported",
@@ -527,10 +527,12 @@ describe("ContextBreakdownPanel", () => {
               tools: [{ name: "Read", calls: 1, totals: { total_tokens: 200 } }],
             },
             {
+              // Per-call attribution total (cached + cache_creation + output) — large,
+              // intentionally inconsistent with the bucket_tokens-derived display total.
               name: "MCP: feishu",
               calls: 2,
-              totals: { total_tokens: 300 },
-              tools: [{ name: "mcp__feishu__list", calls: 2, totals: { total_tokens: 300 } }],
+              totals: { total_tokens: 9000 },
+              tools: [{ name: "mcp__feishu__list", calls: 2, totals: { total_tokens: 9000 } }],
             },
           ],
         },
@@ -540,19 +542,19 @@ describe("ContextBreakdownPanel", () => {
 
     render(<ContextBreakdownPanel from="2026-05-09" to="2026-05-09" source="claude" />);
 
-    // tool_calls row keeps only the non-MCP portion (200 tokens, 40%)
+    // tool_calls keeps its bucket-bar percent at 100% (no subtraction)
     const toolCallsRow = (
       await screen.findByText(copy("dashboard.context_breakdown.category.tool_calls"))
     ).closest("li");
-    expect(toolCallsRow).toHaveTextContent("40.0%");
+    expect(toolCallsRow).toHaveTextContent("100.0%");
 
-    // MCP servers row carries the hoisted portion (300 tokens, 60%)
+    // MCP servers row exists but renders WITHOUT a percent (separate metric)
     const mcpRow = screen
       .getByText(copy("dashboard.context_breakdown.category.mcp_servers"))
       .closest("li");
-    expect(mcpRow).toHaveTextContent("60.0%");
+    expect(mcpRow).not.toHaveTextContent("%");
 
-    // tool_calls disclosure still works for the residual non-MCP category
+    // tool_calls disclosure still drills into residual non-MCP categories only
     fireEvent.click(
       screen.getByRole("button", { name: copy("dashboard.context_breakdown.category.tool_calls") }),
     );

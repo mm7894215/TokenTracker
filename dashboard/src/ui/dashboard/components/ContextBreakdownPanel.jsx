@@ -29,7 +29,6 @@ const BUCKET_RAMP = {
   system_prompt: { l: 0.55, c: 0.05 },
   messages: { l: 0.65, c: 0.18 },
   tool_calls: { l: 0.6, c: 0.14 },
-  mcp_servers: { l: 0.5, c: 0.12 },
   custom_agents: { l: 0.55, c: 0.1 },
   reasoning: { l: 0.7, c: 0.08 },
 };
@@ -199,36 +198,6 @@ function partitionMcpFromToolCalls(toolCallsSet) {
     residualSet: { ...toolCallsSet, categories: residualCategories },
     mcpTotalTokens,
   };
-}
-
-// Move MCP tokens out of the "tool_calls" display group and into a new
-// "mcp_servers" display group, preserving the panel's total-tokens invariant
-// (the grand total is unchanged — tokens just shift bucket). Re-sorts by
-// total_tokens to match the panel's "largest float to top" rule.
-function rebucketMcpInDisplayCategories(displayCats, mcpTotalTokens) {
-  if (!Array.isArray(displayCats) || !(mcpTotalTokens > 0)) return displayCats;
-  const toolCallsOrig = displayCats.find((c) => c.key === "tool_calls");
-  const origTotal = Number(toolCallsOrig?.totals?.total_tokens || 0);
-  const origPercent = Number(toolCallsOrig?.percent || 0);
-  if (!(origTotal > 0)) return displayCats;
-  const safeMcp = Math.min(mcpTotalTokens, origTotal);
-  const adjusted = displayCats.map((c) => {
-    if (c.key !== "tool_calls") return c;
-    const newTotal = origTotal - safeMcp;
-    const ratio = newTotal / origTotal;
-    return {
-      ...c,
-      totals: { ...c.totals, total_tokens: newTotal },
-      percent: Number((origPercent * ratio).toFixed(2)),
-    };
-  });
-  const mcpPercent = Number((origPercent * (safeMcp / origTotal)).toFixed(2));
-  adjusted.push({
-    key: "mcp_servers",
-    totals: { total_tokens: safeMcp },
-    percent: mcpPercent,
-  });
-  return adjusted.sort((a, b) => (b.totals?.total_tokens || 0) - (a.totals?.total_tokens || 0));
 }
 
 function categoryLabel(key) {
@@ -789,7 +758,7 @@ export function ContextBreakdownPanel({ from, to, source = "claude", referenceTo
     );
   }
 
-  const rawCategories =
+  const categories =
     source === "claude"
       ? buildDisplayCategories(data.categories || [], referenceTotalTokens)
       : buildCodexDisplayCategories(data, referenceTotalTokens);
@@ -802,15 +771,17 @@ export function ContextBreakdownPanel({ from, to, source = "claude", referenceTo
   const messageRows = normalizeMessageRows(messageDetails?.categories || []);
   const codexQueueFallback = source === "codex" && (data?.breakdown_status === "queue_fallback" || data?.fallback === "queue_totals");
 
-  // The tool set for the top-level "tool_calls" row. Hoist MCP categories
-  // out into their own sibling set so they can drive a separate top-level
-  // disclosure row — the backend already groups by `MCP: <server>`.
+  // Hoist MCP categories out of the tool-calls drill-down into their own
+  // sibling set. Displayed as a separate auxiliary row (no percent, no
+  // bucket-bar fill) because tool_calls_breakdown reports full per-call
+  // attribution (cached + cache_creation + output) which is a different
+  // metric from the bucket_tokens shown in the percentage bar — mixing them
+  // into the bar would make children sums diverge from the parent.
   const rawToolCallsSet = source === "claude"
     ? toolDetails?.tool_calls || null
     : toolDetails || null;
   const { mcpSet: mcpServersSet, residualSet: toolCallsSet, mcpTotalTokens } =
     partitionMcpFromToolCalls(rawToolCallsSet);
-  const categories = rebucketMcpInDisplayCategories(rawCategories, mcpTotalTokens);
   // The tool set for the "custom_agents" row
   const subagentsSet = source === "claude"
     ? toolDetails?.subagents || null
@@ -846,14 +817,12 @@ export function ContextBreakdownPanel({ from, to, source = "claude", referenceTo
           const isMessages = cat.key === "messages";
           const isToolCalls = cat.key === "tool_calls";
           const isCustomAgents = cat.key === "custom_agents";
-          const isMcpServers = cat.key === "mcp_servers";
           const isReasoning = cat.key === "reasoning";
 
           const hasChevron =
             (isMessages && messageRows.length > 0) ||
             (isToolCalls && (toolCallsSet?.categories?.length > 0 || codexQueueFallback)) ||
-            (isCustomAgents && hasCustomAgents && subagentsSet) ||
-            (isMcpServers && Boolean(mcpServersSet?.categories?.length));
+            (isCustomAgents && hasCustomAgents && subagentsSet);
 
           const rowOpen = Boolean(openRows[cat.key]);
           const bucketBase = bucketColor(cat.key, source);
@@ -940,19 +909,36 @@ export function ContextBreakdownPanel({ from, to, source = "claude", referenceTo
                   codexQueueFallback={false}
                 />
               )}
-
-              {/* MCP servers disclosure content */}
-              {isMcpServers && mcpServersSet && (
-                <ToolCallsExpanded
-                  toolSet={mcpServersSet}
-                  execDetails={null}
-                  source={source}
-                  codexQueueFallback={false}
-                />
-              )}
             </Row>
           );
         })}
+
+        {/* MCP servers row — shown separately (not in DISPLAY_GROUPS, no
+            percent in bar) because tool_calls_breakdown attribution and the
+            bucket_tokens metric powering the percentage bar are different
+            metrics; mixing them would make children sums diverge from the
+            parent. */}
+        {mcpServersSet?.categories?.length > 0 && (
+          <Row
+            level={0}
+            colorSquare={
+              <span className="h-2 w-2 rounded-sm shrink-0 bg-oai-gray-300 dark:bg-oai-gray-600" aria-hidden="true" />
+            }
+            label={copy("dashboard.context_breakdown.category.mcp_servers")}
+            tokens={formatTokens(mcpTotalTokens)}
+            percent={null}
+            hasChevron={true}
+            open={Boolean(openRows["mcp_servers"])}
+            onToggle={() => toggleRow("mcp_servers")}
+          >
+            <ToolCallsExpanded
+              toolSet={mcpServersSet}
+              execDetails={null}
+              source={source}
+              codexQueueFallback={false}
+            />
+          </Row>
+        )}
 
         {/* Skills row — shown separately (not in DISPLAY_GROUPS, no token total in bar) */}
         {skillRows.length > 0 && (

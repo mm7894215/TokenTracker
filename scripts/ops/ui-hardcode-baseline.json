@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-19T07:53:35.292Z",
+  "generatedAt": "2026-05-19T10:48:12.905Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
@@ -7,7 +7,7 @@
   },
   "totals": {
     "colors": 118,
-    "rawText": 80
+    "rawText": 81
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -143,13 +143,13 @@
     },
     "dashboard/src/ui/dashboard/components/ContextBreakdownPanel.jsx": {
       "colors": 0,
-      "rawText": 7,
+      "rawText": 8,
       "rawTextTokens": [
         "(b.totals?.total_tokens || 0) - (a.totals?.total_tokens || 0), ); return (",
         "); const labelInner = (",
         "); const labelSuffix = isSystemPrefix ? (",
         "0 && (",
-        "0 || codexQueueFallback)) || (isCustomAgents && hasCustomAgents && subagentsSet) || (isMcpServers && Boolean(mcpServersSet?.categories?.length)); const rowOpen = Boolean(openRows[cat.key]); const bucketBase = bucketColor(cat.key, source); const colorSquare = (",
+        "0 || codexQueueFallback)) || (isCustomAgents && hasCustomAgents && subagentsSet); const rowOpen = Boolean(openRows[cat.key]); const bucketBase = bucketColor(cat.key, source); const colorSquare = (",
         "0; const clampedShare = hasFill ? Math.max(0, Math.min(100, share)) : 0; return (",
         "isExecToolName(t.name)); const catOpen = Boolean(openCats[cat.name]); return ("
       ]
