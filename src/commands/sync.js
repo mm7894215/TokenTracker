@@ -14,7 +14,7 @@ const {
   readOpencodeDbMessages,
   resolveKiroDbPath,
   resolveKiroJsonlPath,
-  resolveHermesDbPath,
+  resolveHermesPath,
   resolveCopilotOtelPaths,
   parseRolloutIncremental,
   parseClaudeIncremental,
@@ -500,13 +500,13 @@ async function cmdSync(argv) {
 
     // ── Hermes Agent (SQLite-based) ──
     let hermesResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const hermesDbPath = resolveHermesDbPath();
-    if (fssync.existsSync(hermesDbPath)) {
+    const hermesPath = resolveHermesPath();
+    if (fssync.existsSync(hermesPath)) {
       if (progress?.enabled) {
         progress.start(`Parsing Hermes ${renderBar(0)} | buckets 0`);
       }
       hermesResult = await parseHermesIncremental({
-        dbPath: hermesDbPath,
+        hermesPath,
         cursors,
         queuePath,
         onProgress: (p) => {

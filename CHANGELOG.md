@@ -19,6 +19,8 @@ All notable changes to this project will be documented in this file.
 - `tokentracker init` detects the Kimi sessions directory and surfaces it as a passive reader in the setup summary.
 - Dashboard model-breakdown shows Kimi with brand logo (`kimi.svg`) and violet color (`#a78bfa`).
 - Model reported as `kimi-k2` (wire.jsonl does not expose the model name).
+- **Hermes** — multi-profile support discovers profile databases under `~/.hermes/profiles/*/state.db` and tracks each profile independently with per-profile cursor state
+- `parseHermesIncremental` in `rollout.js` now aggregates tokens across the default DB and all discovered profile DBs
 
 ### Fixed
 

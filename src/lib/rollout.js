@@ -3005,9 +3005,37 @@ async function parseKiroIncremental({ dbPath, jsonlPath, cursors, queuePath, onP
 // Hermes Agent — SQLite-based (sessions table in ~/.hermes/state.db)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function resolveHermesDbPath() {
+function resolveHermesPath() {
   const home = require("node:os").homedir();
-  return path.join(home, ".hermes", "state.db");
+  return path.join(home, ".hermes");
+}
+
+function resolveHermesDbPath() {
+  return path.join(resolveHermesPath(), "state.db");
+}
+
+function resolveAllHermesDBPaths({ hermesPath, dbPath } = {}) {
+  const hermesDir = hermesPath ?? (dbPath ? path.dirname(dbPath) : resolveHermesPath());
+  const defaultDbPath = dbPath ?? path.join(hermesDir, "state.db");
+  const profilePaths = {};
+  try {
+    const profilesDir = path.join(hermesDir, "profiles");
+    const profiles = fssync.readdirSync(profilesDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    for (const entry of profiles) {
+      const dbPath = path.join(profilesDir, entry.name, "state.db");
+      if (fssync.existsSync(dbPath)) {
+        profilePaths[entry.name] = dbPath;
+      }
+    }
+  } catch (_e) { }
+
+  return {
+    default: fssync.existsSync(defaultDbPath) ? defaultDbPath : null,
+    profiles: profilePaths,
+  }
 }
 
 function readHermesSessions(dbPath, lastCompletedEpoch) {
@@ -3037,122 +3065,154 @@ function readHermesSessions(dbPath, lastCompletedEpoch) {
   return Array.isArray(rows) ? rows : [];
 }
 
-async function parseHermesIncremental({ dbPath, cursors, queuePath, onProgress }) {
+function hasLegacyHermesDefaultState(hermesState) {
+  return (
+    typeof hermesState.lastStartedAt === "number" ||
+    typeof hermesState.lastCompletedStartedAt === "number" ||
+    (hermesState.snapshots && typeof hermesState.snapshots === "object")
+  );
+}
+
+async function parseHermesIncremental({ hermesPath, dbPath, cursors, queuePath, onProgress }) {
   await ensureDir(path.dirname(queuePath));
   const hermesState = cursors.hermes && typeof cursors.hermes === "object" ? cursors.hermes : {};
 
-  // Only advance past sessions that have fully ended.  Active sessions
-  // (ended_at IS NULL) must be re-read every sync because Hermes updates
-  // their token counts in real-time after each turn.
-  const lastCompletedStartedAt =
-    typeof hermesState.lastCompletedStartedAt === "number" ? hermesState.lastCompletedStartedAt : 0;
-
-  // Per-session snapshot from the previous sync: { [sessionId]: { in, out, cacheRead, cacheWrite, reasoning } }
-  const prevSnapshots = (hermesState.snapshots && typeof hermesState.snapshots === "object")
-    ? hermesState.snapshots : {};
-
-  const resolvedDbPath = dbPath || resolveHermesDbPath();
-  if (!fssync.existsSync(resolvedDbPath)) {
-    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-  }
-
-  const rows = readHermesSessions(resolvedDbPath, lastCompletedStartedAt);
-  if (rows.length === 0) {
-    cursors.hermes = { ...hermesState, lastCompletedStartedAt, updatedAt: new Date().toISOString() };
+  const dbPaths = resolveAllHermesDBPaths({ hermesPath, dbPath });
+  if (dbPaths.default === null && Object.keys(dbPaths.profiles).length === 0) {
+    // No state in any profile
     return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
   }
 
   const hourlyState = normalizeHourlyState(cursors?.hourly);
-  const touchedBuckets = new Set();
   const cb = typeof onProgress === "function" ? onProgress : null;
+  const updatedAt = new Date().toISOString();
+  let recordsProcessed = 0;
   let eventsAggregated = 0;
-  let maxCompletedStartedAt = lastCompletedStartedAt;
-  const nextSnapshots = {};
+  const touchedBuckets = new Set();
 
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    const inputTokens = toNonNegativeInt(row.input_tokens);
-    const outputTokens = toNonNegativeInt(row.output_tokens);
-    const cacheRead = toNonNegativeInt(row.cache_read_tokens);
-    const cacheWrite = toNonNegativeInt(row.cache_write_tokens);
-    const reasoning = toNonNegativeInt(row.reasoning_tokens);
-    if (inputTokens === 0 && outputTokens === 0 && cacheRead === 0 && reasoning === 0) continue;
-
-    // Save current snapshot for next sync
-    nextSnapshots[row.id] = { in: inputTokens, out: outputTokens, cacheRead, cacheWrite, reasoning };
-
-    // Compute delta from previous snapshot (if any) so that we only count
-    // new tokens since the last sync.  First time we see a session the
-    // previous snapshot is absent, so the full amount is the delta.
-    const prev = prevSnapshots[row.id];
-    let dInput = inputTokens;
-    let dOutput = outputTokens;
-    let dCacheRead = cacheRead;
-    let dCacheWrite = cacheWrite;
-    let dReasoning = reasoning;
-    if (prev) {
-      dInput = Math.max(0, inputTokens - (prev.in || 0));
-      dOutput = Math.max(0, outputTokens - (prev.out || 0));
-      dCacheRead = Math.max(0, cacheRead - (prev.cacheRead || 0));
-      dCacheWrite = Math.max(0, cacheWrite - (prev.cacheWrite || 0));
-      dReasoning = Math.max(0, reasoning - (prev.reasoning || 0));
-    }
-    // Skip if delta is zero (session unchanged since last sync)
-    if (dInput === 0 && dOutput === 0 && dCacheRead === 0 && dCacheWrite === 0 && dReasoning === 0) continue;
-
-    // Prefer ended_at for bucket placement; fall back to started_at
-    const epochSec = row.ended_at || row.started_at;
-    if (!epochSec || !Number.isFinite(epochSec)) continue;
-    const tsIso = new Date(epochSec * 1000).toISOString();
-    const bucketStart = toUtcHalfHourStart(tsIso);
-    if (!bucketStart) continue;
-
-    const model = normalizeModelInput(row.model) || "hermes-agent";
-
-    const delta = {
-      input_tokens: dInput,
-      cached_input_tokens: dCacheRead,
-      cache_creation_input_tokens: dCacheWrite,
-      output_tokens: dOutput,
-      reasoning_output_tokens: dReasoning,
-      total_tokens: dInput + dOutput + dCacheRead + dCacheWrite + dReasoning,
-      conversation_count: toNonNegativeInt(row.message_count) || 1,
-    };
-
-    const bucket = getHourlyBucket(hourlyState, "hermes", model, bucketStart);
-    addTotals(bucket.totals, delta);
-    touchedBuckets.add(bucketKey("hermes", model, bucketStart));
-    eventsAggregated++;
-
-    // Only advance cursor past sessions that have ended
-    if (row.ended_at && row.started_at > maxCompletedStartedAt) {
-      maxCompletedStartedAt = row.started_at;
+  function ingestProfile(dbPath, dbState) {
+    const rows = readHermesSessions(dbPath, dbState.lastCompletedStartedAt);
+    recordsProcessed += rows.length;
+    if (rows.length === 0) {
+      dbState.updatedAt = updatedAt;
+      return;
     }
 
-    if (cb) {
-      cb({
-        index: i + 1,
-        total: rows.length,
-        recordsProcessed: i + 1,
-        eventsAggregated,
-        bucketsQueued: touchedBuckets.size,
-      });
+    // Per-session snapshot from the previous sync: { [sessionId]: { in, out, cacheRead, cacheWrite, reasoning } }
+    const prevSnapshots = (dbState.snapshots && typeof dbState.snapshots === "object")
+      ? dbState.snapshots : {};
+
+    // Only advance past sessions that have fully ended.  Active sessions
+    // (ended_at IS NULL) must be re-read every sync because Hermes updates
+    // their token counts in real-time after each turn.
+    const lastCompletedStartedAt =
+      typeof dbState.lastCompletedStartedAt === "number" ? dbState.lastCompletedStartedAt : 0;
+
+    let maxCompletedStartedAt = lastCompletedStartedAt;
+    const nextSnapshots = {};
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const inputTokens = toNonNegativeInt(row.input_tokens);
+      const outputTokens = toNonNegativeInt(row.output_tokens);
+      const cacheRead = toNonNegativeInt(row.cache_read_tokens);
+      const cacheWrite = toNonNegativeInt(row.cache_write_tokens);
+      const reasoning = toNonNegativeInt(row.reasoning_tokens);
+      if (inputTokens === 0 && outputTokens === 0 && cacheRead === 0 && reasoning === 0) continue;
+
+      // Save current snapshot for next sync
+      nextSnapshots[row.id] = { in: inputTokens, out: outputTokens, cacheRead, cacheWrite, reasoning };
+
+      // Compute delta from previous snapshot (if any) so that we only count
+      // new tokens since the last sync.  First time we see a session the
+      // previous snapshot is absent, so the full amount is the delta.
+      const prev = prevSnapshots[row.id];
+      let dInput = inputTokens;
+      let dOutput = outputTokens;
+      let dCacheRead = cacheRead;
+      let dCacheWrite = cacheWrite;
+      let dReasoning = reasoning;
+      if (prev) {
+        dInput = Math.max(0, inputTokens - (prev.in || 0));
+        dOutput = Math.max(0, outputTokens - (prev.out || 0));
+        dCacheRead = Math.max(0, cacheRead - (prev.cacheRead || 0));
+        dCacheWrite = Math.max(0, cacheWrite - (prev.cacheWrite || 0));
+        dReasoning = Math.max(0, reasoning - (prev.reasoning || 0));
+      }
+      // Skip if delta is zero (session unchanged since last sync)
+      if (dInput === 0 && dOutput === 0 && dCacheRead === 0 && dCacheWrite === 0 && dReasoning === 0) continue;
+
+      // Prefer ended_at for bucket placement; fall back to started_at
+      const epochSec = row.ended_at || row.started_at;
+      if (!epochSec || !Number.isFinite(epochSec)) continue;
+      const tsIso = new Date(epochSec * 1000).toISOString();
+      const bucketStart = toUtcHalfHourStart(tsIso);
+      if (!bucketStart) continue;
+
+      const model = normalizeModelInput(row.model) || "hermes-agent";
+
+      const delta = {
+        input_tokens: dInput,
+        cached_input_tokens: dCacheRead,
+        cache_creation_input_tokens: dCacheWrite,
+        output_tokens: dOutput,
+        reasoning_output_tokens: dReasoning,
+        total_tokens: dInput + dOutput + dCacheRead + dCacheWrite + dReasoning,
+        conversation_count: toNonNegativeInt(row.message_count) || 1,
+      };
+
+      const bucket = getHourlyBucket(hourlyState, "hermes", model, bucketStart);
+      addTotals(bucket.totals, delta);
+      touchedBuckets.add(bucketKey("hermes", model, bucketStart));
+      eventsAggregated++;
+
+      // Only advance cursor past sessions that have ended
+      if (row.ended_at && row.started_at > maxCompletedStartedAt) {
+        maxCompletedStartedAt = row.started_at;
+      }
+
+      if (cb) {
+        cb({
+          index: i + 1,
+          total: rows.length,
+          recordsProcessed: i + 1,
+          eventsAggregated,
+          bucketsQueued: touchedBuckets.size,
+        });
+      }
     }
+
+    Object.assign(dbState, {
+      lastStartedAt: maxCompletedStartedAt,
+      lastCompletedStartedAt: maxCompletedStartedAt,
+      snapshots: nextSnapshots,
+      updatedAt,
+    });
+  }
+
+  if (dbPaths.default) {
+    ingestProfile(dbPaths.default, hermesState);
+  }
+
+  hermesState.profiles = hermesState.profiles && typeof hermesState.profiles === "object" ? hermesState.profiles : {};
+
+  for (const [profileName, dbPath] of Object.entries(dbPaths.profiles)) {
+    const profileState = hermesState.profiles[profileName] && typeof hermesState.profiles[profileName] === "object"
+      ? hermesState.profiles[profileName]
+      : {};
+    hermesState.profiles[profileName] = profileState;
+    ingestProfile(dbPath, profileState);
   }
 
   const bucketsQueued = await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets });
-  const updatedAt = new Date().toISOString();
   hourlyState.updatedAt = updatedAt;
   cursors.hourly = hourlyState;
   cursors.hermes = {
     ...hermesState,
-    lastStartedAt: maxCompletedStartedAt, // keep for backward compat
-    lastCompletedStartedAt: maxCompletedStartedAt,
-    snapshots: nextSnapshots,
-    updatedAt,
+    updatedAt, // Update the overall profile state timestamp even if the DB doesn't exist for the fast-path check
   };
 
-  return { recordsProcessed: rows.length, eventsAggregated, bucketsQueued };
+  return { recordsProcessed, eventsAggregated, bucketsQueued };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -6532,6 +6592,7 @@ module.exports = {
   readOpencodeDbMessages,
   resolveKiroDbPath,
   resolveKiroJsonlPath,
+  resolveHermesPath,
   resolveHermesDbPath,
   resolveCopilotOtelPaths,
   parseRolloutIncremental,

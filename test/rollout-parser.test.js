@@ -2662,6 +2662,7 @@ async function readJsonLines(filePath) {
 // ── Hermes Agent integration tests ──
 
 function createHermesDb(dbPath, sessions) {
+  require("node:fs").mkdirSync(path.dirname(dbPath), { recursive: true });
   cp.execFileSync("sqlite3", [
     dbPath,
     `CREATE TABLE sessions (
@@ -2707,6 +2708,85 @@ function createHermesDb(dbPath, sessions) {
     ]);
   }
 }
+
+test("parseHermesIncremental reads default and named profile databases with isolated cursors", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-hermes-profiles-"));
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+    const defaultDbPath = path.join(tmp, "state.db");
+    const workDbPath = path.join(tmp, "profiles", "work", "state.db");
+    const personalDbPath = path.join(tmp, "profiles", "personal", "state.db");
+    const defaultEpoch = 1775993779.0;
+    const workEpoch = 1775997400.0;
+    const personalEpoch = 1776001000.0;
+
+    createHermesDb(defaultDbPath, [
+      { id: "shared_session", model: "gpt-5.4-mini", started_at: defaultEpoch, ended_at: defaultEpoch + 120, input_tokens: 1000, output_tokens: 500, message_count: 4 },
+    ]);
+    createHermesDb(workDbPath, [
+      { id: "shared_session", model: "claude-sonnet-4-6", started_at: workEpoch, ended_at: workEpoch + 120, input_tokens: 2000, output_tokens: 700, cache_read_tokens: 300, message_count: 5 },
+    ]);
+    createHermesDb(personalDbPath, [
+      { id: "personal_session", model: "gpt-5.4", started_at: personalEpoch, ended_at: personalEpoch + 120, input_tokens: 3000, output_tokens: 900, cache_write_tokens: 400, reasoning_tokens: 100, message_count: 6 },
+    ]);
+
+    const first = await parseHermesIncremental({ hermesPath: tmp, cursors, queuePath });
+    assert.equal(first.recordsProcessed, 3);
+    assert.equal(first.eventsAggregated, 3);
+    assert.ok(first.bucketsQueued >= 3);
+
+    assert.equal(cursors.hermes.lastStartedAt, defaultEpoch);
+    assert.equal(cursors.hermes.lastCompletedStartedAt, defaultEpoch);
+    assert.equal(cursors.hermes.snapshots["shared_session"].in, 1000);
+    assert.equal(cursors.hermes.profiles.work.lastCompletedStartedAt, workEpoch);
+    assert.equal(cursors.hermes.profiles.work.snapshots["shared_session"].in, 2000);
+    assert.equal(cursors.hermes.profiles.personal.lastCompletedStartedAt, personalEpoch);
+    assert.equal(cursors.hermes.profiles.personal.snapshots["personal_session"].cacheWrite, 400);
+
+    const queued = await readJsonLines(queuePath);
+    assert.ok(queued.some((b) => b.source === "hermes" && b.model === "gpt-5.4-mini" && b.input_tokens === 1000));
+    assert.ok(queued.some((b) => b.source === "hermes" && b.model === "claude-sonnet-4-6" && b.cached_input_tokens === 300));
+    assert.ok(queued.some((b) => b.source === "hermes" && b.model === "gpt-5.4" && b.cache_creation_input_tokens === 400 && b.reasoning_output_tokens === 100));
+
+    const second = await parseHermesIncremental({ hermesPath: tmp, cursors, queuePath });
+    assert.equal(second.recordsProcessed, 0);
+    assert.equal(second.eventsAggregated, 0);
+    assert.equal(second.bucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseHermesIncremental processes profiles when default database is absent", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-hermes-profile-only-"));
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+    const workDbPath = path.join(tmp, "profiles", "work", "state.db");
+    const epoch = 1775993779.0;
+
+    createHermesDb(workDbPath, [
+      { id: "work_session", model: "claude-sonnet-4-6", started_at: epoch, ended_at: epoch + 120, input_tokens: 1234, output_tokens: 567, message_count: 3 },
+    ]);
+
+    const result = await parseHermesIncremental({ hermesPath: tmp, cursors, queuePath });
+    assert.equal(result.recordsProcessed, 1);
+    assert.equal(result.eventsAggregated, 1);
+    assert.equal(cursors.hermes.profiles.work.lastCompletedStartedAt, epoch);
+    assert.equal(cursors.hermes.profiles.work.snapshots["work_session"].out, 567);
+    assert.equal(cursors.hermes.lastCompletedStartedAt, undefined);
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].source, "hermes");
+    assert.equal(queued[0].model, "claude-sonnet-4-6");
+    assert.equal(queued[0].input_tokens, 1234);
+    assert.equal(queued[0].output_tokens, 567);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
 
 test("parseHermesIncremental processes sessions incrementally", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-hermes-"));
