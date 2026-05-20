@@ -2952,6 +2952,43 @@ test("parseHermesIncremental tracks real-time token growth for active sessions (
   }
 });
 
+test("parseHermesIncremental ingests final deltas for active sessions older than newer completed sessions", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-hermes-old-active-"));
+  try {
+    const dbPath = path.join(tmp, "state.db");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+
+    const activeEpoch = 1775990000.0;
+    const completedEpoch = activeEpoch + 7200;
+
+    createHermesDb(dbPath, [
+      { id: "sess_active_old", model: "gpt-5.4-mini", started_at: activeEpoch, ended_at: null, input_tokens: 100, output_tokens: 10, message_count: 2 },
+      { id: "sess_done_newer", model: "claude-sonnet-4-6", started_at: completedEpoch, ended_at: completedEpoch + 120, input_tokens: 1000, output_tokens: 50, message_count: 4 },
+    ]);
+
+    const first = await parseHermesIncremental({ dbPath, cursors, queuePath });
+    assert.equal(first.recordsProcessed, 2);
+    assert.equal(first.eventsAggregated, 2);
+    assert.equal(cursors.hermes.lastCompletedStartedAt, activeEpoch);
+    assert.equal(cursors.hermes.snapshots["sess_active_old"].in, 100);
+
+    cp.execFileSync("sqlite3", [
+      dbPath,
+      `UPDATE sessions SET ended_at = ${activeEpoch + 3600}, input_tokens = 150, output_tokens = 25, message_count = 3 WHERE id = 'sess_active_old';`,
+    ]);
+
+    const second = await parseHermesIncremental({ dbPath, cursors, queuePath });
+    assert.equal(second.eventsAggregated, 1);
+    assert.equal(cursors.hermes.lastCompletedStartedAt, completedEpoch);
+
+    const queued = await readJsonLines(queuePath);
+    assert.ok(queued.some((b) => b.source === "hermes" && b.model === "gpt-5.4-mini" && b.input_tokens === 50 && b.output_tokens === 15));
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseHermesIncremental skips active session when delta is zero (unchanged)", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-hermes-"));
   try {

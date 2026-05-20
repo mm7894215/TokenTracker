@@ -3038,13 +3038,24 @@ function resolveAllHermesDBPaths({ hermesPath, dbPath } = {}) {
   }
 }
 
-function readHermesSessions(dbPath, lastCompletedEpoch) {
+function sqliteStringLiteral(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function readHermesSessions(dbPath, lastCompletedEpoch, unfinishedSessionIds = []) {
   if (!dbPath || !fssync.existsSync(dbPath)) return [];
   const since = Number.isFinite(lastCompletedEpoch) && lastCompletedEpoch > 0 ? lastCompletedEpoch : 0;
-  // Fetch sessions that started after the cursor, OR sessions that are still
-  // in-progress (ended_at IS NULL).  Hermes updates token counts in real-time,
-  // so an active session keeps growing and must be re-read on every sync.
-  const sql = `SELECT id, model, started_at, ended_at, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, message_count FROM sessions WHERE (started_at > ${since} OR ended_at IS NULL) AND (input_tokens > 0 OR output_tokens > 0 OR cache_read_tokens > 0 OR reasoning_tokens > 0) ORDER BY started_at ASC`;
+  const forceIds = Array.isArray(unfinishedSessionIds)
+    ? [...new Set(unfinishedSessionIds.filter((id) => typeof id === "string" && id.length > 0))]
+    : [];
+  const forceIncludeSql = forceIds.length > 0
+    ? ` OR id IN (${forceIds.map(sqliteStringLiteral).join(",")})`
+    : "";
+  // Fetch sessions that started after the cursor, sessions that are still
+  // in-progress (ended_at IS NULL), OR sessions that were previously observed
+  // unfinished.  Hermes updates token counts in real-time, including a final
+  // delta when an active session later gets ended_at set.
+  const sql = `SELECT id, model, started_at, ended_at, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, message_count FROM sessions WHERE (started_at > ${since} OR ended_at IS NULL${forceIncludeSql}) AND (input_tokens > 0 OR output_tokens > 0 OR cache_read_tokens > 0 OR reasoning_tokens > 0) ORDER BY started_at ASC`;
   let raw;
   try {
     raw = cp.execFileSync("sqlite3", ["-json", dbPath, sql], {
@@ -3091,7 +3102,10 @@ async function parseHermesIncremental({ hermesPath, dbPath, cursors, queuePath, 
   const touchedBuckets = new Set();
 
   function ingestProfile(dbPath, dbState) {
-    const rows = readHermesSessions(dbPath, dbState.lastCompletedStartedAt);
+    const trackedUnfinishedSessionIds = Array.isArray(dbState.unfinishedSessionIds)
+      ? dbState.unfinishedSessionIds
+      : [];
+    const rows = readHermesSessions(dbPath, dbState.lastCompletedStartedAt, trackedUnfinishedSessionIds);
     recordsProcessed += rows.length;
     if (rows.length === 0) {
       dbState.updatedAt = updatedAt;
@@ -3109,6 +3123,8 @@ async function parseHermesIncremental({ hermesPath, dbPath, cursors, queuePath, 
       typeof dbState.lastCompletedStartedAt === "number" ? dbState.lastCompletedStartedAt : 0;
 
     let maxCompletedStartedAt = lastCompletedStartedAt;
+    let oldestUnfinishedStartedAt = Infinity;
+    const nextUnfinishedSessionIds = new Set();
     const nextSnapshots = {};
 
     for (let i = 0; i < rows.length; i++) {
@@ -3122,6 +3138,17 @@ async function parseHermesIncremental({ hermesPath, dbPath, cursors, queuePath, 
 
       // Save current snapshot for next sync
       nextSnapshots[row.id] = { in: inputTokens, out: outputTokens, cacheRead, cacheWrite, reasoning };
+
+      const startedAt = Number(row.started_at);
+      const endedAt = row.ended_at == null ? null : Number(row.ended_at);
+      if (endedAt == null) {
+        if (row.id && Number.isFinite(startedAt)) {
+          nextUnfinishedSessionIds.add(row.id);
+          oldestUnfinishedStartedAt = Math.min(oldestUnfinishedStartedAt, startedAt);
+        }
+      } else if (Number.isFinite(startedAt) && startedAt > maxCompletedStartedAt) {
+        maxCompletedStartedAt = startedAt;
+      }
 
       // Compute delta from previous snapshot (if any) so that we only count
       // new tokens since the last sync.  First time we see a session the
@@ -3143,7 +3170,7 @@ async function parseHermesIncremental({ hermesPath, dbPath, cursors, queuePath, 
       if (dInput === 0 && dOutput === 0 && dCacheRead === 0 && dCacheWrite === 0 && dReasoning === 0) continue;
 
       // Prefer ended_at for bucket placement; fall back to started_at
-      const epochSec = row.ended_at || row.started_at;
+      const epochSec = endedAt ?? startedAt;
       if (!epochSec || !Number.isFinite(epochSec)) continue;
       const tsIso = new Date(epochSec * 1000).toISOString();
       const bucketStart = toUtcHalfHourStart(tsIso);
@@ -3166,11 +3193,6 @@ async function parseHermesIncremental({ hermesPath, dbPath, cursors, queuePath, 
       touchedBuckets.add(bucketKey("hermes", model, bucketStart));
       eventsAggregated++;
 
-      // Only advance cursor past sessions that have ended
-      if (row.ended_at && row.started_at > maxCompletedStartedAt) {
-        maxCompletedStartedAt = row.started_at;
-      }
-
       if (cb) {
         cb({
           index: i + 1,
@@ -3182,9 +3204,14 @@ async function parseHermesIncremental({ hermesPath, dbPath, cursors, queuePath, 
       }
     }
 
+    const nextLastCompletedStartedAt = Number.isFinite(oldestUnfinishedStartedAt)
+      ? Math.min(maxCompletedStartedAt, oldestUnfinishedStartedAt)
+      : maxCompletedStartedAt;
+
     Object.assign(dbState, {
-      lastStartedAt: maxCompletedStartedAt,
-      lastCompletedStartedAt: maxCompletedStartedAt,
+      lastStartedAt: nextLastCompletedStartedAt,
+      lastCompletedStartedAt: nextLastCompletedStartedAt,
+      unfinishedSessionIds: Array.from(nextUnfinishedSessionIds),
       snapshots: nextSnapshots,
       updatedAt,
     });
