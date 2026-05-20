@@ -58,7 +58,6 @@ async function runGeneratedNotifyHandler({ trackerDir, notify }) {
     );
     child.stdin?.end();
   });
-  await new Promise((resolve) => setTimeout(resolve, 250));
 }
 
 test("notify handler skips SkyComputerUseClient and stale explicit original notify paths", async () => {
@@ -93,7 +92,7 @@ test("notify handler skips SkyComputerUseClient and stale explicit original noti
       trackerDir: path.join(tmp, "tracker-sky"),
       notify: [skyPath, "turn-ended"],
     });
-    await assert.rejects(fs.stat(markerPath), /ENOENT/);
+    assert.equal(await waitForFile(markerPath, { timeoutMs: 500 }), null);
 
     await runGeneratedNotifyHandler({
       trackerDir: path.join(tmp, "tracker-missing"),
@@ -120,7 +119,8 @@ test("notify handler still chains normal original notify commands", async () => 
       notify: [process.execPath, shimPath],
     });
 
-    const marker = await fs.readFile(markerPath, "utf8");
+    const marker = await waitForFile(markerPath, { timeoutMs: 5000 });
+    assert.ok(marker, "expected chained notify marker to be written");
     assert.ok(marker.includes("turn-ended"), "expected payload args to be forwarded");
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });

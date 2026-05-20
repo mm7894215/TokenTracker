@@ -5893,15 +5893,15 @@ async function parseCopilotIncremental({ otelPaths, cursors, queuePath, onProgre
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Grok Build (xAI) — passive reader for ~/.grok/sessions/**/signals.json + summary.json
+// Grok Build (xAI) — passive reader for ~/.grok/sessions/**/updates.jsonl + signals.json
 // Triggered either by full scan in sync or by the SessionEnd hook writing a signal.
-// Grok exposes contextTokensUsed, which appears to be a snapshot rather than
-// per-call telemetry, so these rows are estimates and only enqueue observed
-// increases for a session.
+// updates.jsonl exposes cumulative totalTokens metadata. Grok still does not
+// expose a stable prompt/output/cache split locally, so these rows keep the
+// estimated input/output split while using better local telemetry for totals.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const GROK_ESTIMATED_INPUT_RATIO = 0.8;
-const GROK_CURSOR_VERSION = 2;
+const GROK_CURSOR_VERSION = 3;
 
 function resolveGrokBuildHome(env = process.env) {
   return (
@@ -5936,9 +5936,11 @@ function resolveGrokBuildSessions(env = process.env) {
     for (const sid of sessionIds) {
       const sessionDir = path.join(cwdPath, sid);
       const signalsPath = path.join(sessionDir, "signals.json");
-      if (fssync.existsSync(signalsPath)) {
+      const updatesPath = path.join(sessionDir, "updates.jsonl");
+      if (fssync.existsSync(signalsPath) || fssync.existsSync(updatesPath)) {
         results.push({
           sessionDir,
+          updatesPath,
           signalsPath,
           summaryPath: path.join(sessionDir, "summary.json"),
           sessionId: sid,
@@ -5961,6 +5963,9 @@ function normalizeGrokSessionSnapshots(grokState) {
         totalTokens,
         messageCount: normalizeNonNegativeNumber(snapshot.messageCount),
         model: normalizeModelInput(snapshot.model) || null,
+        source: normalizeModelInput(snapshot.source) || null,
+        lastEventId: normalizeModelInput(snapshot.lastEventId) || null,
+        lastEventTimestamp: normalizeModelInput(snapshot.lastEventTimestamp) || null,
         updatedAt: normalizeModelInput(snapshot.updatedAt) || null,
       };
     }
@@ -5971,7 +5976,7 @@ function normalizeGrokSessionSnapshots(grokState) {
       const safeSessionId = normalizeModelInput(sessionId);
       if (!safeSessionId || snapshots[safeSessionId]) continue;
       snapshots[safeSessionId] = {
-        totalTokens: Number.MAX_SAFE_INTEGER,
+        totalTokens: 0,
         messageCount: 0,
         model: null,
         updatedAt: normalizeModelInput(grokState.updatedAt) || null,
@@ -5996,6 +6001,14 @@ function readGrokJsonFile(filePath) {
   } catch {
     return null;
   }
+}
+
+function grokUpdatesPathForSession(sess) {
+  if (typeof sess?.updatesPath === "string" && sess.updatesPath.trim()) return sess.updatesPath;
+  if (typeof sess?.sessionDir === "string" && sess.sessionDir.trim()) {
+    return path.join(sess.sessionDir, "updates.jsonl");
+  }
+  return null;
 }
 
 function grokSessionIdFor(sess) {
@@ -6025,11 +6038,110 @@ function grokLastActiveFromSignals(signals, summary) {
   );
 }
 
-function estimateGrokTokenDelta(totalTokens, conversationCount) {
+function grokMessageCountFromSignals(signals) {
+  return normalizeNonNegativeNumber(
+    signals?.assistantMessageCount ??
+      signals?.turnCount ??
+      signals?.num_chat_messages ??
+      signals?.messageCount,
+  );
+}
+
+function grokEffectiveTotalFromSignals(signals) {
+  if (!signals || typeof signals !== "object") return 0;
+  const currentContextTotal = Math.max(
+    normalizeNonNegativeNumber(signals.contextTokensUsed),
+    normalizeNonNegativeNumber(signals.totalTokens),
+  );
+  const beforeCompaction = normalizeNonNegativeNumber(signals.totalTokensBeforeCompaction);
+  return beforeCompaction + currentContextTotal;
+}
+
+function grokTimestampToIso(value) {
+  if (value == null) return null;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value <= 0) return null;
+    const millis = value < 10_000_000_000 ? value * 1000 : value;
+    const dt = new Date(millis);
+    return Number.isFinite(dt.getTime()) ? dt.toISOString() : null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (/^[0-9]+(?:\.[0-9]+)?$/.test(trimmed)) {
+      return grokTimestampToIso(Number(trimmed));
+    }
+    const dt = new Date(trimmed);
+    return Number.isFinite(dt.getTime()) ? dt.toISOString() : null;
+  }
+  return null;
+}
+
+function grokTimestampFromUpdate(meta, record, fallback) {
+  return (
+    grokTimestampToIso(meta?.agentTimestampMs) ||
+    grokTimestampToIso(meta?.timestampMs) ||
+    grokTimestampToIso(record?.timestamp_ms) ||
+    grokTimestampToIso(record?.timestamp) ||
+    grokTimestampToIso(record?.time) ||
+    fallback ||
+    null
+  );
+}
+
+function grokEventId(value, fallback) {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return fallback;
+}
+
+async function readGrokUpdateTokenEvents(updatesPath, fallbackTimestamp) {
+  if (!updatesPath) return { events: [], recordsProcessed: 0 };
+  try {
+    const stat = fssync.statSync(updatesPath);
+    if (!stat.isFile()) return { events: [], recordsProcessed: 0 };
+  } catch {
+    return { events: [], recordsProcessed: 0 };
+  }
+
+  const events = [];
+  let lineIndex = 0;
+  const input = fssync.createReadStream(updatesPath, { encoding: "utf8" });
+  const rl = readline.createInterface({ input, crlfDelay: Infinity });
+  try {
+    for await (const line of rl) {
+      lineIndex++;
+      if (!line || !line.trim()) continue;
+      let record;
+      try {
+        record = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const meta = record?.params?._meta || record?._meta;
+      if (!meta || typeof meta !== "object") continue;
+      const totalTokens = normalizeNonNegativeNumber(meta.totalTokens);
+      if (totalTokens <= 0) continue;
+      const timestamp = grokTimestampFromUpdate(meta, record, fallbackTimestamp);
+      events.push({
+        totalTokens,
+        timestamp,
+        eventId: grokEventId(meta.eventId ?? record?.eventId ?? record?.id, String(lineIndex)),
+      });
+    }
+  } catch {
+    return { events, recordsProcessed: events.length };
+  }
+
+  return { events, recordsProcessed: events.length };
+}
+
+function estimateGrokTokenDelta(totalTokens, conversationCount, options = {}) {
   const total = Math.trunc(normalizeNonNegativeNumber(totalTokens));
   const inputTokens = Math.round(total * GROK_ESTIMATED_INPUT_RATIO);
   const outputTokens = Math.max(0, total - inputTokens);
-  const conversations = Math.max(1, Math.trunc(normalizeNonNegativeNumber(conversationCount)));
+  const rawConversations = Math.trunc(normalizeNonNegativeNumber(conversationCount));
+  const conversations = options.allowZeroConversationCount ? rawConversations : Math.max(1, rawConversations);
 
   return {
     input_tokens: inputTokens,
@@ -6062,51 +6174,102 @@ async function parseGrokBuildIncremental({
 
   let eventsAggregated = 0;
 
-  for (const sess of sessionList) {
+  for (let index = 0; index < sessionList.length; index++) {
+    const sess = sessionList[index];
     const sessionId = grokSessionIdFor(sess);
-    if (!sessionId) continue;
+    if (!sessionId) {
+      if (onProgress) onProgress({ index: index + 1, total: sessionList.length, bucketsQueued: touchedBuckets.size });
+      continue;
+    }
 
     const signals = sess?.signals && typeof sess.signals === "object"
       ? sess.signals
       : readGrokJsonFile(sess?.signalsPath);
-    if (!signals || typeof signals !== "object") continue;
+    const safeSignals = signals && typeof signals === "object" ? signals : {};
 
     const summary = sess?.summary && typeof sess.summary === "object"
       ? sess.summary
       : readGrokJsonFile(sess?.summaryPath) || {};
-    const totalTokens = normalizeNonNegativeNumber(signals.contextTokensUsed ?? signals.totalTokens);
-    if (totalTokens <= 0) {
-      continue;
-    }
-
     const previous = sessionSnapshots[sessionId] || {};
     const previousTotal = normalizeNonNegativeNumber(previous.totalTokens);
-    const deltaTokens = totalTokens > previousTotal ? totalTokens - previousTotal : 0;
-    if (deltaTokens <= 0) continue;
-
-    const messageCount = normalizeNonNegativeNumber(
-      signals.assistantMessageCount ?? signals.num_chat_messages ?? signals.messageCount,
-    );
     const previousMessageCount = normalizeNonNegativeNumber(previous.messageCount);
-    const deltaMessageCount =
-      messageCount > previousMessageCount ? messageCount - previousMessageCount : 1;
-    const model = grokModelFromSignals(signals);
-    const lastActive = grokLastActiveFromSignals(signals, summary);
-    const hourStartStr = toUtcHalfHourStart(lastActive) || toUtcHalfHourStart(Date.now());
-    if (!hourStartStr) continue;
+    const messageCount = grokMessageCountFromSignals(safeSignals);
+    const model = grokModelFromSignals(safeSignals);
+    const lastActive = grokLastActiveFromSignals(safeSignals, summary);
 
-    const delta = estimateGrokTokenDelta(deltaTokens, deltaMessageCount);
-    const bucket = getHourlyBucket(hourlyState, "grok", model, hourStartStr);
-    addTotals(bucket.totals, delta);
-    touchedBuckets.add(bucketKey("grok", model, hourStartStr));
+    let highWatermark = previousTotal;
+    let observedTotal = previousTotal;
+    let tokenDeltaForSession = 0;
+    let finalTouchedHourStart = null;
+    let source = previous.source || null;
+    let lastEventId = previous.lastEventId || null;
+    let lastEventTimestamp = previous.lastEventTimestamp || null;
+    const pendingTokenDeltas = [];
 
-    eventsAggregated++;
-    sessionSnapshots[sessionId] = {
-      totalTokens: Math.max(previousTotal, totalTokens),
-      messageCount: Math.max(previousMessageCount, messageCount),
-      model,
-      updatedAt: new Date().toISOString(),
+    const recordTokenDelta = (deltaTokens, timestamp, deltaSource) => {
+      const hourStartStr = toUtcHalfHourStart(timestamp) || toUtcHalfHourStart(Date.now());
+      if (!hourStartStr) return false;
+      pendingTokenDeltas.push({ deltaTokens, hourStartStr });
+      tokenDeltaForSession += deltaTokens;
+      finalTouchedHourStart = hourStartStr;
+      source = deltaSource;
+      return true;
     };
+
+    const updates = await readGrokUpdateTokenEvents(grokUpdatesPathForSession(sess), lastActive);
+    for (const event of updates.events) {
+      observedTotal = Math.max(observedTotal, event.totalTokens);
+      lastEventId = event.eventId || lastEventId;
+      lastEventTimestamp = event.timestamp || lastEventTimestamp;
+      if (event.totalTokens <= highWatermark) continue;
+      const deltaTokens = event.totalTokens - highWatermark;
+      highWatermark = event.totalTokens;
+      recordTokenDelta(deltaTokens, event.timestamp || lastActive, "updates");
+    }
+
+    const effectiveSignalTotal = grokEffectiveTotalFromSignals(safeSignals);
+    observedTotal = Math.max(observedTotal, effectiveSignalTotal);
+    if (effectiveSignalTotal > highWatermark) {
+      const deltaTokens = effectiveSignalTotal - highWatermark;
+      highWatermark = effectiveSignalTotal;
+      recordTokenDelta(deltaTokens, lastActive, "signals");
+    }
+
+    const finalTotal = Math.max(previousTotal, highWatermark, observedTotal);
+    const legacyBaselineOnly = previous.legacySeen && previousTotal === 0 && finalTotal > 0;
+    if (!legacyBaselineOnly) {
+      for (const pending of pendingTokenDeltas) {
+        const delta = estimateGrokTokenDelta(pending.deltaTokens, 0, { allowZeroConversationCount: true });
+        const bucket = getHourlyBucket(hourlyState, "grok", model, pending.hourStartStr);
+        addTotals(bucket.totals, delta);
+        touchedBuckets.add(bucketKey("grok", model, pending.hourStartStr));
+        eventsAggregated++;
+      }
+    }
+
+    if (!legacyBaselineOnly && tokenDeltaForSession > 0 && finalTouchedHourStart) {
+      const deltaMessageCount =
+        messageCount > previousMessageCount ? messageCount - previousMessageCount : 1;
+      const bucket = getHourlyBucket(hourlyState, "grok", model, finalTouchedHourStart);
+      addTotals(bucket.totals, { conversation_count: deltaMessageCount });
+      touchedBuckets.add(bucketKey("grok", model, finalTouchedHourStart));
+    }
+
+    if (finalTotal > 0 && (tokenDeltaForSession > 0 || previousTotal > 0 || legacyBaselineOnly)) {
+      sessionSnapshots[sessionId] = {
+        totalTokens: finalTotal,
+        messageCount: Math.max(previousMessageCount, messageCount),
+        model,
+        source: source || previous.source || null,
+        lastEventId,
+        lastEventTimestamp,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    if (onProgress) {
+      onProgress({ index: index + 1, total: sessionList.length, bucketsQueued: touchedBuckets.size });
+    }
   }
 
   const bucketsQueued = queuePath
@@ -6589,7 +6752,7 @@ module.exports = {
   canonicalizeProjectRef,
   deriveProjectKeyFromRef,
 
-  // Grok Build (xAI) — SessionEnd hook + passive signals.json reader
+  // Grok Build (xAI) — SessionEnd hook + passive updates.jsonl/signals.json reader
   resolveGrokBuildHome,
   resolveGrokBuildSessions,
   parseGrokBuildIncremental,

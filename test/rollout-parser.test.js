@@ -28,6 +28,7 @@ const {
   resolveCraftSessionFiles,
   resolveCraftWorkspaceRoots,
   parseGrokBuildIncremental,
+  resolveGrokBuildSessions,
   parseAntigravityIncremental,
   listAntigravitySessionFiles,
   estimateAntigravityTokens,
@@ -5648,6 +5649,273 @@ test("parseGrokBuildIncremental buckets Grok sessions by UTC half hour", async (
     assert.equal(queued.length, 2);
     assert.equal(queued[0].hour_start, "2026-04-05T14:00:00.000Z");
     assert.equal(queued[1].hour_start, "2026-04-05T14:30:00.000Z");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseGrokBuildIncremental reads Grok updates metadata by event timestamp", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-grok-updates-"));
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    const sessionDir = path.join(tmp, "sessions", "encoded-cwd", "grok-session-updates");
+    await fs.mkdir(sessionDir, { recursive: true });
+    const signalsPath = path.join(sessionDir, "signals.json");
+    const updatesPath = path.join(sessionDir, "updates.jsonl");
+    await fs.writeFile(
+      signalsPath,
+      JSON.stringify({
+        contextTokensUsed: 90,
+        assistantMessageCount: 2,
+        primaryModelId: "grok-build",
+        lastActiveAt: "2026-04-05T14:50:00.000Z",
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      updatesPath,
+      [
+        JSON.stringify({
+          method: "session/update",
+          timestamp: 1775397900,
+          params: { _meta: { totalTokens: 100, agentTimestampMs: Date.parse("2026-04-05T14:05:00.000Z"), eventId: "evt-1" } },
+        }),
+        JSON.stringify({
+          method: "session/update",
+          params: { _meta: { totalTokens: 100, agentTimestampMs: Date.parse("2026-04-05T14:06:00.000Z"), eventId: "evt-repeat" } },
+        }),
+        JSON.stringify({
+          method: "session/update",
+          params: { _meta: { totalTokens: 80, agentTimestampMs: Date.parse("2026-04-05T14:07:00.000Z"), eventId: "evt-drop" } },
+        }),
+        JSON.stringify({
+          method: "session/update",
+          params: { _meta: { totalTokens: 250, agentTimestampMs: Date.parse("2026-04-05T14:35:00.000Z"), eventId: "evt-2" } },
+        }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+
+    const result = await parseGrokBuildIncremental({
+      sessions: [{ sessionDir, updatesPath, signalsPath, summaryPath: path.join(sessionDir, "summary.json"), sessionId: "grok-session-updates" }],
+      cursors,
+      queuePath,
+    });
+    assert.equal(result.eventsAggregated, 2);
+    assert.equal(result.bucketsQueued, 2);
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 2);
+    assert.equal(queued[0].hour_start, "2026-04-05T14:00:00.000Z");
+    assert.equal(queued[0].total_tokens, 100);
+    assert.equal(queued[0].conversation_count, 0);
+    assert.equal(queued[1].hour_start, "2026-04-05T14:30:00.000Z");
+    assert.equal(queued[1].total_tokens, 150);
+    assert.equal(queued[1].input_tokens, 120);
+    assert.equal(queued[1].output_tokens, 30);
+    assert.equal(queued[1].conversation_count, 2);
+    assert.equal(cursors.grok.version, 3);
+    assert.equal(cursors.grok.sessionSnapshots["grok-session-updates"].totalTokens, 250);
+    assert.equal(cursors.grok.sessionSnapshots["grok-session-updates"].source, "updates");
+    assert.equal(cursors.grok.sessionSnapshots["grok-session-updates"].lastEventId, "evt-2");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseGrokBuildIncremental applies Grok compaction residual once", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-grok-compaction-"));
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    const sessionDir = path.join(tmp, "sessions", "encoded-cwd", "grok-session-compact");
+    await fs.mkdir(sessionDir, { recursive: true });
+    const signalsPath = path.join(sessionDir, "signals.json");
+    const updatesPath = path.join(sessionDir, "updates.jsonl");
+    await fs.writeFile(
+      signalsPath,
+      JSON.stringify({
+        contextTokensUsed: 50,
+        totalTokensBeforeCompaction: 500,
+        assistantMessageCount: 4,
+        primaryModelId: "grok-build",
+        lastActiveAt: "2026-04-05T15:20:00.000Z",
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      updatesPath,
+      JSON.stringify({
+        method: "session/update",
+        params: { _meta: { totalTokens: 100, agentTimestampMs: Date.parse("2026-04-05T14:05:00.000Z"), eventId: "evt-before-compact" } },
+      }) + "\n",
+      "utf8",
+    );
+
+    const session = { sessionDir, updatesPath, signalsPath, summaryPath: path.join(sessionDir, "summary.json"), sessionId: "grok-session-compact" };
+    const firstRun = await parseGrokBuildIncremental({ sessions: [session], cursors, queuePath });
+    assert.equal(firstRun.eventsAggregated, 2);
+    assert.equal(firstRun.bucketsQueued, 2);
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 2);
+    assert.equal(queued[0].hour_start, "2026-04-05T14:00:00.000Z");
+    assert.equal(queued[0].total_tokens, 100);
+    assert.equal(queued[1].hour_start, "2026-04-05T15:00:00.000Z");
+    assert.equal(queued[1].total_tokens, 450);
+    assert.equal(queued[1].conversation_count, 4);
+    assert.equal(cursors.grok.sessionSnapshots["grok-session-compact"].totalTokens, 550);
+
+    const secondRun = await parseGrokBuildIncremental({ sessions: [session], cursors, queuePath });
+    assert.equal(secondRun.eventsAggregated, 0);
+    assert.equal(secondRun.bucketsQueued, 0);
+    assert.equal((await readJsonLines(queuePath)).length, 2);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseGrokBuildIncremental upgrades v2 Grok cursor without replaying updates", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-grok-v2-cursor-"));
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = {
+      version: 1,
+      files: {},
+      updatedAt: null,
+      grok: {
+        version: 2,
+        sessionSnapshots: {
+          "grok-session-v2": {
+            totalTokens: 250,
+            messageCount: 2,
+            model: "grok-build",
+          },
+        },
+      },
+    };
+    const sessionDir = path.join(tmp, "sessions", "encoded-cwd", "grok-session-v2");
+    await fs.mkdir(sessionDir, { recursive: true });
+    const signalsPath = path.join(sessionDir, "signals.json");
+    const updatesPath = path.join(sessionDir, "updates.jsonl");
+    await fs.writeFile(
+      signalsPath,
+      JSON.stringify({
+        contextTokensUsed: 200,
+        assistantMessageCount: 2,
+        primaryModelId: "grok-build",
+        lastActiveAt: "2026-04-05T14:50:00.000Z",
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      updatesPath,
+      [
+        JSON.stringify({ params: { _meta: { totalTokens: 100, agentTimestampMs: Date.parse("2026-04-05T14:05:00.000Z") } } }),
+        JSON.stringify({ params: { _meta: { totalTokens: 250, agentTimestampMs: Date.parse("2026-04-05T14:35:00.000Z") } } }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+
+    const result = await parseGrokBuildIncremental({
+      sessions: [{ sessionDir, updatesPath, signalsPath, summaryPath: path.join(sessionDir, "summary.json"), sessionId: "grok-session-v2" }],
+      cursors,
+      queuePath,
+    });
+    assert.equal(result.eventsAggregated, 0);
+    assert.equal(result.bucketsQueued, 0);
+    assert.deepEqual(await readJsonLines(queuePath), []);
+    assert.equal(cursors.grok.version, 3);
+    assert.equal(cursors.grok.sessionSnapshots["grok-session-v2"].totalTokens, 250);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseGrokBuildIncremental baselines legacy Grok seenSessions before counting new growth", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-grok-legacy-seen-"));
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = {
+      version: 1,
+      files: {},
+      updatedAt: null,
+      grok: {
+        seenSessions: ["grok-session-legacy"],
+        updatedAt: "2026-04-05T14:00:00.000Z",
+      },
+    };
+    const sessionDir = path.join(tmp, "sessions", "encoded-cwd", "grok-session-legacy");
+    await fs.mkdir(sessionDir, { recursive: true });
+    const signalsPath = path.join(sessionDir, "signals.json");
+    await fs.writeFile(
+      signalsPath,
+      JSON.stringify({
+        contextTokensUsed: 500,
+        assistantMessageCount: 5,
+        primaryModelId: "grok-build",
+        lastActiveAt: "2026-04-05T14:10:00.000Z",
+      }),
+      "utf8",
+    );
+
+    const firstRun = await parseGrokBuildIncremental({
+      sessions: [{ sessionDir, signalsPath, summaryPath: path.join(sessionDir, "summary.json"), sessionId: "grok-session-legacy" }],
+      cursors,
+      queuePath,
+    });
+
+    assert.equal(firstRun.eventsAggregated, 0);
+    assert.equal(firstRun.bucketsQueued, 0);
+    assert.deepEqual(await readJsonLines(queuePath), []);
+    assert.equal(cursors.grok.sessionSnapshots["grok-session-legacy"].totalTokens, 500);
+
+    await fs.writeFile(
+      signalsPath,
+      JSON.stringify({
+        contextTokensUsed: 750,
+        assistantMessageCount: 7,
+        primaryModelId: "grok-build",
+        lastActiveAt: "2026-04-05T14:40:00.000Z",
+      }),
+      "utf8",
+    );
+
+    const secondRun = await parseGrokBuildIncremental({
+      sessions: [{ sessionDir, signalsPath, summaryPath: path.join(sessionDir, "summary.json"), sessionId: "grok-session-legacy" }],
+      cursors,
+      queuePath,
+    });
+
+    assert.equal(secondRun.eventsAggregated, 1);
+    assert.equal(secondRun.bucketsQueued, 1);
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].hour_start, "2026-04-05T14:30:00.000Z");
+    assert.equal(queued[0].total_tokens, 250);
+    assert.equal(queued[0].input_tokens, 200);
+    assert.equal(queued[0].output_tokens, 50);
+    assert.equal(queued[0].conversation_count, 2);
+    assert.equal(cursors.grok.sessionSnapshots["grok-session-legacy"].totalTokens, 750);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveGrokBuildSessions includes sessions with updates only", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-grok-resolve-"));
+  try {
+    const grokHome = path.join(tmp, ".grok");
+    const sessionDir = path.join(grokHome, "sessions", "encoded-cwd", "grok-session-updates-only");
+    await fs.mkdir(sessionDir, { recursive: true });
+    await fs.writeFile(path.join(sessionDir, "updates.jsonl"), "\n", "utf8");
+
+    const sessions = resolveGrokBuildSessions({ GROK_HOME: grokHome });
+    assert.equal(sessions.length, 1);
+    assert.equal(sessions[0].sessionId, "grok-session-updates-only");
+    assert.equal(sessions[0].updatesPath, path.join(sessionDir, "updates.jsonl"));
+    assert.equal(sessions[0].signalsPath, path.join(sessionDir, "signals.json"));
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

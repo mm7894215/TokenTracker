@@ -681,18 +681,32 @@ async function cmdSync(argv) {
           ? grokHookSignal.sessionId.trim()
           : null;
       if (hookSessionId) {
+        const hookContextTokens =
+          grokHookSignal.contextTokensUsed != null
+            ? grokHookSignal.contextTokensUsed
+            : grokHookSignal.totalTokens;
         grokSessionInputs.unshift({
           sessionId: hookSessionId,
+          sessionDir:
+            typeof grokHookSignal.sessionDir === "string" ? grokHookSignal.sessionDir : undefined,
+          updatesPath:
+            typeof grokHookSignal.updatesPath === "string" ? grokHookSignal.updatesPath : undefined,
+          signalsPath:
+            typeof grokHookSignal.signalsPath === "string" ? grokHookSignal.signalsPath : undefined,
+          summaryPath:
+            typeof grokHookSignal.summaryPath === "string" ? grokHookSignal.summaryPath : undefined,
           signals: {
-            contextTokensUsed: grokHookSignal.totalTokens,
+            contextTokensUsed: hookContextTokens,
+            totalTokens: hookContextTokens,
+            totalTokensBeforeCompaction: grokHookSignal.totalTokensBeforeCompaction,
             assistantMessageCount: grokHookSignal.messageCount,
             primaryModelId: grokHookSignal.model,
             lastActiveAt: grokHookSignal.lastActive,
           },
           summary: { updated_at: grokHookSignal.lastActive },
         });
+        grokHookSignalConsumed = true;
       }
-      grokHookSignalConsumed = true;
     }
     if (grokSessionInputs.length > 0) {
       if (progress?.enabled) {

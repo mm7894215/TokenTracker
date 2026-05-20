@@ -64,6 +64,75 @@ test("generated Grok handler skips malformed numeric signal fields", async () =>
   }
 });
 
+test("generated Grok handler writes session paths and update telemetry", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-grok-handler-updates-"));
+  try {
+    const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+    const grokHome = path.join(tmp, ".grok");
+    const workspaceRoot = path.join(tmp, "project");
+    const sessionId = "grok-session-updates";
+    const sessionDir = path.join(grokHome, "sessions", encodeURIComponent(workspaceRoot), sessionId);
+    const signalsPath = path.join(sessionDir, "signals.json");
+    const summaryPath = path.join(sessionDir, "summary.json");
+    const updatesPath = path.join(sessionDir, "updates.jsonl");
+    await fs.mkdir(sessionDir, { recursive: true });
+    await fs.writeFile(
+      signalsPath,
+      JSON.stringify({
+        contextTokensUsed: 50,
+        totalTokensBeforeCompaction: 10,
+        assistantMessageCount: 2,
+        primaryModelId: "grok-build",
+        lastActiveAt: "2026-04-05T14:20:00.000Z",
+      }),
+      "utf8",
+    );
+    await fs.writeFile(summaryPath, JSON.stringify({ updated_at: "2026-04-05T14:10:00.000Z" }), "utf8");
+    await fs.writeFile(
+      updatesPath,
+      JSON.stringify({
+        method: "session/update",
+        params: {
+          _meta: {
+            totalTokens: 120,
+            agentTimestampMs: Date.parse("2026-04-05T14:15:00.000Z"),
+            eventId: "evt-120",
+          },
+        },
+      }) + "\n",
+      "utf8",
+    );
+
+    const handlerPath = path.join(tmp, "grok-session-end-hook.cjs");
+    await fs.writeFile(handlerPath, buildGrokSessionEndHandler({ trackerDir }), "utf8");
+
+    const result = cp.spawnSync(process.execPath, [handlerPath], {
+      env: {
+        ...process.env,
+        GROK_HOME: grokHome,
+        GROK_SESSION_ID: sessionId,
+        GROK_WORKSPACE_ROOT: workspaceRoot,
+      },
+      encoding: "utf8",
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const signal = JSON.parse(await fs.readFile(path.join(trackerDir, "grok-last-session.json"), "utf8"));
+    assert.equal(signal.totalTokens, 120);
+    assert.equal(signal.contextTokensUsed, 50);
+    assert.equal(signal.totalTokensBeforeCompaction, 10);
+    assert.equal(signal.messageCount, 2);
+    assert.equal(signal.sessionDir, sessionDir);
+    assert.equal(signal.signalsPath, signalsPath);
+    assert.equal(signal.summaryPath, summaryPath);
+    assert.equal(signal.updatesPath, updatesPath);
+    assert.equal(signal.lastEventId, "evt-120");
+    assert.equal(signal.lastEventTimestamp, "2026-04-05T14:15:00.000Z");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("buildGrokSessionEndHookJson quotes handler paths for shell command", () => {
   const hookJson = buildGrokSessionEndHookJson({
     notifyGrokHandlerPath: "/tmp/Token Tracker's/bin/grok-session-end-hook.cjs",
