@@ -133,6 +133,51 @@ test("generated Grok handler writes session paths and update telemetry", async (
   }
 });
 
+test("generated Grok handler preserves zero context after compaction", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-grok-handler-zero-context-"));
+  try {
+    const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+    const grokHome = path.join(tmp, ".grok");
+    const workspaceRoot = path.join(tmp, "project");
+    const sessionId = "grok-session-zero-context";
+    const sessionDir = path.join(grokHome, "sessions", encodeURIComponent(workspaceRoot), sessionId);
+    await fs.mkdir(sessionDir, { recursive: true });
+    await fs.writeFile(
+      path.join(sessionDir, "signals.json"),
+      JSON.stringify({
+        contextTokensUsed: 0,
+        totalTokensBeforeCompaction: 500,
+        totalTokens: 500,
+        assistantMessageCount: 3,
+        primaryModelId: "grok-build",
+        lastActiveAt: "2026-04-05T15:20:00.000Z",
+      }),
+      "utf8",
+    );
+
+    const handlerPath = path.join(tmp, "grok-session-end-hook.cjs");
+    await fs.writeFile(handlerPath, buildGrokSessionEndHandler({ trackerDir }), "utf8");
+
+    const result = cp.spawnSync(process.execPath, [handlerPath], {
+      env: {
+        ...process.env,
+        GROK_HOME: grokHome,
+        GROK_SESSION_ID: sessionId,
+        GROK_WORKSPACE_ROOT: workspaceRoot,
+      },
+      encoding: "utf8",
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const signal = JSON.parse(await fs.readFile(path.join(trackerDir, "grok-last-session.json"), "utf8"));
+    assert.equal(signal.contextTokensUsed, 0);
+    assert.equal(signal.totalTokensBeforeCompaction, 500);
+    assert.equal(signal.totalTokens, 500);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("buildGrokSessionEndHookJson quotes handler paths for shell command", () => {
   const hookJson = buildGrokSessionEndHookJson({
     notifyGrokHandlerPath: "/tmp/Token Tracker's/bin/grok-session-end-hook.cjs",

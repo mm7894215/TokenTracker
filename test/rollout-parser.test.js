@@ -5776,6 +5776,52 @@ test("parseGrokBuildIncremental applies Grok compaction residual once", async ()
   }
 });
 
+test("parseGrokBuildIncremental preserves zero current context after compaction", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-grok-zero-context-"));
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    const sessionDir = path.join(tmp, "sessions", "encoded-cwd", "grok-session-zero-context");
+    await fs.mkdir(sessionDir, { recursive: true });
+    const signalsPath = path.join(sessionDir, "signals.json");
+    await fs.writeFile(
+      signalsPath,
+      JSON.stringify({
+        contextTokensUsed: 0,
+        totalTokensBeforeCompaction: 500,
+        totalTokens: 500,
+        assistantMessageCount: 3,
+        primaryModelId: "grok-build",
+        lastActiveAt: "2026-04-05T15:20:00.000Z",
+      }),
+      "utf8",
+    );
+
+    const result = await parseGrokBuildIncremental({
+      sessions: [
+        {
+          sessionDir,
+          signalsPath,
+          summaryPath: path.join(sessionDir, "summary.json"),
+          sessionId: "grok-session-zero-context",
+        },
+      ],
+      cursors,
+      queuePath,
+    });
+    assert.equal(result.eventsAggregated, 1);
+    assert.equal(result.bucketsQueued, 1);
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].hour_start, "2026-04-05T15:00:00.000Z");
+    assert.equal(queued[0].total_tokens, 500);
+    assert.equal(cursors.grok.sessionSnapshots["grok-session-zero-context"].totalTokens, 500);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseGrokBuildIncremental upgrades v2 Grok cursor without replaying updates", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-grok-v2-cursor-"));
   try {

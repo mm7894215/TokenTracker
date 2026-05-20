@@ -6050,12 +6050,15 @@ function grokMessageCountFromSignals(signals) {
 
 function grokEffectiveTotalFromSignals(signals) {
   if (!signals || typeof signals !== "object") return 0;
-  const currentContextTotal = Math.max(
-    normalizeNonNegativeNumber(signals.contextTokensUsed),
-    normalizeNonNegativeNumber(signals.totalTokens),
-  );
   const beforeCompaction = normalizeNonNegativeNumber(signals.totalTokensBeforeCompaction);
-  return beforeCompaction + currentContextTotal;
+  const totalTokens = normalizeNonNegativeNumber(signals.totalTokens);
+  if (signals.contextTokensUsed == null) {
+    return beforeCompaction + totalTokens;
+  }
+  return Math.max(
+    totalTokens,
+    beforeCompaction + normalizeNonNegativeNumber(signals.contextTokensUsed),
+  );
 }
 
 function grokTimestampToIso(value) {

@@ -207,7 +207,7 @@ async function readUpdateTelemetry(filePath) {
 }
 
 async function main() {
-const contextTokensUsed = toNonNegativeFiniteNumber(signals.contextTokensUsed || signals.totalTokens);
+const contextTokensUsed = toNonNegativeFiniteNumber(signals.contextTokensUsed ?? signals.totalTokens);
 const totalTokensBeforeCompaction = toNonNegativeFiniteNumber(signals.totalTokensBeforeCompaction);
 const signalTotalTokens = totalTokensBeforeCompaction + contextTokensUsed;
 const updateTelemetry = await readUpdateTelemetry(updatesPath);
