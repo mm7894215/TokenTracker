@@ -76,29 +76,6 @@ Upgrade with `brew upgrade --cask mm7894215/tokentracker/tokentracker`. The tap 
 
 ---
 
-## 🤖 Supported providers (17)
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/lobehub/lobe-icons/refs/heads/master/packages/static-svg/icons/claude-color.svg" width="44" height="44" alt="Claude Code" title="Claude Code">&nbsp;&nbsp;
-  <picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lobehub/lobe-icons/refs/heads/master/packages/static-png/dark/cursor.png"><img src="https://raw.githubusercontent.com/lobehub/lobe-icons/refs/heads/master/packages/static-png/light/cursor.png" width="44" height="44" alt="Cursor" title="Cursor"></picture>&nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/lobehub/lobe-icons/refs/heads/master/packages/static-svg/icons/copilot-color.svg" width="44" height="44" alt="GitHub Copilot" title="GitHub Copilot">&nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/lobehub/lobe-icons/refs/heads/master/packages/static-svg/icons/codex-color.svg" width="44" height="44" alt="Codex CLI" title="Codex CLI">&nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/lobehub/lobe-icons/refs/heads/master/packages/static-svg/icons/gemini-color.svg" width="44" height="44" alt="Gemini CLI" title="Gemini CLI">&nbsp;&nbsp;
-  <picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lobehub/lobe-icons/refs/heads/master/packages/static-png/dark/grok.png"><img src="https://raw.githubusercontent.com/lobehub/lobe-icons/refs/heads/master/packages/static-png/light/grok.png" width="44" height="44" alt="Grok Build" title="Grok Build"></picture>&nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/lobehub/lobe-icons/refs/heads/master/packages/static-svg/icons/antigravity-color.svg" width="44" height="44" alt="Antigravity" title="Antigravity">&nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/lobehub/lobe-icons/refs/heads/master/packages/static-svg/icons/kimi-color.svg" width="44" height="44" alt="Kimi Code" title="Kimi Code">
-  <br><br>
-  <img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/docs/readme-logos/kiro.svg" width="44" height="44" alt="Kiro" title="Kiro">&nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/lobehub/lobe-icons/refs/heads/master/packages/static-svg/icons/codebuddy-color.svg" width="44" height="44" alt="CodeBuddy" title="CodeBuddy">&nbsp;&nbsp;
-  <picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lobehub/lobe-icons/refs/heads/master/packages/static-png/dark/opencode.png"><img src="https://raw.githubusercontent.com/lobehub/lobe-icons/refs/heads/master/packages/static-png/light/opencode.png" width="44" height="44" alt="OpenCode" title="OpenCode"></picture>&nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/lobehub/lobe-icons/refs/heads/master/packages/static-svg/icons/openclaw-color.svg" width="44" height="44" alt="OpenClaw" title="OpenClaw">&nbsp;&nbsp;
-  <picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lobehub/lobe-icons/refs/heads/master/packages/static-png/dark/hermesagent.png"><img src="https://raw.githubusercontent.com/lobehub/lobe-icons/refs/heads/master/packages/static-png/light/hermesagent.png" width="44" height="44" alt="Hermes Agent" title="Hermes Agent"></picture>&nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/docs/readme-logos/every-code.svg" width="44" height="44" alt="Every Code" title="Every Code">&nbsp;&nbsp;
-  <picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lobehub/lobe-icons/refs/heads/master/packages/static-png/dark/kilocode.png"><img src="https://raw.githubusercontent.com/lobehub/lobe-icons/refs/heads/master/packages/static-png/light/kilocode.png" width="44" height="44" alt="Kilo" title="Kilo"></picture>&nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/mm7894215/TokenTracker/main/docs/readme-logos/oh-my-pi.svg" width="44" height="44" alt="oh-my-pi" title="oh-my-pi">
-</p>
-
----
 
 ## ✨ Features
 
