@@ -1531,7 +1531,7 @@ async function getUsageLimits({
   }
 
   const [claudeToken, codexAuth] = await Promise.all([
-    Promise.resolve().then(() => readClaudeCodeAccessToken({ platform, securityRunner })),
+    Promise.resolve().then(() => readClaudeCodeAccessToken({ platform, securityRunner, home })),
     readCodexAuthBundle({ home, env }),
   ]);
 

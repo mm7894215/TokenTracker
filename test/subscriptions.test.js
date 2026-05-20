@@ -242,6 +242,89 @@ test("collectLocalSubscriptions falls back to Claude Code keychain presence when
   }
 });
 
+test("collectLocalSubscriptions reads Claude Code credentials from ~/.claude/.credentials.json on Linux", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-subscriptions-claude-linux-"));
+
+  try {
+    await writeJson(path.join(tmp, ".claude", ".credentials.json"), {
+      claudeAiOauth: {
+        accessToken: "secret-access",
+        refreshToken: "secret-refresh",
+        subscriptionType: "max",
+        rateLimitTier: "tier-1",
+      },
+    });
+
+    const subs = await collectLocalSubscriptions({
+      home: tmp,
+      env: {},
+      platform: "linux",
+      probeKeychain: true,
+      probeKeychainDetails: true,
+    });
+
+    assert.equal(subs.length, 1);
+    assert.deepEqual(subs[0], {
+      tool: "claude",
+      provider: "anthropic",
+      product: "subscription",
+      planType: "max",
+      rateLimitTier: "tier-1",
+    });
+    assert.ok(!("accessToken" in subs[0]));
+    assert.ok(!("refreshToken" in subs[0]));
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("collectLocalSubscriptions reports Linux Claude Code credentials presence when details missing", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-subscriptions-claude-linux-presence-"));
+
+  try {
+    // Payload without subscriptionType — details extractor returns null, fall back to presence.
+    await writeJson(path.join(tmp, ".claude", ".credentials.json"), {
+      claudeAiOauth: { accessToken: "secret-access" },
+    });
+
+    const subs = await collectLocalSubscriptions({
+      home: tmp,
+      env: {},
+      platform: "linux",
+      probeKeychain: true,
+      probeKeychainDetails: true,
+    });
+
+    assert.equal(subs.length, 1);
+    assert.deepEqual(subs[0], {
+      tool: "claude",
+      provider: "anthropic",
+      product: "credentials",
+      planType: "present",
+    });
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("collectLocalSubscriptions hides Claude Code line on Linux when credentials file is absent", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-subscriptions-claude-linux-miss-"));
+
+  try {
+    const subs = await collectLocalSubscriptions({
+      home: tmp,
+      env: {},
+      platform: "linux",
+      probeKeychain: true,
+      probeKeychainDetails: true,
+    });
+
+    assert.deepEqual(subs, []);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("collectLocalSubscriptions includes OpenClaw when session plugin is configured", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-subscriptions-openclaw-"));
 
