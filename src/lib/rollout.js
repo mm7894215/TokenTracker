@@ -6229,6 +6229,7 @@ async function parseAntigravityIncremental({
     const sameFile = prev && prev.inode === inode;
     const lastLine = sameFile ? Number(prev.lastLine || 0) : 0;
     const initialContextTokens = sameFile ? Number(prev.contextTokens || 0) : 0;
+    const initialPrevContext = sameFile ? Number(prev.previousContextTokens || 0) : 0;
     const initialModel = sameFile && typeof prev.currentModel === "string" ? prev.currentModel : null;
 
     const projectContext = projectEnabled
@@ -6247,6 +6248,7 @@ async function parseAntigravityIncremental({
       filePath,
       lastLine,
       initialContextTokens,
+      initialPrevContext,
       initialModel,
       hourlyState,
       touchedBuckets,
@@ -6263,6 +6265,7 @@ async function parseAntigravityIncremental({
       mtimeMs,
       lastLine: result.lastLine,
       contextTokens: result.contextTokens,
+      previousContextTokens: result.previousContextTokens,
       currentModel: result.currentModel,
       updatedAt: new Date().toISOString(),
     };
@@ -6300,6 +6303,7 @@ async function parseAntigravityFile({
   filePath,
   lastLine,
   initialContextTokens,
+  initialPrevContext,
   initialModel,
   hourlyState,
   touchedBuckets,
@@ -6311,7 +6315,13 @@ async function parseAntigravityFile({
 }) {
   const raw = await fs.readFile(filePath, "utf8").catch(() => "");
   if (!raw.trim()) {
-    return { lastLine: 0, eventsAggregated: 0, contextTokens: 0, currentModel: null };
+    return {
+      lastLine: 0,
+      eventsAggregated: 0,
+      contextTokens: 0,
+      previousContextTokens: 0,
+      currentModel: null,
+    };
   }
 
   const lines = raw
@@ -6325,11 +6335,16 @@ async function parseAntigravityFile({
   const canResume =
     Number.isFinite(lastLine) && lastLine > 0 && lastLine <= lines.length;
   const cachedTokens = Number.isFinite(initialContextTokens) ? initialContextTokens : 0;
+  const cachedPrev = Number.isFinite(initialPrevContext) ? initialPrevContext : 0;
   const cachedModel = typeof initialModel === "string" ? initialModel : null;
   const resumed = canResume && (cachedTokens > 0 || cachedModel !== null);
   const scanStart = resumed ? lastLine : 0;
   let currentModel = resumed ? cachedModel : null;
   let contextTokens = resumed ? cachedTokens : 0;
+  // Snapshot of contextTokens at the last PLANNER_RESPONSE we billed for. Only
+  // tokens accumulated AFTER that point count as new input on the next planner
+  // call — prevents O(N²) double-counting of the full history every turn.
+  let previousContextTokens = resumed ? cachedPrev : 0;
   let lastCompletedLine = Math.min(Number.isFinite(lastLine) ? lastLine : 0, lines.length);
 
   for (let i = scanStart; i < lines.length; i++) {
@@ -6375,22 +6390,28 @@ async function parseAntigravityFile({
 
     let model = currentModel || "antigravity-unknown";
     let delta = initTotals();
+    let billedPlanner = false;
 
     if (parsed.type === "PLANNER_RESPONSE") {
       const content = typeof parsed.content === "string" ? parsed.content : "";
       const thinking = typeof parsed.thinking === "string" ? parsed.thinking : "";
 
-      delta.input_tokens = contextTokens;
-      delta.output_tokens =
+      const inputDelta = Math.max(0, contextTokens - previousContextTokens);
+      const outputTokens =
         antigravityValueTokens(content) + antigravityValueTokens(parsed.tool_calls);
-      delta.reasoning_output_tokens = antigravityValueTokens(thinking);
-      delta.total_tokens =
-        delta.input_tokens + delta.output_tokens + delta.reasoning_output_tokens;
-      delta.billable_total_tokens = delta.total_tokens;
+      const reasoningTokens = antigravityValueTokens(thinking);
+
+      delta.input_tokens = inputDelta;
+      delta.output_tokens = outputTokens;
+      delta.reasoning_output_tokens = reasoningTokens;
+      // Match the mainstream convention (Codebuddy / Kilocode / OMP / Hermes):
+      // total_tokens = sum of every token column. No cache columns here.
+      delta.total_tokens = inputDelta + outputTokens + reasoningTokens;
       delta.conversation_count = 1;
+      billedPlanner = delta.total_tokens > 0;
     }
 
-    if (delta.total_tokens === 0) {
+    if (!billedPlanner) {
       contextTokens += eventContextTokens;
       lastCompletedLine = i + 1;
       continue;
@@ -6412,6 +6433,11 @@ async function parseAntigravityFile({
       projectTouchedBuckets.add(projectBucketKey(projectKey, source, bucketStart));
     }
     eventsAggregated += 1;
+    // Snapshot the pre-planner context first. The planner's own content+tool_calls
+    // (eventContextTokens, added below) become part of the next turn's history,
+    // so they MUST be billed as input on the next planner — don't fold them into
+    // previousContextTokens or that history vanishes from the totals.
+    previousContextTokens = contextTokens;
     contextTokens += eventContextTokens;
     lastCompletedLine = i + 1;
   }
@@ -6420,6 +6446,7 @@ async function parseAntigravityFile({
     lastLine: lastCompletedLine,
     eventsAggregated,
     contextTokens,
+    previousContextTokens,
     currentModel,
   };
 }

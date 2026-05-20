@@ -394,6 +394,8 @@ export function UsageOverview({
 // of taking its own row.
 function ProviderExpandedSection({ provider, color, providerHeading, contextSource, from, to, sortedModels }) {
   const [breakdownLoading, setBreakdownLoading] = useState(false);
+  const isAntigravity =
+    String(provider?.source || provider?.label || "").trim().toLowerCase() === "antigravity";
 
   return (
                       <div>
@@ -412,6 +414,19 @@ function ProviderExpandedSection({ provider, color, providerHeading, contextSour
                             />
                           )}
                         </div>
+
+                        {/* Antigravity transcripts carry no usage field — every token
+                            here is a 4-char/token estimate that ignores Gemini prompt
+                            caching. Inline footnote, same muted style as the Context
+                            Breakdown footnote. */}
+                        {isAntigravity && (
+                          <p className="mb-3 text-[10px] leading-snug text-oai-gray-400 dark:text-oai-gray-500">
+                            <span className="font-medium text-oai-gray-500 dark:text-oai-gray-400">
+                              {copy("usage.overview.antigravity_notice_title")}.
+                            </span>{" "}
+                            {copy("usage.overview.antigravity_notice_body")}
+                          </p>
+                        )}
 
                         {/* Context Breakdown drill-down.
                             Claude: category-based (approx /context).

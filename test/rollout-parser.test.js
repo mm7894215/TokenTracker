@@ -5708,7 +5708,7 @@ test("parseGrokBuildIncremental does not mark zero-token sessions as seen", asyn
   }
 });
 
-test("parseAntigravityIncremental bills cumulative context at each planner call", async () => {
+test("parseAntigravityIncremental bills only newly added context per planner call", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-antigravity-"));
   try {
     const transcriptPath = path.join(tmp, "transcript.jsonl");
@@ -5756,16 +5756,77 @@ test("parseAntigravityIncremental bills cumulative context at each planner call"
     assert.equal(queued.length, 1);
     assert.equal(queued[0].source, "antigravity");
     assert.equal(queued[0].model, "gemini-3.5-flash");
+    // Planner 1 input = USER_INPUT + TOOL_RESULT (all context up to it).
+    // Planner 2 input = previous assistant content (answerA) + new USER_INPUT (userB),
+    // NOT the full history again — this is the O(N) vs prior O(N^2) fix.
     const firstInput = antigravityTestTokens(modelContentA) + antigravityTestTokens(toolResult);
-    const secondInput =
-      firstInput + antigravityTestTokens(answerA) + antigravityTestTokens(userB);
+    const secondInput = antigravityTestTokens(answerA) + antigravityTestTokens(userB);
     assert.equal(queued[0].input_tokens, firstInput + secondInput);
     assert.equal(queued[0].output_tokens, 10);
     assert.equal(queued[0].reasoning_output_tokens, 6);
     assert.equal(queued[0].conversation_count, 2);
+    // total_tokens = sum of every column (matches Codebuddy / Kilocode / OMP / Hermes).
     assert.equal(
       queued[0].total_tokens,
       queued[0].input_tokens + queued[0].output_tokens + queued[0].reasoning_output_tokens,
+    );
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseAntigravityIncremental delta billing is O(N), not O(N^2)", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-antigravity-on2-"));
+  try {
+    const transcriptPath = path.join(tmp, "transcript.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    // 10 turns of (USER_INPUT, PLANNER_RESPONSE) with identical token cost per event.
+    // Old behavior: input_tokens ≈ sum(1..N) * unit  (quadratic)
+    // New behavior: input_tokens ≈ N * unit          (linear)
+    const turns = 10;
+    const userUnit = "u".repeat(40); // 10 tokens
+    const plannerUnit = "a".repeat(40); // 10 tokens (output AND becomes next-turn input)
+    const userUnitTokens = antigravityTestTokens(userUnit);
+    const plannerUnitTokens = antigravityTestTokens(plannerUnit);
+    assert.equal(userUnitTokens, 10);
+    assert.equal(plannerUnitTokens, 10);
+
+    const lines = [];
+    let t = Date.parse("2026-04-05T14:00:00.000Z");
+    const modelLead =
+      "changed setting `Model Selection` from Auto to Gemini 3.5 Flash.\n" + userUnit;
+    for (let i = 0; i < turns; i++) {
+      lines.push({
+        type: "USER_INPUT",
+        created_at: new Date(t).toISOString(),
+        content: i === 0 ? modelLead : userUnit,
+      });
+      t += 60_000;
+      lines.push({
+        type: "PLANNER_RESPONSE",
+        created_at: new Date(t).toISOString(),
+        content: plannerUnit,
+      });
+      t += 60_000;
+    }
+    await fs.writeFile(transcriptPath, lines.map((l) => JSON.stringify(l)).join("\n"));
+
+    await parseAntigravityIncremental({ sessionFiles: [transcriptPath], cursors, queuePath });
+    const queued = await readJsonLines(queuePath);
+    const totalInput = queued.reduce((sum, row) => sum + (row.input_tokens || 0), 0);
+
+    // Linear upper bound: first-turn input (modelLead tokens) + (N-1) turns of
+    // (planner_unit + user_unit). Far below the quadratic ~N^2/2 * unit blow-up.
+    const firstTurnInput = antigravityTestTokens(modelLead);
+    const expected = firstTurnInput + (turns - 1) * (plannerUnitTokens + userUnitTokens);
+    assert.equal(totalInput, expected);
+    // Sanity: assert it really is linear, not quadratic.
+    const quadraticLowerBound = userUnitTokens * (turns * (turns + 1)) / 2;
+    assert.ok(
+      totalInput < quadraticLowerBound,
+      `expected linear billing (${totalInput}) < quadratic floor (${quadraticLowerBound})`,
     );
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
