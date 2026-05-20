@@ -3051,11 +3051,11 @@ function readHermesSessions(dbPath, lastCompletedEpoch, unfinishedSessionIds = [
   const forceIncludeSql = forceIds.length > 0
     ? ` OR id IN (${forceIds.map(sqliteStringLiteral).join(",")})`
     : "";
-  // Fetch sessions that started after the cursor, sessions that are still
+  // Fetch sessions that started at/after the cursor, sessions that are still
   // in-progress (ended_at IS NULL), OR sessions that were previously observed
   // unfinished.  Hermes updates token counts in real-time, including a final
   // delta when an active session later gets ended_at set.
-  const sql = `SELECT id, model, started_at, ended_at, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, message_count FROM sessions WHERE (started_at > ${since} OR ended_at IS NULL${forceIncludeSql}) AND (input_tokens > 0 OR output_tokens > 0 OR cache_read_tokens > 0 OR reasoning_tokens > 0) ORDER BY started_at ASC`;
+  const sql = `SELECT id, model, started_at, ended_at, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, message_count FROM sessions WHERE (started_at >= ${since} OR ended_at IS NULL${forceIncludeSql}) AND (input_tokens > 0 OR output_tokens > 0 OR cache_read_tokens > 0 OR reasoning_tokens > 0) ORDER BY started_at ASC`;
   let raw;
   try {
     raw = cp.execFileSync("sqlite3", ["-json", dbPath, sql], {

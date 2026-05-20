@@ -2750,7 +2750,7 @@ test("parseHermesIncremental reads default and named profile databases with isol
     assert.ok(queued.some((b) => b.source === "hermes" && b.model === "gpt-5.4" && b.cache_creation_input_tokens === 400 && b.reasoning_output_tokens === 100));
 
     const second = await parseHermesIncremental({ hermesPath: tmp, cursors, queuePath });
-    assert.equal(second.recordsProcessed, 0);
+    assert.equal(second.recordsProcessed, 3);
     assert.equal(second.eventsAggregated, 0);
     assert.equal(second.bucketsQueued, 0);
   } finally {
@@ -2821,9 +2821,9 @@ test("parseHermesIncremental processes sessions incrementally", async () => {
     assert.equal(b1.output_tokens, 500);
     assert.equal(b1.cached_input_tokens, 200);
 
-    // Second parse — no new data, should be no-op
+    // Second parse — cursor-boundary row is re-read, but duplicate suppression makes it a no-op
     const second = await parseHermesIncremental({ dbPath, cursors, queuePath });
-    assert.equal(second.recordsProcessed, 0);
+    assert.equal(second.recordsProcessed, 1);
     assert.equal(second.eventsAggregated, 0);
     assert.equal(second.bucketsQueued, 0);
 
@@ -2833,10 +2833,44 @@ test("parseHermesIncremental processes sessions incrementally", async () => {
       `INSERT INTO sessions (id, source, model, started_at, ended_at, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, message_count) VALUES ('sess_003', 'cli', 'gpt-5.4-mini', ${epoch2 + 3600}, ${epoch2 + 3700}, 500, 250, 0, 0, 0, 2);`,
     ]);
     const third = await parseHermesIncremental({ dbPath, cursors, queuePath });
-    assert.equal(third.recordsProcessed, 1);
+    assert.equal(third.recordsProcessed, 2);
     assert.equal(third.eventsAggregated, 1);
     assert.ok(third.bucketsQueued >= 1);
     assert.equal(cursors.hermes.lastStartedAt, epoch2 + 3600);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseHermesIncremental re-reads cursor timestamp sessions so same-second inserts are not dropped", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-hermes-same-second-"));
+  try {
+    const dbPath = path.join(tmp, "state.db");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+    const epoch = 1775993779.0;
+
+    createHermesDb(dbPath, [
+      { id: "sess_original", model: "gpt-5.4-mini", started_at: epoch, ended_at: epoch + 120, input_tokens: 1000, output_tokens: 500, message_count: 4 },
+    ]);
+
+    const first = await parseHermesIncremental({ dbPath, cursors, queuePath });
+    assert.equal(first.recordsProcessed, 1);
+    assert.equal(first.eventsAggregated, 1);
+    assert.equal(cursors.hermes.lastCompletedStartedAt, epoch);
+
+    cp.execFileSync("sqlite3", [
+      dbPath,
+      `INSERT INTO sessions (id, source, model, started_at, ended_at, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, message_count) VALUES ('sess_same_second', 'cli', 'gpt-5.4-mini', ${epoch}, ${epoch + 240}, 300, 150, 0, 0, 0, 2);`,
+    ]);
+
+    const second = await parseHermesIncremental({ dbPath, cursors, queuePath });
+    assert.equal(second.recordsProcessed, 2);
+    assert.equal(second.eventsAggregated, 1);
+    assert.ok(second.bucketsQueued >= 1);
+
+    const queued = await readJsonLines(queuePath);
+    assert.ok(queued.some((b) => b.source === "hermes" && b.model === "gpt-5.4-mini" && b.input_tokens === 1300 && b.output_tokens === 650));
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
@@ -2914,7 +2948,7 @@ test("parseHermesIncremental tracks real-time token growth for active sessions (
 
     // Second parse — should pick up the delta for the active session
     const second = await parseHermesIncremental({ dbPath, cursors, queuePath });
-    assert.equal(second.recordsProcessed, 1); // only the active session re-read
+    assert.equal(second.recordsProcessed, 2); // cursor-boundary completed session plus active session are re-read
     assert.equal(second.eventsAggregated, 1);
 
     // Verify the delta was computed correctly
@@ -2944,7 +2978,7 @@ test("parseHermesIncremental tracks real-time token growth for active sessions (
     ]);
 
     const third = await parseHermesIncremental({ dbPath, cursors, queuePath });
-    assert.equal(third.recordsProcessed, 1);
+    assert.equal(third.recordsProcessed, 2);
     assert.equal(third.eventsAggregated, 1);
 
     // Now cursor should advance past the ended session
