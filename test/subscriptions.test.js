@@ -307,6 +307,32 @@ test("collectLocalSubscriptions reports Linux Claude Code credentials presence w
   }
 });
 
+test("collectLocalSubscriptions does not read ~/.claude/.credentials.json on platforms other than Linux/macOS", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-subscriptions-claude-win32-"));
+
+  try {
+    // Real-looking credentials file on disk — but platform is win32, so it must be ignored.
+    await writeJson(path.join(tmp, ".claude", ".credentials.json"), {
+      claudeAiOauth: {
+        accessToken: "should-not-be-read",
+        subscriptionType: "max",
+      },
+    });
+
+    const subs = await collectLocalSubscriptions({
+      home: tmp,
+      env: {},
+      platform: "win32",
+      probeKeychain: true,
+      probeKeychainDetails: true,
+    });
+
+    assert.deepEqual(subs, []);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("collectLocalSubscriptions hides Claude Code line on Linux when credentials file is absent", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-subscriptions-claude-linux-miss-"));
 

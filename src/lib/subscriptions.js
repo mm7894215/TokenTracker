@@ -228,7 +228,9 @@ function detectClaudeCodeCredentialsPresence({ platform, securityRunner, home, f
     return null;
   }
 
-  // Linux (and any non-darwin) — credentials live in ~/.claude/.credentials.json.
+  if (platform !== "linux") return null;
+
+  // Linux: credentials live in ~/.claude/.credentials.json (mode 0600).
   // Existence-only: just check that the file is readable and contains the OAuth key.
   const raw = readClaudeCodeCredentialsLinuxFile({ home, fsReader });
   if (!raw) return null;
@@ -268,9 +270,11 @@ function detectClaudeCodeSubscriptionDetails({ platform, securityRunner, home, f
       const raw = readMacosKeychainPassword({ service, securityRunner });
       if (raw) rawPayloads.push(raw);
     }
-  } else {
+  } else if (platform === "linux") {
     const raw = readClaudeCodeCredentialsLinuxFile({ home, fsReader });
     if (raw) rawPayloads.push(raw);
+  } else {
+    return null;
   }
 
   for (const raw of rawPayloads) {
@@ -364,6 +368,8 @@ function readClaudeCodeAccessToken({ platform, securityRunner, home, fsReader } 
     }
     return null;
   }
+
+  if (platform !== "linux") return null;
 
   // Linux: Claude Code stores the OAuth payload as a JSON file with mode 0600.
   const raw = readClaudeCodeCredentialsLinuxFile({ home, fsReader });
