@@ -5958,6 +5958,29 @@ test("parseGrokBuildIncremental preserves legacy baseline marker across zero-tok
     assert.equal(baselineRun.bucketsQueued, 0);
     assert.deepEqual(await readJsonLines(queuePath), []);
     assert.equal(cursors.grok.sessionSnapshots["grok-session-delayed"].totalTokens, 420);
+
+    await fs.writeFile(
+      signalsPath,
+      JSON.stringify({
+        contextTokensUsed: 750,
+        assistantMessageCount: 7,
+        primaryModelId: "grok-build",
+        lastActiveAt: "2026-04-05T14:40:00.000Z",
+      }),
+      "utf8",
+    );
+
+    const growthRun = await parseGrokBuildIncremental({ sessions: [session], cursors, queuePath });
+    assert.ok(growthRun.eventsAggregated > 0);
+    assert.equal(growthRun.bucketsQueued, 1);
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].hour_start, "2026-04-05T14:30:00.000Z");
+    assert.equal(queued[0].total_tokens, 330);
+    assert.equal(queued[0].input_tokens, 264);
+    assert.equal(queued[0].output_tokens, 66);
+    assert.equal(cursors.grok.sessionSnapshots["grok-session-delayed"].totalTokens, 750);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

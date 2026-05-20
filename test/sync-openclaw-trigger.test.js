@@ -164,6 +164,18 @@ test("sync queues and consumes Grok hook signal after cursor persistence", async
 
     const cursors = JSON.parse(await fs.readFile(path.join(trackerDir, "cursors.json"), "utf8"));
     assert.deepEqual(cursors.grok.seenSessions, ["grok-session-hook"]);
+
+    const firstSnapshots = cursors.grok.sessionSnapshots;
+    await cmdSync(["--auto"]);
+
+    const rowsAfterSecondSync = await readJsonl(path.join(trackerDir, "queue.jsonl"));
+    assert.equal(rowsAfterSecondSync.length, rows.length);
+    await assert.rejects(fs.stat(signalPath), /ENOENT/);
+
+    const cursorsAfterSecondSync = JSON.parse(
+      await fs.readFile(path.join(trackerDir, "cursors.json"), "utf8"),
+    );
+    assert.deepEqual(cursorsAfterSecondSync.grok.sessionSnapshots, firstSnapshots);
   } finally {
     if (prevHome === undefined) delete process.env.HOME;
     else process.env.HOME = prevHome;

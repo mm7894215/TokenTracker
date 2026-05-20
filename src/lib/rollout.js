@@ -6214,6 +6214,7 @@ async function parseGrokBuildIncremental({
       tokenDeltaForSession += deltaTokens;
       finalTouchedHourStart = hourStartStr;
       source = deltaSource;
+      lastEventTimestamp = timestamp || lastEventTimestamp;
       return true;
     };
 

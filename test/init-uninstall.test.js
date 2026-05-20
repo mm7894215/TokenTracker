@@ -127,6 +127,63 @@ test("notify handler still chains normal original notify commands", async () => 
   }
 });
 
+test("init preserves existing config fields and custom URLs", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-init-config-"));
+  const prevHome = process.env.HOME;
+  const prevCodexHome = process.env.CODEX_HOME;
+  const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
+  const prevOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
+  const prevWrite = process.stdout.write;
+
+  try {
+    process.env.HOME = tmp;
+    process.env.CODEX_HOME = path.join(tmp, ".codex");
+    delete process.env.TOKENTRACKER_DEVICE_TOKEN;
+    process.env.OPENCODE_CONFIG_DIR = path.join(tmp, ".config", "opencode");
+
+    const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+    await fs.mkdir(trackerDir, { recursive: true });
+    await fs.writeFile(
+      path.join(trackerDir, "config.json"),
+      JSON.stringify(
+        {
+          installedAt: "2026-04-01T00:00:00.000Z",
+          baseUrl: "https://self-hosted.example",
+          dashboardUrl: "https://dashboard.example",
+          deviceToken: "device-token",
+          deviceId: "device-id",
+          customFlag: true,
+        },
+        null,
+        2,
+      ) + "\n",
+      "utf8",
+    );
+
+    process.stdout.write = () => true;
+    await cmdInit(["--yes", "--no-auth", "--no-open"]);
+
+    const config = JSON.parse(await fs.readFile(path.join(trackerDir, "config.json"), "utf8"));
+    assert.equal(config.installedAt, "2026-04-01T00:00:00.000Z");
+    assert.equal(config.baseUrl, "https://self-hosted.example");
+    assert.equal(config.dashboardUrl, "https://dashboard.example");
+    assert.equal(config.deviceToken, "device-token");
+    assert.equal(config.deviceId, "device-id");
+    assert.equal(config.customFlag, true);
+  } finally {
+    process.stdout.write = prevWrite;
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = prevCodexHome;
+    if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;
+    else process.env.TOKENTRACKER_DEVICE_TOKEN = prevToken;
+    if (prevOpencodeConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+    else process.env.OPENCODE_CONFIG_DIR = prevOpencodeConfigDir;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("init then uninstall restores original Codex notify (when pre-existing notify exists)", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-init-uninstall-"));
   const prevHome = process.env.HOME;

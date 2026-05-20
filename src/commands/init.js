@@ -125,8 +125,6 @@ async function cmdInit(argv) {
     config: existingConfig || {},
     env: process.env,
   });
-  const baseUrl = runtime.baseUrl;
-  let dashboardUrl = runtime.dashboardUrl || DEFAULT_DASHBOARD_URL;
   const notifyPath = path.join(binDir, "notify.cjs");
   const appDir = path.join(trackerDir, "app");
   const trackerBinPath = path.join(appDir, "bin", "tracker.js");
@@ -172,7 +170,6 @@ async function cmdInit(argv) {
     setup = await runSetup({
       opts,
       home,
-      baseUrl,
       trackerDir,
       binDir,
       configPath,
@@ -302,7 +299,6 @@ async function buildDryRunSummary({ opts, home, trackerDir, notifyPath, runtime 
 async function runSetup({
   opts,
   home,
-  baseUrl,
   trackerDir,
   binDir,
   configPath,
@@ -323,10 +319,18 @@ async function runSetup({
 
   await installLocalTrackerApp({ appDir });
 
+  const existingPlainConfig =
+    existingConfig && typeof existingConfig === "object" && !Array.isArray(existingConfig)
+      ? existingConfig
+      : {};
   const config = {
+    ...existingPlainConfig,
     installedAt,
-    baseUrl: DEFAULT_BASE_URL,
+    baseUrl: opts.baseUrl || existingPlainConfig.baseUrl || DEFAULT_BASE_URL,
   };
+  if (opts.dashboardUrl) {
+    config.dashboardUrl = opts.dashboardUrl;
+  }
 
   await writeJson(configPath, config);
   await chmod600IfPossible(configPath);

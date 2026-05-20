@@ -22,6 +22,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Fix Grok Build token inflation without silently rewriting local queues; historical repair is now explicit and append-only.
 - Restored `parseResult.filesProcessed` and `parseResult.bucketsQueued` in `sync.js` totals; Codex/Every-Code rollout sources were previously under-counted in the sync summary.
 - `tokentracker serve` now suggests `npx tokentracker-cli serve --port ...` when the requested port is still occupied, matching the published npm package name and avoiding the `E404` path reported in issue #30.
 

@@ -44,18 +44,6 @@ async function cmdServe(argv) {
     process.stdout.write(`Runtime refresh warning: ${e?.message || e}\n`);
   }
 
-  // 0.1 Ensure config.json baseUrl matches the canonical default
-  try {
-    const { DEFAULT_BASE_URL } = require("../lib/runtime-config");
-    const { readJson, writeJson } = require("../lib/fs");
-    const cfgPath = path.join(trackerDir, "config.json");
-    const cfg = await readJson(cfgPath);
-    if (cfg && cfg.baseUrl !== DEFAULT_BASE_URL) {
-      cfg.baseUrl = DEFAULT_BASE_URL;
-      await writeJson(cfgPath, cfg);
-    }
-  } catch { /* ignore */ }
-
   // 1. Optional sync
   if (opts.sync) {
     process.stdout.write("Syncing local data...\n");
