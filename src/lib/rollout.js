@@ -5967,6 +5967,7 @@ function normalizeGrokSessionSnapshots(grokState) {
         lastEventId: normalizeModelInput(snapshot.lastEventId) || null,
         lastEventTimestamp: normalizeModelInput(snapshot.lastEventTimestamp) || null,
         updatedAt: normalizeModelInput(snapshot.updatedAt) || null,
+        legacySeen: snapshot.legacySeen === true,
       };
     }
   }

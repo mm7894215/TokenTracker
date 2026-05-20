@@ -685,6 +685,10 @@ async function cmdSync(argv) {
           grokHookSignal.contextTokensUsed != null
             ? grokHookSignal.contextTokensUsed
             : grokHookSignal.totalTokens;
+        const hookTotalTokens =
+          grokHookSignal.totalTokens != null
+            ? grokHookSignal.totalTokens
+            : hookContextTokens;
         grokSessionInputs.unshift({
           sessionId: hookSessionId,
           sessionDir:
@@ -697,7 +701,7 @@ async function cmdSync(argv) {
             typeof grokHookSignal.summaryPath === "string" ? grokHookSignal.summaryPath : undefined,
           signals: {
             contextTokensUsed: hookContextTokens,
-            totalTokens: hookContextTokens,
+            totalTokens: hookTotalTokens,
             totalTokensBeforeCompaction: grokHookSignal.totalTokensBeforeCompaction,
             assistantMessageCount: grokHookSignal.messageCount,
             primaryModelId: grokHookSignal.model,

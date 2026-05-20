@@ -145,6 +145,7 @@ test("sync queues and consumes Grok hook signal after cursor persistence", async
         sessionId: "grok-session-hook",
         model: "grok-build",
         totalTokens: 99,
+        contextTokensUsed: 20,
         messageCount: 3,
         lastActive: "2026-04-05T14:45:00.000Z",
       }) + "\n",
@@ -222,7 +223,13 @@ test("sync keeps malformed Grok hook signal without a session id", async () => {
 
     await cmdSync(["--auto"]);
 
-    const signal = JSON.parse(await fs.readFile(signalPath, "utf8"));
+    let signal = JSON.parse(await fs.readFile(signalPath, "utf8"));
+    assert.equal(signal.totalTokens, 99);
+    assert.deepEqual(await readJsonl(path.join(trackerDir, "queue.jsonl")), []);
+
+    await cmdSync(["--auto"]);
+
+    signal = JSON.parse(await fs.readFile(signalPath, "utf8"));
     assert.equal(signal.totalTokens, 99);
     assert.deepEqual(await readJsonl(path.join(trackerDir, "queue.jsonl")), []);
   } finally {

@@ -102,6 +102,7 @@ function buildGrokSessionEndHandler({ trackerDir }) {
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+const readline = require('node:readline');
 
 const GROK_HOME = process.env.TOKENTRACKER_GROK_HOME || process.env.GROK_HOME || path.join(os.homedir(), '.grok');
 const SESSION_ID = process.env.GROK_SESSION_ID;
@@ -164,47 +165,52 @@ function timestampToIso(value) {
   return null;
 }
 
-function readUpdateTelemetry(filePath) {
-  let text = '';
-  try {
-    text = fs.readFileSync(filePath, 'utf8');
-  } catch {
-    return { totalTokens: 0, lastEventId: null, lastEventTimestamp: null };
-  }
-
+async function readUpdateTelemetry(filePath) {
   let totalTokens = 0;
   let lastEventId = null;
   let lastEventTimestamp = null;
-  const lines = text.split('\\n');
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line || !line.trim()) continue;
-    let record = null;
+  let lineNumber = 0;
+
+  try {
+    const input = fs.createReadStream(filePath, { encoding: 'utf8' });
+    const rl = readline.createInterface({ input, crlfDelay: Infinity });
     try {
-      record = JSON.parse(line);
-    } catch {
-      continue;
+      for await (const line of rl) {
+        lineNumber += 1;
+        if (!line || !line.trim()) continue;
+        let record = null;
+        try {
+          record = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        const meta = record && record.params && record.params._meta ? record.params._meta : record && record._meta;
+        if (!meta || typeof meta !== 'object') continue;
+        const nextTotal = toNonNegativeFiniteNumber(meta.totalTokens);
+        if (nextTotal <= 0) continue;
+        totalTokens = Math.max(totalTokens, nextTotal);
+        lastEventId = meta.eventId != null ? String(meta.eventId) : String(lineNumber);
+        lastEventTimestamp =
+          timestampToIso(meta.agentTimestampMs) ||
+          timestampToIso(meta.timestampMs) ||
+          timestampToIso(record.timestamp_ms) ||
+          timestampToIso(record.timestamp) ||
+          lastEventTimestamp;
+      }
+    } finally {
+      rl.close();
     }
-    const meta = record && record.params && record.params._meta ? record.params._meta : record && record._meta;
-    if (!meta || typeof meta !== 'object') continue;
-    const nextTotal = toNonNegativeFiniteNumber(meta.totalTokens);
-    if (nextTotal <= 0) continue;
-    totalTokens = Math.max(totalTokens, nextTotal);
-    lastEventId = meta.eventId != null ? String(meta.eventId) : String(i + 1);
-    lastEventTimestamp =
-      timestampToIso(meta.agentTimestampMs) ||
-      timestampToIso(meta.timestampMs) ||
-      timestampToIso(record.timestamp_ms) ||
-      timestampToIso(record.timestamp) ||
-      lastEventTimestamp;
+  } catch {
+    return { totalTokens, lastEventId, lastEventTimestamp };
   }
   return { totalTokens, lastEventId, lastEventTimestamp };
 }
 
+async function main() {
 const contextTokensUsed = toNonNegativeFiniteNumber(signals.contextTokensUsed || signals.totalTokens);
 const totalTokensBeforeCompaction = toNonNegativeFiniteNumber(signals.totalTokensBeforeCompaction);
 const signalTotalTokens = totalTokensBeforeCompaction + contextTokensUsed;
-const updateTelemetry = readUpdateTelemetry(updatesPath);
+const updateTelemetry = await readUpdateTelemetry(updatesPath);
 const totalTokens = Math.max(updateTelemetry.totalTokens, signalTotalTokens);
 const messageCount = toNonNegativeFiniteNumber(signals.assistantMessageCount || signals.num_chat_messages);
 const model = signals.primaryModelId || (Array.isArray(signals.modelsUsed) ? signals.modelsUsed[0] : 'grok-build');
@@ -247,6 +253,9 @@ try {
 } catch {}
 
 process.exit(0);
+}
+
+main().catch(() => process.exit(0));
 `;
 }
 

@@ -5903,6 +5903,66 @@ test("parseGrokBuildIncremental baselines legacy Grok seenSessions before counti
   }
 });
 
+test("parseGrokBuildIncremental preserves legacy baseline marker across zero-token sync", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-grok-legacy-zero-"));
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = {
+      version: 1,
+      files: {},
+      updatedAt: null,
+      grok: {
+        seenSessions: ["grok-session-delayed"],
+        updatedAt: "2026-04-05T14:00:00.000Z",
+      },
+    };
+    const sessionDir = path.join(tmp, "sessions", "encoded-cwd", "grok-session-delayed");
+    await fs.mkdir(sessionDir, { recursive: true });
+    const signalsPath = path.join(sessionDir, "signals.json");
+    const session = {
+      sessionDir,
+      signalsPath,
+      summaryPath: path.join(sessionDir, "summary.json"),
+      sessionId: "grok-session-delayed",
+    };
+
+    await fs.writeFile(
+      signalsPath,
+      JSON.stringify({
+        contextTokensUsed: 0,
+        assistantMessageCount: 0,
+        primaryModelId: "grok-build",
+        lastActiveAt: "2026-04-05T14:10:00.000Z",
+      }),
+      "utf8",
+    );
+
+    const zeroRun = await parseGrokBuildIncremental({ sessions: [session], cursors, queuePath });
+    assert.equal(zeroRun.eventsAggregated, 0);
+    assert.equal(zeroRun.bucketsQueued, 0);
+    assert.equal(cursors.grok.sessionSnapshots["grok-session-delayed"].legacySeen, true);
+
+    await fs.writeFile(
+      signalsPath,
+      JSON.stringify({
+        contextTokensUsed: 420,
+        assistantMessageCount: 4,
+        primaryModelId: "grok-build",
+        lastActiveAt: "2026-04-05T14:20:00.000Z",
+      }),
+      "utf8",
+    );
+
+    const baselineRun = await parseGrokBuildIncremental({ sessions: [session], cursors, queuePath });
+    assert.equal(baselineRun.eventsAggregated, 0);
+    assert.equal(baselineRun.bucketsQueued, 0);
+    assert.deepEqual(await readJsonLines(queuePath), []);
+    assert.equal(cursors.grok.sessionSnapshots["grok-session-delayed"].totalTokens, 420);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("resolveGrokBuildSessions includes sessions with updates only", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-grok-resolve-"));
   try {
