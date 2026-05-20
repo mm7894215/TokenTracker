@@ -3134,10 +3134,11 @@ async function parseHermesIncremental({ hermesPath, dbPath, cursors, queuePath, 
       const cacheRead = toNonNegativeInt(row.cache_read_tokens);
       const cacheWrite = toNonNegativeInt(row.cache_write_tokens);
       const reasoning = toNonNegativeInt(row.reasoning_tokens);
+      const messageCount = toNonNegativeInt(row.message_count);
       if (inputTokens === 0 && outputTokens === 0 && cacheRead === 0 && reasoning === 0) continue;
 
       // Save current snapshot for next sync
-      nextSnapshots[row.id] = { in: inputTokens, out: outputTokens, cacheRead, cacheWrite, reasoning };
+      nextSnapshots[row.id] = { in: inputTokens, out: outputTokens, cacheRead, cacheWrite, reasoning, message_count: messageCount };
 
       const startedAt = Number(row.started_at);
       const endedAt = row.ended_at == null ? null : Number(row.ended_at);
@@ -3151,7 +3152,7 @@ async function parseHermesIncremental({ hermesPath, dbPath, cursors, queuePath, 
       }
 
       // Compute delta from previous snapshot (if any) so that we only count
-      // new tokens since the last sync.  First time we see a session the
+      // new usage since the last sync.  First time we see a session the
       // previous snapshot is absent, so the full amount is the delta.
       const prev = prevSnapshots[row.id];
       let dInput = inputTokens;
@@ -3159,12 +3160,14 @@ async function parseHermesIncremental({ hermesPath, dbPath, cursors, queuePath, 
       let dCacheRead = cacheRead;
       let dCacheWrite = cacheWrite;
       let dReasoning = reasoning;
+      let dMessageCount = messageCount;
       if (prev) {
         dInput = Math.max(0, inputTokens - (prev.in || 0));
         dOutput = Math.max(0, outputTokens - (prev.out || 0));
         dCacheRead = Math.max(0, cacheRead - (prev.cacheRead || 0));
         dCacheWrite = Math.max(0, cacheWrite - (prev.cacheWrite || 0));
         dReasoning = Math.max(0, reasoning - (prev.reasoning || 0));
+        dMessageCount = Math.max(0, messageCount - (prev.message_count || 0));
       }
       // Skip if delta is zero (session unchanged since last sync)
       if (dInput === 0 && dOutput === 0 && dCacheRead === 0 && dCacheWrite === 0 && dReasoning === 0) continue;
@@ -3185,7 +3188,7 @@ async function parseHermesIncremental({ hermesPath, dbPath, cursors, queuePath, 
         output_tokens: dOutput,
         reasoning_output_tokens: dReasoning,
         total_tokens: dInput + dOutput + dCacheRead + dCacheWrite + dReasoning,
-        conversation_count: toNonNegativeInt(row.message_count) || 1,
+        conversation_count: dMessageCount,
       };
 
       const bucket = getHourlyBucket(hourlyState, "hermes", model, bucketStart);

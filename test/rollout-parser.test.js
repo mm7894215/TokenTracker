@@ -2927,10 +2927,12 @@ test("parseHermesIncremental tracks real-time token growth for active sessions (
     assert.equal(activeBucket.input_tokens, 8000);
     assert.equal(activeBucket.output_tokens, 400);
     assert.equal(activeBucket.cached_input_tokens, 2000);
+    assert.equal(activeBucket.conversation_count, 10);
 
     // Snapshot should be updated
     assert.equal(cursors.hermes.snapshots["sess_active"].in, 8000);
     assert.equal(cursors.hermes.snapshots["sess_active"].out, 400);
+    assert.equal(cursors.hermes.snapshots["sess_active"].message_count, 10);
 
     // Cursor still hasn't advanced past the active session
     assert.equal(cursors.hermes.lastCompletedStartedAt, epoch1);
