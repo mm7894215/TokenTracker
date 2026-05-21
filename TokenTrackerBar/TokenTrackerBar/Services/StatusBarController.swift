@@ -277,9 +277,14 @@ final class StatusBarController: NSObject {
         setupPopover()
         observeSyncState()
         observeNativeBridgeSettings()
+        observeApplicationActivity()
     }
 
     private func closePopoverForModalAlert() {
+        closePopoverIfShown()
+    }
+
+    private func closePopoverIfShown() {
         if popover.isShown {
             popover.performClose(nil)
         }
@@ -298,6 +303,16 @@ final class StatusBarController: NSObject {
                 self.animator?.applyCurrentState()
                 self.updateStatsDisplay()
             }
+        }
+    }
+
+    private func observeApplicationActivity() {
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification,
+            object: NSApp,
+            queue: .main
+        ) { [weak self] _ in
+            self?.closePopoverIfShown()
         }
     }
 
@@ -670,7 +685,7 @@ final class StatusBarController: NSObject {
         } else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
 
-            // Ensure popover closes when user clicks outside
+            // Keep keyboard focus inside the popover while it is visible.
             if let window = popover.contentViewController?.view.window {
                 NSApp.activate(ignoringOtherApps: true)
                 window.makeKey()

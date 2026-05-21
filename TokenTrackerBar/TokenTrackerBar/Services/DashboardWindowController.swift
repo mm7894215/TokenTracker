@@ -272,7 +272,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     // MARK: - Loading Overlay
 
     private func makeLoadingOverlay() -> NSView {
-        let overlay = NSView()
+        let overlay = PassthroughOverlayView()
         overlay.wantsLayer = true
         overlay.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
 
@@ -321,7 +321,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     }
 
     func closeWindow() {
-        window?.close()
+        window?.performClose(nil)
     }
 
     // MARK: - NSWindowDelegate
@@ -499,5 +499,17 @@ private final class TitlebarDragView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         window?.performDrag(with: event)
+    }
+}
+
+/// Visual-only overlay for the initial dashboard load.
+///
+/// WKWebView navigation can swap from the dashboard to an auth callback page
+/// while this overlay is fading or waiting to be removed. Keeping it out of
+/// hit-testing prevents a transparent stale overlay from swallowing button
+/// clicks in the WebView.
+private final class PassthroughOverlayView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
     }
 }

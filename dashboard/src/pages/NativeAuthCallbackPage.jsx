@@ -86,6 +86,10 @@ export function NativeAuthCallbackPage() {
     }
   }, [isNative]);
 
+  const handleClosePage = () => {
+    navigate("/dashboard", { replace: true });
+  };
+
   // Show blank while determining flow type or SDK is processing
   if (status === "processing" && isNative !== true) {
     if (isNative === null || (isNative === false && loading)) {
@@ -120,7 +124,7 @@ export function NativeAuthCallbackPage() {
             <p className="text-oai-gray-300 text-sm">{copy("auth.callback.failed")}</p>
             <button
               type="button"
-              onClick={() => window.close()}
+              onClick={handleClosePage}
               className="px-4 py-2 rounded-lg bg-oai-gray-800 text-sm text-white hover:bg-oai-gray-700 transition-colors"
             >
               {copy("auth.callback.close")}
