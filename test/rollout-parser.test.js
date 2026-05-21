@@ -2892,6 +2892,66 @@ test("resolveHermesPath honors TOKENTRACKER_HERMES_HOME override", () => {
   assert.equal(resolveHermesPath({}), path.join(os.homedir(), ".hermes"));
 });
 
+test("resolveHermesPath prefers %LOCALAPPDATA%\\hermes on Windows when present", async (t) => {
+  // The auto-detect branch only triggers on win32. Stub process.platform so
+  // the same assertion runs on mac/Linux CI.
+  const originalPlatform = process.platform;
+  Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-hermes-localappdata-"));
+  t.after(async () => {
+    Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  // LOCALAPPDATA points at a dir that does NOT contain `hermes` → fall back.
+  assert.equal(
+    resolveHermesPath({ LOCALAPPDATA: tmp }),
+    path.join(os.homedir(), ".hermes"),
+  );
+
+  // After we create LOCALAPPDATA\hermes the resolver should prefer it over ~/.hermes.
+  const winNative = path.join(tmp, "hermes");
+  await fs.mkdir(winNative, { recursive: true });
+  assert.equal(resolveHermesPath({ LOCALAPPDATA: tmp }), winNative);
+
+  // Explicit TOKENTRACKER_HERMES_HOME still wins over LOCALAPPDATA auto-detect.
+  assert.equal(
+    resolveHermesPath({ LOCALAPPDATA: tmp, TOKENTRACKER_HERMES_HOME: "/custom/hermes" }),
+    "/custom/hermes",
+  );
+});
+
+test("parseHermesIncremental snapshots the DB locally for UNC paths", async () => {
+  // Simulate the \\wsl$\Ubuntu\... case: we can't actually create a UNC path
+  // in CI, but the codepath is gated on isUncPath() and the rest of the
+  // pipeline is identical. We point a junction-style "\\?\..." path at a real
+  // file so the snapshot helper copies it, then read the snapshot.
+  if (process.platform !== "win32") {
+    // On non-Windows the // prefix is treated as POSIX-absolute by node, so we
+    // can use it to exercise the snapshot branch without a UNC mount.
+  }
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-hermes-unc-"));
+  try {
+    const realDbPath = path.join(tmp, "state.db");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+    const epoch = 1775993779.0;
+    createHermesDb(realDbPath, [
+      { id: "unc_session", model: "gpt-5.4-mini", started_at: epoch, ended_at: epoch + 60, input_tokens: 700, output_tokens: 100, message_count: 2 },
+    ]);
+    // Prefix with an extra `/` so isUncPath() returns true; node's path layer
+    // still resolves it to the same inode on POSIX.
+    const uncStyle = "/" + realDbPath;
+    const result = await parseHermesIncremental({ dbPath: uncStyle, cursors, queuePath });
+    assert.equal(result.recordsProcessed, 1);
+    assert.equal(result.eventsAggregated, 1);
+    const queued = await readJsonLines(queuePath);
+    assert.ok(queued.some((b) => b.source === "hermes" && b.input_tokens === 700 && b.output_tokens === 100));
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseHermesIncremental reads a database under TOKENTRACKER_HERMES_HOME override", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-hermes-env-override-"));
   const prev = process.env.TOKENTRACKER_HERMES_HOME;

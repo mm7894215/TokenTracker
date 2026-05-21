@@ -3011,7 +3011,20 @@ function resolveHermesPath(env = process.env) {
     return override.trim();
   }
   const home = require("node:os").homedir();
-  return path.join(home, ".hermes");
+  const defaultPath = path.join(home, ".hermes");
+  // Hermes official Windows installer (install.ps1) writes state to
+  // %LOCALAPPDATA%\hermes, not ~/.hermes. Prefer it when present so native
+  // Windows users don't need to set TOKENTRACKER_HERMES_HOME manually.
+  if (process.platform === "win32") {
+    const localAppData = typeof env.LOCALAPPDATA === "string" ? env.LOCALAPPDATA.trim() : "";
+    if (localAppData.length > 0) {
+      const winNative = path.join(localAppData, "hermes");
+      try {
+        if (fssync.existsSync(winNative)) return winNative;
+      } catch (_e) { }
+    }
+  }
+  return defaultPath;
 }
 
 function resolveHermesDbPath(env = process.env) {
@@ -3046,6 +3059,35 @@ function sqliteStringLiteral(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
 
+// UNC paths (\\wsl$\Ubuntu\..., \\wsl.localhost\..., \\server\share\...) make
+// sqlite3.exe fail with "database is locked (5)" on Windows because the Plan 9
+// / SMB bridge can't grant the locks SQLite asks for — even after `wsl
+// --shutdown`. Detect those paths so we can snapshot the DB locally first.
+function isUncPath(p) {
+  return typeof p === "string" && (p.startsWith("\\\\") || p.startsWith("//"));
+}
+
+function snapshotSqliteDb(dbPath) {
+  const tmpRoot = fssync.mkdtempSync(
+    path.join(require("node:os").tmpdir(), "tokentracker-hermes-snap-"),
+  );
+  const target = path.join(tmpRoot, path.basename(dbPath));
+  fssync.copyFileSync(dbPath, target);
+  // Best-effort copy of SQLite sidecars; missing -wal/-shm/-journal is fine.
+  for (const suffix of ["-wal", "-shm", "-journal"]) {
+    const src = dbPath + suffix;
+    try {
+      if (fssync.existsSync(src)) fssync.copyFileSync(src, target + suffix);
+    } catch (_e) { }
+  }
+  return {
+    path: target,
+    cleanup() {
+      try { fssync.rmSync(tmpRoot, { recursive: true, force: true }); } catch (_e) { }
+    },
+  };
+}
+
 function readHermesSessions(dbPath, lastCompletedEpoch, unfinishedSessionIds = []) {
   if (!dbPath || !fssync.existsSync(dbPath)) return [];
   const since = Number.isFinite(lastCompletedEpoch) && lastCompletedEpoch > 0 ? lastCompletedEpoch : 0;
@@ -3060,24 +3102,41 @@ function readHermesSessions(dbPath, lastCompletedEpoch, unfinishedSessionIds = [
   // unfinished.  Hermes updates token counts in real-time, including a final
   // delta when an active session later gets ended_at set.
   const sql = `SELECT id, model, started_at, ended_at, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, message_count FROM sessions WHERE (started_at >= ${since} OR ended_at IS NULL${forceIncludeSql}) AND (input_tokens > 0 OR output_tokens > 0 OR cache_read_tokens > 0 OR reasoning_tokens > 0) ORDER BY started_at ASC`;
-  let raw;
-  try {
-    raw = cp.execFileSync("sqlite3", ["-json", dbPath, sql], {
-      encoding: "utf8",
-      maxBuffer: 10 * 1024 * 1024,
-      timeout: 15_000,
-    });
-  } catch (_e) {
-    return [];
+
+  let snapshot = null;
+  let effectiveDbPath = dbPath;
+  if (isUncPath(dbPath)) {
+    try {
+      snapshot = snapshotSqliteDb(dbPath);
+      effectiveDbPath = snapshot.path;
+    } catch (_e) {
+      // Snapshot failed — fall through to a direct read so we don't regress
+      // the non-locked case (e.g. permissions, transient I/O).
+    }
   }
-  if (!raw || !raw.trim()) return [];
-  let rows;
+
   try {
-    rows = JSON.parse(raw);
-  } catch (_e) {
-    return [];
+    let raw;
+    try {
+      raw = cp.execFileSync("sqlite3", ["-json", effectiveDbPath, sql], {
+        encoding: "utf8",
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: 15_000,
+      });
+    } catch (_e) {
+      return [];
+    }
+    if (!raw || !raw.trim()) return [];
+    let rows;
+    try {
+      rows = JSON.parse(raw);
+    } catch (_e) {
+      return [];
+    }
+    return Array.isArray(rows) ? rows : [];
+  } finally {
+    if (snapshot) snapshot.cleanup();
   }
-  return Array.isArray(rows) ? rows : [];
 }
 
 function hasLegacyHermesDefaultState(hermesState) {
