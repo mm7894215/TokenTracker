@@ -6,7 +6,7 @@ const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 
 const FRONT_PREFIXES = ["dashboard/"];
-const FRONT_FILES = ["copy.jsx"];
+const FRONT_FILES = [];
 const BACK_PREFIXES = ["src/", "test/"];
 
 function parseArgs(argv) {

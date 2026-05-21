@@ -1,11 +1,11 @@
-create or replace function public.vibeusage_rebuild_daily_rollup(p_from date, p_to date)
+create or replace function public.tokentracker_rebuild_daily_rollup(p_from date, p_to date)
 returns void as $$
 begin
   perform set_config('TimeZone', 'UTC', true);
-  delete from public.vibeusage_tracker_daily_rollup
+  delete from public.tokentracker_daily_rollup
   where day >= p_from and day <= p_to;
 
-  insert into public.vibeusage_tracker_daily_rollup (
+  insert into public.tokentracker_daily_rollup (
     user_id, day, source, model,
     total_tokens, input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens, updated_at
   )
@@ -20,7 +20,7 @@ begin
     sum(coalesce(output_tokens, 0))::bigint,
     sum(coalesce(reasoning_output_tokens, 0))::bigint,
     now()
-  from public.vibeusage_tracker_hourly
+  from public.tokentracker_hourly
   where hour_start >= p_from::timestamptz
     and hour_start < (p_to + 1)::timestamptz
   group by 1,2,3,4;

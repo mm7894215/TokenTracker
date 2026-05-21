@@ -21,7 +21,7 @@ function toNumber(value, fallback) {
 }
 
 const url =
-  readArg("--url", process.env.VIBESCORE_SCREENSHOT_URL) || "http://localhost:5173/?screenshot=1";
+  readArg("--url", process.env.TOKENTRACKER_SCREENSHOT_URL) || "http://localhost:5173/?screenshot=1";
 const out =
   readArg("--out", path.resolve("docs", "screenshots", "dashboard-screenshot.png")) ||
   path.resolve("docs", "screenshots", "dashboard-screenshot.png");

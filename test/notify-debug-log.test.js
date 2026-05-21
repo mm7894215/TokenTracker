@@ -47,7 +47,7 @@ async function rmWithRetry(target, retries = 3) {
 }
 
 async function setupInitEnv() {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-notify-debug-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-notify-debug-"));
   const codexHome = path.join(tmp, ".codex");
   await fs.mkdir(codexHome, { recursive: true });
 

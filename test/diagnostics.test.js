@@ -8,7 +8,7 @@ const { cmdDiagnostics } = require("../src/commands/diagnostics");
 const { collectTrackerDiagnostics } = require("../src/lib/diagnostics");
 
 test("diagnostics redacts device token and home paths", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-diagnostics-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-diagnostics-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevTokenTrackerGrokHome = process.env.TOKENTRACKER_GROK_HOME;
@@ -126,7 +126,7 @@ test("diagnostics redacts device token and home paths", async () => {
 });
 
 test("diagnostics reports TokenTracker-prefixed Grok home override", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-diagnostics-grok-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-diagnostics-grok-"));
   const prevTokenTrackerGrokHome = process.env.TOKENTRACKER_GROK_HOME;
   const prevGrokHome = process.env.GROK_HOME;
   try {
@@ -146,10 +146,10 @@ test("diagnostics reports TokenTracker-prefixed Grok home override", async () =>
 });
 
 test("diagnostics does not migrate legacy root", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-diagnostics-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-diagnostics-"));
   const home = path.join(tmp, "home");
   await fs.mkdir(home, { recursive: true });
-  const legacyRoot = path.join(home, ".vibescore");
+  const legacyRoot = path.join(home, ".legacy-tracker-root");
   await fs.mkdir(path.join(legacyRoot, "tracker"), { recursive: true });
 
   await collectTrackerDiagnostics({ home });

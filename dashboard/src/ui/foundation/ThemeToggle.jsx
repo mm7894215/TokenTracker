@@ -112,5 +112,3 @@ export function ThemeToggle({ theme, resolvedTheme, onSetTheme, className = "", 
     </div>
   );
 }
-
-export default ThemeToggle;

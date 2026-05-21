@@ -1,9 +1,0 @@
-{
-  "version": 1,
-  "max_scenarios": 3,
-  "pin": ["tracker-sync-ingest"],
-  "exclude": [],
-  "labels": {
-    "tracker-sync-ingest": "Tracker Sync -> Ingest"
-  }
-}

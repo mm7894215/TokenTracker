@@ -16,6 +16,7 @@ const {
   normalizeAntigravityResponse,
   parseListeningPorts,
   detectAntigravityProcess,
+  fetchAntigravityLimits,
 } = require("../src/lib/usage-limits");
 
 describe("extractGeminiOauthClientCredentials", () => {
@@ -392,6 +393,89 @@ describe("getUsageLimits", () => {
       assert.equal(result.codex.error, null);
       assert.equal(result.codex.primary_window, null);
       assert.equal(result.codex.secondary_window, null);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("reads the Claude OAuth access token from ~/.claude/.credentials.json on Linux", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-claude-linux-"));
+    try {
+      const claudeDir = path.join(tmp, ".claude");
+      fs.mkdirSync(claudeDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(claudeDir, ".credentials.json"),
+        JSON.stringify({
+          claudeAiOauth: {
+            accessToken: "linux-claude-token",
+            subscriptionType: "max",
+            rateLimitTier: "tier-1",
+          },
+        }),
+      );
+
+      let observedAuth = null;
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 1000,
+        securityRunner() {
+          // No keychain on Linux; if the macOS path is taken by mistake this would be the wrong token.
+          return { status: 1, stdout: "" };
+        },
+        commandRunner() {
+          return { status: 1, stdout: "" };
+        },
+        fetchImpl(url, opts) {
+          if (typeof url === "string" && url === "https://api.anthropic.com/api/oauth/usage") {
+            observedAuth = opts?.headers?.Authorization || null;
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                five_hour: { utilization: 0.4 },
+                seven_day: { utilization: 0.12 },
+                seven_day_opus: null,
+              }),
+            });
+          }
+          return new Promise(() => {});
+        },
+      });
+
+      assert.equal(observedAuth, "Bearer linux-claude-token");
+      assert.equal(result.claude.configured, true);
+      assert.equal(result.claude.error, null);
+      assert.deepEqual(result.claude.five_hour, { utilization: 0.4 });
+      assert.deepEqual(result.claude.seven_day, { utilization: 0.12 });
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("reports Claude unconfigured on Linux when the credentials file is missing", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-claude-linux-missing-"));
+    try {
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 1000,
+        securityRunner() {
+          return { status: 1, stdout: "" };
+        },
+        commandRunner() {
+          return { status: 1, stdout: "" };
+        },
+        fetchImpl() {
+          return new Promise(() => {});
+        },
+      });
+
+      assert.equal(result.claude.configured, false);
     } finally {
       resetUsageLimitsCache();
       fs.rmSync(tmp, { recursive: true, force: true });
@@ -921,5 +1005,132 @@ lang      123 me    23u  IPv4 0x124                0t0  TCP 127.0.0.1:51235 (LIS
     assert.equal(result.pid, 123);
     assert.equal(result.csrfToken, "abc123");
     assert.equal(result.extensionPort, 42427);
+  });
+
+  it("persists live Antigravity quota for use after the process exits", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-antigravity-cache-write-"));
+    try {
+      const nowMs = Date.parse("2026-05-21T00:00:00.000Z");
+      const commandRunner = (command) => {
+        if (command === "/bin/ps") {
+          return {
+            stdout: `
+123 /Applications/Antigravity.app/Contents/MacOS/language_server_macos --app_data_dir antigravity --csrf_token abc123 --extension_server_port 42427
+`,
+            status: 0,
+          };
+        }
+        if (command === "which") {
+          return { stdout: "/usr/bin/lsof\n", status: 0 };
+        }
+        if (String(command).endsWith("lsof")) {
+          return {
+            stdout: `
+lang 123 me 22u IPv4 0x123 0t0 TCP 127.0.0.1:51234 (LISTEN)
+`,
+            status: 0,
+          };
+        }
+        return { stdout: "", stderr: "", status: 1 };
+      };
+      const requestFn = async ({ path: requestPath }) => {
+        if (requestPath.includes("GetUnleashData")) return { code: 0 };
+        assert.ok(requestPath.includes("GetUserStatus"));
+        return {
+          code: 0,
+          userStatus: {
+            cascadeModelConfigData: {
+              clientModelConfigs: [
+                {
+                  label: "Claude Sonnet",
+                  modelOrAlias: { model: "claude-sonnet-4" },
+                  quotaInfo: {
+                    remainingFraction: 0.25,
+                    resetTime: "2026-05-22T00:00:00.000Z",
+                  },
+                },
+              ],
+            },
+          },
+        };
+      };
+
+      const result = await fetchAntigravityLimits({ home: tmp, commandRunner, requestFn, nowMs });
+      assert.equal(result.configured, true);
+      assert.equal(result.primary_window.used_percent, 75);
+
+      const cachedPath = path.join(tmp, ".tokentracker", "tracker", "usage-limits-cache.json");
+      const cached = JSON.parse(fs.readFileSync(cachedPath, "utf8"));
+      assert.equal(cached.antigravity.primary_window.used_percent, 75);
+      assert.equal(cached.antigravity.cached_at, "2026-05-21T00:00:00.000Z");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("uses cached Antigravity quota when no language server process is running", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-antigravity-cache-read-"));
+    try {
+      const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+      fs.mkdirSync(trackerDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(trackerDir, "usage-limits-cache.json"),
+        JSON.stringify({
+          antigravity: {
+            primary_window: {
+              used_percent: 42,
+              reset_at: "2026-05-22T00:00:00.000Z",
+            },
+            cached_at: "2026-05-21T00:00:00.000Z",
+          },
+        }),
+        "utf8",
+      );
+      const commandRunner = () => ({ stdout: "", stderr: "", status: 1 });
+
+      const result = await fetchAntigravityLimits({
+        home: tmp,
+        commandRunner,
+        nowMs: Date.parse("2026-05-21T01:00:00.000Z"),
+      });
+
+      assert.equal(result.configured, true);
+      assert.equal(result.cached, true);
+      assert.equal(result.primary_window.used_percent, 42);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("does not use cached Antigravity quota after all cached windows reset", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-antigravity-cache-expired-"));
+    try {
+      const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+      fs.mkdirSync(trackerDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(trackerDir, "usage-limits-cache.json"),
+        JSON.stringify({
+          antigravity: {
+            primary_window: {
+              used_percent: 42,
+              reset_at: "2026-05-21T00:00:00.000Z",
+            },
+            cached_at: "2026-05-20T23:00:00.000Z",
+          },
+        }),
+        "utf8",
+      );
+      const commandRunner = () => ({ stdout: "", stderr: "", status: 1 });
+
+      const result = await fetchAntigravityLimits({
+        home: tmp,
+        commandRunner,
+        nowMs: Date.parse("2026-05-21T01:00:00.000Z"),
+      });
+
+      assert.equal(result.configured, false);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

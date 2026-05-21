@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
  * since WKWebView's localStorage is isolated from UserDefaults.
  */
 
-export const ALL_LIMIT_PROVIDERS = [
+const ALL_LIMIT_PROVIDERS = [
   "claude",
   "codex",
   "cursor",

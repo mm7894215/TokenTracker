@@ -59,7 +59,7 @@ test("doctor reports runtime config status", async () => {
 });
 
 test("doctor marks invalid config.json as critical", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-doctor-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-doctor-"));
   const trackerDir = path.join(tmp, ".tokentracker", "tracker");
   await fs.mkdir(trackerDir, { recursive: true });
   const configPath = path.join(trackerDir, "config.json");
@@ -77,7 +77,7 @@ test("doctor marks invalid config.json as critical", async () => {
 });
 
 test("doctor --out writes json to file and stdout", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-doctor-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-doctor-"));
   const prevHome = process.env.HOME;
   const prevCwd = process.cwd();
   const prevFetch = globalThis.fetch;
@@ -117,7 +117,7 @@ test("doctor --out writes json to file and stdout", async () => {
 });
 
 test("doctor sets exitCode on critical failures", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-doctor-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-doctor-"));
   const prevHome = process.env.HOME;
   const prevFetch = globalThis.fetch;
   const prevWrite = process.stdout.write;
@@ -151,7 +151,7 @@ test("doctor sets exitCode on critical failures", async () => {
 });
 
 test("doctor supports CLI base-url override", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-doctor-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-doctor-"));
   const prevHome = process.env.HOME;
   const prevFetch = globalThis.fetch;
   const prevWrite = process.stdout.write;
@@ -191,7 +191,7 @@ test("doctor supports CLI base-url override", async () => {
 });
 
 test("doctor tolerates null config.json payload", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-doctor-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-doctor-"));
   const prevHome = process.env.HOME;
   const prevFetch = globalThis.fetch;
   const prevWrite = process.stdout.write;

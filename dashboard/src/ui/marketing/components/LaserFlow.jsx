@@ -217,7 +217,7 @@ function hexToRGB(hex) {
   return {r:((n>>16)&255)/255,g:((n>>8)&255)/255,b:(n&255)/255};
 }
 
-export function LaserFlow({
+function LaserFlow({
   className,
   style,
   wispDensity       = 1,

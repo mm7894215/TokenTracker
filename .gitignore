@@ -1,41 +1,31 @@
-node_modules
-.DS_Store
-dist
-.tmp
-dashboard/tmp
-.amazonq
+# Dependencies & build output
+node_modules/
+dist/
+build/
+.tmp/
+dashboard/tmp/
+*.tsbuildinfo
+
+# Environment & logs
 .env
 .env.local
 .env.*.local
+.env*.local
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-.obsidian/
-.code/
-.worktrees/
-codex-pr-review-loop.skill
+
+# Graph tooling (npm run graph:scip / graph:auto-index)
 index.scip
 /index.*.scip
 /graph.plan.json
 /data/graph.sqlite
 /data/graph.sqlite-*
 
-# Local-only snapshots and experiments
-/backups/
-/copy2.jsx
-/vibescore-flowchart/
-
-# Local-only docs
+# Local-only
+/tasks/
 .vercel
-.env*.local
-
-.worktrees/
-
-# OpenMemory - IDE/Assistant specific rules
-.cursor/rules/openmemory.mdc
-CLAUDE.md
-AGENTS.md
 
 # TokenTrackerBar build artifacts
 TokenTrackerBar/EmbeddedServer/
@@ -45,12 +35,13 @@ TokenTrackerBar/icon_composer/
 TokenTrackerBar/DerivedData/
 TokenTrackerBar/*.xcarchive
 
-# AI / IDE tooling
-.agent
+# AI / IDE tooling (created locally by assistants)
+.agent/
 .agents/
+.amazonq/
 .augment/
 .claude/
-.cline
+.cline/
 .codebuddy/
 .continue/
 .cursor/
@@ -59,14 +50,16 @@ TokenTrackerBar/*.xcarchive
 .iflow/
 .insforge/
 .kilocode/
+.kilo/
 .kiro/
 .qoder/
 .qwen/
 .roo/
 .trae/
 .windsurf/
+.worktrees/
 
-# System & Editor
+# System & editor
 .DS_Store
 .DS_Store?
 ._*
@@ -81,27 +74,7 @@ Thumbs.db
 *.sublime-project
 *.sublime-workspace
 
-# Build & Cache
+# Build & cache
 .eslintcache
 .parcel-cache
 .turbo
-node_modules/
-dist/
-build/
-.tmp/
-*.tsbuildinfo
-
-# InsForge & AI agent skills
-.insforge
-.agents
-.augment
-.claude
-.kilocode
-.qoder
-.qwen
-.roo
-.trae
-.windsurf
-
-# Kilo CLI per-project plans/state (used during development)
-.kilo/

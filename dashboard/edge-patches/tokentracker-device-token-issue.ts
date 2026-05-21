@@ -1,6 +1,6 @@
 /**
  * InsForge Edge：为当前登录用户签发 device token（写入 tokentracker_devices / tokentracker_device_tokens）。
- * 与文档中 historical 名称 vibeusage-device-token-issue 不同：本项目云端 slug 为 tokentracker-device-token-issue。
+ * 与文档中 historical 名称 tokentracker-device-token-issue 不同：本项目云端 slug 为 tokentracker-device-token-issue。
  */
 import { createClient } from "npm:@insforge/sdk";
 

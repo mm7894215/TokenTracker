@@ -11,7 +11,7 @@ function tmpDir(prefix) {
 }
 
 test("readNotify parses multi-line notify arrays", async () => {
-  const dir = tmpDir("vibeusage-codex-config-");
+  const dir = tmpDir("tokentracker-codex-config-");
   const configPath = path.join(dir, "config.toml");
 
   fs.writeFileSync(
@@ -19,8 +19,8 @@ test("readNotify parses multi-line notify arrays", async () => {
     [
       'model = "gpt-5.3-codex"',
       "notify = [",
-      '  "/Users/victor/.bun/bin/bun",',
-      '  "/Users/victor/.confirmo/hooks/confirmo-codex-hook.js"',
+      '  "/Users/tokentracker/.bun/bin/bun",',
+      '  "/Users/tokentracker/.confirmo/hooks/confirmo-codex-hook.js"',
       "]",
       'personality = "pragmatic"',
     ].join("\n"),
@@ -29,13 +29,13 @@ test("readNotify parses multi-line notify arrays", async () => {
 
   const notify = await readNotify(configPath);
   assert.deepEqual(notify, [
-    "/Users/victor/.bun/bin/bun",
-    "/Users/victor/.confirmo/hooks/confirmo-codex-hook.js",
+    "/Users/tokentracker/.bun/bin/bun",
+    "/Users/tokentracker/.confirmo/hooks/confirmo-codex-hook.js",
   ]);
 });
 
 test("upsertNotify replaces multi-line notify blocks without leaving trailing lines", async () => {
-  const dir = tmpDir("vibeusage-codex-upsert-");
+  const dir = tmpDir("tokentracker-codex-upsert-");
   const configPath = path.join(dir, "config.toml");
   const notifyOriginalPath = path.join(dir, "codex_notify_original.json");
 
@@ -44,15 +44,15 @@ test("upsertNotify replaces multi-line notify blocks without leaving trailing li
     [
       'model = "gpt-5.3-codex"',
       "notify = [",
-      '  "/Users/victor/.bun/bin/bun",',
-      '  "/Users/victor/.confirmo/hooks/confirmo-codex-hook.js"',
+      '  "/Users/tokentracker/.bun/bin/bun",',
+      '  "/Users/tokentracker/.confirmo/hooks/confirmo-codex-hook.js"',
       "]",
       'personality = "pragmatic"',
     ].join("\n"),
     "utf8",
   );
 
-  const newNotify = ["/usr/bin/env", "node", "/Users/victor/.tokentracker/bin/notify.cjs"];
+  const newNotify = ["/usr/bin/env", "node", "/Users/tokentracker/.tokentracker/bin/notify.cjs"];
 
   const result = await upsertNotify({
     configPath,
@@ -65,7 +65,7 @@ test("upsertNotify replaces multi-line notify blocks without leaving trailing li
   const updated = fs.readFileSync(configPath, "utf8");
   assert.equal(
     updated.includes(
-      'notify = [\"/usr/bin/env\", \"node\", \"/Users/victor/.tokentracker/bin/notify.cjs\"]',
+      'notify = [\"/usr/bin/env\", \"node\", \"/Users/tokentracker/.tokentracker/bin/notify.cjs\"]',
     ),
     true,
   );
@@ -77,19 +77,19 @@ test("upsertNotify replaces multi-line notify blocks without leaving trailing li
 
   const original = JSON.parse(fs.readFileSync(notifyOriginalPath, "utf8"));
   assert.deepEqual(original.notify, [
-    "/Users/victor/.bun/bin/bun",
-    "/Users/victor/.confirmo/hooks/confirmo-codex-hook.js",
+    "/Users/tokentracker/.bun/bin/bun",
+    "/Users/tokentracker/.confirmo/hooks/confirmo-codex-hook.js",
   ]);
 });
 
 test("restoreNotify restores from notifyOriginalPath even if config was updated", async () => {
-  const dir = tmpDir("vibeusage-codex-restore-");
+  const dir = tmpDir("tokentracker-codex-restore-");
   const configPath = path.join(dir, "config.toml");
   const notifyOriginalPath = path.join(dir, "codex_notify_original.json");
 
   const originalNotify = [
-    "/Users/victor/.bun/bin/bun",
-    "/Users/victor/.confirmo/hooks/confirmo-codex-hook.js",
+    "/Users/tokentracker/.bun/bin/bun",
+    "/Users/tokentracker/.confirmo/hooks/confirmo-codex-hook.js",
   ];
   fs.writeFileSync(
     notifyOriginalPath,
@@ -101,20 +101,20 @@ test("restoreNotify restores from notifyOriginalPath even if config was updated"
     configPath,
     [
       'model = "gpt-5.3-codex"',
-      'notify = [\"/usr/bin/env\", \"node\", \"/Users/victor/.tokentracker/bin/notify.cjs\"]',
+      'notify = [\"/usr/bin/env\", \"node\", \"/Users/tokentracker/.tokentracker/bin/notify.cjs\"]',
       'personality = "pragmatic"',
     ].join("\n"),
     "utf8",
   );
 
-  const expectedNotify = ["/usr/bin/env", "node", "/Users/victor/.tokentracker/bin/notify.cjs"];
+  const expectedNotify = ["/usr/bin/env", "node", "/Users/tokentracker/.tokentracker/bin/notify.cjs"];
   const result = await restoreNotify({ configPath, notifyOriginalPath, expectedNotify });
   assert.equal(result.restored, true);
 
   const updated = fs.readFileSync(configPath, "utf8");
   assert.equal(
     updated.includes(
-      'notify = [\"/Users/victor/.bun/bin/bun\", \"/Users/victor/.confirmo/hooks/confirmo-codex-hook.js\"]',
+      'notify = [\"/Users/tokentracker/.bun/bin/bun\", \"/Users/tokentracker/.confirmo/hooks/confirmo-codex-hook.js\"]',
     ),
     true,
   );

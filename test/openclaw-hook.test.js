@@ -14,13 +14,13 @@ const {
 } = require("../src/lib/openclaw-hook");
 
 test("probeOpenclawHookState detects linked + enabled hook", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-openclaw-hook-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-openclaw-hook-"));
   const home = path.join(tmp, "home");
   const trackerDir = path.join(home, ".tokentracker", "tracker");
   await fs.mkdir(trackerDir, { recursive: true });
 
   const { hookDir, openclawConfigPath } = resolveOpenclawHookPaths({ home, trackerDir, env: {} });
-  await ensureOpenclawHookFiles({ hookDir, trackerDir, packageName: "vibeusage" });
+  await ensureOpenclawHookFiles({ hookDir, trackerDir, packageName: "tokentracker-cli" });
   await fs.mkdir(path.dirname(openclawConfigPath), { recursive: true });
   await fs.writeFile(
     openclawConfigPath,
@@ -53,7 +53,7 @@ test("probeOpenclawHookState detects linked + enabled hook", async () => {
 });
 
 test("installOpenclawHook returns skipped when openclaw CLI is missing", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-openclaw-hook-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-openclaw-hook-"));
   const home = path.join(tmp, "home");
   const trackerDir = path.join(home, ".tokentracker", "tracker");
   await fs.mkdir(trackerDir, { recursive: true });
@@ -61,7 +61,7 @@ test("installOpenclawHook returns skipped when openclaw CLI is missing", async (
   const result = await installOpenclawHook({
     home,
     trackerDir,
-    packageName: "vibeusage",
+    packageName: "tokentracker-cli",
     env: { PATH: "", OPENCLAW_CONFIG_PATH: path.join(home, ".openclaw", "openclaw.json") },
   });
 
@@ -72,13 +72,13 @@ test("installOpenclawHook returns skipped when openclaw CLI is missing", async (
 });
 
 test("removeOpenclawHookConfig removes linked config and hook dir", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-openclaw-hook-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-openclaw-hook-"));
   const home = path.join(tmp, "home");
   const trackerDir = path.join(home, ".tokentracker", "tracker");
   await fs.mkdir(trackerDir, { recursive: true });
 
   const { hookDir, openclawConfigPath } = resolveOpenclawHookPaths({ home, trackerDir, env: {} });
-  await ensureOpenclawHookFiles({ hookDir, trackerDir, packageName: "vibeusage" });
+  await ensureOpenclawHookFiles({ hookDir, trackerDir, packageName: "tokentracker-cli" });
   await fs.mkdir(path.dirname(openclawConfigPath), { recursive: true });
 
   const keepDir = path.join(tmp, "keep-hook-dir");
@@ -136,13 +136,13 @@ test("removeOpenclawHookConfig removes linked config and hook dir", async () => 
 });
 
 test("ensureOpenclawHookFiles keeps command-only trigger set and command guard", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-openclaw-hook-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-openclaw-hook-"));
   const home = path.join(tmp, "home");
   const trackerDir = path.join(home, ".tokentracker", "tracker");
   await fs.mkdir(trackerDir, { recursive: true });
 
   const { hookDir, hookEntryDir } = resolveOpenclawHookPaths({ home, trackerDir, env: {} });
-  await ensureOpenclawHookFiles({ hookDir, trackerDir, packageName: "vibeusage" });
+  await ensureOpenclawHookFiles({ hookDir, trackerDir, packageName: "tokentracker-cli" });
 
   const hookMd = await fs.readFile(path.join(hookEntryDir, "HOOK.md"), "utf8");
   assert.doesNotMatch(hookMd, /"agent:bootstrap"/);

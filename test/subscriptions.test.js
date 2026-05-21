@@ -23,7 +23,7 @@ async function writeJson(p, obj) {
 }
 
 test("collectLocalSubscriptions returns paid ChatGPT plans from codex + opencode", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-subscriptions-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-subscriptions-"));
 
   try {
     const home = tmp;
@@ -57,7 +57,7 @@ test("collectLocalSubscriptions returns paid ChatGPT plans from codex + opencode
 });
 
 test("collectLocalSubscriptions hides free/unknown plans", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-subscriptions-free-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-subscriptions-free-"));
 
   try {
     const home = tmp;
@@ -82,7 +82,7 @@ test("collectLocalSubscriptions hides free/unknown plans", async () => {
 });
 
 test("collectLocalSubscriptions can probe Claude Code keychain item existence (no secret read)", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-subscriptions-claude-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-subscriptions-claude-"));
 
   try {
     const runner = (cmd, args) => {
@@ -113,7 +113,7 @@ test("collectLocalSubscriptions can probe Claude Code keychain item existence (n
 });
 
 test("collectLocalSubscriptions does not probe Claude keychain by default", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-subscriptions-claude-default-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-subscriptions-claude-default-"));
 
   try {
     let calls = 0;
@@ -137,7 +137,7 @@ test("collectLocalSubscriptions does not probe Claude keychain by default", asyn
 });
 
 test("collectLocalSubscriptions hides Claude keychain line when probe fails", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-subscriptions-claude-miss-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-subscriptions-claude-miss-"));
 
   try {
     const runner = () => ({ status: 1 });
@@ -157,7 +157,7 @@ test("collectLocalSubscriptions hides Claude keychain line when probe fails", as
 });
 
 test("collectLocalSubscriptions can read Claude Code subscription type from keychain when enabled (no secret leak)", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-subscriptions-claude-details-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-subscriptions-claude-details-"));
 
   try {
     const runner = (cmd, args) => {
@@ -208,7 +208,7 @@ test("collectLocalSubscriptions can read Claude Code subscription type from keyc
 
 test("collectLocalSubscriptions falls back to Claude Code keychain presence when details probe fails", async () => {
   const tmp = await fs.mkdtemp(
-    path.join(os.tmpdir(), "vibeusage-subscriptions-claude-details-fallback-"),
+    path.join(os.tmpdir(), "tokentracker-subscriptions-claude-details-fallback-"),
   );
 
   try {
@@ -242,8 +242,117 @@ test("collectLocalSubscriptions falls back to Claude Code keychain presence when
   }
 });
 
+test("collectLocalSubscriptions reads Claude Code credentials from ~/.claude/.credentials.json on Linux", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-subscriptions-claude-linux-"));
+
+  try {
+    await writeJson(path.join(tmp, ".claude", ".credentials.json"), {
+      claudeAiOauth: {
+        accessToken: "secret-access",
+        refreshToken: "secret-refresh",
+        subscriptionType: "max",
+        rateLimitTier: "tier-1",
+      },
+    });
+
+    const subs = await collectLocalSubscriptions({
+      home: tmp,
+      env: {},
+      platform: "linux",
+      probeKeychain: true,
+      probeKeychainDetails: true,
+    });
+
+    assert.equal(subs.length, 1);
+    assert.deepEqual(subs[0], {
+      tool: "claude",
+      provider: "anthropic",
+      product: "subscription",
+      planType: "max",
+      rateLimitTier: "tier-1",
+    });
+    assert.ok(!("accessToken" in subs[0]));
+    assert.ok(!("refreshToken" in subs[0]));
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("collectLocalSubscriptions reports Linux Claude Code credentials presence when details missing", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-subscriptions-claude-linux-presence-"));
+
+  try {
+    // Payload without subscriptionType — details extractor returns null, fall back to presence.
+    await writeJson(path.join(tmp, ".claude", ".credentials.json"), {
+      claudeAiOauth: { accessToken: "secret-access" },
+    });
+
+    const subs = await collectLocalSubscriptions({
+      home: tmp,
+      env: {},
+      platform: "linux",
+      probeKeychain: true,
+      probeKeychainDetails: true,
+    });
+
+    assert.equal(subs.length, 1);
+    assert.deepEqual(subs[0], {
+      tool: "claude",
+      provider: "anthropic",
+      product: "credentials",
+      planType: "present",
+    });
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("collectLocalSubscriptions does not read ~/.claude/.credentials.json on platforms other than Linux/macOS", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-subscriptions-claude-win32-"));
+
+  try {
+    // Real-looking credentials file on disk — but platform is win32, so it must be ignored.
+    await writeJson(path.join(tmp, ".claude", ".credentials.json"), {
+      claudeAiOauth: {
+        accessToken: "should-not-be-read",
+        subscriptionType: "max",
+      },
+    });
+
+    const subs = await collectLocalSubscriptions({
+      home: tmp,
+      env: {},
+      platform: "win32",
+      probeKeychain: true,
+      probeKeychainDetails: true,
+    });
+
+    assert.deepEqual(subs, []);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("collectLocalSubscriptions hides Claude Code line on Linux when credentials file is absent", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-subscriptions-claude-linux-miss-"));
+
+  try {
+    const subs = await collectLocalSubscriptions({
+      home: tmp,
+      env: {},
+      platform: "linux",
+      probeKeychain: true,
+      probeKeychainDetails: true,
+    });
+
+    assert.deepEqual(subs, []);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("collectLocalSubscriptions includes OpenClaw when session plugin is configured", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-subscriptions-openclaw-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-subscriptions-openclaw-"));
 
   try {
     const home = tmp;

@@ -7,7 +7,7 @@ const { test } = require("node:test");
 const { cmdStatus } = require("../src/commands/status");
 
 test("status prints last upload timestamps from upload.throttle.json", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-status-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-status-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevWrite = process.stdout.write;
@@ -88,7 +88,7 @@ test("status prints last upload timestamps from upload.throttle.json", async () 
 });
 
 test("status does not migrate legacy tracker directory", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-status-legacy-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-status-legacy-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevWrite = process.stdout.write;
@@ -97,13 +97,13 @@ test("status does not migrate legacy tracker directory", async () => {
     process.env.HOME = tmp;
     process.env.CODEX_HOME = path.join(tmp, ".codex");
 
-    const legacyTrackerDir = path.join(tmp, ".vibescore", "tracker");
+    const legacyTrackerDir = path.join(tmp, ".legacy-tracker-root", "tracker");
     await fs.mkdir(legacyTrackerDir, { recursive: true });
     await fs.mkdir(process.env.CODEX_HOME, { recursive: true });
 
     await fs.writeFile(
       path.join(process.env.CODEX_HOME, "config.toml"),
-      'notify = [\"/usr/bin/env\", \"node\", \"~/.vibescore/bin/notify.cjs\"]\n',
+      'notify = [\"/usr/bin/env\", \"node\", \"~/.legacy-tracker-root/bin/notify.cjs\"]\n',
       "utf8",
     );
 

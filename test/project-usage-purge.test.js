@@ -7,7 +7,7 @@ const { test } = require("node:test");
 const { purgeProjectUsage } = require("../src/lib/project-usage-purge");
 
 test("purgeProjectUsage preserves queue offset after removing lines", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-purge-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-purge-"));
   const queuePath = path.join(tmp, "project.queue.jsonl");
   const statePath = path.join(tmp, "project.queue.state.json");
 

@@ -78,5 +78,3 @@ export function DismissibleHint({ id, children, className, ariaLabel }) {
     </div>
   );
 }
-
-export default DismissibleHint;

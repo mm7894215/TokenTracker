@@ -12,9 +12,9 @@ function write(filePath, content) {
 }
 
 test("parseFrontmatter parses scalar and list values", () => {
-  const text = `---\nrepo: vibeusage\nlayer: backend\nreusable_for:\n  - ingest\n  - sync\n---\n\n# Title\n`;
+  const text = `---\nrepo: tokentracker\nlayer: backend\nreusable_for:\n  - ingest\n  - sync\n---\n\n# Title\n`;
   const fm = parseFrontmatter(text);
-  assert.equal(fm.repo, "vibeusage");
+  assert.equal(fm.repo, "tokentracker");
   assert.equal(fm.layer, "backend");
   assert.deepEqual(fm.reusable_for, ["ingest", "sync"]);
 });
@@ -25,15 +25,15 @@ test("runRetroValidation passes for repo-scoped retrospective with index referen
 
   write(
     path.join(retroRoot, "_index.md"),
-    `# idx\n- path: \`vibeusage/2026-02-14-openclaw-ingest-gap.md\`\n`,
+    `# idx\n- path: \`tokentracker/2026-02-14-openclaw-ingest-gap.md\`\n`,
   );
   write(
-    path.join(retroRoot, "vibeusage", "_index.md"),
+    path.join(retroRoot, "tokentracker", "_index.md"),
     `# repo idx\n- file: \`2026-02-14-openclaw-ingest-gap.md\`\n`,
   );
   write(
-    path.join(retroRoot, "vibeusage", "2026-02-14-openclaw-ingest-gap.md"),
-    `---\nrepo: vibeusage\nlayer: backend\nmodule: openclaw-sync\nseverity: S1\ndesign_mismatch: yes\ndetection_gap: yes\n---\n\n# OK\n`,
+    path.join(retroRoot, "tokentracker", "2026-02-14-openclaw-ingest-gap.md"),
+    `---\nrepo: tokentracker\nlayer: backend\nmodule: openclaw-sync\nseverity: S1\ndesign_mismatch: yes\ndetection_gap: yes\n---\n\n# OK\n`,
   );
 
   const { errors } = runRetroValidation({ root });
@@ -46,12 +46,12 @@ test("runRetroValidation fails when global index reference is missing", () => {
 
   write(path.join(retroRoot, "_index.md"), "# idx\n");
   write(
-    path.join(retroRoot, "vibeusage", "_index.md"),
+    path.join(retroRoot, "tokentracker", "_index.md"),
     `# repo idx\n- file: \`2026-02-14-openclaw-ingest-gap.md\`\n`,
   );
   write(
-    path.join(retroRoot, "vibeusage", "2026-02-14-openclaw-ingest-gap.md"),
-    `---\nrepo: vibeusage\nlayer: backend\nmodule: openclaw-sync\nseverity: S1\ndesign_mismatch: yes\ndetection_gap: yes\n---\n\n# Missing global index ref\n`,
+    path.join(retroRoot, "tokentracker", "2026-02-14-openclaw-ingest-gap.md"),
+    `---\nrepo: tokentracker\nlayer: backend\nmodule: openclaw-sync\nseverity: S1\ndesign_mismatch: yes\ndetection_gap: yes\n---\n\n# Missing global index ref\n`,
   );
 
   const { errors } = runRetroValidation({ root });

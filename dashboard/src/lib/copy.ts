@@ -157,7 +157,3 @@ export function copy(key: any, params?: AnyRecord) {
   }
   return interpolate(normalizeText(resolveCopyValue(record, key)), params);
 }
-
-export function getCopyRegistry() {
-  return getRegistry();
-}

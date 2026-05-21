@@ -89,15 +89,3 @@ export function getRangeForPeriod(
   // Default to week (safe fallback)
   return getRangeForPeriod("week");
 }
-
-export function getDefaultRange() {
-  const todayKey = formatDateLocal(new Date());
-  const today = parseDateString(todayKey) || new Date();
-  const to = todayKey;
-  const from = formatDateUTC(addUtcDays(today, -29));
-  return { from, to };
-}
-
-function addUtcDays(date: Date, days: number) {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + days));
-}

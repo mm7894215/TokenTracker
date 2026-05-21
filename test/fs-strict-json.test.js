@@ -7,7 +7,7 @@ const { test } = require("node:test");
 const { readJsonStrict } = require("../src/lib/fs");
 
 test("readJsonStrict reports missing files", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-fs-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-fs-"));
   const target = path.join(tmp, "missing.json");
 
   const res = await readJsonStrict(target);
@@ -17,7 +17,7 @@ test("readJsonStrict reports missing files", async () => {
 });
 
 test("readJsonStrict reports invalid JSON", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-fs-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-fs-"));
   const target = path.join(tmp, "invalid.json");
   await fs.writeFile(target, "{bad", "utf8");
 

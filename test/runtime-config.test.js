@@ -20,8 +20,8 @@ test("resolveRuntimeConfig prefers CLI flags over config and env", () => {
 test("resolveRuntimeConfig ignores non-TOKENTRACKER env inputs", () => {
   const result = resolveRuntimeConfig({
     env: {
-      VIBESCORE_BASE_URL: "https://legacy.example",
-      VIBESCORE_DEVICE_TOKEN: "legacy",
+      LEGACY_BASE_URL: "https://legacy.example",
+      LEGACY_DEVICE_TOKEN: "legacy",
     },
   });
 

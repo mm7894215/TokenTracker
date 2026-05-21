@@ -25,6 +25,9 @@ const {
 let cache = { data: null, fetchedAt: 0 };
 const CACHE_TTL_MS = 2 * 60 * 1000;
 const DEFAULT_PROVIDER_TIMEOUT_MS = 15_000;
+const ANTIGRAVITY_LIMITS_CACHE_FILE = "usage-limits-cache.json";
+const ANTIGRAVITY_LIMITS_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const ANTIGRAVITY_LIMITS_CACHE_UNKNOWN_RESET_TTL_MS = 12 * 60 * 60 * 1000;
 
 function clampPercent(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -808,9 +811,15 @@ function runCommand(commandRunner, command, args, options = {}) {
   });
 }
 
-function isBinaryAvailable(binary, { commandRunner } = {}) {
+function whichBinary(binary, { commandRunner } = {}) {
   const result = runCommand(commandRunner, "which", [binary], { timeout: 2000 });
-  return !result?.error && result?.status === 0;
+  if (result?.error || result?.status !== 0) return null;
+  const stdout = typeof result?.stdout === "string" ? result.stdout.trim() : "";
+  return stdout ? stdout.split("\n")[0] : null;
+}
+
+function isBinaryAvailable(binary, { commandRunner } = {}) {
+  return whichBinary(binary, { commandRunner }) !== null;
 }
 
 function stripAnsi(text) {
@@ -1173,11 +1182,84 @@ function detectAntigravityProcess({ commandRunner } = {}) {
   return { configured: false };
 }
 
-function resolveLsofBinary() {
+function resolveAntigravityLimitsCachePath({ home } = {}) {
+  return path.join(home || os.homedir(), ".tokentracker", "tracker", ANTIGRAVITY_LIMITS_CACHE_FILE);
+}
+
+function parseTimeMs(value) {
+  if (typeof value !== "string" || !value) return null;
+  const ts = Date.parse(value);
+  return Number.isFinite(ts) && ts > 0 ? ts : null;
+}
+
+function isCacheWindowUsable(window, { cachedAtMs, nowMs } = {}) {
+  if (!window || typeof window !== "object") return false;
+  const resetAtMs = parseTimeMs(window.reset_at);
+  if (resetAtMs !== null) return resetAtMs > nowMs;
+  return Number.isFinite(cachedAtMs)
+    && nowMs - cachedAtMs <= ANTIGRAVITY_LIMITS_CACHE_UNKNOWN_RESET_TTL_MS;
+}
+
+function hasAntigravityWindow(limits) {
+  return Boolean(limits?.primary_window || limits?.secondary_window || limits?.tertiary_window);
+}
+
+function normalizeAntigravityCachedLimits(raw, { nowMs = Date.now() } = {}) {
+  const cachedAtMs = parseTimeMs(raw?.cached_at);
+  if (!Number.isFinite(cachedAtMs)) return null;
+  if (cachedAtMs > nowMs + 60_000) return null;
+  if (nowMs - cachedAtMs > ANTIGRAVITY_LIMITS_CACHE_MAX_AGE_MS) return null;
+
+  const cached = {
+    configured: true,
+    error: null,
+    account_email: typeof raw?.account_email === "string" ? raw.account_email : null,
+    account_plan: typeof raw?.account_plan === "string" ? raw.account_plan : null,
+    primary_window: isCacheWindowUsable(raw?.primary_window, { cachedAtMs, nowMs }) ? raw.primary_window : null,
+    secondary_window: isCacheWindowUsable(raw?.secondary_window, { cachedAtMs, nowMs }) ? raw.secondary_window : null,
+    tertiary_window: isCacheWindowUsable(raw?.tertiary_window, { cachedAtMs, nowMs }) ? raw.tertiary_window : null,
+    cached: true,
+    cached_at: raw.cached_at,
+  };
+  return hasAntigravityWindow(cached) ? cached : null;
+}
+
+function readAntigravityLimitsCache({ home, nowMs = Date.now() } = {}) {
+  const cachePath = resolveAntigravityLimitsCachePath({ home });
+  try {
+    const parsed = JSON.parse(fs.readFileSync(cachePath, "utf8"));
+    return normalizeAntigravityCachedLimits(parsed?.antigravity, { nowMs });
+  } catch (_error) {
+    return null;
+  }
+}
+
+function writeAntigravityLimitsCache(limits, { home, nowMs = Date.now() } = {}) {
+  if (!limits?.configured || limits.error || !hasAntigravityWindow(limits)) return;
+  const cachePath = resolveAntigravityLimitsCachePath({ home });
+  const payload = {
+    antigravity: {
+      account_email: limits.account_email || null,
+      account_plan: limits.account_plan || null,
+      primary_window: limits.primary_window || null,
+      secondary_window: limits.secondary_window || null,
+      tertiary_window: limits.tertiary_window || null,
+      cached_at: new Date(nowMs).toISOString(),
+    },
+  };
+  try {
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    const tmpPath = `${cachePath}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 0o600 });
+    fs.renameSync(tmpPath, cachePath);
+  } catch (_error) {}
+}
+
+function resolveLsofBinary({ commandRunner } = {}) {
   for (const candidate of ["/usr/sbin/lsof", "/usr/bin/lsof"]) {
     if (fs.existsSync(candidate)) return candidate;
   }
-  return null;
+  return whichBinary("lsof", { commandRunner });
 }
 
 function parseListeningPorts(output) {
@@ -1193,7 +1275,7 @@ function parseListeningPorts(output) {
 }
 
 function listAntigravityPorts(pid, { commandRunner } = {}) {
-  const lsof = resolveLsofBinary();
+  const lsof = resolveLsofBinary({ commandRunner });
   if (!lsof) {
     throw new Error("Antigravity port detection needs lsof. Install it, then retry.");
   }
@@ -1446,14 +1528,24 @@ async function probeAntigravityPort(port, csrfToken, { timeoutMs, requestFn } = 
   }
 }
 
-async function fetchAntigravityLimits({ commandRunner, requestFn, timeoutMs = 8000 } = {}) {
+async function fetchAntigravityLimits({ home, commandRunner, requestFn, timeoutMs = 8000, nowMs = Date.now() } = {}) {
   const processInfo = detectAntigravityProcess({ commandRunner });
   if (!processInfo.configured) {
-    return { configured: false };
+    return readAntigravityLimitsCache({ home, nowMs }) || { configured: false };
   }
   if (processInfo.error) {
     return { configured: true, error: processInfo.error };
   }
+
+  const finalize = (payload, normalizeOptions) => {
+    const result = {
+      configured: true,
+      error: null,
+      ...normalizeAntigravityResponse(payload, normalizeOptions),
+    };
+    writeAntigravityLimitsCache(result, { home, nowMs });
+    return result;
+  };
 
   try {
     const ports = listAntigravityPorts(processInfo.pid, { commandRunner });
@@ -1478,11 +1570,7 @@ async function fetchAntigravityLimits({ commandRunner, requestFn, timeoutMs = 80
         timeoutMs,
         requestFn,
       });
-      return {
-        configured: true,
-        error: null,
-        ...normalizeAntigravityResponse(userStatus),
-      };
+      return finalize(userStatus);
     } catch (primaryError) {
       const fallbackPort =
         Number.isFinite(processInfo.extensionPort) && processInfo.extensionPort > 0
@@ -1497,11 +1585,7 @@ async function fetchAntigravityLimits({ commandRunner, requestFn, timeoutMs = 80
         timeoutMs,
         requestFn,
       });
-      return {
-        configured: true,
-        error: null,
-        ...normalizeAntigravityResponse(modelConfigs, { fallbackToConfigs: true }),
-      };
+      return finalize(modelConfigs, { fallbackToConfigs: true });
     }
   } catch (error) {
     const message = error?.message === "timeout"
@@ -1531,7 +1615,7 @@ async function getUsageLimits({
   }
 
   const [claudeToken, codexAuth] = await Promise.all([
-    Promise.resolve().then(() => readClaudeCodeAccessToken({ platform, securityRunner })),
+    Promise.resolve().then(() => readClaudeCodeAccessToken({ platform, securityRunner, home })),
     readCodexAuthBundle({ home, env }),
   ]);
 
@@ -1594,7 +1678,7 @@ async function getUsageLimits({
     withProviderTimeout(fetchGeminiLimits({ home, env, fetchImpl: providerFetch, commandRunner }), "Gemini", providerTimeoutMs)
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
     Promise.resolve().then(() => fetchKiroLimits({ commandRunner, now })),
-    fetchAntigravityLimits({ commandRunner, requestFn }),
+    fetchAntigravityLimits({ home, commandRunner, requestFn, nowMs }),
     withProviderTimeout(fetchCopilotLimits({ home, env, fetchImpl: providerFetch }), "GitHub Copilot", providerTimeoutMs)
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
   ]);
@@ -1670,6 +1754,7 @@ module.exports = {
   normalizeAntigravityResponse,
   parseListeningPorts,
   detectAntigravityProcess,
+  fetchAntigravityLimits,
   fetchCopilotLimits,
   readCopilotOauthToken,
   describeCopilotOtelStatus,

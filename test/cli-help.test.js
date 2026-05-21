@@ -19,6 +19,6 @@ test("help output uses TokenTracker identifiers", async () => {
   }
 
   assert.match(out, /tokentracker/);
-  assert.ok(!out.includes("@vibescore/tracker"));
+  assert.ok(!out.includes("vibe"));
   assert.match(out, /doctor/);
 });

@@ -164,7 +164,6 @@ function buildMeta(prefix = "landing") {
 function resolveMetaPrefix(ctx) {
   const rawPath = String(ctx?.path || ctx?.filename || ctx?.originalUrl || "").toLowerCase();
   if (rawPath.includes("share")) return "share";
-  if (rawPath.includes("wrapped-2025")) return "share";
   return "landing";
 }
 
@@ -1007,7 +1006,6 @@ export default defineConfig(({ mode }) => {
         input: {
           main: path.resolve(ROOT_DIR, "index.html"),
           share: path.resolve(ROOT_DIR, "share.html"),
-          wrapped: path.resolve(ROOT_DIR, "wrapped-2025.html"),
         },
       },
     },

@@ -4,7 +4,7 @@ export function normalizeAccessToken(token) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-export function getAccessTokenExpiryMs(token) {
+function getAccessTokenExpiryMs(token) {
   const normalized = normalizeAccessToken(token);
   if (!normalized) return null;
   const parts = normalized.split(".");

@@ -5,14 +5,14 @@ const fs = require("node:fs/promises");
 const { test } = require("node:test");
 
 const { cmdInit } = require("../src/commands/init");
-const { resolveOpencodePluginDir } = require("../src/lib/opencode-config");
+const { resolveOpencodePluginDir, DEFAULT_PLUGIN_NAME } = require("../src/lib/opencode-config");
 
 function stripAnsi(text) {
   return String(text || "").replace(/\x1b\[[0-9;]*m/g, "");
 }
 
 test("dry-run preview reports opencode install when config is missing", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-init-dry-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-dry-"));
   const prevHome = process.env.HOME;
   const prevOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -45,7 +45,7 @@ test("dry-run preview reports opencode install when config is missing", async ()
 
     const pluginPath = path.join(
       resolveOpencodePluginDir({ configDir: process.env.OPENCODE_CONFIG_DIR }),
-      "vibeusage-tracker.js",
+      DEFAULT_PLUGIN_NAME,
     );
     await assert.rejects(fs.stat(pluginPath), /ENOENT/);
   } finally {

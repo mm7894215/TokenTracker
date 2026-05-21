@@ -18,7 +18,7 @@ export function getInsforgeRemoteUrl(): string {
  * SDK baseUrl：localhost 时指向自己（走 vite proxy 避免跨域 cookie 问题），
  * 部署后直接指向云端。
  */
-export function getInsforgeBaseUrl(): string {
+function getInsforgeBaseUrl(): string {
   const isLocalhost =
     typeof window !== "undefined" &&
     (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
@@ -62,9 +62,4 @@ export function getOrCreateInsforgeClient(): ReturnType<typeof createClient> | n
     });
   }
   return insforgeClientSingleton;
-}
-
-/** 仅测试用：重置单例 */
-export function __resetInsforgeClientSingletonForTests(): void {
-  insforgeClientSingleton = null;
 }

@@ -4,7 +4,7 @@ export function clearLocalApiAuthToken(): void {
   localApiAuthToken = null;
 }
 
-export async function getLocalApiAuthToken(fetchImpl: typeof fetch = fetch): Promise<string> {
+async function getLocalApiAuthToken(fetchImpl: typeof fetch = fetch): Promise<string> {
   if (localApiAuthToken) return localApiAuthToken;
 
   const res = await fetchImpl("/api/local-auth", {

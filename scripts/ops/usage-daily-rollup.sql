@@ -1,4 +1,4 @@
-create table if not exists public.vibeusage_tracker_daily_rollup (
+create table if not exists public.tokentracker_daily_rollup (
   user_id uuid not null,
   day date not null,
   source text not null,
@@ -12,13 +12,13 @@ create table if not exists public.vibeusage_tracker_daily_rollup (
   primary key (user_id, day, source, model)
 );
 
-create index if not exists vibeusage_tracker_daily_rollup_user_day_idx
-  on public.vibeusage_tracker_daily_rollup (user_id, day);
+create index if not exists tokentracker_daily_rollup_user_day_idx
+  on public.tokentracker_daily_rollup (user_id, day);
 
-create index if not exists vibeusage_tracker_daily_rollup_user_source_model_day_idx
-  on public.vibeusage_tracker_daily_rollup (user_id, source, model, day);
+create index if not exists tokentracker_daily_rollup_user_source_model_day_idx
+  on public.tokentracker_daily_rollup (user_id, source, model, day);
 
-create or replace function public.vibeusage_apply_daily_rollup_delta()
+create or replace function public.tokentracker_apply_daily_rollup_delta()
 returns trigger as $$
 declare
   v_day date;
@@ -66,7 +66,7 @@ begin
       d_output := -coalesce(old.output_tokens, 0);
       d_reasoning := -coalesce(old.reasoning_output_tokens, 0);
 
-      insert into public.vibeusage_tracker_daily_rollup (
+      insert into public.tokentracker_daily_rollup (
         user_id, day, source, model,
         total_tokens, input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens, updated_at
       ) values (
@@ -74,11 +74,11 @@ begin
         d_total, d_input, d_cached, d_output, d_reasoning, now()
       ) on conflict (user_id, day, source, model)
       do update set
-        total_tokens = public.vibeusage_tracker_daily_rollup.total_tokens + excluded.total_tokens,
-        input_tokens = public.vibeusage_tracker_daily_rollup.input_tokens + excluded.input_tokens,
-        cached_input_tokens = public.vibeusage_tracker_daily_rollup.cached_input_tokens + excluded.cached_input_tokens,
-        output_tokens = public.vibeusage_tracker_daily_rollup.output_tokens + excluded.output_tokens,
-        reasoning_output_tokens = public.vibeusage_tracker_daily_rollup.reasoning_output_tokens + excluded.reasoning_output_tokens,
+        total_tokens = public.tokentracker_daily_rollup.total_tokens + excluded.total_tokens,
+        input_tokens = public.tokentracker_daily_rollup.input_tokens + excluded.input_tokens,
+        cached_input_tokens = public.tokentracker_daily_rollup.cached_input_tokens + excluded.cached_input_tokens,
+        output_tokens = public.tokentracker_daily_rollup.output_tokens + excluded.output_tokens,
+        reasoning_output_tokens = public.tokentracker_daily_rollup.reasoning_output_tokens + excluded.reasoning_output_tokens,
         updated_at = now();
 
       v_day := (new.hour_start at time zone 'UTC')::date;
@@ -91,7 +91,7 @@ begin
       d_output := coalesce(new.output_tokens, 0);
       d_reasoning := coalesce(new.reasoning_output_tokens, 0);
 
-      insert into public.vibeusage_tracker_daily_rollup (
+      insert into public.tokentracker_daily_rollup (
         user_id, day, source, model,
         total_tokens, input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens, updated_at
       ) values (
@@ -99,11 +99,11 @@ begin
         d_total, d_input, d_cached, d_output, d_reasoning, now()
       ) on conflict (user_id, day, source, model)
       do update set
-        total_tokens = public.vibeusage_tracker_daily_rollup.total_tokens + excluded.total_tokens,
-        input_tokens = public.vibeusage_tracker_daily_rollup.input_tokens + excluded.input_tokens,
-        cached_input_tokens = public.vibeusage_tracker_daily_rollup.cached_input_tokens + excluded.cached_input_tokens,
-        output_tokens = public.vibeusage_tracker_daily_rollup.output_tokens + excluded.output_tokens,
-        reasoning_output_tokens = public.vibeusage_tracker_daily_rollup.reasoning_output_tokens + excluded.reasoning_output_tokens,
+        total_tokens = public.tokentracker_daily_rollup.total_tokens + excluded.total_tokens,
+        input_tokens = public.tokentracker_daily_rollup.input_tokens + excluded.input_tokens,
+        cached_input_tokens = public.tokentracker_daily_rollup.cached_input_tokens + excluded.cached_input_tokens,
+        output_tokens = public.tokentracker_daily_rollup.output_tokens + excluded.output_tokens,
+        reasoning_output_tokens = public.tokentracker_daily_rollup.reasoning_output_tokens + excluded.reasoning_output_tokens,
         updated_at = now();
 
       return null;
@@ -120,7 +120,7 @@ begin
     d_reasoning := coalesce(new.reasoning_output_tokens, 0) - coalesce(old.reasoning_output_tokens, 0);
   end if;
 
-  insert into public.vibeusage_tracker_daily_rollup (
+  insert into public.tokentracker_daily_rollup (
     user_id, day, source, model,
     total_tokens, input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens, updated_at
   ) values (
@@ -128,18 +128,18 @@ begin
     d_total, d_input, d_cached, d_output, d_reasoning, now()
   ) on conflict (user_id, day, source, model)
   do update set
-    total_tokens = public.vibeusage_tracker_daily_rollup.total_tokens + excluded.total_tokens,
-    input_tokens = public.vibeusage_tracker_daily_rollup.input_tokens + excluded.input_tokens,
-    cached_input_tokens = public.vibeusage_tracker_daily_rollup.cached_input_tokens + excluded.cached_input_tokens,
-    output_tokens = public.vibeusage_tracker_daily_rollup.output_tokens + excluded.output_tokens,
-    reasoning_output_tokens = public.vibeusage_tracker_daily_rollup.reasoning_output_tokens + excluded.reasoning_output_tokens,
+    total_tokens = public.tokentracker_daily_rollup.total_tokens + excluded.total_tokens,
+    input_tokens = public.tokentracker_daily_rollup.input_tokens + excluded.input_tokens,
+    cached_input_tokens = public.tokentracker_daily_rollup.cached_input_tokens + excluded.cached_input_tokens,
+    output_tokens = public.tokentracker_daily_rollup.output_tokens + excluded.output_tokens,
+    reasoning_output_tokens = public.tokentracker_daily_rollup.reasoning_output_tokens + excluded.reasoning_output_tokens,
     updated_at = now();
 
   return null;
 end;
 $$ language plpgsql;
 
-drop trigger if exists vibeusage_tracker_hourly_daily_rollup_trg on public.vibeusage_tracker_hourly;
-create trigger vibeusage_tracker_hourly_daily_rollup_trg
-after insert or update or delete on public.vibeusage_tracker_hourly
-for each row execute function public.vibeusage_apply_daily_rollup_delta();
+drop trigger if exists tokentracker_hourly_daily_rollup_trg on public.tokentracker_hourly;
+create trigger tokentracker_hourly_daily_rollup_trg
+after insert or update or delete on public.tokentracker_hourly
+for each row execute function public.tokentracker_apply_daily_rollup_delta();

@@ -39,17 +39,6 @@ export function safeSetItem(key: any, value: any, { storage }: SafeBrowserOption
   }
 }
 
-export function safeRemoveItem(key: any, { storage }: SafeBrowserOptions = {}) {
-  const target = storage ?? getLocalStorage();
-  if (!target || typeof target.removeItem !== "function") return false;
-  try {
-    target.removeItem(key);
-    return true;
-  } catch (_e) {
-    return false;
-  }
-}
-
 export async function safeWriteClipboard(text: any, { clipboard }: SafeBrowserOptions = {}) {
   const target = clipboard ?? getClipboard();
   if (!target || typeof target.writeText !== "function") return false;

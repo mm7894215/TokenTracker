@@ -136,9 +136,6 @@ export function ClawdAnimated({ state = "idle-living", size = 48, className = ""
   );
 }
 
-/** All available animation state names */
-export const CLAWD_STATES = Object.keys(STATE_TO_PATH);
-
 function useReducedMotion() {
   const [reduced, setReduced] = useState(() => {
     if (typeof window === "undefined") return false;

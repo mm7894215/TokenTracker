@@ -19,7 +19,7 @@ type HourRow = {
 
 const DEFAULT_MOCK_SEED = "tokentracker";
 const MOCK_PROJECT_REPOS = [
-  "victorgpt/tokentracker",
+  "tokentracker/tokentracker",
   "spacedriveapp/spacedrive",
   "acme/alpha",
   "acme/beta",

@@ -10,7 +10,7 @@ test("cloud sync source includes device-session rotation and recovery", () => {
   );
 
   assert.match(src, /DEVICE_TOKEN_ROTATE_AFTER_MS\s*=\s*12 \* 60 \* 60 \* 1000/);
-  assert.match(src, /export function shouldRotateStoredDeviceSession/);
+  assert.match(src, /function shouldRotateStoredDeviceSession/);
   assert.match(src, /issuedAtMs \+ DEVICE_TOKEN_ROTATE_AFTER_MS <= nowMs/);
   assert.match(src, /clearCloudDeviceSession\(\)/);
   assert.match(src, /await postLocalUsageSync/);

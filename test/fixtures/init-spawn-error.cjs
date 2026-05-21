@@ -8,7 +8,7 @@ const path = require("node:path");
 const cp = require("node:child_process");
 
 (async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibescore-init-spawn-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-spawn-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;

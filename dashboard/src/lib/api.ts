@@ -1,4 +1,3 @@
-import { formatDateLocal } from "./date-range";
 import {
   getMockUsageDaily,
   getMockUsageHourly,
@@ -68,12 +67,6 @@ function buildFilterParams({ source, model }: AnyRecord = {}) {
   const normalizedModel = typeof model === "string" ? model.trim() : "";
   if (normalizedModel) params.model = normalizedModel;
   return params;
-}
-
-export async function probeBackend({ signal }: AnyRecord = {}) {
-  const today = formatDateLocal(new Date());
-  await fetchLocalJson(PATHS.usageSummary, { from: today, to: today }, { signal });
-  return { status: 200 };
 }
 
 export async function getUsageSummary({

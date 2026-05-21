@@ -16,7 +16,7 @@ async function readJsonl(filePath) {
 }
 
 test("sync --from-openclaw records last OpenClaw trigger marker", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-sync-openclaw-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-sync-openclaw-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevCodeHome = process.env.CODE_HOME;
@@ -52,7 +52,7 @@ test("sync --from-openclaw records last OpenClaw trigger marker", async () => {
 });
 
 test("sync keeps Grok hook signal when another sync owns the lock", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-sync-grok-lock-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-sync-grok-lock-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevCodeHome = process.env.CODE_HOME;
@@ -115,7 +115,7 @@ test("sync keeps Grok hook signal when another sync owns the lock", async () => 
 });
 
 test("sync queues and consumes Grok hook signal after cursor persistence", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-sync-grok-signal-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-sync-grok-signal-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevCodeHome = process.env.CODE_HOME;
@@ -198,7 +198,7 @@ test("sync queues and consumes Grok hook signal after cursor persistence", async
 });
 
 test("sync keeps malformed Grok hook signal without a session id", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-sync-grok-bad-signal-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-sync-grok-bad-signal-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevCodeHome = process.env.CODE_HOME;
@@ -266,7 +266,7 @@ test("sync keeps malformed Grok hook signal without a session id", async () => {
 });
 
 test("sync --from-openclaw falls back to previous session totals when jsonl has zero usage", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-sync-openclaw-fallback-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-sync-openclaw-fallback-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevCodeHome = process.env.CODE_HOME;

@@ -22,7 +22,7 @@ type TimeZoneOptions = {
   date?: Date;
 };
 
-export function formatUtcOffset(offsetMinutes: any) {
+function formatUtcOffset(offsetMinutes: any) {
   if (!Number.isFinite(offsetMinutes) || offsetMinutes === 0) return "UTC";
   const sign = offsetMinutes >= 0 ? "+" : "-";
   const abs = Math.abs(offsetMinutes);

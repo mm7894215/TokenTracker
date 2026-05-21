@@ -24,12 +24,3 @@ export function getBackendBaseUrl() {
 export function getLeaderboardBaseUrl() {
   return getInsforgeRemoteUrl();
 }
-
-export function getBackendAnonKey() {
-  const env = typeof import.meta !== "undefined" ? import.meta.env : undefined;
-  return (
-    env?.VITE_TOKENTRACKER_BACKEND_ANON_KEY ||
-    env?.VITE_INSFORGE_ANON_KEY ||
-    ""
-  ).trim();
-}

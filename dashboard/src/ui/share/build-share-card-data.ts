@@ -12,7 +12,7 @@ export interface ShareCardModel {
   percent: string;
 }
 
-export interface ShareCardHeatmapCell {
+interface ShareCardHeatmapCell {
   day: string;
   level: number;
   value?: number;

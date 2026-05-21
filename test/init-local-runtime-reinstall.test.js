@@ -25,7 +25,7 @@ function runLocalTracker(trackerBinPath, args, env) {
 }
 
 test("init can rerun from installed local runtime without self-deleting app source", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-init-local-runtime-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-local-runtime-"));
   const env = {
     ...process.env,
     HOME: tmp,
@@ -69,7 +69,7 @@ test("init can rerun from installed local runtime without self-deleting app sour
 });
 
 test("installLocalTrackerApp replaces stale installed runtime and writes a package marker", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-runtime-refresh-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-runtime-refresh-"));
   try {
     const appDir = path.join(tmp, "app");
     await fs.mkdir(path.join(appDir, "src", "lib"), { recursive: true });

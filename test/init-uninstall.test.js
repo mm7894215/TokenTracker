@@ -61,7 +61,7 @@ async function runGeneratedNotifyHandler({ trackerDir, notify }) {
 }
 
 test("notify handler skips SkyComputerUseClient and stale explicit original notify paths", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-notify-chain-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-notify-chain-"));
   try {
     const markerPath = path.join(tmp, "unsafe-marker");
     const skyDir = path.join(
@@ -104,7 +104,7 @@ test("notify handler skips SkyComputerUseClient and stale explicit original noti
 });
 
 test("notify handler still chains normal original notify commands", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-notify-chain-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-notify-chain-"));
   try {
     const markerPath = path.join(tmp, "safe-marker");
     const shimPath = path.join(tmp, "safe-notify.js");
@@ -128,7 +128,7 @@ test("notify handler still chains normal original notify commands", async () => 
 });
 
 test("init preserves existing config fields and custom URLs", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-init-config-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-config-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -185,7 +185,7 @@ test("init preserves existing config fields and custom URLs", async () => {
 });
 
 test("init then uninstall restores original Codex notify (when pre-existing notify exists)", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-init-uninstall-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -253,7 +253,7 @@ test("opencode config exports plugin constants", () => {
 });
 
 test("init then uninstall removes notify when none existed", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-init-uninstall-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -298,7 +298,7 @@ test("init then uninstall removes notify when none existed", async () => {
 });
 
 test("init skips Codex notify when config is missing", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-init-uninstall-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -335,7 +335,7 @@ test("init skips Codex notify when config is missing", async () => {
 });
 
 test("init then uninstall restores original Every Code notify (when config exists)", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-init-uninstall-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevCodeHome = process.env.CODE_HOME;
@@ -393,7 +393,7 @@ test("init then uninstall restores original Every Code notify (when config exist
 });
 
 test("init skips Every Code notify when config is missing", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-init-uninstall-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevCodeHome = process.env.CODE_HOME;
@@ -435,7 +435,7 @@ test("init skips Every Code notify when config is missing", async () => {
 });
 
 test("uninstall skips notify restore when no backup and notify not installed", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-init-uninstall-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevCodeHome = process.env.CODE_HOME;
@@ -477,7 +477,7 @@ test("uninstall skips notify restore when no backup and notify not installed", a
 });
 
 test("uninstall removes Grok Build hook and handler", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-grok-uninstall-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-grok-uninstall-"));
   const prevHome = process.env.HOME;
   const prevGrokHome = process.env.GROK_HOME;
   const prevWrite = process.stdout.write;
@@ -524,7 +524,7 @@ test("uninstall removes Grok Build hook and handler", async () => {
 });
 
 test("init then uninstall manages Claude hooks without removing existing hooks", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-init-uninstall-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -601,7 +601,7 @@ test("init then uninstall manages Claude hooks without removing existing hooks",
 });
 
 test("init then uninstall manages Gemini hooks without removing existing hooks", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-init-uninstall-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -690,7 +690,7 @@ test("init then uninstall manages Gemini hooks without removing existing hooks",
 });
 
 test("init skips Gemini hooks when config directory is missing", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-init-uninstall-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -730,7 +730,7 @@ test("init skips Gemini hooks when config directory is missing", async () => {
 });
 
 test("init creates Gemini settings when directory exists but file is missing", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-init-uninstall-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -780,7 +780,7 @@ test("init creates Gemini settings when directory exists but file is missing", a
 });
 
 test("init then uninstall manages Opencode plugin without removing other plugins", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-init-uninstall-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -830,7 +830,7 @@ test("init then uninstall manages Opencode plugin without removing other plugins
 });
 
 test("init installs Opencode plugin when config dir is missing", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-init-uninstall-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
   const prevHome = process.env.HOME;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;

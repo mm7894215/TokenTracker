@@ -18,9 +18,6 @@ export const LEADERBOARD_TOKEN_COLUMNS = [
   { key: "other_tokens", copyKey: "leaderboard.column.supplemental", icon: null },
 ];
 
-/** Rank column width matches `left` offset of the second sticky column */
-export const LEADERBOARD_STICKY_RANK_PX = 72;
-
 // Divider between the two sticky columns lives on the SECOND cell's left
 // edge (not the first cell's right edge), and that cell is shifted 1px
 // left (`left-[71px]`) so it overlaps the rank column by a pixel. Without

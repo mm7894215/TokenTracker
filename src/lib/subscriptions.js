@@ -10,6 +10,10 @@ const { probeOpenclawSessionPluginState } = require("./openclaw-session-plugin")
 const OPENAI_AUTH_CLAIM = "https://api.openai.com/auth";
 const MACOS_SECURITY_BIN = "/usr/bin/security";
 const CLAUDE_CODE_KEYCHAIN_SERVICES = ["Claude Code-credentials"];
+// On Linux, Claude Code persists the same OAuth payload as a plain JSON file
+// (~/.claude/.credentials.json) instead of the macOS Keychain. The payload
+// shape is identical: { claudeAiOauth: { accessToken, subscriptionType, ... } }
+const CLAUDE_CODE_CREDENTIALS_FILE = ".credentials.json";
 
 function normalizeString(value) {
   if (typeof value !== "string") return null;
@@ -193,25 +197,56 @@ function readMacosKeychainPassword({ service, securityRunner, timeoutMs } = {}) 
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function detectClaudeCodeCredentialsPresence({ platform, securityRunner } = {}) {
-  if (platform !== "darwin") return null;
+function readClaudeCodeCredentialsLinuxFile({ home, fsReader } = {}) {
+  const homeDir = typeof home === "string" && home ? home : os.homedir();
+  const credPath = path.join(homeDir, ".claude", CLAUDE_CODE_CREDENTIALS_FILE);
+  const reader = typeof fsReader === "function" ? fsReader : fs.readFileSync;
+  try {
+    return reader(credPath, "utf8");
+  } catch (_e) {
+    return null;
+  }
+}
 
-  for (const service of CLAUDE_CODE_KEYCHAIN_SERVICES) {
-    const present = probeMacosKeychainGenericPassword({
-      service,
-      securityRunner,
-    });
-    if (!present) continue;
+function detectClaudeCodeCredentialsPresence({ platform, securityRunner, home, fsReader } = {}) {
+  if (platform === "darwin") {
+    for (const service of CLAUDE_CODE_KEYCHAIN_SERVICES) {
+      const present = probeMacosKeychainGenericPassword({
+        service,
+        securityRunner,
+      });
+      if (!present) continue;
 
-    // Existence-only probe: do not read secrets or infer paid tier.
-    return {
-      tool: "claude",
-      provider: "anthropic",
-      product: "credentials",
-      planType: "present",
-    };
+      // Existence-only probe: do not read secrets or infer paid tier.
+      return {
+        tool: "claude",
+        provider: "anthropic",
+        product: "credentials",
+        planType: "present",
+      };
+    }
+    return null;
   }
 
+  if (platform !== "linux") return null;
+
+  // Linux: credentials live in ~/.claude/.credentials.json (mode 0600).
+  // Existence-only: just check that the file is readable and contains the OAuth key.
+  const raw = readClaudeCodeCredentialsLinuxFile({ home, fsReader });
+  if (!raw) return null;
+  try {
+    const payload = JSON.parse(raw);
+    if (payload?.claudeAiOauth && typeof payload.claudeAiOauth === "object") {
+      return {
+        tool: "claude",
+        provider: "anthropic",
+        product: "credentials",
+        planType: "present",
+      };
+    }
+  } catch (_e) {
+    // fall through
+  }
   return null;
 }
 
@@ -228,16 +263,21 @@ function extractClaudeKeychainSubscription(payload) {
   return { subscriptionType, rateLimitTier };
 }
 
-function detectClaudeCodeSubscriptionDetails({ platform, securityRunner } = {}) {
-  if (platform !== "darwin") return null;
+function detectClaudeCodeSubscriptionDetails({ platform, securityRunner, home, fsReader } = {}) {
+  const rawPayloads = [];
+  if (platform === "darwin") {
+    for (const service of CLAUDE_CODE_KEYCHAIN_SERVICES) {
+      const raw = readMacosKeychainPassword({ service, securityRunner });
+      if (raw) rawPayloads.push(raw);
+    }
+  } else if (platform === "linux") {
+    const raw = readClaudeCodeCredentialsLinuxFile({ home, fsReader });
+    if (raw) rawPayloads.push(raw);
+  } else {
+    return null;
+  }
 
-  for (const service of CLAUDE_CODE_KEYCHAIN_SERVICES) {
-    const raw = readMacosKeychainPassword({
-      service,
-      securityRunner,
-    });
-    if (!raw) continue;
-
+  for (const raw of rawPayloads) {
     let payload;
     try {
       payload = JSON.parse(raw);
@@ -277,14 +317,14 @@ async function collectLocalSubscriptions({
   if (opencode) out.push(opencode);
 
   if (probeKeychainDetails) {
-    const claude = detectClaudeCodeSubscriptionDetails({ platform, securityRunner });
+    const claude = detectClaudeCodeSubscriptionDetails({ platform, securityRunner, home });
     if (claude) out.push(claude);
     else if (probeKeychain) {
-      const present = detectClaudeCodeCredentialsPresence({ platform, securityRunner });
+      const present = detectClaudeCodeCredentialsPresence({ platform, securityRunner, home });
       if (present) out.push(present);
     }
   } else if (probeKeychain) {
-    const claude = detectClaudeCodeCredentialsPresence({ platform, securityRunner });
+    const claude = detectClaudeCodeCredentialsPresence({ platform, securityRunner, home });
     if (claude) out.push(claude);
   }
 
@@ -314,20 +354,32 @@ async function detectOpenclawSessionIntegration({ home, env }) {
   };
 }
 
-function readClaudeCodeAccessToken({ platform, securityRunner } = {}) {
-  if (platform !== "darwin") return null;
-
-  for (const service of CLAUDE_CODE_KEYCHAIN_SERVICES) {
-    try {
-      const raw = readMacosKeychainPassword({ service, securityRunner });
-      if (!raw) continue;
-      const payload = JSON.parse(raw);
-      return normalizeString(payload?.claudeAiOauth?.accessToken);
-    } catch (_e) {
-      continue;
+function readClaudeCodeAccessToken({ platform, securityRunner, home, fsReader } = {}) {
+  if (platform === "darwin") {
+    for (const service of CLAUDE_CODE_KEYCHAIN_SERVICES) {
+      try {
+        const raw = readMacosKeychainPassword({ service, securityRunner });
+        if (!raw) continue;
+        const payload = JSON.parse(raw);
+        return normalizeString(payload?.claudeAiOauth?.accessToken);
+      } catch (_e) {
+        continue;
+      }
     }
+    return null;
   }
-  return null;
+
+  if (platform !== "linux") return null;
+
+  // Linux: Claude Code stores the OAuth payload as a JSON file with mode 0600.
+  const raw = readClaudeCodeCredentialsLinuxFile({ home, fsReader });
+  if (!raw) return null;
+  try {
+    const payload = JSON.parse(raw);
+    return normalizeString(payload?.claudeAiOauth?.accessToken);
+  } catch (_e) {
+    return null;
+  }
 }
 
 async function readCodexAccessToken({ home, env } = {}) {

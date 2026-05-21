@@ -67,7 +67,7 @@ function readCollapsed() {
   }
 }
 
-export function useSidebarCollapsed() {
+function useSidebarCollapsed() {
   const [collapsed, setCollapsed] = useState(readCollapsed);
 
   const toggle = useCallback(() => {
@@ -405,7 +405,7 @@ function SidebarBody({ collapsed, onToggleCollapsed, onItemClick, showCloseButto
  * Desktop Sidebar — visible only on lg+. Fills its parent's height (which is
  * already bounded by AppLayout's fixed-viewport flex container).
  */
-export function Sidebar({ collapsed, onToggleCollapsed }) {
+function Sidebar({ collapsed, onToggleCollapsed }) {
   const nativeGlass = useMemo(() => {
     if (typeof window === "undefined") return false;
     return isNativeEmbed() || isNativeApp();

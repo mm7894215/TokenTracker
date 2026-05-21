@@ -11,7 +11,7 @@ const {
 } = require("../src/lib/rollout");
 
 test("parseRolloutIncremental ignores non-remote url sections in git config", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-gitcfg-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-gitcfg-"));
   const repoRoot = path.join(tmp, "repo");
   const gitDir = path.join(repoRoot, ".git");
   await fs.mkdir(gitDir, { recursive: true });
@@ -56,7 +56,7 @@ test("parseRolloutIncremental ignores non-remote url sections in git config", as
 });
 
 test("parseRolloutIncremental resolves worktree gitdir via commondir config", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-gitcfg-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-gitcfg-"));
   const repoRoot = path.join(tmp, "repo");
   await fs.mkdir(repoRoot, { recursive: true });
 

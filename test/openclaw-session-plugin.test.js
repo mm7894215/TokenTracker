@@ -14,7 +14,7 @@ const {
 } = require("../src/lib/openclaw-session-plugin");
 
 test("probeOpenclawSessionPluginState detects linked + enabled plugin", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-openclaw-plugin-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-openclaw-plugin-"));
   const home = path.join(tmp, "home");
   const trackerDir = path.join(home, ".tokentracker", "tracker");
   await fs.mkdir(trackerDir, { recursive: true });
@@ -68,7 +68,7 @@ test("probeOpenclawSessionPluginState detects linked + enabled plugin", async ()
 });
 
 test("installOpenclawSessionPlugin returns skipped when openclaw CLI is missing", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-openclaw-plugin-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-openclaw-plugin-"));
   const home = path.join(tmp, "home");
   const trackerDir = path.join(home, ".tokentracker", "tracker");
   await fs.mkdir(trackerDir, { recursive: true });
@@ -87,7 +87,7 @@ test("installOpenclawSessionPlugin returns skipped when openclaw CLI is missing"
 });
 
 test("removeOpenclawSessionPluginConfig removes linked config and plugin dir", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-openclaw-plugin-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-openclaw-plugin-"));
   const home = path.join(tmp, "home");
   const trackerDir = path.join(home, ".tokentracker", "tracker");
   await fs.mkdir(trackerDir, { recursive: true });
@@ -157,7 +157,7 @@ test("removeOpenclawSessionPluginConfig removes linked config and plugin dir", a
 });
 
 test("ensureOpenclawSessionPluginFiles includes agent/session lifecycle hooks", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibeusage-openclaw-plugin-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-openclaw-plugin-"));
   const home = path.join(tmp, "home");
   const trackerDir = path.join(home, ".tokentracker", "tracker");
   await fs.mkdir(trackerDir, { recursive: true });
