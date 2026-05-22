@@ -309,15 +309,18 @@ describe("extractCursorSessionToken", () => {
 
   it("reads the Cursor access token via sqlite3 CLI", () => {
     const jwt = makeCursorJwt();
-    const token = readCursorAccessTokenFromStateDb("/tmp/state.vscdb", {
+    const dbPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-cursor-db-")), "state.vscdb");
+    fs.writeFileSync(dbPath, "", "utf8");
+    const token = readCursorAccessTokenFromStateDb(dbPath, {
       execFileSync: (cmd, args, opts) => {
         assert.equal(cmd, "sqlite3");
         assert.deepEqual(args, [
-          "/tmp/state.vscdb",
+          "-json",
+          dbPath,
           "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken';",
         ]);
         assert.equal(opts.encoding, "utf8");
-        return `${jwt}\n`;
+        return JSON.stringify([{ value: jwt }]);
       },
       requireFn: () => {
         throw new Error("node:sqlite should not be used when sqlite3 works");
@@ -330,8 +333,10 @@ describe("extractCursorSessionToken", () => {
 
   it("falls back to node:sqlite when sqlite3 CLI is unavailable", () => {
     const jwt = makeCursorJwt();
+    const dbPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-cursor-db-")), "state.vscdb");
+    fs.writeFileSync(dbPath, "", "utf8");
     let closed = false;
-    const token = readCursorAccessTokenFromStateDb("C:\\Users\\alice\\state.vscdb", {
+    const token = readCursorAccessTokenFromStateDb(dbPath, {
       execFileSync: () => {
         throw new Error("spawn sqlite3 ENOENT");
       },
@@ -339,16 +344,16 @@ describe("extractCursorSessionToken", () => {
         assert.equal(name, "node:sqlite");
         return {
           DatabaseSync: class FakeDatabaseSync {
-            constructor(dbPath, options) {
-              assert.equal(dbPath, "C:\\Users\\alice\\state.vscdb");
+            constructor(actualDbPath, options) {
+              assert.equal(actualDbPath, dbPath);
               assert.deepEqual(options, { readOnly: true });
             }
 
             prepare(sql) {
               assert.equal(sql, "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken';");
               return {
-                get() {
-                  return { value: ` ${jwt}\n` };
+                all() {
+                  return [{ value: ` ${jwt}\n` }];
                 },
               };
             }
@@ -367,7 +372,9 @@ describe("extractCursorSessionToken", () => {
   });
 
   it("returns null when neither sqlite reader can read the token", () => {
-    const token = readCursorAccessTokenFromStateDb("/tmp/state.vscdb", {
+    const dbPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-cursor-db-")), "state.vscdb");
+    fs.writeFileSync(dbPath, "", "utf8");
+    const token = readCursorAccessTokenFromStateDb(dbPath, {
       execFileSync: () => {
         throw new Error("spawn sqlite3 ENOENT");
       },
@@ -375,6 +382,7 @@ describe("extractCursorSessionToken", () => {
         throw new Error("No such built-in module: node:sqlite");
       },
       env: {},
+      stderr: { write() {} },
     });
 
     assert.equal(token, null);
@@ -383,11 +391,12 @@ describe("extractCursorSessionToken", () => {
   it("builds the Cursor cookie when token reading falls back to node:sqlite", () => {
     const jwt = makeCursorJwt("user_FALLBACK");
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-cursor-home-"));
-    const { stateDbPath } = resolveCursorPaths({ home });
+    const { stateDbPath } = resolveCursorPaths({ home, env: {} });
     fs.mkdirSync(path.dirname(stateDbPath), { recursive: true });
     fs.writeFileSync(stateDbPath, "", "utf8");
     const result = extractCursorSessionToken({
       home,
+      env: {},
       deps: {
         execFileSync: () => {
           throw new Error("spawn sqlite3 ENOENT");
@@ -396,8 +405,8 @@ describe("extractCursorSessionToken", () => {
           DatabaseSync: class FakeDatabaseSync {
             prepare() {
               return {
-                get() {
-                  return { value: jwt };
+                all() {
+                  return [{ value: jwt }];
                 },
               };
             }
@@ -422,7 +431,7 @@ describe("extractCursorSessionToken", () => {
     const jwt = `${header}.${payload}.sig`;
 
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-cursor-google-"));
-    const { stateDbPath, cliConfigPath } = resolveCursorPaths({ home });
+    const { stateDbPath, cliConfigPath } = resolveCursorPaths({ home, env: {} });
     fs.mkdirSync(path.dirname(stateDbPath), { recursive: true });
     fs.writeFileSync(stateDbPath, "", "utf8");
     fs.mkdirSync(path.dirname(cliConfigPath), { recursive: true });
@@ -430,8 +439,9 @@ describe("extractCursorSessionToken", () => {
 
     const result = extractCursorSessionToken({
       home,
+      env: {},
       deps: {
-        execFileSync: () => `${jwt}\n`,
+        execFileSync: () => JSON.stringify([{ value: jwt }]),
         requireFn: () => {
           throw new Error("sqlite3 CLI used");
         },
@@ -452,14 +462,15 @@ describe("extractCursorSessionToken", () => {
     const jwt = `${header}.${payload}.sig`;
 
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-cursor-google-jwt-"));
-    const { stateDbPath } = resolveCursorPaths({ home });
+    const { stateDbPath } = resolveCursorPaths({ home, env: {} });
     fs.mkdirSync(path.dirname(stateDbPath), { recursive: true });
     fs.writeFileSync(stateDbPath, "", "utf8");
 
     const result = extractCursorSessionToken({
       home,
+      env: {},
       deps: {
-        execFileSync: () => `${jwt}\n`,
+        execFileSync: () => JSON.stringify([{ value: jwt }]),
         requireFn: () => {
           throw new Error("sqlite3 CLI used");
         },
@@ -480,14 +491,15 @@ describe("extractCursorSessionToken", () => {
     const jwt = `${header}.${payload}.sig`;
 
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-cursor-gh-"));
-    const { stateDbPath } = resolveCursorPaths({ home });
+    const { stateDbPath } = resolveCursorPaths({ home, env: {} });
     fs.mkdirSync(path.dirname(stateDbPath), { recursive: true });
     fs.writeFileSync(stateDbPath, "", "utf8");
 
     const result = extractCursorSessionToken({
       home,
+      env: {},
       deps: {
-        execFileSync: () => `${jwt}\n`,
+        execFileSync: () => JSON.stringify([{ value: jwt }]),
         requireFn: () => {
           throw new Error("sqlite3 CLI used");
         },
@@ -504,14 +516,15 @@ describe("extractCursorSessionToken", () => {
     const jwt = `${header}.${payload}.sig`;
 
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-cursor-unknown-"));
-    const { stateDbPath } = resolveCursorPaths({ home });
+    const { stateDbPath } = resolveCursorPaths({ home, env: {} });
     fs.mkdirSync(path.dirname(stateDbPath), { recursive: true });
     fs.writeFileSync(stateDbPath, "", "utf8");
 
     const result = extractCursorSessionToken({
       home,
+      env: {},
       deps: {
-        execFileSync: () => `${jwt}\n`,
+        execFileSync: () => JSON.stringify([{ value: jwt }]),
         requireFn: () => {
           throw new Error("sqlite3 CLI used");
         },

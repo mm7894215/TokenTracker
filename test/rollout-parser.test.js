@@ -10,6 +10,7 @@ const {
   parseClaudeIncremental,
   parseGeminiIncremental,
   parseOpencodeIncremental,
+  readOpencodeDbMessages,
   parseKiroIncremental,
   parseHermesIncremental,
   resolveHermesPath,
@@ -1018,6 +1019,63 @@ test("parseOpencodeIncremental aggregates message tokens and model", async () =>
       queuePath,
     });
     assert.equal(resAgain.bucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("readOpencodeDbMessages falls back to node:sqlite when sqlite3 CLI is unavailable", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-opencode-db-"));
+  try {
+    const dbPath = path.join(tmp, "opencode.db");
+    await fs.writeFile(dbPath, "", "utf8");
+    const message = buildOpencodeMessage({
+      modelID: "deepseek-v4-flash-free",
+      created: "2025-12-29T10:14:00.000Z",
+      completed: "2025-12-29T10:15:00.000Z",
+      tokens: { input: 34, output: 10, reasoning: 2, cached: 0, cacheWrite: 0 },
+    });
+    const rows = readOpencodeDbMessages(dbPath, {
+      execFileSync() {
+        throw new Error("spawn sqlite3 ENOENT");
+      },
+      requireFn(name) {
+        assert.equal(name, "node:sqlite");
+        return {
+          DatabaseSync: class FakeDatabaseSync {
+            constructor(actualDbPath, options) {
+              assert.equal(actualDbPath, dbPath);
+              assert.deepEqual(options, { readOnly: true });
+            }
+
+            prepare(sql) {
+              assert.match(sql, /FROM message/);
+              return {
+                all() {
+                  return [
+                    {
+                      id: "msg_db_1",
+                      session_id: "ses_db_1",
+                      time_updated: Date.parse("2025-12-29T10:15:00.000Z"),
+                      data: JSON.stringify(message),
+                    },
+                  ];
+                },
+              };
+            }
+
+            close() {}
+          },
+        };
+      },
+      stderr: { write() {} },
+    });
+
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id, "msg_db_1");
+    assert.equal(rows[0].sessionID, "ses_db_1");
+    assert.equal(rows[0].data.modelID, "deepseek-v4-flash-free");
+    assert.equal(rows[0].data.tokens.input, 34);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
@@ -2939,9 +2997,11 @@ test("parseHermesIncremental snapshots the DB locally for UNC paths", async () =
     createHermesDb(realDbPath, [
       { id: "unc_session", model: "gpt-5.4-mini", started_at: epoch, ended_at: epoch + 60, input_tokens: 700, output_tokens: 100, message_count: 2 },
     ]);
-    // Prefix with an extra `/` so isUncPath() returns true; node's path layer
-    // still resolves it to the same inode on POSIX.
-    const uncStyle = "/" + realDbPath;
+    // Prefix so isUncPath() returns true while node's path layer still
+    // resolves it to the same inode.
+    const uncStyle = process.platform === "win32"
+      ? "\\\\?\\" + realDbPath
+      : "/" + realDbPath;
     const result = await parseHermesIncremental({ dbPath: uncStyle, cursors, queuePath });
     assert.equal(result.recordsProcessed, 1);
     assert.equal(result.eventsAggregated, 1);

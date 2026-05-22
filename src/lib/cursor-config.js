@@ -1,33 +1,34 @@
 const os = require("node:os");
 const path = require("node:path");
 const fs = require("node:fs");
-const cp = require("node:child_process");
 const https = require("node:https");
 
 const { readJson } = require("./fs");
+const { readSqliteFirstValue } = require("./sqlite-reader");
 
 // ── Path resolution ──
 
 function resolveCursorPaths({ home, platform = process.platform, env = process.env } = {}) {
   const h = home || os.homedir();
+  const pathForPlatform = platform === "win32" ? path.win32 : path.posix;
   let appDir;
   if (platform === "darwin") {
-    appDir = path.join(h, "Library", "Application Support", "Cursor");
+    appDir = pathForPlatform.join(h, "Library", "Application Support", "Cursor");
   } else if (platform === "win32") {
     const appData =
       (typeof env.APPDATA === "string" && env.APPDATA.trim()) ||
-      path.join(h, "AppData", "Roaming");
-    appDir = path.join(appData, "Cursor");
+      pathForPlatform.join(h, "AppData", "Roaming");
+    appDir = pathForPlatform.join(appData, "Cursor");
   } else {
     const xdg =
       (typeof env.XDG_CONFIG_HOME === "string" && env.XDG_CONFIG_HOME.trim()) ||
-      path.join(h, ".config");
-    appDir = path.join(xdg, "Cursor");
+      pathForPlatform.join(h, ".config");
+    appDir = pathForPlatform.join(xdg, "Cursor");
   }
   return {
     appDir,
-    stateDbPath: path.join(appDir, "User", "globalStorage", "state.vscdb"),
-    cliConfigPath: path.join(h, ".cursor", "cli-config.json"),
+    stateDbPath: pathForPlatform.join(appDir, "User", "globalStorage", "state.vscdb"),
+    cliConfigPath: pathForPlatform.join(h, ".cursor", "cli-config.json"),
   };
 }
 
@@ -53,43 +54,15 @@ function cursorDebugLog(message, env = process.env) {
 }
 
 function readCursorAccessTokenFromStateDb(stateDbPath, deps = {}) {
-  const execFileSync = deps.execFileSync || cp.execFileSync;
-  const requireFn = deps.requireFn || require;
-  const env = deps.env || process.env;
-
-  try {
-    return execFileSync("sqlite3", [stateDbPath, CURSOR_ACCESS_TOKEN_SQL], {
-      encoding: "utf8",
-      timeout: 5000,
-      stdio: ["pipe", "pipe", "pipe"],
-    }).trim();
-  } catch (sqliteCliErr) {
-    cursorDebugLog(
-      `sqlite3 CLI token read failed for ${stateDbPath}: ${sqliteCliErr?.message || sqliteCliErr}`,
-      env,
-    );
-  }
-
-  try {
-    const { DatabaseSync } = requireFn("node:sqlite");
-    if (typeof DatabaseSync !== "function") {
-      cursorDebugLog("node:sqlite DatabaseSync is unavailable", env);
-      return null;
-    }
-    const db = new DatabaseSync(stateDbPath, { readOnly: true });
-    try {
-      const row = db.prepare(CURSOR_ACCESS_TOKEN_SQL).get();
-      return typeof row?.value === "string" ? row.value.trim() : null;
-    } finally {
-      db.close();
-    }
-  } catch (nodeSqliteErr) {
-    cursorDebugLog(
-      `node:sqlite token read failed for ${stateDbPath}: ${nodeSqliteErr?.message || nodeSqliteErr}`,
-      env,
-    );
-    return null;
-  }
+  return readSqliteFirstValue(stateDbPath, CURSOR_ACCESS_TOKEN_SQL, "value", {
+    execFileSync: deps.execFileSync,
+    requireFn: deps.requireFn,
+    env: deps.env,
+    stderr: deps.stderr,
+    label: "Cursor",
+    timeout: 5000,
+    maxBuffer: 1024 * 1024,
+  });
 }
 
 /**
@@ -103,8 +76,8 @@ function readCursorAccessTokenFromStateDb(stateDbPath, deps = {}) {
  *   - Google sign-in via WorkOS:    "google-oauth2|<numeric>" → kept verbatim
  *   - other WorkOS subjects:        "github|…", "oidc|…"      → kept verbatim
  */
-function extractCursorSessionToken({ home, deps } = {}) {
-  const { stateDbPath, cliConfigPath } = resolveCursorPaths({ home });
+function extractCursorSessionToken({ home, platform, env, deps } = {}) {
+  const { stateDbPath, cliConfigPath } = resolveCursorPaths({ home, platform, env });
 
   // 1. Extract JWT from SQLite
   if (!fs.existsSync(stateDbPath)) {

@@ -2,10 +2,10 @@ const fs = require("node:fs/promises");
 const fssync = require("node:fs");
 const path = require("node:path");
 const readline = require("node:readline");
-const cp = require("node:child_process");
 
 const crypto = require("node:crypto");
 const { ensureDir } = require("./fs");
+const { readSqliteJsonRows } = require("./sqlite-reader");
 
 const DEFAULT_SOURCE = "codex";
 const DEFAULT_MODEL = "unknown";
@@ -2381,27 +2381,15 @@ async function walkOpencodeMessages(dir, out) {
 // OpenCode SQLite DB reader (v1.2+ stores messages in opencode.db)
 // ---------------------------------------------------------------------------
 
-function readOpencodeDbMessages(dbPath) {
+function readOpencodeDbMessages(dbPath, sqliteOptions = {}) {
   if (!dbPath || !fssync.existsSync(dbPath)) return [];
   const sql = `SELECT id, session_id, time_updated, data FROM message WHERE json_extract(data, '$.role') = 'assistant' ORDER BY time_created ASC`;
-  let raw;
-  try {
-    raw = cp.execFileSync("sqlite3", ["-json", dbPath, sql], {
-      encoding: "utf8",
-      maxBuffer: 50 * 1024 * 1024,
-      timeout: 30_000,
-    });
-  } catch (_e) {
-    return [];
-  }
-  if (!raw || !raw.trim()) return [];
-  let rows;
-  try {
-    rows = JSON.parse(raw);
-  } catch (_e) {
-    return [];
-  }
-  if (!Array.isArray(rows)) return [];
+  const rows = readSqliteJsonRows(dbPath, sql, {
+    label: "OpenCode",
+    maxBuffer: 50 * 1024 * 1024,
+    timeout: 30_000,
+    ...sqliteOptions,
+  });
   const out = [];
   for (const row of rows) {
     if (!row || typeof row.data !== "string") continue;
@@ -2717,28 +2705,16 @@ function resolveKiroJsonlPath() {
   return path.join(resolveKiroBasePath(), "dev_data", "tokens_generated.jsonl");
 }
 
-function readKiroDbTokens(dbPath, sinceId) {
+function readKiroDbTokens(dbPath, sinceId, sqliteOptions = {}) {
   if (!dbPath || !fssync.existsSync(dbPath)) return [];
   const minId = Number.isFinite(sinceId) && sinceId > 0 ? sinceId : 0;
   const sql = `SELECT id, model, provider, tokens_prompt, tokens_generated, timestamp FROM tokens_generated WHERE id > ${minId} ORDER BY id ASC`;
-  let raw;
-  try {
-    raw = cp.execFileSync("sqlite3", ["-json", dbPath, sql], {
-      encoding: "utf8",
-      maxBuffer: 10 * 1024 * 1024,
-      timeout: 15_000,
-    });
-  } catch (_e) {
-    return [];
-  }
-  if (!raw || !raw.trim()) return [];
-  let rows;
-  try {
-    rows = JSON.parse(raw);
-  } catch (_e) {
-    return [];
-  }
-  return Array.isArray(rows) ? rows : [];
+  return readSqliteJsonRows(dbPath, sql, {
+    label: "Kiro",
+    maxBuffer: 10 * 1024 * 1024,
+    timeout: 15_000,
+    ...sqliteOptions,
+  });
 }
 
 // Read Kiro token data from JSONL fallback (tokens_generated.jsonl).
@@ -2880,7 +2856,7 @@ function normalizeKiroModelName(raw) {
   return name || null;
 }
 
-async function parseKiroIncremental({ dbPath, jsonlPath, cursors, queuePath, onProgress }) {
+async function parseKiroIncremental({ dbPath, jsonlPath, cursors, queuePath, onProgress, sqliteOptions } = {}) {
   await ensureDir(path.dirname(queuePath));
   const kiroState = cursors.kiro && typeof cursors.kiro === "object" ? cursors.kiro : {};
   const lastDbId = typeof kiroState.lastDbId === "number"
@@ -2898,7 +2874,7 @@ async function parseKiroIncremental({ dbPath, jsonlPath, cursors, queuePath, onP
   let nextJsonlLine = lastJsonlLine;
   let usingDb = false;
   if (fssync.existsSync(resolvedDbPath)) {
-    rows = readKiroDbTokens(resolvedDbPath, lastDbId);
+    rows = readKiroDbTokens(resolvedDbPath, lastDbId, sqliteOptions);
     usingDb = true;
     // DB and JSONL are siblings for the same usage events. If the DB ever
     // disappears (corrupted / wiped) and we fall back to JSONL in a later
@@ -3088,7 +3064,7 @@ function snapshotSqliteDb(dbPath) {
   };
 }
 
-function readHermesSessions(dbPath, lastCompletedEpoch, unfinishedSessionIds = []) {
+function readHermesSessions(dbPath, lastCompletedEpoch, unfinishedSessionIds = [], sqliteOptions = {}) {
   if (!dbPath || !fssync.existsSync(dbPath)) return [];
   const since = Number.isFinite(lastCompletedEpoch) && lastCompletedEpoch > 0 ? lastCompletedEpoch : 0;
   const forceIds = Array.isArray(unfinishedSessionIds)
@@ -3116,24 +3092,12 @@ function readHermesSessions(dbPath, lastCompletedEpoch, unfinishedSessionIds = [
   }
 
   try {
-    let raw;
-    try {
-      raw = cp.execFileSync("sqlite3", ["-json", effectiveDbPath, sql], {
-        encoding: "utf8",
-        maxBuffer: 10 * 1024 * 1024,
-        timeout: 15_000,
-      });
-    } catch (_e) {
-      return [];
-    }
-    if (!raw || !raw.trim()) return [];
-    let rows;
-    try {
-      rows = JSON.parse(raw);
-    } catch (_e) {
-      return [];
-    }
-    return Array.isArray(rows) ? rows : [];
+    return readSqliteJsonRows(effectiveDbPath, sql, {
+      label: "Hermes",
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: 15_000,
+      ...sqliteOptions,
+    });
   } finally {
     if (snapshot) snapshot.cleanup();
   }
@@ -3147,7 +3111,7 @@ function hasLegacyHermesDefaultState(hermesState) {
   );
 }
 
-async function parseHermesIncremental({ hermesPath, dbPath, cursors, queuePath, onProgress }) {
+async function parseHermesIncremental({ hermesPath, dbPath, cursors, queuePath, onProgress, sqliteOptions } = {}) {
   await ensureDir(path.dirname(queuePath));
   const hermesState = cursors.hermes && typeof cursors.hermes === "object" ? cursors.hermes : {};
 
@@ -3168,7 +3132,12 @@ async function parseHermesIncremental({ hermesPath, dbPath, cursors, queuePath, 
     const trackedUnfinishedSessionIds = Array.isArray(dbState.unfinishedSessionIds)
       ? dbState.unfinishedSessionIds
       : [];
-    const rows = readHermesSessions(dbPath, dbState.lastCompletedStartedAt, trackedUnfinishedSessionIds);
+    const rows = readHermesSessions(
+      dbPath,
+      dbState.lastCompletedStartedAt,
+      trackedUnfinishedSessionIds,
+      sqliteOptions,
+    );
     recordsProcessed += rows.length;
     if (rows.length === 0) {
       dbState.updatedAt = updatedAt;
@@ -3650,44 +3619,22 @@ function canonicalizeKiroCliModelId(raw) {
 // `conversation_id` and the inner JSON `continuation_id` are different
 // UUIDs on observed data; covering both means retraction fires whichever
 // side matches the live session's `session_id`.
-function readKiroCliRequests(dbPath, env = process.env) {
+function readKiroCliRequests(dbPath, env = process.env, sqliteOptions = {}) {
   if (!dbPath || !fssync.existsSync(dbPath)) return [];
-  let raw;
-  try {
-    raw = cp.execFileSync(
-      "sqlite3",
-      [
-        "-json",
-        dbPath,
-        "SELECT conversation_id, " +
-          "json_extract(value, '$.model_info.model_id') AS session_model_id, " +
-          "json_extract(value, '$.user_turn_metadata.continuation_id') AS continuation_id, " +
-          "json_extract(value, '$.user_turn_metadata.requests') AS requests_json " +
-          "FROM conversations_v2 " +
-          "WHERE json_extract(value, '$.user_turn_metadata.requests') IS NOT NULL",
-      ],
-      { encoding: "utf8", maxBuffer: 128 * 1024 * 1024, timeout: 120_000 },
-    );
-  } catch (err) {
-    // TASK-012 / D-8: debug-gated stderr log so a missing sqlite3 binary
-    // is distinguishable from an empty DB. Silent by default. env is
-    // threaded so tests can toggle debug hermetically.
-    const dbg = String((env && env.TOKENTRACKER_DEBUG) || "").toLowerCase();
-    if (dbg === "1" || dbg === "true") {
-      process.stderr.write(
-        `[kiro-cli] sqlite3 read failed: ${err?.message || err}\n`,
-      );
-    }
-    return [];
-  }
-  if (!raw || !raw.trim()) return [];
-  let rows;
-  try {
-    rows = JSON.parse(raw);
-  } catch {
-    return [];
-  }
-  if (!Array.isArray(rows)) return [];
+  const sql =
+    "SELECT conversation_id, " +
+    "json_extract(value, '$.model_info.model_id') AS session_model_id, " +
+    "json_extract(value, '$.user_turn_metadata.continuation_id') AS continuation_id, " +
+    "json_extract(value, '$.user_turn_metadata.requests') AS requests_json " +
+    "FROM conversations_v2 " +
+    "WHERE json_extract(value, '$.user_turn_metadata.requests') IS NOT NULL";
+  const rows = readSqliteJsonRows(dbPath, sql, {
+    label: "Kiro CLI",
+    env,
+    maxBuffer: 128 * 1024 * 1024,
+    timeout: 120_000,
+    ...sqliteOptions,
+  });
   const flat = [];
   for (const row of rows) {
     let requests;
@@ -3715,7 +3662,7 @@ function readKiroCliRequests(dbPath, env = process.env) {
   return flat;
 }
 
-async function parseKiroCliIncremental({ sessionFiles, cursors, queuePath, onProgress, env } = {}) {
+async function parseKiroCliIncremental({ sessionFiles, cursors, queuePath, onProgress, env, sqliteOptions } = {}) {
   await ensureDir(path.dirname(queuePath));
   const kiroCliState =
     cursors.kiroCli && typeof cursors.kiroCli === "object" ? cursors.kiroCli : {};
@@ -3750,7 +3697,7 @@ async function parseKiroCliIncremental({ sessionFiles, cursors, queuePath, onPro
   // SQLite conversation_id OR continuation_id to subtract the orphan
   // session-file cursor entry before the new SQLite row is processed.
   const flatDb = fssync.existsSync(dbPath)
-    ? readKiroCliRequests(dbPath, resolvedEnv)
+    ? readKiroCliRequests(dbPath, resolvedEnv, sqliteOptions)
     : [];
   const sessionFilesList = resolveKiroCliSessionFiles(resolvedEnv);
   let flatSessions = [];
@@ -5203,16 +5150,16 @@ function extractZedTotals(thread) {
 // several `threads` schemas; older versions may omit created_at /
 // folder_paths. We dynamically detect via PRAGMA so the query never fails on
 // a missing column.
-function buildZedThreadsQuery(dbPath, cursorUpdatedAt) {
-  const pragma = cp.execFileSync("sqlite3", [dbPath, "PRAGMA table_info(threads)"], {
-    encoding: "utf8",
+function buildZedThreadsQuery(dbPath, cursorUpdatedAt, sqliteOptions = {}) {
+  const pragmaRows = readSqliteJsonRows(dbPath, "PRAGMA table_info(threads)", {
+    label: "Zed",
     maxBuffer: 4 * 1024 * 1024,
     timeout: 10_000,
+    ...sqliteOptions,
   });
   const columns = new Set(
-    pragma
-      .split("\n")
-      .map((line) => line.split("|")[1])
+    pragmaRows
+      .map((row) => row?.name)
       .filter(Boolean),
   );
   const optional = (col) => (columns.has(col) ? col : `NULL AS ${col}`);
@@ -5228,27 +5175,14 @@ function buildZedThreadsQuery(dbPath, cursorUpdatedAt) {
   return `SELECT id, updated_at, ${optional("created_at")}, data_type, hex(data) AS data_hex FROM threads${where}`;
 }
 
-function readZedThreadRowsFromSqlite(dbPath, cursorUpdatedAt) {
-  const query = buildZedThreadsQuery(dbPath, cursorUpdatedAt);
-  let raw;
-  try {
-    raw = cp.execFileSync("sqlite3", ["-json", dbPath, query], {
-      encoding: "utf8",
-      maxBuffer: 256 * 1024 * 1024,
-      timeout: 60_000,
-    });
-  } catch (_e) {
-    return [];
-  }
-  if (!raw || !raw.trim()) return [];
-  let rows;
-  try {
-    rows = JSON.parse(raw);
-  } catch (_e) {
-    return [];
-  }
-  if (!Array.isArray(rows)) return [];
-  return rows;
+function readZedThreadRowsFromSqlite(dbPath, cursorUpdatedAt, sqliteOptions = {}) {
+  const query = buildZedThreadsQuery(dbPath, cursorUpdatedAt, sqliteOptions);
+  return readSqliteJsonRows(dbPath, query, {
+    label: "Zed",
+    maxBuffer: 256 * 1024 * 1024,
+    timeout: 60_000,
+    ...sqliteOptions,
+  });
 }
 
 async function parseZedIncremental({
@@ -5257,6 +5191,7 @@ async function parseZedIncremental({
   queuePath,
   onProgress,
   env,
+  sqliteOptions,
 } = {}) {
   await ensureDir(path.dirname(queuePath));
   const resolvedDb = dbPath || resolveZedDbPath(env || process.env);
@@ -5294,7 +5229,7 @@ async function parseZedIncremental({
   const snap = snapshotSqliteDb(resolvedDb);
   let rows = [];
   try {
-    rows = readZedThreadRowsFromSqlite(snap.path, cursorUpdatedAt);
+    rows = readZedThreadRowsFromSqlite(snap.path, cursorUpdatedAt, sqliteOptions);
   } finally {
     snap.cleanup();
   }
@@ -5528,21 +5463,18 @@ function parseGooseCreatedAt(s) {
   return null;
 }
 
-function readGooseSessionsFromSqlite(dbPath) {
+function readGooseSessionsFromSqlite(dbPath, sqliteOptions = {}) {
   // Probe columns: the `accumulated_*` fields were added in a later Goose
   // version; we keep the query forgiving so older installs still work.
-  let pragma;
-  try {
-    pragma = cp.execFileSync("sqlite3", [dbPath, "PRAGMA table_info(sessions)"], {
-      encoding: "utf8",
-      maxBuffer: 4 * 1024 * 1024,
-      timeout: 10_000,
-    });
-  } catch (_e) { return []; }
+  const pragmaRows = readSqliteJsonRows(dbPath, "PRAGMA table_info(sessions)", {
+    label: "Goose",
+    maxBuffer: 4 * 1024 * 1024,
+    timeout: 10_000,
+    ...sqliteOptions,
+  });
   const columns = new Set(
-    pragma
-      .split("\n")
-      .map((line) => line.split("|")[1])
+    pragmaRows
+      .map((row) => row?.name)
       .filter(Boolean),
   );
   const optional = (col) => (columns.has(col) ? col : `NULL AS ${col}`);
@@ -5562,21 +5494,12 @@ function readGooseSessionsFromSqlite(dbPath) {
     WHERE model_config_json IS NOT NULL
       AND TRIM(model_config_json) != ''
   `.trim();
-  let raw;
-  try {
-    raw = cp.execFileSync("sqlite3", ["-json", dbPath, sql], {
-      encoding: "utf8",
-      maxBuffer: 64 * 1024 * 1024,
-      timeout: 60_000,
-    });
-  } catch (_e) { return []; }
-  if (!raw || !raw.trim()) return [];
-  try {
-    const rows = JSON.parse(raw);
-    return Array.isArray(rows) ? rows : [];
-  } catch (_e) {
-    return [];
-  }
+  return readSqliteJsonRows(dbPath, sql, {
+    label: "Goose",
+    maxBuffer: 64 * 1024 * 1024,
+    timeout: 60_000,
+    ...sqliteOptions,
+  });
 }
 
 async function parseGooseIncremental({
@@ -5585,6 +5508,7 @@ async function parseGooseIncremental({
   queuePath,
   onProgress,
   env,
+  sqliteOptions,
 } = {}) {
   await ensureDir(path.dirname(queuePath));
   const resolvedDb = dbPath || resolveGooseDbPath(env || process.env);
@@ -5618,7 +5542,7 @@ async function parseGooseIncremental({
   const snap = snapshotSqliteDb(resolvedDb);
   let rows = [];
   try {
-    rows = readGooseSessionsFromSqlite(snap.path);
+    rows = readGooseSessionsFromSqlite(snap.path, sqliteOptions);
   } finally {
     snap.cleanup();
   }
