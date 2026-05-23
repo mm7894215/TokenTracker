@@ -364,6 +364,12 @@ async function handleLocalApi(req, res, url) {
       agg.cache_creation_input_tokens += row.cache_creation_input_tokens || 0;
       agg.reasoning_output_tokens += row.reasoning_output_tokens || 0;
       agg.conversation_count += row.conversation_count || 0;
+
+      if (!agg.models) {
+        agg.models = {};
+      }
+      const model = row.model || "unknown";
+      agg.models[model] = (agg.models[model] || 0) + (row.total_tokens || 0);
     }
     return Array.from(byDay.values()).sort((a, b) => a.day.localeCompare(b.day));
   }
@@ -555,6 +561,7 @@ async function handleLocalApi(req, res, url) {
         total_tokens: data?.total_tokens || 0,
         billable_total_tokens: billable,
         level: calcLevel(billable),
+        models: data?.models || null,
       });
       cursor.setUTCDate(cursor.getUTCDate() + 1);
     }

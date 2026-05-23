@@ -139,22 +139,34 @@ test("empty in-memory relay cookies do not wipe an existing on-disk session file
   });
 });
 
-test("refresh requests without browser auth context do not inject persisted relay cookies", async () => {
+test("refresh requests without browser auth context use the persisted refresh token fallback", async () => {
   await withTempHome(async (home) => {
     const cookiePath = getCookiePath(home);
     await fs.mkdir(path.dirname(cookiePath), { recursive: true });
     await fs.writeFile(
       cookiePath,
       JSON.stringify({
-        refresh: "refresh=stale-token; Path=/; HttpOnly",
+        insforge_refresh_token: "insforge_refresh_token=persisted-refresh-token; Path=/; HttpOnly",
       }),
       "utf8",
     );
 
-    let proxiedCookieHeader = null;
-    globalThis.fetch = async (_url, options = {}) => {
+    let proxiedUrl = null;
+    let proxiedBody = null;
+    let proxiedCookieHeader = "unset";
+    globalThis.fetch = async (url, options = {}) => {
+      proxiedUrl = String(url);
+      proxiedBody = JSON.parse(String(options.body || "{}"));
       proxiedCookieHeader = options.headers?.cookie || "";
-      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(
+        JSON.stringify({
+          accessToken: "access-token",
+          refreshToken: "rotated-refresh-token",
+          csrfToken: "csrf-from-refresh",
+          user: { id: "user-1" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
     };
 
     const handler = createLocalApiHandler({ queuePath: path.join(home, "queue.jsonl") });
@@ -165,7 +177,12 @@ test("refresh requests without browser auth context do not inject persisted rela
 
     assert.equal(handled, true);
     assert.equal(res.statusCode, 200);
+    assert.equal(proxiedUrl, "https://example.invalid/api/auth/refresh?client_type=mobile");
+    assert.deepEqual(proxiedBody, { refresh_token: "persisted-refresh-token" });
     assert.equal(proxiedCookieHeader, "");
+    const saved = JSON.parse(await fs.readFile(cookiePath, "utf8"));
+    assert.match(saved.insforge_refresh_token, /^insforge_refresh_token=rotated-refresh-token;/);
+    assert.match(saved.insforge_csrf_token, /^insforge_csrf_token=csrf-from-refresh;/);
   });
 });
 
@@ -204,14 +221,14 @@ test("refresh requests with csrf context still receive persisted relay cookies",
   });
 });
 
-test("stale refresh errors clear persisted relay cookies when no browser auth context exists", async () => {
+test("stale refresh csrf errors do not clear relay cookies when no relay cookies were replayed", async () => {
   await withTempHome(async (home) => {
     const cookiePath = getCookiePath(home);
     await fs.mkdir(path.dirname(cookiePath), { recursive: true });
     await fs.writeFile(
       cookiePath,
       JSON.stringify({
-        refresh: "refresh=stale-token; Path=/; HttpOnly",
+        other_cookie: "other_cookie=keep-me; Path=/; HttpOnly",
       }),
       "utf8",
     );
@@ -229,6 +246,7 @@ test("stale refresh errors clear persisted relay cookies when no browser auth co
     const handled = await handler(req, res, new URL("http://localhost/api/auth/refresh"));
 
     assert.equal(handled, true);
-    await assert.rejects(fs.readFile(cookiePath, "utf8"), { code: "ENOENT" });
+    const saved = JSON.parse(await fs.readFile(cookiePath, "utf8"));
+    assert.deepEqual(saved, { other_cookie: "other_cookie=keep-me; Path=/; HttpOnly" });
   });
 });

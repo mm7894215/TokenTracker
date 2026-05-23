@@ -2,11 +2,11 @@
 
 # Token Tracker
 
-[English](./README.md) · **简体中文**
+[English](./README.md) · **简体中文** · [日本語](./README.ja.md) · [한국어](./README.ko.md)
 
 ### 跨所有 CLI，看清你到底在 AI 上花了多少钱
 
-自动采集 **17 款 AI 编码工具** 的 token 用量，全程本地聚合，用一套漂亮的 Dashboard 看真实成本与趋势。不需要云账号、不需要 API Key、不需要任何配置 —— 一条命令搞定。
+自动采集 **22 款 AI 编码工具** 的 token 用量，全程本地聚合，用一套漂亮的 Dashboard 看真实成本与趋势。不需要云账号、不需要 API Key、不需要任何配置 —— 一条命令搞定。
 
 [![npm version](https://img.shields.io/npm/v/tokentracker-cli.svg?color=blue)](https://www.npmjs.com/package/tokentracker-cli)
 [![npm downloads](https://img.shields.io/npm/dm/tokentracker-cli.svg?color=brightgreen)](https://www.npmjs.com/package/tokentracker-cli)
@@ -14,6 +14,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/macOS-supported-lightgrey.svg)](https://www.apple.com/macos/)
 [![GitHub stars](https://img.shields.io/github/stars/mm7894215/TokenTracker?style=social)](https://github.com/mm7894215/TokenTracker/stargazers)
+[![作者 tokens](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=0652839f-d19f-4f67-af85-6b7675875443&metric=tokens&compact=1&label=author%20tokens)](https://github.com/mm7894215/TokenTracker)
 
 <br/>
 
@@ -57,6 +58,8 @@ npm i -g tokentracker-cli
 tokentracker              # 打开 Dashboard
 tokentracker sync         # 手动同步
 tokentracker status       # 查看 hook 挂接状态
+tokentracker status --json   # 机器可读 JSON（pipe 到 jq、给 AI agent 喂数据）
+tokentracker status --light  # 纯 ASCII 表（CI / SSH 用，无 spinner）
 tokentracker doctor       # 健康检查
 ```
 
@@ -79,7 +82,7 @@ brew install mm7894215/tokentracker/tokentracker
 
 ## ✨ 特性
 
-- 🔌 **开箱即用支持 17 款 AI 工具** —— Claude Code、Codex CLI、Cursor、Gemini CLI、Kiro、OpenCode、OpenClaw、Every Code、Hermes Agent、GitHub Copilot、Kimi Code、CodeBuddy、Grok Build、oh-my-pi、Kilo CLI、Kilo Code、Antigravity
+- 🔌 **开箱即用支持 22 款 AI 工具** —— Claude Code、Codex CLI、Cursor、Gemini CLI、Kiro、OpenCode、OpenClaw、Every Code、Hermes Agent、GitHub Copilot、Kimi Code、CodeBuddy、Grok Build、oh-my-pi、pi、Craft Agents、Kilo CLI、Kilo Code、Roo Code、Antigravity、Zed Agent、Goose
 - 🏠 **100% 本地** —— Token 数据绝不离开你的机器。无账号、无 API Key
 - 🚀 **零配置** —— 首次运行自动安装所有 hook。30 秒从零到 Dashboard
 - 📊 **漂亮的 Dashboard** —— 用量趋势、按模型的成本分解、GitHub 风格活跃度热力图、按项目归因
@@ -162,11 +165,16 @@ brew install mm7894215/tokentracker/tokentracker
 | **Grok Build** (xAI) | ✅ 自动 | SessionEnd hook + 被动扫描 `updates.jsonl` / `signals.json`（`~/.grok/sessions/**/`） |
 | **Kilo CLI** (kilo.ai) | ✅ 自动 | 被动读取 SQLite（`~/.local/share/kilo/kilo.db`，OpenCode-fork schema） |
 | **Kilo Code** (VS Code 插件) | ✅ 自动 | 被动读取 `ui_messages.json`（Cursor / VS Code / CodeBuddy / Windsurf 的 globalStorage） |
+| **pi** (`@mariozechner/pi-coding-agent`) | ✅ 自动 | 被动读取（`~/.pi/agent/sessions/**/*.jsonl`） |
+| **Craft Agents** | ✅ 自动 | 被动读取 session（`~/.craft-agent` + workspace session logs） |
+| **Roo Code** (VS Code 扩展) | ✅ 自动 | 被动读取 `ui_messages.json`（`rooveterinaryinc.roo-cline`） |
+| **Zed Agent** | ✅ 自动 | 被动 SQLite 读取（`threads.db`，仅统计托管的 `zed.dev` 模型） |
+| **Goose** (Block) | ✅ 自动 | 被动 SQLite 读取（`sessions.db`，累计量 delta） |
 
 > **需要手动装什么插件 / hook 吗？** 不需要。`tokentracker`（或 `tokentracker init`）第一次跑的时候会全部搞定：
 > - **基于 hook 的工具**（Claude Code、Codex、Gemini、Every Code、**CodeBuddy**、**Grok Build**）—— 我们把 SessionEnd hook 或 TOML notify 条目写入它们自己的配置文件
 > - **基于插件的工具**（OpenCode、**OpenClaw**）—— 插件随 npm 包一起分发（`~/.tokentracker/app/openclaw-plugin/`），通过对应工具自己的 CLI 挂接（`openclaw plugins install --link …` + `enable`）。无需下载、无需拖拽
-> - **被动读取类**（Cursor、Kiro、Hermes、Kimi Code、Copilot、**Grok Build**、**oh-my-pi**、**Kilo CLI**、**Kilo Code**、**Antigravity**）—— 完全不往它们里面塞东西，只读取它们自己产生的文件（SQLite DB、JSONL、OTEL 导出、会话轨迹日志）
+> - **被动读取类**（Cursor、Kiro、Hermes、Kimi Code、Copilot、**Grok Build**、**oh-my-pi**、**pi**、**Craft Agents**、**Kilo CLI**、**Kilo Code**、**Roo Code**、**Antigravity**、**Zed Agent**、**Goose**）—— 完全不往它们里面塞东西，只读取它们自己产生的文件（SQLite DB、JSONL、OTEL 导出、会话轨迹日志）
 > - **Grok Build 估算说明** —— Grok 当前本地遥测提供 `updates.jsonl` 里的累计 `totalTokens`，但还没有稳定的输入/输出/cache 拆分；`signals.json` 仍作为 `contextTokensUsed` 快照兜底。所以在 Grok 提供按调用粒度的用量明细之前，TokenTracker 对 Grok 成本仍是估算值
 >
 > 任何时候都可以用 `tokentracker status` 查看每个集成的状态。如果显示 `skipped`，`detail` 列会解释原因（例如某工具 CLI 不在 `PATH` 上、config 不可读等）。
@@ -181,7 +189,7 @@ brew install mm7894215/tokentracker/tokentracker
 
 |                          | **TokenTracker** | ccusage     | Cursor 自带统计 |
 |--------------------------|:---:|:---:|:---:|
-| **支持的 AI 工具数**     | **16**           | 1（Claude）  | 1（Cursor）   |
+| **支持的 AI 工具数**     | **22**           | 1（Claude）  | 1（Cursor）   |
 | **本地优先，无需账号**   | ✅               | ✅           | ❌            |
 | **原生菜单栏 App**       | ✅               | ❌           | ❌            |
 | **桌面小组件**           | ✅ 4 个小组件    | ❌           | ❌            |
@@ -193,7 +201,7 @@ brew install mm7894215/tokentracker/tokentracker
 
 ```mermaid
 flowchart LR
-    A["AI CLI 工具<br/>Claude · Codex · Cursor · Gemini · Kiro<br/>OpenCode · OpenClaw · Every Code · Hermes · Copilot · Kimi Code · CodeBuddy · Grok Build · oh-my-pi · Kilo CLI · Kilo Code"]
+    A["AI CLI 工具<br/>Claude · Codex · Cursor · Gemini · Kiro<br/>OpenCode · OpenClaw · Every Code · Hermes · Copilot · Kimi Code · CodeBuddy · Grok Build · oh-my-pi · pi · Craft · Roo Code · Zed · Goose"]
     A -->|hook 触发| B[Token Tracker]
     B -->|解析日志<br/>30 分钟 UTC 桶| C[(本地 SQLite)]
     C --> D[Web Dashboard]
@@ -383,6 +391,39 @@ xattr -cr /Applications/TokenTrackerBar.app
 授权一次即可记住。注意 ad-hoc 签名的版本每次升级后签名身份会变，所以每次升级都会重新弹一次。
 
 </details>
+
+---
+
+## 🪪 README 徽章
+
+把你的 token 用量秀到 GitHub Profile 或项目 README 上。
+
+获取 `你的_USER_ID`：
+1. 运行 `tokentracker`，打开 Dashboard，并登录排行榜。
+2. 进入 **设置 → 账号**。
+3. 使用页面里的 **User ID**。如果是 headless/SSH 机器，`tokentracker device-login` 也会把同一个 `user_id` 写到 `~/.tokentracker/tracker/config.json`。
+
+然后贴一段：
+
+```markdown
+[![tokens](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=你的_USER_ID&metric=tokens)](https://github.com/mm7894215/TokenTracker)
+[![cost](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=你的_USER_ID&metric=cost)](https://github.com/mm7894215/TokenTracker)
+[![rank](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=你的_USER_ID&metric=rank)](https://github.com/mm7894215/TokenTracker)
+```
+
+> 链接默认指向 TokenTracker 仓库，每次点击都能帮其他开发者发现 TokenTracker。如果你想让点击跳到你自己的 leaderboard profile、个人主页或 `https://www.tokentracker.cc`，改 URL 即可。
+
+输出 shields.io 兼容的徽章 SVG，含你当前的累计数据（60 秒缓存）：
+
+| 参数 | 取值 | 默认 |
+|---|---|---|
+| `metric` | `tokens` / `cost` / `rank` | `tokens` |
+| `period` | `week` / `month` / `total` | `total` |
+| `style` | `flat` / `flat-square` | `flat` |
+| `label` | 任意短文本 | 指标名 |
+| `color` | hex，例如 `ff6b35` | 品牌绿 |
+
+> **隐私**：徽章仅对开启了排行榜公开（**设置 → 账号 → 公开 Profile**）的用户生效；未公开的用户会返回 "private" 占位徽章。
 
 ---
 

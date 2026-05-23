@@ -105,7 +105,10 @@ export function buildActivityHeatmap({
     const day = typeof row?.day === "string" ? row.day : null;
     if (!day) continue;
     const value = toFiniteNumber(row?.billable_total_tokens ?? row?.total_tokens) ?? 0;
-    valuesByDay.set(day, Math.max(0, value));
+    valuesByDay.set(day, {
+      value: Math.max(0, value),
+      models: row?.models || null,
+    });
   }
 
   const totalDays = diffUtcDays(startAligned, end) + 1;
@@ -115,7 +118,8 @@ export function buildActivityHeatmap({
   for (let i = 0; i < totalDays; i++) {
     const dt = addUtcDays(startAligned, i);
     const key = formatDateUTC(dt);
-    const value = valuesByDay.get(key) ?? 0;
+    const dayData = valuesByDay.get(key);
+    const value = dayData ? dayData.value : 0;
     if (value > 0) allValues.push(value);
   }
   allValues.sort((a, b) => a - b);
@@ -143,11 +147,14 @@ export function buildActivityHeatmap({
         continue;
       }
       const day = formatDateUTC(dt);
-      const value = valuesByDay.get(day) ?? 0;
+      const dayData = valuesByDay.get(day);
+      const value = dayData ? dayData.value : 0;
+      const models = dayData ? dayData.models : null;
       week.push({
         day,
         value,
         level: clampLevel(levelFor(value)),
+        models,
       });
     }
     weeksOut.push(week);

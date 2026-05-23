@@ -414,4 +414,111 @@ describe("extractCursorSessionToken", () => {
       userId: "user_FALLBACK",
     });
   });
+
+  it("accepts Google OAuth subject from cli-config.json (issue #88)", () => {
+    const subject = "google-oauth2|105551234567890123456";
+    const header = Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url");
+    const payload = Buffer.from(JSON.stringify({ sub: subject })).toString("base64url");
+    const jwt = `${header}.${payload}.sig`;
+
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-cursor-google-"));
+    const { stateDbPath, cliConfigPath } = resolveCursorPaths({ home });
+    fs.mkdirSync(path.dirname(stateDbPath), { recursive: true });
+    fs.writeFileSync(stateDbPath, "", "utf8");
+    fs.mkdirSync(path.dirname(cliConfigPath), { recursive: true });
+    fs.writeFileSync(cliConfigPath, JSON.stringify({ authInfo: { authId: subject } }), "utf8");
+
+    const result = extractCursorSessionToken({
+      home,
+      deps: {
+        execFileSync: () => `${jwt}\n`,
+        requireFn: () => {
+          throw new Error("sqlite3 CLI used");
+        },
+        env: {},
+      },
+    });
+
+    assert.deepEqual(result, {
+      cookie: `WorkosCursorSessionToken=${subject}%3A%3A${jwt}`,
+      userId: subject,
+    });
+  });
+
+  it("falls back to Google OAuth subject from JWT when cli-config is missing", () => {
+    const subject = "google-oauth2|987654321098765432109";
+    const header = Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url");
+    const payload = Buffer.from(JSON.stringify({ sub: subject })).toString("base64url");
+    const jwt = `${header}.${payload}.sig`;
+
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-cursor-google-jwt-"));
+    const { stateDbPath } = resolveCursorPaths({ home });
+    fs.mkdirSync(path.dirname(stateDbPath), { recursive: true });
+    fs.writeFileSync(stateDbPath, "", "utf8");
+
+    const result = extractCursorSessionToken({
+      home,
+      deps: {
+        execFileSync: () => `${jwt}\n`,
+        requireFn: () => {
+          throw new Error("sqlite3 CLI used");
+        },
+        env: {},
+      },
+    });
+
+    assert.deepEqual(result, {
+      cookie: `WorkosCursorSessionToken=${subject}%3A%3A${jwt}`,
+      userId: subject,
+    });
+  });
+
+  it("accepts github WorkOS subject", () => {
+    const subject = "github|42";
+    const header = Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url");
+    const payload = Buffer.from(JSON.stringify({ sub: subject })).toString("base64url");
+    const jwt = `${header}.${payload}.sig`;
+
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-cursor-gh-"));
+    const { stateDbPath } = resolveCursorPaths({ home });
+    fs.mkdirSync(path.dirname(stateDbPath), { recursive: true });
+    fs.writeFileSync(stateDbPath, "", "utf8");
+
+    const result = extractCursorSessionToken({
+      home,
+      deps: {
+        execFileSync: () => `${jwt}\n`,
+        requireFn: () => {
+          throw new Error("sqlite3 CLI used");
+        },
+        env: {},
+      },
+    });
+
+    assert.equal(result.userId, subject);
+  });
+
+  it("still returns null for unrecognized JWT subjects", () => {
+    const header = Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url");
+    const payload = Buffer.from(JSON.stringify({ sub: "saml|enterprise-xyz" })).toString("base64url");
+    const jwt = `${header}.${payload}.sig`;
+
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-cursor-unknown-"));
+    const { stateDbPath } = resolveCursorPaths({ home });
+    fs.mkdirSync(path.dirname(stateDbPath), { recursive: true });
+    fs.writeFileSync(stateDbPath, "", "utf8");
+
+    const result = extractCursorSessionToken({
+      home,
+      deps: {
+        execFileSync: () => `${jwt}\n`,
+        requireFn: () => {
+          throw new Error("sqlite3 CLI used");
+        },
+        env: {},
+      },
+    });
+
+    assert.equal(result, null);
+  });
 });

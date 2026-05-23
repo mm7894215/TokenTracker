@@ -49,6 +49,7 @@ function useProfileState(user) {
   const [githubError, setGithubError] = useState(null);
   const displayName = useMemo(() => pickDisplayName(user), [user]);
   const email = useMemo(() => pickEmail(user), [user]);
+  const userId = useMemo(() => (typeof user?.id === "string" ? user.id.trim() : ""), [user]);
   const loadSetters = useMemo(() => ({
     setAnonymousOn,
     setCustomDisplayName,
@@ -86,6 +87,7 @@ function useProfileState(user) {
     setPublicProfileOn,
     setShowGithubOn,
     showGithubOn,
+    userId,
   };
 }
 
@@ -273,6 +275,7 @@ export function useAccountProfileSettings() {
     ...cloudSync,
     email: state.email,
     handlePublicProfileToggle: visibilityActions.handlePublicProfileToggle,
+    userId: state.userId,
     name: buildNameProps(state, { ...visibilityActions, ...nameActions }),
     github: buildGithubProps(state, githubActions),
     profileLoading: state.profileLoading,

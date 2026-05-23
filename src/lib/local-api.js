@@ -175,6 +175,12 @@ function aggregateByDay(rows, timeZoneContext = null) {
     a.cache_creation_input_tokens += row.cache_creation_input_tokens || 0;
     a.reasoning_output_tokens += row.reasoning_output_tokens || 0;
     a.conversation_count += row.conversation_count || 0;
+
+    if (!a.models) {
+      a.models = {};
+    }
+    const model = row.model || "unknown";
+    a.models[model] = (a.models[model] || 0) + (row.total_tokens || 0);
   }
   return Array.from(byDay.values()).sort((a, b) => a.day.localeCompare(b.day));
 }
@@ -668,6 +674,7 @@ function createLocalApiHandler({ queuePath }) {
   // Server-side cookie relay: captures auth cookies from InsForge cloud responses
   // so that both browser and WKWebView share the same login session via the proxy.
   // Persisted to disk so cookies survive server restarts.
+  const csrfRelayCookieName = "insforge_csrf_token";
   let relayCookies = new Map();
   const localAuthToken = crypto.randomBytes(24).toString("hex");
   const trackerDataDir = path.join(os.homedir(), ".tokentracker", "tracker");
@@ -744,6 +751,49 @@ function createLocalApiHandler({ queuePath }) {
           changed = true;
           console.log(`[LocalAPI] Cookie captured: ${name}`);
         }
+      }
+    }
+    if (changed) persistRelayCookies();
+  }
+
+  function getRelayCookieValue(name, { decode = false } = {}) {
+    const raw = relayCookies.get(name);
+    if (!raw || typeof raw !== "string") return "";
+    const pair = raw.split(";")[0] || "";
+    const eqIdx = pair.indexOf("=");
+    if (eqIdx < 1) return "";
+    const value = pair.substring(eqIdx + 1).trim();
+    if (!decode) return value;
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  }
+
+  function captureAuthTokensFromBody(bodyBuffer, contentType) {
+    if (!bodyBuffer || !String(contentType || "").toLowerCase().includes("application/json")) return;
+    let parsed = null;
+    try {
+      parsed = JSON.parse(bodyBuffer.toString("utf8"));
+    } catch {
+      return;
+    }
+    let changed = false;
+    const token = typeof parsed?.csrfToken === "string" ? parsed.csrfToken.trim() : "";
+    if (token) {
+      const cookie = `${csrfRelayCookieName}=${encodeURIComponent(token)}; Path=/; SameSite=Lax`;
+      if (relayCookies.get(csrfRelayCookieName) !== cookie) {
+        relayCookies.set(csrfRelayCookieName, cookie);
+        changed = true;
+      }
+    }
+    const refreshToken = typeof parsed?.refreshToken === "string" ? parsed.refreshToken.trim() : "";
+    if (refreshToken) {
+      const cookie = `insforge_refresh_token=${encodeURIComponent(refreshToken)}; Path=/; HttpOnly; SameSite=Lax`;
+      if (relayCookies.get("insforge_refresh_token") !== cookie) {
+        relayCookies.set("insforge_refresh_token", cookie);
+        changed = true;
       }
     }
     if (changed) persistRelayCookies();
@@ -846,25 +896,48 @@ function createLocalApiHandler({ queuePath }) {
         }
         const hasClientCookie = normalizeCookieHeader(proxyHeaders["cookie"]).trim().length > 0;
         const hasCsrfHeader = typeof proxyHeaders["x-csrf-token"] === "string" && proxyHeaders["x-csrf-token"].trim().length > 0;
-        const shouldInjectRelayCookies =
-          p !== "/api/auth/refresh" || hasClientCookie || hasCsrfHeader;
+        const relayCsrfToken = getRelayCookieValue(csrfRelayCookieName);
+        if (p === "/api/auth/refresh" && !hasCsrfHeader && relayCsrfToken) {
+          proxyHeaders["x-csrf-token"] = relayCsrfToken;
+        }
+        const hasEffectiveCsrfHeader =
+          hasCsrfHeader ||
+          (typeof proxyHeaders["x-csrf-token"] === "string" && proxyHeaders["x-csrf-token"].trim().length > 0);
+        let shouldInjectRelayCookies =
+          p !== "/api/auth/refresh" || hasClientCookie || hasEffectiveCsrfHeader;
+        const relayRefreshToken = getRelayCookieValue("insforge_refresh_token", { decode: true });
+        const shouldUseRelayRefreshFallback =
+          p === "/api/auth/refresh" && !hasClientCookie && !hasEffectiveCsrfHeader && relayRefreshToken;
+        if (shouldUseRelayRefreshFallback) {
+          shouldInjectRelayCookies = false;
+        }
 
         // Inject relay cookies so WebView benefits from browser's login session.
         // Refresh requests need either a browser cookie or an explicit CSRF token;
         // otherwise replaying a stale persisted refresh cookie just manufactures
         // Invalid CSRF errors on startup.
+        const originalCookieHeader = normalizeCookieHeader(proxyHeaders["cookie"]);
         const mergedCookie = shouldInjectRelayCookies
-          ? buildRelayCookieHeader(proxyHeaders["cookie"])
-          : normalizeCookieHeader(proxyHeaders["cookie"]);
+          ? buildRelayCookieHeader(originalCookieHeader)
+          : originalCookieHeader;
+        const injectedRelayCookies =
+          shouldInjectRelayCookies && relayCookies.size > 0 && mergedCookie !== originalCookieHeader;
         if (mergedCookie) proxyHeaders["cookie"] = mergedCookie;
 
         const bodyChunks = [];
         for await (const chunk of req) bodyChunks.push(chunk);
-        const body = bodyChunks.length > 0 ? Buffer.concat(bodyChunks) : undefined;
-        const proxyRes = await fetch(targetUrl, {
+        let proxyBody = bodyChunks.length > 0 ? Buffer.concat(bodyChunks) : undefined;
+        let effectiveTargetUrl = targetUrl;
+        if (shouldUseRelayRefreshFallback) {
+          effectiveTargetUrl = `${insforgeBase.replace(/\/$/, "")}/api/auth/refresh?client_type=mobile`;
+          proxyHeaders["content-type"] = "application/json";
+          delete proxyHeaders["content-length"];
+          proxyBody = Buffer.from(JSON.stringify({ refresh_token: relayRefreshToken }), "utf8");
+        }
+        const proxyRes = await fetch(effectiveTargetUrl, {
           method: req.method || "GET",
           headers: proxyHeaders,
-          body,
+          body: proxyBody,
           credentials: "include",
           redirect: "manual",
         });
@@ -880,11 +953,18 @@ function createLocalApiHandler({ queuePath }) {
           });
         res.writeHead(proxyRes.status, Object.fromEntries(responseHeaders));
         const resBody = Buffer.from(await proxyRes.arrayBuffer());
+        if (proxyRes.status >= 200 && proxyRes.status < 300) {
+          if (p === "/api/auth/logout") {
+            clearRelayCookies("sign out");
+          } else {
+            captureAuthTokensFromBody(resBody, proxyRes.headers.get("content-type"));
+          }
+        }
         if (
           p === "/api/auth/refresh"
           && proxyRes.status === 403
+          && injectedRelayCookies
           && !hasClientCookie
-          && !hasCsrfHeader
           && /invalid csrf token/i.test(resBody.toString("utf8"))
         ) {
           clearRelayCookies("stale refresh cookie without local CSRF context");
@@ -996,6 +1076,17 @@ function createLocalApiHandler({ queuePath }) {
       } catch (e) {
         json(res, { ok: false, error: e?.message, code: e?.code ?? null, stdout: e?.stdout || "", stderr: e?.stderr || "" }, 500);
       }
+      return true;
+    }
+
+    // --- wrapped (year-end summary, à la Spotify Wrapped) ---
+    if (p === "/functions/tokentracker-wrapped") {
+      const yearParam = url.searchParams.get("year");
+      const year = yearParam ? Number(yearParam) : null;
+      const { rows, scope, excludedSources } = scopedQueueRows(qp, url);
+      const { aggregateWrapped } = require("./wrapped-aggregator");
+      const summary = aggregateWrapped(rows, year ? { year } : {});
+      json(res, { scope, excluded_sources: excludedSources, ...summary });
       return true;
     }
 
@@ -1111,14 +1202,32 @@ function createLocalApiHandler({ queuePath }) {
         const day = cursor.toISOString().slice(0, 10);
         const data = byDay.get(day);
         const billable = data?.billable_total_tokens || 0;
-        cells.push({ day, total_tokens: data?.total_tokens || 0, billable_total_tokens: billable, level: calcLevel(billable) });
+        cells.push({ day, total_tokens: data?.total_tokens || 0, billable_total_tokens: billable, level: calcLevel(billable), models: data?.models || null });
         cursor.setUTCDate(cursor.getUTCDate() + 1);
       }
       const weeksArr = [];
       for (let i = 0; i < cells.length; i += 7) {
         weeksArr.push(cells.slice(i, i + 7));
       }
-      json(res, { from, to, scope, excluded_sources: excludedSources, week_starts_on: "sun", active_days: cells.filter((c) => c.billable_total_tokens > 0).length, streak_days: 0, weeks: weeksArr });
+
+      let totalCostUsd = 0;
+      for (const d of daily) {
+        if (d.day >= from && d.day <= to) {
+          totalCostUsd += d.total_cost_usd || 0;
+        }
+      }
+
+      json(res, { 
+        from, 
+        to, 
+        scope, 
+        excluded_sources: excludedSources, 
+        week_starts_on: "sun", 
+        active_days: cells.filter((c) => c.billable_total_tokens > 0).length, 
+        streak_days: 0, 
+        weeks: weeksArr,
+        total_cost_usd: totalCostUsd
+      });
       return true;
     }
 

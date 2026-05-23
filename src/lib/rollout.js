@@ -4840,6 +4840,905 @@ function normalizeKilocodeProviderToModel(providerName) {
   return `provider:${slug}`;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Roo Code (rooveterinaryinc.roo-cline)
+//
+// Same Cline-derived ui_messages.json format as Kilo Code, but two real
+// differences worth noting:
+//
+//   1. The model name is NOT in the per-turn payload (Roo Code only writes
+//      provider via `apiProtocol`). It lives in a sibling
+//      `api_conversation_history.json` inside `<environment_details>` blocks:
+//
+//          <environment_details>
+//          <model>claude-3-7-sonnet-20250219</model>
+//          </environment_details>
+//
+//      We read the most recent occurrence — Roo can switch models mid-task,
+//      so the last-seen value is the most accurate attribution; if the file
+//      or tag is missing we fall back to `protocol:<apiProtocol>` (e.g.
+//      `protocol:anthropic`) and finally to "unknown".
+//
+//   2. Same multi-IDE root scan as Kilo Code (Cursor, Code, CodeBuddy, …) —
+//      we reuse resolveKilocodeRoots so both parsers stay in sync when a new
+//      VS Code fork ships.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function resolveRoocodeTaskFiles(env = process.env) {
+  const roots = resolveKilocodeRoots(env);
+  const out = [];
+  for (const root of roots) {
+    const tasksDir = path.join(root, "User", "globalStorage", "rooveterinaryinc.roo-cline", "tasks");
+    if (!fssync.existsSync(tasksDir)) continue;
+    let entries;
+    try { entries = fssync.readdirSync(tasksDir); } catch { continue; }
+    for (const taskUuid of entries) {
+      const filePath = path.join(tasksDir, taskUuid, "ui_messages.json");
+      if (!fssync.existsSync(filePath)) continue;
+      out.push({ filePath, taskUuid, ide: path.basename(root) });
+    }
+  }
+  out.sort((a, b) => a.filePath.localeCompare(b.filePath));
+  return out;
+}
+
+// Pull the most recent <model>…</model> from a Roo Code task's
+// api_conversation_history.json (each Cline turn appends a fresh
+// <environment_details> block). Returns null when the sibling file is
+// missing, unreadable, or contains no tag. Bounded to first 1MB to avoid
+// pathological history files starving sync.
+function readRoocodeTaskModel(uiMessagesPath) {
+  const historyPath = path.join(path.dirname(uiMessagesPath), "api_conversation_history.json");
+  let raw;
+  try { raw = fssync.readFileSync(historyPath, "utf8"); } catch { return null; }
+  if (raw.length > 1_048_576) {
+    // Naive `slice(raw.length - 1MB)` can split a `<environment_details>`
+    // block mid-tag — e.g. the keep window starts at "...<mod" so the
+    // regex finds nothing and we fall back to "unknown". Align the cut
+    // to the first `<environment_details>` start in the keep window so
+    // every retained tag is intact.
+    const naive = raw.slice(raw.length - 1_048_576);
+    const blockStart = naive.indexOf("<environment_details>");
+    raw = blockStart >= 0 ? naive.slice(blockStart) : naive;
+  }
+  let lastModel = null;
+  const re = /<model>\s*([^<\s][^<]*?)\s*<\/model>/g;
+  let m;
+  while ((m = re.exec(raw)) !== null) {
+    const value = m[1].trim();
+    if (value) lastModel = value;
+  }
+  return lastModel;
+}
+
+function normalizeRoocodeModel({ explicitModel, apiProtocol }) {
+  const trimmed = typeof explicitModel === "string" ? explicitModel.trim() : "";
+  if (trimmed) return trimmed;
+  if (typeof apiProtocol === "string" && apiProtocol.trim()) {
+    const slug = apiProtocol.trim().toLowerCase().replace(/[^a-z0-9._-]/g, "");
+    if (slug) return `protocol:${slug}`;
+  }
+  return "unknown";
+}
+
+async function parseRoocodeIncremental({
+  taskFiles,
+  cursors,
+  queuePath,
+  onProgress,
+  env,
+} = {}) {
+  await ensureDir(path.dirname(queuePath));
+  const roocodeState =
+    cursors.roocode && typeof cursors.roocode === "object" ? cursors.roocode : {};
+  const seenIds = new Set(
+    Array.isArray(roocodeState.seenIds) ? roocodeState.seenIds : [],
+  );
+  const fileOffsets =
+    roocodeState.fileOffsets && typeof roocodeState.fileOffsets === "object"
+      ? { ...roocodeState.fileOffsets }
+      : {};
+
+  const files = Array.isArray(taskFiles)
+    ? taskFiles
+    : resolveRoocodeTaskFiles(env || process.env);
+
+  if (files.length === 0) {
+    cursors.roocode = {
+      ...roocodeState,
+      seenIds: Array.from(seenIds),
+      fileOffsets,
+      updatedAt: new Date().toISOString(),
+    };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
+
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const touchedBuckets = new Set();
+  const cb = typeof onProgress === "function" ? onProgress : null;
+  let recordsProcessed = 0;
+  let eventsAggregated = 0;
+
+  for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+    const entry = files[fileIdx];
+    const { filePath, taskUuid } = entry;
+    let stat;
+    try { stat = fssync.statSync(filePath); } catch { continue; }
+
+    const prevEntry = fileOffsets[filePath];
+    if (
+      prevEntry &&
+      Number(prevEntry.size) === stat.size &&
+      Number(prevEntry.mtimeMs) === stat.mtimeMs
+    ) {
+      continue;
+    }
+
+    let raw;
+    try { raw = fssync.readFileSync(filePath, "utf8"); } catch { continue; }
+    let data;
+    try { data = JSON.parse(raw); } catch { continue; }
+    if (!Array.isArray(data)) continue;
+
+    // Read sibling history once per task — model can change mid-task but is
+    // stable enough at this granularity that re-reading on every entry would
+    // just burn IO. Task attribution at the bucket layer is hourly anyway.
+    const taskModel = readRoocodeTaskModel(filePath);
+
+    for (const msg of data) {
+      if (!msg || typeof msg !== "object") continue;
+      // Like Kilo Code, accept both api_req_started (live) and api_req_deleted
+      // (user-removed turn whose tokens were already consumed).
+      if (msg.say !== "api_req_started" && msg.say !== "api_req_deleted") continue;
+      if (typeof msg.text !== "string" || !msg.text.startsWith("{")) continue;
+
+      let payload;
+      try { payload = JSON.parse(msg.text); } catch { continue; }
+      if (!payload || typeof payload !== "object") continue;
+
+      const ts = Number(msg.ts);
+      if (!Number.isFinite(ts) || ts <= 0) continue;
+
+      const dedupKey = `${taskUuid}:${ts}`;
+      recordsProcessed++;
+      if (seenIds.has(dedupKey)) continue;
+
+      const tokensIn = toNonNegativeInt(payload.tokensIn);
+      const tokensOut = toNonNegativeInt(payload.tokensOut);
+      const cacheReads = toNonNegativeInt(payload.cacheReads);
+      const cacheWrites = toNonNegativeInt(payload.cacheWrites);
+      if (tokensIn === 0 && tokensOut === 0 && cacheReads === 0 && cacheWrites === 0) {
+        seenIds.add(dedupKey);
+        continue;
+      }
+
+      const tsIso = new Date(ts).toISOString();
+      const bucketStart = toUtcHalfHourStart(tsIso);
+      if (!bucketStart) continue;
+
+      const delta = {
+        input_tokens: tokensIn,
+        cached_input_tokens: cacheReads,
+        cache_creation_input_tokens: cacheWrites,
+        output_tokens: tokensOut,
+        reasoning_output_tokens: 0,
+        total_tokens: tokensIn + tokensOut + cacheReads + cacheWrites,
+        conversation_count: 1,
+      };
+
+      const model = normalizeRoocodeModel({
+        explicitModel: taskModel,
+        apiProtocol: payload.apiProtocol,
+      });
+      const bucket = getHourlyBucket(hourlyState, "roocode", model, bucketStart);
+      addTotals(bucket.totals, delta);
+      touchedBuckets.add(bucketKey("roocode", model, bucketStart));
+      seenIds.add(dedupKey);
+      eventsAggregated++;
+    }
+
+    fileOffsets[filePath] = { size: stat.size, mtimeMs: stat.mtimeMs, ino: stat.ino };
+
+    if (cb) {
+      cb({
+        index: fileIdx + 1,
+        total: files.length,
+        recordsProcessed,
+        eventsAggregated,
+        bucketsQueued: touchedBuckets.size,
+      });
+    }
+  }
+
+  const seenArr = Array.from(seenIds);
+  const cappedSeen = seenArr.length > 50_000 ? seenArr.slice(seenArr.length - 50_000) : seenArr;
+
+  const bucketsQueued = await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets });
+  const updatedAt = new Date().toISOString();
+  hourlyState.updatedAt = updatedAt;
+  cursors.hourly = hourlyState;
+  cursors.roocode = { ...roocodeState, seenIds: cappedSeen, fileOffsets, updatedAt };
+
+  return { recordsProcessed, eventsAggregated, bucketsQueued };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Zed Agent (hosted models only, provider == "zed.dev")
+//
+// Data: SQLite at
+//   macOS:    ~/Library/Application Support/Zed/threads/threads.db
+//   Linux:    $XDG_DATA_HOME/zed/threads/threads.db (defaults to ~/.local/share)
+//   Windows:  %LOCALAPPDATA%\Zed\threads\threads.db
+//
+// `threads` table stores one row per thread with a BLOB `data` column —
+// either raw JSON or zstd-compressed JSON (governed by `data_type`). Each
+// thread's JSON carries `cumulative_token_usage` and/or
+// `request_token_usage` (a map or array of per-request usages with
+// input_tokens / output_tokens / cache_read_input_tokens /
+// cache_creation_input_tokens).
+//
+// Threads grow over multiple turns — the row is rewritten with a larger
+// cumulative on every send, so naive dedup-by-id would freeze our count at
+// whatever the thread looked like the first time we saw it. We mirror the
+// antigravity cumulative-delta pattern: keep last-seen totals per thread in
+// `cursors.zed.threadTotals`, emit (current - previous) on each sync.
+//
+// External ACP agents are skipped (their CLIs already report to us through
+// their own parsers — counting them via the Zed UI would double-count).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ZED_HOSTED_PROVIDER = "zed.dev";
+const MAX_ZED_THREAD_JSON_BYTES = 32 * 1024 * 1024;
+
+function resolveZedDbPath(env = process.env) {
+  if (typeof env.TOKENTRACKER_ZED_DB === "string" && env.TOKENTRACKER_ZED_DB.trim()) {
+    return env.TOKENTRACKER_ZED_DB.trim();
+  }
+  const home = env.HOME || require("node:os").homedir();
+  if (process.platform === "darwin") {
+    return path.join(home, "Library", "Application Support", "Zed", "threads", "threads.db");
+  }
+  if (process.platform === "win32") {
+    const local = env.LOCALAPPDATA || path.join(home, "AppData", "Local");
+    return path.join(local, "Zed", "threads", "threads.db");
+  }
+  const xdg = env.XDG_DATA_HOME || path.join(home, ".local", "share");
+  return path.join(xdg, "zed", "threads", "threads.db");
+}
+
+// Decode a row's BLOB payload into UTF-8 JSON text. Zed marks zstd-compressed
+// blobs with data_type="zstd"; older / smaller threads use data_type="json"
+// and store the bytes verbatim. Node 24+ has native zstd; Node 20 needs the
+// @mongodb-js/zstd fallback. Cap decoded size to mirror tokscale's safety net.
+async function decodeZedThreadBlob({ dataType, data }) {
+  const type = (dataType || "").trim().toLowerCase();
+  if (type === "json") {
+    if (data.length > MAX_ZED_THREAD_JSON_BYTES) {
+      throw new Error(`json blob exceeds ${MAX_ZED_THREAD_JSON_BYTES} bytes`);
+    }
+    return data.toString("utf8");
+  }
+  if (type === "zstd") {
+    const zlib = require("node:zlib");
+    const out =
+      typeof zlib.zstdDecompressSync === "function"
+        ? zlib.zstdDecompressSync(data)
+        : Buffer.from(await require("@mongodb-js/zstd").decompress(data));
+    if (out.length > MAX_ZED_THREAD_JSON_BYTES) {
+      throw new Error(`decoded zstd blob exceeds ${MAX_ZED_THREAD_JSON_BYTES} bytes`);
+    }
+    return out.toString("utf8");
+  }
+  throw new Error(`unsupported data_type: ${dataType}`);
+}
+
+// Pull the 4-tuple (input/output/cache_read/cache_write) out of one Zed
+// TokenUsage shape. Zed stores integers but some historical rows used
+// strings — match tokscale's permissive coercion.
+function readZedUsage(value) {
+  if (!value || typeof value !== "object") return null;
+  const coerce = (v) => {
+    if (typeof v === "number") return Math.max(0, Math.floor(v));
+    if (typeof v === "string") {
+      const n = Number.parseInt(v, 10);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    }
+    return 0;
+  };
+  return {
+    input: coerce(value.input_tokens),
+    output: coerce(value.output_tokens),
+    cache_read: coerce(value.cache_read_input_tokens),
+    cache_write: coerce(value.cache_creation_input_tokens),
+  };
+}
+
+function sumZedRequestUsage(value) {
+  const total = { input: 0, output: 0, cache_read: 0, cache_write: 0 };
+  if (!value) return total;
+  const iter =
+    Array.isArray(value)
+      ? value
+      : typeof value === "object"
+      ? Object.values(value)
+      : [];
+  for (const entry of iter) {
+    const u = readZedUsage(entry);
+    if (!u) continue;
+    total.input += u.input;
+    total.output += u.output;
+    total.cache_read += u.cache_read;
+    total.cache_write += u.cache_write;
+  }
+  return total;
+}
+
+// Extract token totals from a parsed Zed thread object. Prefer summed
+// request_token_usage (per-turn breakdown) and fall back to
+// cumulative_token_usage when the per-turn map is empty.
+function extractZedTotals(thread) {
+  if (!thread || thread.imported === true) return null;
+  const model = thread.model;
+  if (!model || typeof model !== "object") return null;
+  const provider = typeof model.provider === "string" ? model.provider.trim() : "";
+  if (provider.toLowerCase() !== ZED_HOSTED_PROVIDER) return null;
+  const modelId = typeof model.model === "string" ? model.model.trim() : "";
+  if (!modelId) return null;
+
+  const request = sumZedRequestUsage(thread.request_token_usage);
+  if (request.input + request.output + request.cache_read + request.cache_write > 0) {
+    return { totals: request, model: modelId };
+  }
+  const cumulative = readZedUsage(thread.cumulative_token_usage);
+  if (
+    cumulative &&
+    cumulative.input + cumulative.output + cumulative.cache_read + cumulative.cache_write > 0
+  ) {
+    return { totals: cumulative, model: modelId };
+  }
+  return null;
+}
+
+// Build a SELECT that only references columns we know exist — Zed has shipped
+// several `threads` schemas; older versions may omit created_at /
+// folder_paths. We dynamically detect via PRAGMA so the query never fails on
+// a missing column.
+function buildZedThreadsQuery(dbPath, cursorUpdatedAt) {
+  const pragma = cp.execFileSync("sqlite3", [dbPath, "PRAGMA table_info(threads)"], {
+    encoding: "utf8",
+    maxBuffer: 4 * 1024 * 1024,
+    timeout: 10_000,
+  });
+  const columns = new Set(
+    pragma
+      .split("\n")
+      .map((line) => line.split("|")[1])
+      .filter(Boolean),
+  );
+  const optional = (col) => (columns.has(col) ? col : `NULL AS ${col}`);
+  // Incremental: only fetch threads updated after the last sync watermark.
+  // Without this we'd zstd-decode every thread on every sync (~250MB for a
+  // 5k-thread DB on every menu-bar tick). Empty cursor → full scan (first
+  // sync). updated_at is stored as ISO 8601 text, so lexical comparison ==
+  // chronological comparison.
+  const escaped = typeof cursorUpdatedAt === "string" && cursorUpdatedAt
+    ? cursorUpdatedAt.replace(/'/g, "''")
+    : null;
+  const where = escaped ? ` WHERE updated_at > '${escaped}'` : "";
+  return `SELECT id, updated_at, ${optional("created_at")}, data_type, hex(data) AS data_hex FROM threads${where}`;
+}
+
+function readZedThreadRowsFromSqlite(dbPath, cursorUpdatedAt) {
+  const query = buildZedThreadsQuery(dbPath, cursorUpdatedAt);
+  let raw;
+  try {
+    raw = cp.execFileSync("sqlite3", ["-json", dbPath, query], {
+      encoding: "utf8",
+      maxBuffer: 256 * 1024 * 1024,
+      timeout: 60_000,
+    });
+  } catch (_e) {
+    return [];
+  }
+  if (!raw || !raw.trim()) return [];
+  let rows;
+  try {
+    rows = JSON.parse(raw);
+  } catch (_e) {
+    return [];
+  }
+  if (!Array.isArray(rows)) return [];
+  return rows;
+}
+
+async function parseZedIncremental({
+  dbPath,
+  cursors,
+  queuePath,
+  onProgress,
+  env,
+} = {}) {
+  await ensureDir(path.dirname(queuePath));
+  const resolvedDb = dbPath || resolveZedDbPath(env || process.env);
+  const zedState =
+    cursors.zed && typeof cursors.zed === "object" ? cursors.zed : {};
+  const threadTotals =
+    zedState.threadTotals && typeof zedState.threadTotals === "object"
+      ? { ...zedState.threadTotals }
+      : {};
+  const cursorUpdatedAt = typeof zedState.lastUpdatedAt === "string" ? zedState.lastUpdatedAt : null;
+  const cursorDbMtime = Number.isFinite(zedState.lastDbMtimeMs) ? zedState.lastDbMtimeMs : 0;
+
+  // mtime short-circuit: if the SQLite file hasn't been touched since the
+  // last sync there's nothing to read — skip the ~250MB copyFile + zstd
+  // round-trip entirely. We still re-stat on the next call, so a Zed write
+  // is picked up within one sync interval.
+  let currentMtime = 0;
+  try {
+    currentMtime = fssync.statSync(resolvedDb).mtimeMs;
+  } catch (e) {
+    if (e && e.code === "ENOENT") {
+      cursors.zed = { ...zedState, threadTotals, updatedAt: new Date().toISOString() };
+      return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    }
+    throw e;
+  }
+  if (currentMtime > 0 && currentMtime === cursorDbMtime) {
+    cursors.zed = { ...zedState, threadTotals, updatedAt: new Date().toISOString() };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
+
+  // Snapshot via the shared helper so we get WAL/SHM/journal sidecar copies
+  // too. Without sidecars, an active Zed write that's still in the WAL
+  // would be missed (the .db has older pages until checkpoint).
+  const snap = snapshotSqliteDb(resolvedDb);
+  let rows = [];
+  try {
+    rows = readZedThreadRowsFromSqlite(snap.path, cursorUpdatedAt);
+  } finally {
+    snap.cleanup();
+  }
+
+  if (rows.length === 0) {
+    cursors.zed = { ...zedState, threadTotals, updatedAt: new Date().toISOString() };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
+
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const touchedBuckets = new Set();
+  const cb = typeof onProgress === "function" ? onProgress : null;
+  let recordsProcessed = 0;
+  let eventsAggregated = 0;
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    recordsProcessed++;
+    if (!row || typeof row.id !== "string" || !row.data_hex) continue;
+
+    let blob;
+    try { blob = Buffer.from(row.data_hex, "hex"); } catch { continue; }
+
+    let jsonText;
+    try { jsonText = await decodeZedThreadBlob({ dataType: row.data_type, data: blob }); }
+    catch { continue; }
+
+    let thread;
+    try { thread = JSON.parse(jsonText); } catch { continue; }
+
+    const extracted = extractZedTotals(thread);
+    if (!extracted) continue;
+
+    const prev = threadTotals[row.id] || { input: 0, output: 0, cache_read: 0, cache_write: 0 };
+    const curr = extracted.totals;
+    const prevSum = prev.input + prev.output + prev.cache_read + prev.cache_write;
+    const currSum = curr.input + curr.output + curr.cache_read + curr.cache_write;
+    // Detect cumulative reset: a thread can be re-created with the same id
+    // but lower totals (rare — Zed may purge & rewrite on import/export).
+    // Naive `Math.max(0, curr - prev)` would clamp the delta to 0 and quietly
+    // update the cursor to the smaller `curr`, so the next sync sees growth
+    // from the reset and re-counts everything since. Treat reset as a
+    // fresh-start emit of `curr`.
+    const isReset = currSum > 0 && currSum < prevSum;
+    const delta = isReset
+      ? { ...curr }
+      : {
+          input: Math.max(0, curr.input - prev.input),
+          output: Math.max(0, curr.output - prev.output),
+          cache_read: Math.max(0, curr.cache_read - prev.cache_read),
+          cache_write: Math.max(0, curr.cache_write - prev.cache_write),
+        };
+    const totalDelta = delta.input + delta.output + delta.cache_read + delta.cache_write;
+    if (totalDelta <= 0) {
+      if (
+        curr.input !== prev.input ||
+        curr.output !== prev.output ||
+        curr.cache_read !== prev.cache_read ||
+        curr.cache_write !== prev.cache_write
+      ) {
+        threadTotals[row.id] = curr;
+      }
+      continue;
+    }
+
+    const tsIso =
+      (typeof row.updated_at === "string" && row.updated_at) ||
+      (typeof row.created_at === "string" && row.created_at) ||
+      (typeof thread.updated_at === "string" && thread.updated_at) ||
+      new Date().toISOString();
+    const bucketStart = toUtcHalfHourStart(tsIso);
+    if (!bucketStart) continue;
+
+    const bucketDelta = {
+      input_tokens: delta.input,
+      cached_input_tokens: delta.cache_read,
+      cache_creation_input_tokens: delta.cache_write,
+      output_tokens: delta.output,
+      reasoning_output_tokens: 0,
+      total_tokens: totalDelta,
+      conversation_count: 1,
+    };
+
+    const bucket = getHourlyBucket(hourlyState, "zed", extracted.model, bucketStart);
+    addTotals(bucket.totals, bucketDelta);
+    touchedBuckets.add(bucketKey("zed", extracted.model, bucketStart));
+    threadTotals[row.id] = curr;
+    eventsAggregated++;
+
+    if (cb) {
+      cb({
+        index: i + 1,
+        total: rows.length,
+        recordsProcessed,
+        eventsAggregated,
+        bucketsQueued: touchedBuckets.size,
+      });
+    }
+  }
+
+  // Compute nextCursor BEFORE the 10k cap. If we capped first, a low-volume
+  // zed.dev thread evicted in the cap step would no longer be in
+  // threadTotals, so its updated_at would not advance the cursor — and the
+  // next sync's WHERE filter would re-read & re-decode the same blob forever.
+  // We record everything we touched this run regardless of post-cap eviction.
+  let nextCursor = cursorUpdatedAt;
+  for (const r of rows) {
+    if (
+      typeof r.updated_at === "string" &&
+      threadTotals[r.id] !== undefined &&
+      (nextCursor == null || r.updated_at > nextCursor)
+    ) {
+      nextCursor = r.updated_at;
+    }
+  }
+
+  const entries = Object.entries(threadTotals);
+  if (entries.length > 10_000) {
+    entries.sort((a, b) => {
+      const ta = a[1].input + a[1].output + a[1].cache_read + a[1].cache_write;
+      const tb = b[1].input + b[1].output + b[1].cache_read + b[1].cache_write;
+      return tb - ta;
+    });
+    const capped = Object.fromEntries(entries.slice(0, 10_000));
+    for (const k of Object.keys(threadTotals)) delete threadTotals[k];
+    Object.assign(threadTotals, capped);
+  }
+
+  const bucketsQueued = await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets });
+  const updatedAt = new Date().toISOString();
+  hourlyState.updatedAt = updatedAt;
+  cursors.hourly = hourlyState;
+  cursors.zed = {
+    ...zedState,
+    threadTotals,
+    lastUpdatedAt: nextCursor,
+    lastDbMtimeMs: currentMtime,
+    updatedAt,
+  };
+
+  return { recordsProcessed, eventsAggregated, bucketsQueued };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Goose (Block AI agent — github.com/block/goose)
+//
+// Data: SQLite at
+//   macOS:   ~/Library/Application Support/goose/sessions/sessions.db
+//   Linux:   $XDG_DATA_HOME/goose/sessions/sessions.db (~/.local/share)
+//   Legacy:  ~/.local/share/Block/goose/sessions/sessions.db
+//   Windows: %APPDATA%\goose\sessions\sessions.db
+//   Override: $GOOSE_PATH_ROOT/data/sessions/sessions.db
+//
+// `sessions` table: one row per session, columns:
+//   id, model_config_json ({"model_name":"..."}),
+//   provider_name, created_at,
+//   total_tokens / input_tokens / output_tokens (latest turn),
+//   accumulated_total_tokens / accumulated_input_tokens /
+//   accumulated_output_tokens (whole-session cumulative).
+//
+// We prefer accumulated_* (gives lifetime usage), with single-turn fallback.
+// Goose has no cache fields; if total > input+output, the excess is treated
+// as reasoning_output_tokens (same heuristic as tokscale).
+//
+// Session rows grow over time → same cumulative-delta pattern as Zed
+// (cursors.goose.sessionTotals tracks last-seen per session).
+// ─────────────────────────────────────────────────────────────────────────────
+
+function resolveGooseDbPath(env = process.env) {
+  if (typeof env.TOKENTRACKER_GOOSE_DB === "string" && env.TOKENTRACKER_GOOSE_DB.trim()) {
+    return env.TOKENTRACKER_GOOSE_DB.trim();
+  }
+  const root = typeof env.GOOSE_PATH_ROOT === "string" ? env.GOOSE_PATH_ROOT.trim() : "";
+  if (root) return path.join(root, "data", "sessions", "sessions.db");
+  const home = env.HOME || require("node:os").homedir();
+  const candidates = [];
+  if (process.platform === "darwin") {
+    candidates.push(
+      path.join(home, "Library", "Application Support", "goose", "sessions", "sessions.db"),
+    );
+  } else if (process.platform === "win32") {
+    const appData = env.APPDATA || path.join(home, "AppData", "Roaming");
+    candidates.push(path.join(appData, "goose", "sessions", "sessions.db"));
+  }
+  const xdg = env.XDG_DATA_HOME || path.join(home, ".local", "share");
+  candidates.push(
+    path.join(xdg, "goose", "sessions", "sessions.db"),
+    path.join(xdg, "Block", "goose", "sessions", "sessions.db"),
+  );
+  // Default to first existing; if none, return the platform-canonical path so
+  // status can report it cleanly without throwing.
+  for (const c of candidates) {
+    if (fssync.existsSync(c)) return c;
+  }
+  return candidates[0];
+}
+
+function parseGooseModelName(modelConfigJson) {
+  if (typeof modelConfigJson !== "string" || !modelConfigJson.trim()) return null;
+  try {
+    const obj = JSON.parse(modelConfigJson);
+    if (obj && typeof obj.model_name === "string") {
+      const trimmed = obj.model_name.trim();
+      return trimmed || null;
+    }
+  } catch (_e) { /* ignore */ }
+  return null;
+}
+
+// Goose stores created_at in multiple formats across versions: RFC3339
+// (preferred), "YYYY-MM-DD HH:MM:SS" (naive UTC), or bare "YYYY-MM-DD".
+// Return ISO 8601 string, or null on failure.
+function parseGooseCreatedAt(s) {
+  if (typeof s !== "string" || !s.trim()) return null;
+  const trimmed = s.trim();
+  // Match naive UTC formats FIRST — otherwise `new Date("2026-05-21 14:30:00")`
+  // is interpreted in the local zone, shifting the bucket by ±N hours.
+  const dt = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})$/.exec(trimmed);
+  if (dt) {
+    const d = new Date(Date.UTC(+dt[1], +dt[2] - 1, +dt[3], +dt[4], +dt[5], +dt[6]));
+    return d.toISOString();
+  }
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (dateOnly) {
+    const d = new Date(Date.UTC(+dateOnly[1], +dateOnly[2] - 1, +dateOnly[3]));
+    return d.toISOString();
+  }
+  // Anything else — RFC3339, "Z"-suffixed, "+HH:MM" — let Date handle it.
+  const iso = new Date(trimmed);
+  if (!Number.isNaN(iso.getTime())) return iso.toISOString();
+  return null;
+}
+
+function readGooseSessionsFromSqlite(dbPath) {
+  // Probe columns: the `accumulated_*` fields were added in a later Goose
+  // version; we keep the query forgiving so older installs still work.
+  let pragma;
+  try {
+    pragma = cp.execFileSync("sqlite3", [dbPath, "PRAGMA table_info(sessions)"], {
+      encoding: "utf8",
+      maxBuffer: 4 * 1024 * 1024,
+      timeout: 10_000,
+    });
+  } catch (_e) { return []; }
+  const columns = new Set(
+    pragma
+      .split("\n")
+      .map((line) => line.split("|")[1])
+      .filter(Boolean),
+  );
+  const optional = (col) => (columns.has(col) ? col : `NULL AS ${col}`);
+  const sql = `
+    SELECT
+      id,
+      model_config_json,
+      ${optional("provider_name")},
+      created_at,
+      ${optional("total_tokens")},
+      ${optional("input_tokens")},
+      ${optional("output_tokens")},
+      ${optional("accumulated_total_tokens")},
+      ${optional("accumulated_input_tokens")},
+      ${optional("accumulated_output_tokens")}
+    FROM sessions
+    WHERE model_config_json IS NOT NULL
+      AND TRIM(model_config_json) != ''
+  `.trim();
+  let raw;
+  try {
+    raw = cp.execFileSync("sqlite3", ["-json", dbPath, sql], {
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: 60_000,
+    });
+  } catch (_e) { return []; }
+  if (!raw || !raw.trim()) return [];
+  try {
+    const rows = JSON.parse(raw);
+    return Array.isArray(rows) ? rows : [];
+  } catch (_e) {
+    return [];
+  }
+}
+
+async function parseGooseIncremental({
+  dbPath,
+  cursors,
+  queuePath,
+  onProgress,
+  env,
+} = {}) {
+  await ensureDir(path.dirname(queuePath));
+  const resolvedDb = dbPath || resolveGooseDbPath(env || process.env);
+  const gooseState =
+    cursors.goose && typeof cursors.goose === "object" ? cursors.goose : {};
+  const sessionTotals =
+    gooseState.sessionTotals && typeof gooseState.sessionTotals === "object"
+      ? { ...gooseState.sessionTotals }
+      : {};
+
+  const cursorDbMtime = Number.isFinite(gooseState.lastDbMtimeMs) ? gooseState.lastDbMtimeMs : 0;
+  let currentMtime = 0;
+  try {
+    currentMtime = fssync.statSync(resolvedDb).mtimeMs;
+  } catch (e) {
+    if (e && e.code === "ENOENT") {
+      cursors.goose = { ...gooseState, sessionTotals, updatedAt: new Date().toISOString() };
+      return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    }
+    throw e;
+  }
+  // mtime short-circuit: skip the full sessions table scan when the DB
+  // hasn't been touched since the last sync.
+  if (currentMtime > 0 && currentMtime === cursorDbMtime) {
+    cursors.goose = { ...gooseState, sessionTotals, updatedAt: new Date().toISOString() };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
+
+  // Snapshot via the shared helper to capture WAL/SHM sidecars — Goose
+  // writes async, so without them an in-flight session would read stale.
+  const snap = snapshotSqliteDb(resolvedDb);
+  let rows = [];
+  try {
+    rows = readGooseSessionsFromSqlite(snap.path);
+  } finally {
+    snap.cleanup();
+  }
+
+  if (rows.length === 0) {
+    cursors.goose = { ...gooseState, sessionTotals, updatedAt: new Date().toISOString() };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
+
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const touchedBuckets = new Set();
+  const cb = typeof onProgress === "function" ? onProgress : null;
+  let recordsProcessed = 0;
+  let eventsAggregated = 0;
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    recordsProcessed++;
+    if (!row || typeof row.id !== "string") continue;
+
+    const model = parseGooseModelName(row.model_config_json);
+    if (!model) continue;
+
+    // Prefer accumulated_*; fall back to single-turn columns.
+    const totalNow = Math.max(
+      0,
+      Number(row.accumulated_total_tokens ?? row.total_tokens ?? 0) || 0,
+    );
+    const inputNow = Math.max(
+      0,
+      Number(row.accumulated_input_tokens ?? row.input_tokens ?? 0) || 0,
+    );
+    const outputNow = Math.max(
+      0,
+      Number(row.accumulated_output_tokens ?? row.output_tokens ?? 0) || 0,
+    );
+    if (totalNow === 0 && inputNow === 0 && outputNow === 0) continue;
+
+    const prev = sessionTotals[row.id] || { input: 0, output: 0, total: 0 };
+    // Goose can wipe a session and re-create with the same id during
+    // database migration. Treat shrinking cumulative as a reset and emit
+    // the full curr value, otherwise the next sync's growth would
+    // double-count everything from the reset.
+    const isReset = totalNow > 0 && totalNow < prev.total;
+    const dInput = isReset ? inputNow : Math.max(0, inputNow - prev.input);
+    const dOutput = isReset ? outputNow : Math.max(0, outputNow - prev.output);
+    const dTotal = isReset ? totalNow : Math.max(0, totalNow - prev.total);
+    if (dInput === 0 && dOutput === 0 && dTotal === 0) {
+      if (
+        prev.input !== inputNow ||
+        prev.output !== outputNow ||
+        prev.total !== totalNow
+      ) {
+        sessionTotals[row.id] = { input: inputNow, output: outputNow, total: totalNow };
+      }
+      continue;
+    }
+
+    // If total grew more than (input + output), treat the excess as reasoning
+    // — matches Goose's accounting (it lumps reasoning into `total_tokens`).
+    const accountedDelta = dInput + dOutput;
+    const reasoningDelta = Math.max(0, dTotal - accountedDelta);
+
+    const tsIso = parseGooseCreatedAt(row.created_at) || new Date().toISOString();
+    const bucketStart = toUtcHalfHourStart(tsIso);
+    if (!bucketStart) continue;
+
+    // Token normalization: input_tokens = non-cached input; Goose has no
+    // cache fields → all input lands in input_tokens. Total stays consistent
+    // with: input + output + reasoning (no cache columns).
+    const bucketDelta = {
+      input_tokens: dInput,
+      cached_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      output_tokens: dOutput,
+      reasoning_output_tokens: reasoningDelta,
+      total_tokens: dInput + dOutput + reasoningDelta,
+      conversation_count: 1,
+    };
+
+    const bucket = getHourlyBucket(hourlyState, "goose", model, bucketStart);
+    addTotals(bucket.totals, bucketDelta);
+    touchedBuckets.add(bucketKey("goose", model, bucketStart));
+    sessionTotals[row.id] = { input: inputNow, output: outputNow, total: totalNow };
+    eventsAggregated++;
+
+    if (cb) {
+      cb({
+        index: i + 1,
+        total: rows.length,
+        recordsProcessed,
+        eventsAggregated,
+        bucketsQueued: touchedBuckets.size,
+      });
+    }
+  }
+
+  // Cap cursor at 10k sessions (largest by lifetime usage).
+  const entries = Object.entries(sessionTotals);
+  if (entries.length > 10_000) {
+    entries.sort((a, b) => b[1].total - a[1].total);
+    const capped = Object.fromEntries(entries.slice(0, 10_000));
+    for (const k of Object.keys(sessionTotals)) delete sessionTotals[k];
+    Object.assign(sessionTotals, capped);
+  }
+
+  const bucketsQueued = await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets });
+  const updatedAt = new Date().toISOString();
+  hourlyState.updatedAt = updatedAt;
+  cursors.hourly = hourlyState;
+  cursors.goose = {
+    ...gooseState,
+    sessionTotals,
+    lastDbMtimeMs: currentMtime,
+    updatedAt,
+  };
+
+  return { recordsProcessed, eventsAggregated, bucketsQueued };
+}
+
 async function parseKilocodeIncremental({
   taskFiles,
   cursors,
@@ -6885,6 +7784,20 @@ module.exports = {
   resolveKilocodeTaskFiles,
   normalizeKilocodeProviderToModel,
   parseKilocodeIncremental,
+  resolveRoocodeTaskFiles,
+  readRoocodeTaskModel,
+  normalizeRoocodeModel,
+  parseRoocodeIncremental,
+  resolveZedDbPath,
+  decodeZedThreadBlob,
+  extractZedTotals,
+  sumZedRequestUsage,
+  readZedUsage,
+  parseZedIncremental,
+  resolveGooseDbPath,
+  parseGooseModelName,
+  parseGooseCreatedAt,
+  parseGooseIncremental,
   resolvePiHome,
   resolvePiAgentDir,
   resolvePiSessionFiles,

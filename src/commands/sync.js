@@ -46,6 +46,12 @@ const {
   parseKiroCliIncremental,
   resolveKilocodeTaskFiles,
   parseKilocodeIncremental,
+  resolveRoocodeTaskFiles,
+  parseRoocodeIncremental,
+  resolveZedDbPath,
+  parseZedIncremental,
+  resolveGooseDbPath,
+  parseGooseIncremental,
   bucketKey,
   totalsKey,
   claudeMessageDedupKey,
@@ -420,6 +426,77 @@ async function cmdSync(argv) {
           const pct = p.total > 0 ? p.index / p.total : 1;
           progress.update(
             `Parsing Kilo Code ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(
+              p.total,
+            )} tasks | buckets ${formatNumber(p.bucketsQueued)}`,
+          );
+        },
+      });
+    }
+
+    // ── Goose (Block) — SQLite sessions with cumulative tokens per session ──
+    const gooseDbPath = resolveGooseDbPath(process.env);
+    let gooseResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    if (fssync.existsSync(gooseDbPath)) {
+      if (progress?.enabled) {
+        progress.start(`Parsing Goose ${renderBar(0)} 0 sessions | buckets 0`);
+      }
+      gooseResult = await parseGooseIncremental({
+        dbPath: gooseDbPath,
+        cursors,
+        queuePath,
+        onProgress: (p) => {
+          if (!progress?.enabled) return;
+          const pct = p.total > 0 ? p.index / p.total : 1;
+          progress.update(
+            `Parsing Goose ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(
+              p.total,
+            )} sessions | buckets ${formatNumber(p.bucketsQueued)}`,
+          );
+        },
+      });
+    }
+
+    // ── Zed Agent (hosted models only; cumulative-delta over SQLite threads) ──
+    const zedDbPath = resolveZedDbPath(process.env);
+    let zedResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    if (fssync.existsSync(zedDbPath)) {
+      if (progress?.enabled) {
+        progress.start(`Parsing Zed Agent ${renderBar(0)} 0 threads | buckets 0`);
+      }
+      zedResult = await parseZedIncremental({
+        dbPath: zedDbPath,
+        cursors,
+        queuePath,
+        onProgress: (p) => {
+          if (!progress?.enabled) return;
+          const pct = p.total > 0 ? p.index / p.total : 1;
+          progress.update(
+            `Parsing Zed Agent ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(
+              p.total,
+            )} threads | buckets ${formatNumber(p.bucketsQueued)}`,
+          );
+        },
+      });
+    }
+
+    // ── Roo Code VS Code extension (Cline-derived; rooveterinaryinc.roo-cline) ──
+    const roocodeTaskFiles = resolveRoocodeTaskFiles(process.env);
+    let roocodeResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    if (roocodeTaskFiles.length > 0) {
+      if (progress?.enabled) {
+        progress.start(
+          `Parsing Roo Code ${renderBar(0)} 0/${formatNumber(roocodeTaskFiles.length)} tasks | buckets 0`,
+        );
+      }
+      roocodeResult = await parseRoocodeIncremental({
+        taskFiles: roocodeTaskFiles,
+        cursors,
+        queuePath,
+        onProgress: (p) => {
+          if (!progress?.enabled) return;
+          const pct = p.total > 0 ? p.index / p.total : 1;
+          progress.update(
+            `Parsing Roo Code ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(
               p.total,
             )} tasks | buckets ${formatNumber(p.bucketsQueued)}`,
           );
@@ -868,7 +945,10 @@ async function cmdSync(argv) {
         grokResult.recordsProcessed +
         copilotResult.recordsProcessed +
         kiloResult.messagesProcessed +
-        kilocodeResult.recordsProcessed;
+        kilocodeResult.recordsProcessed +
+        roocodeResult.recordsProcessed +
+        zedResult.recordsProcessed +
+        gooseResult.recordsProcessed;
       const totalBuckets =
         parseResult.bucketsQueued +
         openclawResult.bucketsQueued +
@@ -888,7 +968,10 @@ async function cmdSync(argv) {
         grokResult.bucketsQueued +
         copilotResult.bucketsQueued +
         kiloResult.bucketsQueued +
-        kilocodeResult.bucketsQueued;
+        kilocodeResult.bucketsQueued +
+        roocodeResult.bucketsQueued +
+        zedResult.bucketsQueued +
+        gooseResult.bucketsQueued;
       process.stdout.write(
         [
           "Sync finished:",

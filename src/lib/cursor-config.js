@@ -96,9 +96,12 @@ function readCursorAccessTokenFromStateDb(stateDbPath, deps = {}) {
  * Extract Cursor session cookie from local SQLite + cli-config.json.
  * Returns { cookie, userId } or null on failure.
  *
- * Cookie format: WorkosCursorSessionToken=user_XXXXX%3A%3A<jwt>
+ * Cookie format: WorkosCursorSessionToken=<userId>%3A%3A<jwt>
  * - JWT from state.vscdb → ItemTable → cursorAuth/accessToken
- * - userId from cli-config.json → authInfo.authId → "auth0|user_XXXXX"
+ * - userId from cli-config.json → authInfo.authId
+ *   - native Cursor email/password: "auth0|user_XXXXX"        → "user_XXXXX"
+ *   - Google sign-in via WorkOS:    "google-oauth2|<numeric>" → kept verbatim
+ *   - other WorkOS subjects:        "github|…", "oidc|…"      → kept verbatim
  */
 function extractCursorSessionToken({ home, deps } = {}) {
   const { stateDbPath, cliConfigPath } = resolveCursorPaths({ home });
@@ -123,12 +126,24 @@ function extractCursorSessionToken({ home, deps } = {}) {
   return { cookie, userId };
 }
 
+// WorkOS OAuth subject prefixes Cursor accepts as-is in the session cookie.
+// Verified against cursor.com/api/usage-summary (issue #88).
+const WORKOS_OAUTH_SUBJECT_RE = /^(google-oauth2|github|oidc|auth0)\|[^|]+$/;
+
+function normalizeCursorSubject(subject) {
+  if (!subject) return null;
+  // Native Cursor: "auth0|user_XXXXX" → strip provider prefix, return "user_XXXXX"
+  const native = subject.match(/\|(user_[A-Za-z0-9_]+)$/);
+  if (native) return native[1];
+  // WorkOS-bridged OAuth: keep the full "<provider>|<id>" subject
+  if (WORKOS_OAUTH_SUBJECT_RE.test(subject)) return subject;
+  return null;
+}
+
 function extractUserIdFromCliConfig(configPath) {
   try {
     const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-    const authId = config?.authInfo?.authId || "";
-    const match = authId.match(/\|(user_[A-Za-z0-9_]+)/);
-    return match ? match[1] : null;
+    return normalizeCursorSubject(config?.authInfo?.authId || "");
   } catch {
     return null;
   }
@@ -139,9 +154,7 @@ function extractUserIdFromJwt(jwt) {
     const parts = jwt.split(".");
     if (parts.length !== 3) return null;
     const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString());
-    const sub = payload.sub || "";
-    const match = sub.match(/(user_[A-Za-z0-9_]+)/);
-    return match ? match[1] : null;
+    return normalizeCursorSubject(payload.sub || "");
   } catch {
     return null;
   }

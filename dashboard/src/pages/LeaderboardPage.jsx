@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
+import { motion } from "motion/react";
 import {
   DndContext,
   KeyboardSensor,
@@ -26,7 +27,8 @@ import {
   buildPageItems,
   clampInt,
   getPaginationFlags,
-  injectMeIntoFirstPage,
+  pageContainingRank,
+  prependMeRowToPage,
 } from "../lib/leaderboard-ui";
 import { getLeaderboardBaseUrl } from "../lib/config";
 import { getDashboardEntryPath } from "../lib/host-mode";
@@ -42,6 +44,7 @@ import { LeaderboardProviderColumnHeader } from "../components/LeaderboardProvid
 import { LeaderboardSkeleton } from "../components/LeaderboardSkeleton.jsx";
 import { SortableColumnHeader } from "../components/SortableColumnHeader.jsx";
 import { useColumnOrder } from "../hooks/use-column-order.js";
+import { LeaderboardMeChip } from "../components/LeaderboardSummaryCard.jsx";
 import {
   LB_STICKY_TH_RANK,
   LB_STICKY_TH_USER,
@@ -357,6 +360,7 @@ export function LeaderboardPage({
   const listData = listState.data;
 
   const totalPages = listData?.total_pages ?? null;
+  const totalEntries = listData?.total_entries ?? 0;
   const currentPage = listData?.page ?? listPage;
   const pageItems = useMemo(() => {
     return buildPageItems(currentPage, totalPages);
@@ -375,14 +379,17 @@ export function LeaderboardPage({
 
   const displayEntries = useMemo(() => {
     const rows = Array.isArray(listData?.entries) ? listData.entries : [];
-    if (currentPage !== 1) return rows;
-    return injectMeIntoFirstPage({
-      entries: rows,
-      me,
-      meLabel,
-      limit: pageSize,
-    });
-  }, [currentPage, listData?.entries, me, meLabel, pageSize]);
+    return prependMeRowToPage({ entries: rows, me, meLabel });
+  }, [listData?.entries, me, meLabel]);
+
+  const myPage = useMemo(
+    () => pageContainingRank(me?.rank, pageSize),
+    [me?.rank, pageSize],
+  );
+  const onMyPage = myPage != null && myPage === currentPage;
+  const handleJumpToMe = useCallback(() => {
+    if (myPage != null) setListPage(myPage);
+  }, [myPage]);
 
   const handleEnableSync = async () => {
     setSyncing(true);
@@ -476,12 +483,24 @@ export function LeaderboardPage({
               const rowClickable = Boolean(publicViewPath);
 
               if (isMe) {
+                const isPinned = Boolean(entry?.is_pinned);
                 return (
                   <tr
-                    key={`row-${entry?.rank}-${name}`}
-                    className="border-y border-oai-brand-300/40 dark:border-oai-brand-500/30 bg-oai-brand-50 dark:bg-oai-brand-900/10 transition-colors"
+                    key={`row-${entry?.rank}-${name}${isPinned ? "-pin" : ""}`}
+                    className={cn(
+                      "bg-oai-brand-50 dark:bg-oai-brand-900/10 transition-colors",
+                      isPinned
+                        ? "border-t border-b border-oai-brand-300/40 dark:border-oai-brand-500/20"
+                        : "border-y border-oai-brand-300/40 dark:border-oai-brand-500/30",
+                    )}
                   >
-                    <td className={cn(lbStickyTdRank(true), "font-semibold text-oai-brand-600 dark:text-oai-brand-400")}>
+                    <td
+                      className={cn(
+                        lbStickyTdRank(true),
+                        "relative font-semibold text-oai-brand-600 dark:text-oai-brand-400",
+                        isPinned && "before:absolute before:left-0 before:top-[15%] before:h-[70%] before:w-[3px] before:rounded-r before:bg-oai-brand-500 dark:before:bg-oai-brand-400"
+                      )}
+                    >
                       <RankCell rank={entry?.rank} placeholder={placeholder} />
                     </td>
                     <td className={lbStickyTdUser(true)}>
@@ -608,23 +627,42 @@ export function LeaderboardPage({
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
-              <div className="inline-flex p-1 border border-oai-gray-200 dark:border-oai-gray-800 rounded-lg">
-                {["week", "month", "total"].map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => handlePeriodChange(p)}
-                    disabled={listState.loading}
-                    className={cn(
-                      "px-4 py-1.5 text-sm font-medium rounded-md transition-colors",
-                      period === p
-                        ? "bg-oai-gray-200 dark:bg-oai-gray-800 text-oai-black dark:text-white"
-                        : "text-oai-gray-500 dark:text-oai-gray-400 hover:text-oai-gray-800 dark:hover:text-oai-gray-200"
-                    )}
-                  >
-                    {p === "week" ? weekLabel : p === "month" ? monthLabel : totalLabel}
-                  </button>
-                ))}
+            <div className="flex flex-wrap items-center gap-3">
+              <LeaderboardMeChip
+                me={me}
+                totalEntries={totalEntries}
+                meLabel={meLabel}
+                onJumpToMe={handleJumpToMe}
+                canJump={myPage != null && !onMyPage && !listState.loading}
+              />
+              <div className="inline-flex h-9 p-1 border border-oai-gray-200 dark:border-oai-gray-800 rounded-full items-center relative">
+                {["week", "month", "total"].map((p) => {
+                  const isActive = period === p;
+                  return (
+                    <button
+                      key={p}
+                      onClick={() => handlePeriodChange(p)}
+                      disabled={listState.loading}
+                      className={cn(
+                        "px-4 h-7 text-sm font-medium rounded-full flex items-center justify-center transition-colors relative",
+                        isActive
+                          ? "text-oai-black dark:text-white"
+                          : "text-oai-gray-500 dark:text-oai-gray-400 hover:text-oai-gray-800 dark:hover:text-oai-gray-200"
+                      )}
+                    >
+                      <span className="relative z-10">
+                        {p === "week" ? weekLabel : p === "month" ? monthLabel : totalLabel}
+                      </span>
+                      {isActive && (
+                        <motion.div
+                          layoutId="leaderboard-period-active-bg"
+                          className="absolute inset-0 bg-oai-gray-200 dark:bg-oai-gray-800 rounded-full z-0"
+                          transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                        />
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>

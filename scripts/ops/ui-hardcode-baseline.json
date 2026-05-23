@@ -1,13 +1,13 @@
 {
-  "generatedAt": "2026-05-19T11:15:30.796Z",
+  "generatedAt": "2026-05-22T02:15:59.943Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
     "rawText": "JSX text nodes containing letters or digits"
   },
   "totals": {
-    "colors": 118,
-    "rawText": 83
+    "colors": 192,
+    "rawText": 116
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -16,6 +16,11 @@
       "rawTextTokens": [
         ") : avatarUrl ? ("
       ]
+    },
+    "dashboard/src/components/LeaderboardSummaryCard.jsx": {
+      "colors": 3,
+      "rawText": 0,
+      "rawTextTokens": []
     },
     "dashboard/src/components/LoginModal.jsx": {
       "colors": 4,
@@ -55,6 +60,16 @@
       "colors": 2,
       "rawText": 0,
       "rawTextTokens": []
+    },
+    "dashboard/src/pages/DevicePage.jsx": {
+      "colors": 0,
+      "rawText": 4,
+      "rawTextTokens": [
+        "Approve your CLI",
+        "CLI code",
+        "Sign in first, then return to this page.",
+        "Type the code your CLI showed you. We'll link it to your account so token usage from that machine flows into your leaderboard profile."
+      ]
     },
     "dashboard/src/pages/IpCheckPage.jsx": {
       "colors": 1,
@@ -101,6 +116,28 @@
         "tokens · 202 active days"
       ]
     },
+    "dashboard/src/pages/WrappedPage.jsx": {
+      "colors": 0,
+      "rawText": 18,
+      "rawTextTokens": [
+        "0 && (",
+        "Highlights",
+        "Loading…",
+        "Longest streak",
+        "No data for that year yet. Run",
+        "Peak hour",
+        "TokenTracker Wrapped",
+        "Top days",
+        "Top models",
+        "Top tools",
+        "Total tokens",
+        "across",
+        "first.",
+        "tools",
+        "tracker sync",
+        "tracker wrapped --json"
+      ]
+    },
     "dashboard/src/ui/components/ConfirmModal.jsx": {
       "colors": 2,
       "rawText": 0,
@@ -137,9 +174,24 @@
       ]
     },
     "dashboard/src/ui/dashboard/components/ActivityHeatmap.jsx": {
-      "colors": 10,
-      "rawText": 0,
-      "rawTextTokens": []
+      "colors": 28,
+      "rawText": 4,
+      "rawTextTokens": [
+        "0 ? (",
+        "3D Insight",
+        "Model Breakdown",
+        "Tokens"
+      ]
+    },
+    "dashboard/src/ui/dashboard/components/ActivityHeatmap3D.jsx": {
+      "colors": 53,
+      "rawText": 4,
+      "rawTextTokens": [
+        "0 ? (",
+        "Model Breakdown",
+        "Tokens",
+        "maxX) maxX = x + padding; if (y - padding"
+      ]
     },
     "dashboard/src/ui/dashboard/components/ContextBreakdownPanel.jsx": {
       "colors": 0,
@@ -229,6 +281,15 @@
       "rawTextTokens": [
         "0 && (",
         "0); return ("
+      ]
+    },
+    "dashboard/src/ui/dashboard/components/__tests__/ActivityHeatmap3D.test.jsx": {
+      "colors": 0,
+      "rawText": 3,
+      "rawTextTokens": [
+        ").container; // The top face is rendered last in each cell",
+        ").container; const darkSvg = render(",
+        "g\"); expect(groups.length).toBe(2); //"
       ]
     },
     "dashboard/src/ui/dashboard/views/DashboardView.jsx": {

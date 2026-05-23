@@ -162,6 +162,9 @@ heatmap.legend.more,ui,ActivityHeatmap,ActivityHeatmap,legend_more,"More",,activ
 heatmap.legend.utc,ui,ActivityHeatmap,ActivityHeatmap,legend_utc,"UTC",,active
 heatmap.tooltip,ui,ActivityHeatmap,ActivityHeatmap,tooltip,"{{day}} • {{value}} {{unit}} • {{tz}}",,active
 heatmap.unit.tokens,ui,ActivityHeatmap,ActivityHeatmap,unit_tokens,"tokens",,active
+heatmap.iso.aria,ui,ActivityHeatmap,ActivityHeatmap3D,iso_aria,"3D isometric activity heatmap",,active
+heatmap.view.2d,ui,ActivityHeatmap,ActivityHeatmap,view_2d,"2D",,active
+heatmap.view.3d,ui,ActivityHeatmap,ActivityHeatmap,view_3d,"3D",,active
 heatmap.month.jan,ui,ActivityHeatmap,ActivityHeatmap,month_label,"Jan",,active
 heatmap.month.feb,ui,ActivityHeatmap,ActivityHeatmap,month_label,"Feb",,active
 heatmap.month.mar,ui,ActivityHeatmap,ActivityHeatmap,month_label,"Mar",,active
@@ -317,6 +320,10 @@ settings.account.edit,ui,SettingsPage,SettingsPage,edit,"Edit",,active
 settings.account.save,ui,SettingsPage,SettingsPage,save,"Save",,active
 settings.account.saving,ui,SettingsPage,SettingsPage,saving,"Saving...",,active
 settings.account.cancel,ui,SettingsPage,SettingsPage,cancel,"Cancel",,active
+settings.account.userId,ui,SettingsPage,SettingsPage,user_id,"User ID",,active
+settings.account.copyUserId,ui,SettingsPage,SettingsPage,copy_user_id,"Copy user ID",,active
+settings.account.copy,ui,SettingsPage,SettingsPage,copy,"Copy",,active
+settings.account.copied,ui,SettingsPage,SettingsPage,copied,"Copied",,active
 settings.account.cloudSync,ui,SettingsPage,SettingsPage,cloud_sync,"Cloud sync",,active
 settings.account.cloudSyncHint,ui,SettingsPage,SettingsPage,cloud_sync_hint,"Upload local usage to your Token Tracker cloud account.",,active
 settings.account.publicProfile,ui,SettingsPage,SettingsPage,public_profile,"Public profile",,active
@@ -349,6 +356,8 @@ leaderboard.github.tooltipAction,ui,LeaderboardPage,LeaderboardPage,github_toolt
 leaderboard.github.tooltipPrefix,ui,LeaderboardPage,LeaderboardPage,github_tooltip_prefix,"Set yours in",,active
 leaderboard.github.tooltipSettingsLink,ui,LeaderboardPage,LeaderboardPage,github_tooltip_link,"Settings",,active
 leaderboard.github.tooltipSuffix,ui,LeaderboardPage,LeaderboardPage,github_tooltip_suffix," to appear here",,active
+leaderboard.summary.percentile,ui,LeaderboardPage,LeaderboardMeChip,summary_percentile,"Top {{p}}%",,active
+leaderboard.summary.jump_to_me,ui,LeaderboardPage,LeaderboardMeChip,summary_jump_to_me,"Jump to my row",,active
 settings.account.signOut,ui,SettingsPage,SettingsPage,sign_out,"Sign out",,active
 settings.account.signIn,ui,SettingsPage,SettingsPage,sign_in,"Sign in",,active
 settings.account.signedOutHint,ui,SettingsPage,SettingsPage,signed_out_hint,"Sign in to manage cloud sync and leaderboard preferences.",,active
@@ -575,3 +584,41 @@ dashboard.context_breakdown.exec_details.group_by_command,dashboard,DashboardPag
 dashboard.context_breakdown.exec_details.group_by_duration,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_group_by_duration,"Duration",,active
 dashboard.context_breakdown.exec_details.group_by_output,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_group_by_output,"Output",,active
 dashboard.context_breakdown.exec_details.group_by_exit,dashboard,DashboardPage,ContextBreakdownPanel,exec_details_group_by_exit,"By exit",,active
+heatmap.3d.hover_tip,ui,ActivityHeatmap,ActivityHeatmap,hover_tip,"Click to enter 3D fullscreen rotation analysis mode",,active
+heatmap.3d.modal.title,ui,ActivityHeatmap,ActivityHeatmap,title,"Token 3D Perspective",,active
+heatmap.3d.modal.desc,ui,ActivityHeatmap,ActivityHeatmap,desc,"Drag with left mouse button to rotate. Hover to inspect daily activity and multidimensional metrics.",,active
+heatmap.3d.modal.stats.total_tokens,ui,ActivityHeatmap,ActivityHeatmap,stats_total_tokens,"Annual Total Tokens",,active
+heatmap.3d.modal.stats.precision_total_tokens,ui,ActivityHeatmap,ActivityHeatmap,stats_precision_total_tokens,"Precise annual consumption",,active
+heatmap.3d.modal.stats.estimated_cost,ui,ActivityHeatmap,ActivityHeatmap,stats_estimated_cost,"Annual Estimated Cost",,active
+heatmap.3d.modal.stats.active_rate_days,ui,ActivityHeatmap,ActivityHeatmap,stats_active_rate_days,"Active Rate / Days",,active
+heatmap.3d.modal.stats.max_streak,ui,ActivityHeatmap,ActivityHeatmap,stats_max_streak,"Longest Active Streak",,active
+heatmap.3d.modal.stats.days_suffix,ui,ActivityHeatmap,ActivityHeatmap,stats_days_suffix,"Days",,active
+heatmap.3d.modal.stats.peak_day,ui,ActivityHeatmap,ActivityHeatmap,stats_peak_day,"Peak Day Blowout",,active
+heatmap.3d.modal.stats.precision_peak_value,ui,ActivityHeatmap,ActivityHeatmap,stats_precision_peak_value,"Precise daily peak",,active
+heatmap.3d.modal.stats.no_data,ui,ActivityHeatmap,ActivityHeatmap,stats_no_data,"No data",,active
+heatmap.3d.modal.legend.title,ui,ActivityHeatmap,ActivityHeatmap,legend_title,"Activity Levels",,active
+heatmap.3d.modal.palette.emerald,ui,ActivityHeatmap,ActivityHeatmap,palette_emerald,"Emerald City",,active
+heatmap.3d.modal.palette.ocean,ui,ActivityHeatmap,ActivityHeatmap,palette_ocean,"Ocean Abyss",,active
+heatmap.3d.modal.palette.neon,ui,ActivityHeatmap,ActivityHeatmap,palette_neon,"Cyber Neon",,active
+heatmap.3d.modal.palette.amber,ui,ActivityHeatmap,ActivityHeatmap,palette_amber,"Blazing Amber",,active
+heatmap.3d.modal.control.play,ui,ActivityHeatmap,ActivityHeatmap,control_play,"Start slow rotation",,active
+heatmap.3d.modal.control.pause,ui,ActivityHeatmap,ActivityHeatmap,control_pause,"Pause auto-rotation",,active
+heatmap.3d.modal.control.reset,ui,ActivityHeatmap,ActivityHeatmap,control_reset,"Reset 3D view",,active
+heatmap.3d.modal.footer.tip,ui,ActivityHeatmap,ActivityHeatmap,footer_tip,"Pinch to zoom / Scroll to zoom / Drag to rotate 3D chart",,active
+heatmap.3d.modal.ai.title.default,ui,ActivityHeatmap,ActivityHeatmap,ai_title_default,"Persistent Creator",,active
+heatmap.3d.modal.ai.eval.default,ui,ActivityHeatmap,ActivityHeatmap,ai_eval_default,"Persist in the river of technology. Daily coding may not always be majestic, but every tiny active point records your thoughts and exploration. Sparks accumulate, eventually converging into your own digital ocean.",,active
+heatmap.3d.modal.ai.title.peak,ui,ActivityHeatmap,ActivityHeatmap,ai_title_peak,"Peak Contributor",,active
+heatmap.3d.modal.ai.eval.peak,ui,ActivityHeatmap,ActivityHeatmap,ai_eval_peak,"This year, your token output shows extremely high engineering density. This scale of development is equivalent to deeply participating in the refactoring of a medium-to-large system base, with each keystroke converging complex logic into deterministic code. A testament to pure engineering passion.",,active
+heatmap.3d.modal.ai.title.heavy,ui,ActivityHeatmap,ActivityHeatmap,ai_title_heavy,"Heavy Producer",,active
+heatmap.3d.modal.ai.eval.heavy,ui,ActivityHeatmap,ActivityHeatmap,ai_eval_heavy,"Exceptional continuous output. Your accumulated tokens have reached millions, equivalent to the volume of dozens of technical novellas. The highly saturated coding pace demonstrates your great execution in building digital assets.",,active
+heatmap.3d.modal.ai.title.core,ui,ActivityHeatmap,ActivityHeatmap,ai_title_core,"Core Productivity Expert",,active
+heatmap.3d.modal.ai.eval.core,ui,ActivityHeatmap,ActivityHeatmap,ai_eval_core,"Highly resilient long-term commitment. Over the past year, you have steadily maintained a high-intensity development rhythm. With solid code volume and token output, you have silently built the core architecture, a true engineering backbone.",,active
+heatmap.3d.modal.ai.title.steady,ui,ActivityHeatmap,ActivityHeatmap,ai_title_steady,"Steady Developer",,active
+heatmap.3d.modal.ai.eval.steady,ui,ActivityHeatmap,ActivityHeatmap,ai_eval_steady,"Steady and firm accumulation of technology. Every step of token increment is a brick in the foundation of your future. This slow but steady pace is the path for an excellent developer to become an engineering master.",,active
+heatmap.3d.voxel.joke.1,ui,ActivityHeatmap3D,ActivityHeatmap3D,voxel_joke1,"🔥 Extremely crazy! Produced {{value}} tokens! Are you training a large language model or writing a compiler by hand?",,active
+heatmap.3d.voxel.joke.2,ui,ActivityHeatmap3D,ActivityHeatmap3D,voxel_joke2,"🚀 Epic output! Total {{value}} tokens. Today's production can circle the earth once, even the AI is amazed by you!",,active
+heatmap.3d.voxel.joke.3,ui,ActivityHeatmap3D,ActivityHeatmap3D,voxel_joke3,"⚡ Critical Day! {{value}} tokens. Code is gushing out, and the keyboard is starting to smoke!",,active
+heatmap.3d.voxel.level3,ui,ActivityHeatmap3D,ActivityHeatmap3D,voxel_level3,"⚡ Productivity explosion ({{value}} tokens)! High efficiency and focus, keep up this peak state!",,active
+heatmap.3d.voxel.level2,ui,ActivityHeatmap3D,ActivityHeatmap3D,voxel_level2,"🌱 Getting into the groove ({{value}} tokens)! Steady output, every keystroke is contributing to the architecture.",,active
+heatmap.3d.voxel.level1,ui,ActivityHeatmap3D,ActivityHeatmap3D,voxel_level1,"🍃 Every drop counts ({{value}} tokens). Tiny commits are investments in the future, embrace compound interest!",,active
+heatmap.3d.voxel.level0,ui,ActivityHeatmap3D,ActivityHeatmap3D,voxel_level0,"💤 Recharging. On days without coding, inspiration grows silently.",,active

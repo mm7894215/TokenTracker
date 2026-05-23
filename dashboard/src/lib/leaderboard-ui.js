@@ -54,19 +54,21 @@ export function getPaginationFlags({ page, totalPages }) {
   return { canPrev, canNext, safePage, safeTotal };
 }
 
-export function injectMeIntoFirstPage({ entries, me, meLabel, limit }) {
-  const safeLimit = clampInt(limit, { min: 1, max: 1000, fallback: 20 });
-  const rows = Array.isArray(entries) ? entries.slice(0, safeLimit) : [];
+export function prependMeRowToPage({ entries, me, meLabel }) {
+  const rows = Array.isArray(entries) ? entries : [];
   const meRank = me && typeof me.rank === "number" ? me.rank : null;
-  const hasMeInPage = rows.some((e) => Boolean(e?.is_me));
+  if (!meRank) return rows;
+  if (rows.some((e) => Boolean(e?.is_me))) return rows;
 
-  if (!meRank || hasMeInPage) return rows;
-
-  const injectedRow = {
+  const pinnedRow = {
     rank: meRank,
     is_me: true,
+    is_pinned: true,
+    user_id: me?.user_id ?? null,
     display_name: meLabel,
-    avatar_url: null,
+    avatar_url: me?.avatar_url ?? null,
+    github_url: null,
+    is_public: false,
     gpt_tokens: me?.gpt_tokens ?? "0",
     claude_tokens: me?.claude_tokens ?? "0",
     gemini_tokens: me?.gemini_tokens ?? "0",
@@ -79,23 +81,16 @@ export function injectMeIntoFirstPage({ entries, me, meLabel, limit }) {
     kimi_tokens: me?.kimi_tokens ?? "0",
     other_tokens: me?.other_tokens ?? "0",
     total_tokens: me?.total_tokens ?? "0",
+    estimated_cost_usd: me?.estimated_cost_usd ?? null,
   };
 
-  // Pin YOU at the bottom of page 1 so users see their own rank without
-  // the row looking interleaved at a random position. When their rank is
-  // not contiguous with the last natural row, insert an ellipsis separator
-  // row right above YOU so the "jump" is explicit instead of resembling a
-  // sort bug. Keep list length stable by trimming the trailing rows we
-  // displace.
-  const pruned = rows.filter((e) => !e?.is_me);
-  const lastRow = pruned[pruned.length - 1];
-  const lastRank = lastRow && typeof lastRow.rank === "number" ? lastRow.rank : 0;
-  const needsGap = meRank > lastRank + 1;
+  return [pinnedRow, ...rows];
+}
 
-  if (needsGap) {
-    const kept = pruned.slice(0, Math.max(0, safeLimit - 2));
-    return [...kept, { is_ellipsis: true, rank: null, display_name: "" }, injectedRow];
-  }
-  const kept = pruned.slice(0, Math.max(0, safeLimit - 1));
-  return [...kept, injectedRow];
+export function pageContainingRank(rank, pageSize) {
+  const r = Number(rank);
+  const s = Number(pageSize);
+  if (!Number.isFinite(r) || r < 1) return null;
+  if (!Number.isFinite(s) || s < 1) return null;
+  return Math.ceil(r / s);
 }

@@ -46,6 +46,8 @@ const LimitsPage = lazy(() =>
 const LoginPage = lazy(() =>
   import("./pages/LoginPage.jsx").then((m) => ({ default: m.LoginPage })),
 );
+const DevicePage = lazy(() => import("./pages/DevicePage.jsx"));
+const WrappedPage = lazy(() => import("./pages/WrappedPage.jsx"));
 const SettingsPage = lazy(() =>
   import("./pages/SettingsPage.jsx").then((m) => ({ default: m.SettingsPage })),
 );
@@ -154,6 +156,15 @@ export default function App() {
     content = <NativeAuthCallbackPage />;
   } else if (normalizedPath === "/login") {
     content = <LoginPage />;
+  } else if (normalizedPath === "/device") {
+    // Headless-CLI device-flow approval page. Standalone (no sidebar) so
+    // unsigned visitors hit the embedded sign-in CTA without sidebar nav
+    // confusion. Auth check happens inside DevicePage itself.
+    content = <DevicePage />;
+  } else if (normalizedPath === "/wrapped") {
+    // Year-end Wrapped page. Reads from /functions/tokentracker-wrapped
+    // (provided by the local CLI server) — no auth required.
+    content = <WrappedPage />;
   } else if (gate === "landing") {
     content = <LandingPage signInUrl="/login" signUpUrl="/login" />;
   } else {

@@ -29,6 +29,7 @@ const {
   normalizeState: normalizeUploadState,
 } = require("../lib/upload-throttle");
 const { collectTrackerDiagnostics } = require("../lib/diagnostics");
+const { detectPassiveProviders, isPassiveModeActive } = require("../lib/passive-mode");
 const { probeOpenclawHookState } = require("../lib/openclaw-hook");
 const {
   probeOpenclawSessionPluginState,
@@ -47,6 +48,9 @@ const {
   resolveCraftSessionFiles,
   resolveCraftConfigDir,
   resolveKilocodeTaskFiles,
+  resolveRoocodeTaskFiles,
+  resolveZedDbPath,
+  resolveGooseDbPath,
   resolveGrokBuildSessions,
 } = require("../lib/rollout");
 const { probeGrokHookState, resolveGrokHome } = require("../lib/grok-hook");
@@ -214,6 +218,19 @@ async function cmdStatus(argv = []) {
   const kilocodeTaskFiles = resolveKilocodeTaskFiles(process.env);
   const kilocodeInstalled = kilocodeTaskFiles.length > 0;
 
+  // Roo Code VS Code extension — same Cline-derived ui_messages.json format,
+  // different globalStorage subdir (rooveterinaryinc.roo-cline).
+  const roocodeTaskFiles = resolveRoocodeTaskFiles(process.env);
+  const roocodeInstalled = roocodeTaskFiles.length > 0;
+
+  // Zed Agent — passive read of hosted threads.db (skips external ACP agents).
+  const zedDbPath = resolveZedDbPath(process.env);
+  const zedInstalled = fssync.existsSync(zedDbPath);
+
+  // Goose (Block) — passive cumulative-delta read of sessions.db.
+  const gooseDbPath = resolveGooseDbPath(process.env);
+  const gooseInstalled = fssync.existsSync(gooseDbPath);
+
   // Grok Build (xAI TUI)
   const grokHookState = await probeGrokHookState({ home, trackerDir, env: process.env });
   const grokSessions = grokHookState.hasGrokInstall || grokHookState.sessionsDir
@@ -227,6 +244,114 @@ async function cmdStatus(argv = []) {
     token: copilotToken,
     otel: copilotOtel,
   });
+
+  // Detect passive-mode providers exactly once — both the JSON/light path
+  // and the human-readable path consume this, and each call hits 5 readdir
+  // syscalls (~5–10ms cold). Memoize.
+  const passiveProviders = detectPassiveProviders({
+    home,
+    hookStatus: {
+      codex_notify: notifyConfigured,
+      every_code_notify: everyCodeConfigured,
+      claude: claudeHookConfigured,
+      gemini: geminiHookConfigured,
+      opencode_plugin: opencodePluginConfigured,
+      openclaw_session_plugin: Boolean(openclawSessionPluginState?.configured),
+      codebuddy: Boolean(codebuddyHookConfigured),
+      grok: Boolean(grokHookState?.configured),
+    },
+  });
+
+  if (opts.json || opts.light) {
+    const summary = {
+      generated_at: new Date().toISOString(),
+      base_url: config?.baseUrl || null,
+      device_token_set: Boolean(config?.deviceToken),
+      queue: {
+        pending_bytes: pendingBytes,
+        size_bytes: queueSize,
+        offset: queueState.offset || 0,
+      },
+      last_parse: cursors?.updatedAt || null,
+      last_notify: lastNotify || null,
+      last_openclaw_sync: lastOpenclawSync || null,
+      last_notify_spawn: lastNotifySpawn || null,
+      last_upload: lastUpload || null,
+      next_upload_after: nextUpload || null,
+      backoff_until: backoffUntil || null,
+      last_upload_error: lastUploadError || null,
+      auto_retry: autoRetry || null,
+      hooks: {
+        codex_notify: notifyConfigured,
+        every_code_notify: everyCodeConfigured,
+        claude: claudeHookConfigured,
+        gemini: geminiHookConfigured,
+        opencode_plugin: opencodePluginConfigured,
+        openclaw_session_plugin: Boolean(openclawSessionPluginState?.configured),
+        openclaw_legacy: Boolean(openclawHookState?.configured),
+        codebuddy: codebuddyInstalled ? Boolean(codebuddyHookConfigured) : null,
+        grok: grokInstalled ? Boolean(grokHookState?.configured) : null,
+      },
+      providers: {
+        kimi_code: kimiInstalled
+          ? { installed: true, files: kimiWireFiles.length }
+          : { installed: false },
+        kiro_cli: kiroCliInstalled
+          ? { installed: true, detail: kiroCliDbPath }
+          : { installed: false },
+        codebuddy: codebuddyInstalled
+          ? { installed: true, files: codebuddyFiles.length }
+          : { installed: false },
+        omp: ompInstalled
+          ? { installed: true, files: ompFiles.length }
+          : { installed: false },
+        pi: piInstalled
+          ? { installed: true, files: piFiles.length }
+          : { installed: false },
+        craft: craftInstalled
+          ? { installed: true, files: craftFiles.length }
+          : { installed: false },
+        kilo_cli: kiloInstalled
+          ? { installed: true, detail: kiloDbPath }
+          : { installed: false },
+        kilocode: kilocodeInstalled
+          ? { installed: true, files: kilocodeTaskFiles.length }
+          : { installed: false },
+        roocode: roocodeInstalled
+          ? { installed: true, files: roocodeTaskFiles.length }
+          : { installed: false },
+        zed: zedInstalled ? { installed: true, detail: zedDbPath } : { installed: false },
+        goose: gooseInstalled
+          ? { installed: true, detail: gooseDbPath }
+          : { installed: false },
+        grok_build: grokInstalled
+          ? {
+              installed: true,
+              files: grokSessions.length,
+              detail: grokHookState.configured ? "hook installed" : "detected",
+            }
+          : { installed: false },
+      },
+      copilot: {
+        token_set: Boolean(copilotToken),
+        otel_has_files: Boolean(copilotOtel.otel_has_files),
+        otel_path: copilotOtel.otel_path || null,
+        otel_enabled: Boolean(copilotOtel.otel_enabled),
+      },
+      passive_mode: {
+        active: isPassiveModeActive(passiveProviders),
+        providers: passiveProviders,
+      },
+      subscriptions,
+    };
+
+    if (opts.json) {
+      process.stdout.write(JSON.stringify(summary, null, 2) + "\n");
+      return;
+    }
+    process.stdout.write(renderLightTable(summary) + "\n");
+    return;
+  }
 
   process.stdout.write(
     [
@@ -274,6 +399,22 @@ async function cmdStatus(argv = []) {
       kilocodeInstalled
         ? `- Kilo Code (VS Code extension): passive reader (${kilocodeTaskFiles.length} task${kilocodeTaskFiles.length !== 1 ? "s" : ""} across ${new Set(kilocodeTaskFiles.map((t) => t.ide)).size} IDE${new Set(kilocodeTaskFiles.map((t) => t.ide)).size !== 1 ? "s" : ""})`
         : null,
+      roocodeInstalled
+        ? `- Roo Code (VS Code extension): passive reader (${roocodeTaskFiles.length} task${roocodeTaskFiles.length !== 1 ? "s" : ""} across ${new Set(roocodeTaskFiles.map((t) => t.ide)).size} IDE${new Set(roocodeTaskFiles.map((t) => t.ide)).size !== 1 ? "s" : ""})`
+        : null,
+      zedInstalled
+        ? `- Zed Agent: passive reader (threads.db, hosted models only)`
+        : null,
+      gooseInstalled
+        ? `- Goose (Block): passive reader (sessions.db, cumulative-delta)`
+        : null,
+      ...(() => {
+        const passive = passiveProviders.filter((p) => p.passive);
+        if (passive.length === 0) return [];
+        return [
+          `- Passive mode: ${passive.length} provider${passive.length !== 1 ? "s" : ""} reading logs without hooks (${passive.map((p) => `${p.name}: ${p.hook_failure_reason || "hook unset"}`).join("; ")})`,
+        ];
+      })(),
       grokInstalled
         ? `- Grok Build (xAI): ${grokHookState.configured ? "hook installed" : "detected"} (${grokSessions.length} session${grokSessions.length !== 1 ? "s" : ""} found, hook: ${grokHookState.configured ? "yes" : "no"})`
         : null,
@@ -348,13 +489,19 @@ function formatSubscriptionLine(entry = {}) {
 function parseArgs(argv) {
   const out = {
     diagnostics: false,
+    json: false,
+    light: false,
+    noSpinner: false,
     probeKeychain: false,
     probeKeychainDetails: false,
   };
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--diagnostics" || a === "--json") out.diagnostics = true;
+    if (a === "--diagnostics") out.diagnostics = true;
+    else if (a === "--json") out.json = true;
+    else if (a === "--light") out.light = true;
+    else if (a === "--no-spinner") out.noSpinner = true;
     else if (a === "--probe-keychain") out.probeKeychain = true;
     else if (a === "--probe-keychain-details") {
       out.probeKeychainDetails = true;
@@ -363,6 +510,57 @@ function parseArgs(argv) {
   }
 
   return out;
+}
+
+// Pure renderer: turn the structured summary into a fixed-width ASCII table.
+// "light" output is for AI agents and CI: deterministic columns, no emoji or
+// spinner side effects, easy to grep. Returns a string (caller adds trailing
+// newline).
+function renderLightTable(summary) {
+  const rows = [];
+  const push = (k, v) => rows.push([k, v == null || v === "" ? "—" : String(v)]);
+
+  push("Base URL", summary.base_url);
+  push("Device token", summary.device_token_set ? "set" : "unset");
+  push("Queue pending (bytes)", summary.queue.pending_bytes);
+  push("Queue size (bytes)", summary.queue.size_bytes);
+  push("Last parse", summary.last_parse);
+  push("Last notify", summary.last_notify);
+  push("Last upload", summary.last_upload);
+  push("Next upload after", summary.next_upload_after);
+  push("Backoff until", summary.backoff_until);
+  if (summary.last_upload_error) push("Last upload error", summary.last_upload_error);
+
+  for (const [name, state] of Object.entries(summary.hooks || {})) {
+    push(`Hook · ${name}`, state ? "set" : "unset");
+  }
+
+  for (const [name, info] of Object.entries(summary.providers || {})) {
+    const detail = [];
+    if (typeof info.installed === "boolean") detail.push(info.installed ? "installed" : "not installed");
+    if (typeof info.files === "number") detail.push(`${info.files} file${info.files !== 1 ? "s" : ""}`);
+    if (info.detail) detail.push(info.detail);
+    push(`Provider · ${name}`, detail.length ? detail.join(", ") : "—");
+  }
+
+  if (summary.passive_mode) {
+    push("Passive mode active", summary.passive_mode.active ? "yes" : "no");
+    for (const p of summary.passive_mode.providers || []) {
+      if (p.passive) {
+        push(`Passive · ${p.name}`, `hook ${p.hook_failure_reason || "missing"}, logs present`);
+      }
+    }
+  }
+
+  const keyWidth = Math.max(...rows.map(([k]) => k.length), 8);
+  const valWidth = Math.max(...rows.map(([, v]) => v.length), 8);
+  const sep = `+${"-".repeat(keyWidth + 2)}+${"-".repeat(valWidth + 2)}+`;
+  const lines = [sep, `| ${"Key".padEnd(keyWidth)} | ${"Value".padEnd(valWidth)} |`, sep];
+  for (const [k, v] of rows) {
+    lines.push(`| ${k.padEnd(keyWidth)} | ${v.padEnd(valWidth)} |`);
+  }
+  lines.push(sep);
+  return lines.join("\n");
 }
 
 async function safeStatSize(p) {
