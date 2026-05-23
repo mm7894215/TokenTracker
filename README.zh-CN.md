@@ -46,7 +46,7 @@ npx tokentracker-cli
 - 📊 本地 Dashboard（`localhost:7680`）—— 用量趋势、模型明细、成本分析
 - 🔌 自动识别并挂接你电脑上所有已安装的 AI 工具
 - 🏠 100% 本地运行 —— 无账号、无 API Key、无网络请求（排行榜是可选的）
-- 🧩 *可选：* Skills 面板——浏览 250+ 公开 skill，并在 Claude · Codex · Gemini · OpenCode · Hermes 之间同步
+- 🧩 *可选：* Skills 面板——浏览 250+ 公开 skill，并在 Claude · Codex · Grok · Gemini · OpenCode · Hermes 之间同步
 
 > **想要原生 macOS 菜单栏 App？** [下载 `TokenTrackerBar.dmg`](https://github.com/mm7894215/TokenTracker/releases/latest) → 拖入「应用程序」即可。包含桌面小组件、菜单栏状态图标，以及同一套 Dashboard（跑在 WKWebView 里）。
 
@@ -91,7 +91,7 @@ brew install mm7894215/tokentracker/tokentracker
 - 📈 **实时限额追踪** —— Claude / Codex / Cursor / Gemini / Kiro / Copilot / Antigravity 的配额窗口与重置倒计时
 - 💰 **成本引擎** —— 内置 70+ 模型定价表，精确到 USD
 - 🌐 **可选排行榜** —— 与全球开发者对比；列可拖拽排序，聚焦你关心的 provider（需登录参与）
-- 🧩 **可选 Skills 面板** —— 浏览 250+ 公开 skill（来自 `anthropics/skills`、`ComposioHQ/awesome-claude-skills`、`skills.sh` 以及你自己添加的任何 GitHub 仓库），在 Claude / Codex / Gemini / OpenCode / Hermes 之间同步，目标 Agent 文字可见、可单独管理、一键撤销
+- 🧩 **可选 Skills 面板** —— 浏览 250+ 公开 skill（来自 `anthropics/skills`、`ComposioHQ/awesome-claude-skills`、`skills.sh` 以及你自己添加的任何 GitHub 仓库），在 Claude / Codex / Grok / Gemini / OpenCode / Hermes 之间同步，目标 Agent 文字可见、可单独管理、一键撤销
 - 🔒 **隐私优先** —— 只记录 token 数量与时间戳。**绝不**收集 prompt、回复、文件内容
 
 ---
@@ -134,7 +134,7 @@ brew install mm7894215/tokentracker/tokentracker
 <tr>
 <td colspan="2">
 
-**Skills 管理器** —— 浏览 250+ 公开 skill（GitHub 仓库 & `skills.sh`），一次安装，同步到 Claude / Codex / Gemini / OpenCode / Hermes。每个 Agent 单独开关，一键撤销，再也不用手动复制文件夹。
+**Skills 管理器** —— 浏览 250+ 公开 skill（GitHub 仓库 & `skills.sh`），一次安装，同步到 Claude / Codex / Grok / Gemini / OpenCode / Hermes。每个 Agent 单独开关，一键撤销，再也不用手动复制文件夹。
 
 <img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/skills.png" alt="Skills Manager" />
 
@@ -239,6 +239,8 @@ flowchart LR
 | `TOKENTRACKER_HTTP_TIMEOUT_MS` | HTTP 超时时间（毫秒） | `20000` |
 | `CODEX_HOME` | 覆盖 Codex CLI 目录 | `~/.codex` |
 | `GEMINI_HOME` | 覆盖 Gemini CLI 目录 | `~/.gemini` |
+| `TOKENTRACKER_GROK_HOME` | 覆盖 Grok Build 目录，供 Grok 集成和 Skills Manager 使用 | `~/.grok` |
+| `GROK_HOME` | 旧版 Grok Build 目录覆盖变量；未设置 `TOKENTRACKER_GROK_HOME` 时使用 | `~/.grok` |
 
 ---
 

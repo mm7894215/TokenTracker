@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { resolveGrokHome } = require("./grok-hook");
 
 const DEFAULT_REPOS = [
   { owner: "anthropics", name: "skills", branch: "main", enabled: true },
@@ -12,6 +13,7 @@ const DEFAULT_REPOS = [
 const TARGETS = {
   claude: { id: "claude", label: "Claude", dir: () => path.join(os.homedir(), ".claude", "skills") },
   codex: { id: "codex", label: "Codex", dir: () => path.join(os.homedir(), ".codex", "skills") },
+  grok: { id: "grok", label: "Grok", dir: () => path.join(resolveGrokHome(process.env), "skills") },
   gemini: { id: "gemini", label: "Gemini", dir: () => path.join(os.homedir(), ".gemini", "skills") },
   opencode: { id: "opencode", label: "OpenCode", dir: () => path.join(os.homedir(), ".config", "opencode", "skills") },
   hermes: { id: "hermes", label: "Hermes", dir: () => path.join(os.homedir(), ".hermes", "skills") },

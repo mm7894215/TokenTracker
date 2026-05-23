@@ -10,6 +10,8 @@ const { before, describe, it } = require("node:test");
 const sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), "tt-skills-mgr-"));
 process.env.HOME = sandboxHome;
 process.env.USERPROFILE = sandboxHome;
+process.env.TOKENTRACKER_GROK_HOME = path.join(sandboxHome, ".grok");
+delete process.env.GROK_HOME;
 
 const skills = require("../src/lib/skills-manager");
 
@@ -19,6 +21,33 @@ function writeLocalSkill(targetDir, directory, body = "---\nname: Local Skill\nd
   fs.writeFileSync(path.join(dir, "SKILL.md"), body);
   return dir;
 }
+
+function restoreEnv(name, value) {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
+
+describe("skills-manager targetList", () => {
+  it("includes Grok and resolves Grok home overrides", () => {
+    const prevTokenTrackerGrokHome = process.env.TOKENTRACKER_GROK_HOME;
+    const prevGrokHome = process.env.GROK_HOME;
+    try {
+      process.env.TOKENTRACKER_GROK_HOME = path.join(sandboxHome, ".grok-prefixed");
+      process.env.GROK_HOME = path.join(sandboxHome, ".grok-legacy");
+      let grok = skills.targetList().find((target) => target.id === "grok");
+      assert.ok(grok);
+      assert.equal(grok.label, "Grok");
+      assert.equal(grok.path, path.join(sandboxHome, ".grok-prefixed", "skills"));
+
+      delete process.env.TOKENTRACKER_GROK_HOME;
+      grok = skills.targetList().find((target) => target.id === "grok");
+      assert.equal(grok.path, path.join(sandboxHome, ".grok-legacy", "skills"));
+    } finally {
+      restoreEnv("TOKENTRACKER_GROK_HOME", prevTokenTrackerGrokHome);
+      restoreEnv("GROK_HOME", prevGrokHome);
+    }
+  });
+});
 
 describe("skills-manager addRepo validation", () => {
   it("rejects path-traversal-like owner/name", () => {
@@ -67,16 +96,19 @@ describe("skills-manager importLocalSkill re-sync", () => {
     assert.deepEqual(first.targets, ["claude"]);
     assert.ok(fs.existsSync(path.join(sandboxHome, ".claude/skills/sample-skill/SKILL.md")));
     assert.ok(!fs.existsSync(path.join(sandboxHome, ".codex/skills/sample-skill")));
+    assert.ok(!fs.existsSync(path.join(sandboxHome, ".grok/skills/sample-skill")));
 
-    const second = skills.importLocalSkill("sample-skill", ["claude", "codex"]);
+    const second = skills.importLocalSkill("sample-skill", ["claude", "codex", "grok"]);
     assert.equal(second.managed, true);
-    assert.deepEqual(new Set(second.targets), new Set(["claude", "codex"]));
+    assert.deepEqual(new Set(second.targets), new Set(["claude", "codex", "grok"]));
     assert.ok(fs.existsSync(path.join(sandboxHome, ".codex/skills/sample-skill/SKILL.md")));
+    assert.ok(fs.existsSync(path.join(sandboxHome, ".grok/skills/sample-skill/SKILL.md")));
 
-    const third = skills.importLocalSkill("sample-skill", ["codex"]);
-    assert.deepEqual(third.targets, ["codex"]);
-    assert.ok(!fs.existsSync(path.join(sandboxHome, ".claude/skills/sample-skill")));
-    assert.ok(fs.existsSync(path.join(sandboxHome, ".codex/skills/sample-skill/SKILL.md")));
+    const third = skills.importLocalSkill("sample-skill", ["claude"]);
+    assert.deepEqual(third.targets, ["claude"]);
+    assert.ok(fs.existsSync(path.join(sandboxHome, ".claude/skills/sample-skill/SKILL.md")));
+    assert.ok(!fs.existsSync(path.join(sandboxHome, ".codex/skills/sample-skill")));
+    assert.ok(!fs.existsSync(path.join(sandboxHome, ".grok/skills/sample-skill")));
 
     // cleanup: uninstall managed skill
     skills.uninstallSkill(third.id);

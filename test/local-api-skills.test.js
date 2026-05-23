@@ -8,6 +8,8 @@ const { before, describe, it } = require("node:test");
 const sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), "tt-localapi-skills-"));
 process.env.HOME = sandboxHome;
 process.env.USERPROFILE = sandboxHome;
+process.env.TOKENTRACKER_GROK_HOME = path.join(sandboxHome, ".grok");
+delete process.env.GROK_HOME;
 
 const { createLocalApiHandler } = require("../src/lib/local-api");
 
@@ -127,6 +129,7 @@ describe("/functions/tokentracker-skills auth + input", () => {
     assert.equal(status, 200);
     assert.ok(Array.isArray(body.targets));
     assert.ok(Array.isArray(body.skills));
+    assert.ok(body.targets.some((target) => target.id === "grok" && target.label === "Grok"));
   });
 
   it("surfaces addRepo validation error via 500 with message", async () => {

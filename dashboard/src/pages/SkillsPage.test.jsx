@@ -34,14 +34,17 @@ vi.mock("../lib/skills-api", () => ({
 
 beforeEach(() => {
   vi.mocked(getInstalledSkills).mockResolvedValue({
-    targets: [{ id: "claude", label: "Claude" }],
+    targets: [
+      { id: "claude", label: "Claude" },
+      { id: "grok", label: "Grok" },
+    ],
     skills: [
       {
         id: "sample-skill",
         name: "Sample Skill",
         directory: "sample-skill",
         description: "Keeps the installed list visible.",
-        targets: ["claude"],
+        targets: ["claude", "grok"],
         managed: true,
       },
     ],
@@ -65,6 +68,7 @@ describe("SkillsPage", () => {
 
     expect(await screen.findByText("Sample Skill")).toBeInTheDocument();
     expect(screen.getByText("Keeps the installed list visible.")).toBeInTheDocument();
+    expect(screen.getByText("Grok")).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.queryByText(copy("skills.empty.my"))).not.toBeInTheDocument();

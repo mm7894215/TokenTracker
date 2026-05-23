@@ -38,6 +38,7 @@ const DEFAULT_TARGETS = ["claude", "codex"];
 const TARGET_CHIP_ICON_CLASSES = {
   claude: "text-orange-500 dark:text-orange-300",
   codex: "text-emerald-600 dark:text-emerald-300",
+  grok: "text-zinc-700 dark:text-zinc-200",
   gemini: "text-sky-600 dark:text-sky-300",
   opencode: "text-amber-600 dark:text-amber-300",
   hermes: "text-indigo-500 dark:text-indigo-300",
