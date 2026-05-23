@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { resolveGrokHome } = require("./grok-hook");
+const { resolveAntigravitySkillDirs } = require("./antigravity-paths");
 
 const DEFAULT_REPOS = [
   { owner: "anthropics", name: "skills", branch: "main", enabled: true },
@@ -14,11 +15,27 @@ const TARGETS = {
   claude: { id: "claude", label: "Claude", dir: () => path.join(os.homedir(), ".claude", "skills") },
   codex: { id: "codex", label: "Codex", dir: () => path.join(os.homedir(), ".codex", "skills") },
   grok: { id: "grok", label: "Grok", dir: () => path.join(resolveGrokHome(process.env), "skills") },
+  antigravity: { id: "antigravity", label: "Antigravity", dirs: () => resolveAntigravitySkillDirs(process.env) },
   gemini: { id: "gemini", label: "Gemini", dir: () => path.join(os.homedir(), ".gemini", "skills") },
   opencode: { id: "opencode", label: "OpenCode", dir: () => path.join(os.homedir(), ".config", "opencode", "skills") },
   hermes: { id: "hermes", label: "Hermes", dir: () => path.join(os.homedir(), ".hermes", "skills") },
   agents: { id: "agents", label: "Agents", visible: false, dir: () => path.join(os.homedir(), ".agents", "skills") },
 };
+
+// Dual contract: a target exposes either dir() → string (single path) or
+// dirs() → string[] (parallel-write to multiple paths, e.g. Antigravity which
+// has separate user-skills dirs for the main app and the IDE). Consumers must
+// route through these helpers so the single-path targets stay zero-overhead.
+function targetDirs(target) {
+  if (typeof target.dirs === "function") return target.dirs();
+  return [target.dir()];
+}
+
+// Used for surfacing one path in UI/local-api responses. For multi-dir targets
+// this is the canonical "first" entry by convention (main app before IDE).
+function targetPrimaryDir(target) {
+  return targetDirs(target)[0];
+}
 
 const FETCH_TIMEOUT_MS = 20_000;
 const DISCOVER_CONCURRENCY = 4;
@@ -130,7 +147,7 @@ function targetList() {
     .map((target) => ({
       id: target.id,
       label: target.label,
-      path: target.dir(),
+      path: targetPrimaryDir(target),
     }));
 }
 
@@ -342,27 +359,35 @@ function syncSkillToTarget(directory, targetId) {
   const target = TARGETS[targetId];
   if (!target) throw new Error(`Unsupported target: ${targetId}`);
   const source = path.join(ssotDir(), directory);
-  const dest = path.join(target.dir(), directory);
   if (!fs.existsSync(source)) throw new Error(`Managed skill not found: ${directory}`);
-  ensureDir(path.dirname(dest));
-  removePath(dest);
-  try {
-    fs.symlinkSync(source, dest, "dir");
-  } catch (_e) {
-    copyDir(source, dest);
+  for (const baseDir of targetDirs(target)) {
+    const dest = path.join(baseDir, directory);
+    ensureDir(path.dirname(dest));
+    removePath(dest);
+    try {
+      fs.symlinkSync(source, dest, "dir");
+    } catch (_e) {
+      copyDir(source, dest);
+    }
   }
 }
 
 function removeSkillFromTarget(directory, targetId) {
   const target = TARGETS[targetId];
   if (!target) return;
-  removePath(path.join(target.dir(), directory));
+  for (const baseDir of targetDirs(target)) {
+    removePath(path.join(baseDir, directory));
+  }
 }
 
 function scanTargetSkill(directory, targetId) {
   const target = TARGETS[targetId];
   if (!target) return false;
-  return fs.existsSync(path.join(target.dir(), directory)) || isSymlink(path.join(target.dir(), directory));
+  for (const baseDir of targetDirs(target)) {
+    const candidate = path.join(baseDir, directory);
+    if (fs.existsSync(candidate) || isSymlink(candidate)) return true;
+  }
+  return false;
 }
 
 function listInstalledSkills() {
@@ -378,41 +403,42 @@ function listInstalledSkills() {
   const managedDirs = new Set(managed.map((skill) => skill.directory.toLowerCase()));
   const unmanaged = new Map();
   for (const target of Object.values(TARGETS)) {
-    const dir = target.dir();
-    let entries = [];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch (_e) {
-      continue;
-    }
-    for (const entry of entries) {
-      if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
-      const directory = entry.name;
-      if (!directory || directory.startsWith(".") || managedDirs.has(directory.toLowerCase())) continue;
-      const skillPath = path.join(dir, directory, "SKILL.md");
-      if (!fs.existsSync(skillPath)) continue;
-      const metadata = readSkillMetadata(fs.readFileSync(skillPath, "utf8"), directory);
-      const key = directory.toLowerCase();
-      if (!unmanaged.has(key)) {
-        unmanaged.set(key, {
-          id: `local:${directory}`,
-          key: `local:${directory}`,
-          name: metadata.name,
-          description: metadata.description,
-          directory,
-          readmeUrl: null,
-          repoOwner: null,
-          repoName: null,
-          repoBranch: null,
-          installedAt: null,
-          managed: false,
-          targets: [],
-          targetPaths: {},
-        });
+    for (const dir of targetDirs(target)) {
+      let entries = [];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch (_e) {
+        continue;
       }
-      const skill = unmanaged.get(key);
-      skill.targets.push(target.id);
-      skill.targetPaths[target.id] = path.join(dir, directory);
+      for (const entry of entries) {
+        if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+        const directory = entry.name;
+        if (!directory || directory.startsWith(".") || managedDirs.has(directory.toLowerCase())) continue;
+        const skillPath = path.join(dir, directory, "SKILL.md");
+        if (!fs.existsSync(skillPath)) continue;
+        const metadata = readSkillMetadata(fs.readFileSync(skillPath, "utf8"), directory);
+        const key = directory.toLowerCase();
+        if (!unmanaged.has(key)) {
+          unmanaged.set(key, {
+            id: `local:${directory}`,
+            key: `local:${directory}`,
+            name: metadata.name,
+            description: metadata.description,
+            directory,
+            readmeUrl: null,
+            repoOwner: null,
+            repoName: null,
+            repoBranch: null,
+            installedAt: null,
+            managed: false,
+            targets: [],
+            targetPaths: {},
+          });
+        }
+        const skill = unmanaged.get(key);
+        if (!skill.targets.includes(target.id)) skill.targets.push(target.id);
+        if (!skill.targetPaths[target.id]) skill.targetPaths[target.id] = path.join(dir, directory);
+      }
     }
   }
 
@@ -596,10 +622,12 @@ function findLocalSkillSource(directory) {
   const installName = sanitizePathSegment(directory);
   if (!installName) return null;
   for (const target of Object.values(TARGETS)) {
-    const skillPath = path.join(target.dir(), installName);
-    const docPath = path.join(skillPath, "SKILL.md");
-    if (fs.existsSync(docPath)) {
-      return { path: skillPath, targetId: target.id };
+    for (const baseDir of targetDirs(target)) {
+      const skillPath = path.join(baseDir, installName);
+      const docPath = path.join(skillPath, "SKILL.md");
+      if (fs.existsSync(docPath)) {
+        return { path: skillPath, targetId: target.id };
+      }
     }
   }
   return null;

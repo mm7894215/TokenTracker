@@ -12,6 +12,7 @@ process.env.HOME = sandboxHome;
 process.env.USERPROFILE = sandboxHome;
 process.env.TOKENTRACKER_GROK_HOME = path.join(sandboxHome, ".grok");
 delete process.env.GROK_HOME;
+delete process.env.TOKENTRACKER_ANTIGRAVITY_HOME;
 
 const skills = require("../src/lib/skills-manager");
 
@@ -112,5 +113,75 @@ describe("skills-manager importLocalSkill re-sync", () => {
 
     // cleanup: uninstall managed skill
     skills.uninstallSkill(third.id);
+  });
+});
+
+describe("skills-manager antigravity target", () => {
+  const mainSkillsDir = path.join(sandboxHome, ".gemini", "antigravity", "skills");
+  const ideSkillsDir = path.join(sandboxHome, ".gemini", "antigravity-ide", "skills");
+  const skillName = "ag-skill";
+
+  before(() => {
+    // Create both Antigravity main-app and IDE parent dirs so dirs() returns both
+    fs.mkdirSync(path.join(sandboxHome, ".gemini", "antigravity"), { recursive: true });
+    fs.mkdirSync(path.join(sandboxHome, ".gemini", "antigravity-ide"), { recursive: true });
+    // Seed source skill under the main-app dir so findLocalSkillSource picks it up
+    writeLocalSkill(".gemini/antigravity/skills", skillName);
+  });
+
+  it("targetList includes antigravity with the main-app dir as primary path", () => {
+    const target = skills.targetList().find((t) => t.id === "antigravity");
+    assert.ok(target);
+    assert.equal(target.label, "Antigravity");
+    assert.equal(target.path, mainSkillsDir);
+  });
+
+  it("writes to both main-app and IDE dirs in parallel on install + removes both on uninstall", () => {
+    const installed = skills.importLocalSkill(skillName, ["antigravity"]);
+    assert.equal(installed.managed, true);
+    assert.deepEqual(installed.targets, ["antigravity"]);
+    // Both directories should be populated (re-sync writes through dirs() array)
+    assert.ok(fs.existsSync(path.join(mainSkillsDir, skillName, "SKILL.md")));
+    assert.ok(fs.existsSync(path.join(ideSkillsDir, skillName, "SKILL.md")));
+
+    // Drop antigravity from target set — both dirs should be cleaned
+    const cleared = skills.setSkillTargets(installed.id, []);
+    assert.deepEqual(cleared.targets, []);
+    assert.ok(!fs.existsSync(path.join(mainSkillsDir, skillName)));
+    assert.ok(!fs.existsSync(path.join(ideSkillsDir, skillName)));
+
+    skills.uninstallSkill(installed.id);
+  });
+
+  it("TOKENTRACKER_ANTIGRAVITY_HOME forces a single override path", () => {
+    const overrideHome = path.join(sandboxHome, "custom-ag");
+    const overrideSkill = "ag-skill-override";
+    const prev = process.env.TOKENTRACKER_ANTIGRAVITY_HOME;
+    process.env.TOKENTRACKER_ANTIGRAVITY_HOME = overrideHome;
+    try {
+      // targetList sees the override
+      const target = skills.targetList().find((t) => t.id === "antigravity");
+      assert.equal(target.path, path.join(overrideHome, "skills"));
+
+      // Seed source under the override path so findLocalSkillSource locates it
+      const seedDir = path.join(overrideHome, "skills", overrideSkill);
+      fs.mkdirSync(seedDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(seedDir, "SKILL.md"),
+        "---\nname: Override Skill\ndescription: forced override\n---\n",
+      );
+
+      const installed = skills.importLocalSkill(overrideSkill, ["antigravity"]);
+      assert.deepEqual(installed.targets, ["antigravity"]);
+      // override path written
+      assert.ok(fs.existsSync(path.join(overrideHome, "skills", overrideSkill, "SKILL.md")));
+      // default-discovery paths must NOT receive a copy when override is set
+      assert.ok(!fs.existsSync(path.join(mainSkillsDir, overrideSkill)));
+      assert.ok(!fs.existsSync(path.join(ideSkillsDir, overrideSkill)));
+      skills.uninstallSkill(installed.id);
+    } finally {
+      if (prev === undefined) delete process.env.TOKENTRACKER_ANTIGRAVITY_HOME;
+      else process.env.TOKENTRACKER_ANTIGRAVITY_HOME = prev;
+    }
   });
 });

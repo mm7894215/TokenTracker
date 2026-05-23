@@ -37,6 +37,7 @@ beforeEach(() => {
     targets: [
       { id: "claude", label: "Claude" },
       { id: "grok", label: "Grok" },
+      { id: "antigravity", label: "Antigravity" },
     ],
     skills: [
       {
@@ -44,7 +45,7 @@ beforeEach(() => {
         name: "Sample Skill",
         directory: "sample-skill",
         description: "Keeps the installed list visible.",
-        targets: ["claude", "grok"],
+        targets: ["claude", "grok", "antigravity"],
         managed: true,
       },
     ],
@@ -69,6 +70,7 @@ describe("SkillsPage", () => {
     expect(await screen.findByText("Sample Skill")).toBeInTheDocument();
     expect(screen.getByText("Keeps the installed list visible.")).toBeInTheDocument();
     expect(screen.getByText("Grok")).toBeInTheDocument();
+    expect(screen.getByText("Antigravity")).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.queryByText(copy("skills.empty.my"))).not.toBeInTheDocument();

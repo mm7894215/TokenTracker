@@ -10,6 +10,7 @@ process.env.HOME = sandboxHome;
 process.env.USERPROFILE = sandboxHome;
 process.env.TOKENTRACKER_GROK_HOME = path.join(sandboxHome, ".grok");
 delete process.env.GROK_HOME;
+delete process.env.TOKENTRACKER_ANTIGRAVITY_HOME;
 
 const { createLocalApiHandler } = require("../src/lib/local-api");
 
@@ -130,6 +131,10 @@ describe("/functions/tokentracker-skills auth + input", () => {
     assert.ok(Array.isArray(body.targets));
     assert.ok(Array.isArray(body.skills));
     assert.ok(body.targets.some((target) => target.id === "grok" && target.label === "Grok"));
+    assert.ok(
+      body.targets.some((target) => target.id === "antigravity" && target.label === "Antigravity"),
+      "Antigravity must appear in installed-skills targets",
+    );
   });
 
   it("surfaces addRepo validation error via 500 with message", async () => {
