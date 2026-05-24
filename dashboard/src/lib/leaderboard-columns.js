@@ -14,7 +14,7 @@ export const LEADERBOARD_TOKEN_COLUMNS = [
   { key: "kimi_tokens", copyKey: "leaderboard.column.kimi", icon: "/brand-logos/kimi.svg" },
   { key: "opencode_tokens", copyKey: "leaderboard.column.opencode", icon: "/brand-logos/opencode.svg" },
   { key: "openclaw_tokens", copyKey: "leaderboard.column.openclaw", icon: "/brand-logos/openclaw.svg" },
-  { key: "hermes_tokens", copyKey: "leaderboard.column.hermes", icon: null },
+  { key: "hermes_tokens", copyKey: "leaderboard.column.hermes", icon: "/brand-logos/hermes.svg" },
   { key: "other_tokens", copyKey: "leaderboard.column.supplemental", icon: null },
 ];
 
