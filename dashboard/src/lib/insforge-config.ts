@@ -14,21 +14,86 @@ export function getInsforgeRemoteUrl(): string {
   ).trim();
 }
 
+function isLoopbackDashboardHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]";
+}
+
+function normalizeAllowedHost(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const raw = value.trim();
+  if (!raw || raw.includes("*") || /\s/.test(raw)) return null;
+  try {
+    const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`;
+    const url = new URL(withScheme);
+    if (!url.hostname || url.username || url.password) return null;
+    return url.hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function normalizeAllowedHosts(values: unknown): string[] {
+  const raw = Array.isArray(values) ? values : [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    const host = normalizeAllowedHost(item);
+    if (!host || seen.has(host)) continue;
+    seen.add(host);
+    out.push(host);
+  }
+  return out;
+}
+
+type ServeConfig = { allowedHosts: string[] };
+
+let cachedServeConfig: ServeConfig = { allowedHosts: [] };
+
+export async function loadInsforgeServeConfig(fetchImpl: typeof fetch = fetch): Promise<ServeConfig> {
+  if (typeof window === "undefined" || typeof fetchImpl !== "function") return cachedServeConfig;
+  try {
+    const res = await fetchImpl("/api/dashboard-config", {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    if (!res.ok) return cachedServeConfig;
+    const data = await res.json();
+    cachedServeConfig = { allowedHosts: normalizeAllowedHosts(data?.allowedHosts) };
+  } catch {
+    // Public deployments do not serve this local CLI endpoint.
+  }
+  return cachedServeConfig;
+}
+
+function isLocalDashboardAuthProxyLocation(location: Location, allowedHosts: string[]): boolean {
+  if (location.protocol !== "http:" && location.protocol !== "https:") return false;
+  if (isLoopbackDashboardHost(location.hostname)) return true;
+  return allowedHosts.includes(location.hostname.toLowerCase());
+}
+
+export function resolveInsforgeBaseUrlForLocation(
+  location: Location | null | undefined,
+  remoteUrl: string,
+  allowedHosts = cachedServeConfig.allowedHosts,
+): string {
+  if (location && isLocalDashboardAuthProxyLocation(location, normalizeAllowedHosts(allowedHosts))) {
+    return location.origin.replace(/\/$/, "");
+  }
+  return remoteUrl.trim();
+}
+
 /**
- * SDK baseUrl：localhost 时指向自己（走 vite proxy 避免跨域 cookie 问题），
- * 部署后直接指向云端。
+ * SDK baseUrl: local CLI/Vite dashboard origins point at themselves (same-origin
+ * auth proxy, avoiding cross-origin refresh-cookie loss); public deployments
+ * point directly at InsForge cloud.
  */
 function getInsforgeBaseUrl(): string {
-  const isLocalhost =
-    typeof window !== "undefined" &&
-    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-  if (isLocalhost) return window.location.origin;
-  const env = typeof import.meta !== "undefined" ? import.meta.env : undefined;
-  return (
-    env?.VITE_INSFORGE_BASE_URL ||
-    env?.VITE_TOKENTRACKER_BACKEND_BASE_URL ||
-    ""
-  ).trim();
+  const remoteUrl = getInsforgeRemoteUrl();
+  return resolveInsforgeBaseUrlForLocation(
+    typeof window !== "undefined" ? window.location : null,
+    remoteUrl,
+  );
 }
 
 export function getInsforgeAnonKey(): string {

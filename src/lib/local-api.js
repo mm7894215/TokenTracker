@@ -457,13 +457,45 @@ function isLoopbackHostname(hostname) {
   return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1" || hostname === "[::1]";
 }
 
-function hasAllowedLoopbackOrigin(headers = {}) {
+function normalizeAllowedHost(value) {
+  if (typeof value !== "string") return null;
+  const raw = value.trim();
+  if (!raw || raw.includes("*") || /\s/.test(raw)) return null;
+  try {
+    const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`;
+    const url = new URL(withScheme);
+    if (!url.hostname || url.username || url.password) return null;
+    return url.hostname.toLowerCase();
+  } catch (_e) {
+    return null;
+  }
+}
+
+function normalizeAllowedHosts(values) {
+  const raw = Array.isArray(values) ? values : [values];
+  const out = [];
+  const seen = new Set();
+  for (const item of raw) {
+    const host = normalizeAllowedHost(item);
+    if (!host || seen.has(host)) continue;
+    seen.add(host);
+    out.push(host);
+  }
+  return out;
+}
+
+function hasAllowedLoopbackOrigin(headers = {}, allowedHosts = []) {
+  const allowed = new Set(normalizeAllowedHosts(allowedHosts));
   const candidates = [headers.origin, headers.referer];
   for (const raw of candidates) {
     if (raw == null || raw === "") continue;
     try {
       const url = new URL(String(raw));
-      if (url.protocol !== "http:" || !isLoopbackHostname(url.hostname)) return false;
+      if (!["http:", "https:"].includes(url.protocol)) return false;
+      const host = url.hostname.toLowerCase();
+      if (url.protocol === "http:" && isLoopbackHostname(host)) continue;
+      if (allowed.has(host)) continue;
+      return false;
     } catch (_e) {
       return false;
     }
@@ -668,8 +700,9 @@ function rewriteIpCheckHtml(html) {
 // Main handler factory
 // ---------------------------------------------------------------------------
 
-function createLocalApiHandler({ queuePath }) {
+function createLocalApiHandler({ queuePath, allowedHosts = [] } = {}) {
   const qp = queuePath || resolveQueuePath();
+  const allowedLocalOriginHosts = normalizeAllowedHosts(allowedHosts);
 
   // Server-side cookie relay: captures auth cookies from InsForge cloud responses
   // so that both browser and WKWebView share the same login session via the proxy.
@@ -839,7 +872,7 @@ function createLocalApiHandler({ queuePath }) {
       ? headerToken.trim()
       : cookieToken || "";
     if (!token || token !== localAuthToken) return false;
-    return hasAllowedLoopbackOrigin(req?.headers || {});
+    return hasAllowedLoopbackOrigin(req?.headers || {}, allowedLocalOriginHosts);
   }
 
   return async function handleLocalApi(req, res, url) {
