@@ -221,6 +221,48 @@ test("refresh requests with csrf context still receive persisted relay cookies",
   });
 });
 
+test("refresh requests prefer persisted relay auth over stale client cookies", async () => {
+  await withTempHome(async (home) => {
+    const cookiePath = getCookiePath(home);
+    await fs.mkdir(path.dirname(cookiePath), { recursive: true });
+    await fs.writeFile(
+      cookiePath,
+      JSON.stringify({
+        insforge_refresh_token: "insforge_refresh_token=persisted-refresh-token; Path=/api/auth; HttpOnly",
+        insforge_csrf_token: "insforge_csrf_token=persisted-csrf; Path=/; SameSite=Lax",
+      }),
+      "utf8",
+    );
+
+    let proxiedCookieHeader = null;
+    let proxiedCsrfHeader = null;
+    globalThis.fetch = async (_url, options = {}) => {
+      proxiedCookieHeader = options.headers?.cookie || "";
+      proxiedCsrfHeader = options.headers?.["x-csrf-token"] || options.headers?.["X-CSRF-Token"] || "";
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    };
+
+    const handler = createLocalApiHandler({ queuePath: path.join(home, "queue.jsonl") });
+    const req = createRequest({
+      method: "POST",
+      headers: {
+        cookie: "insforge_refresh_token=stale-client-token; insforge_csrf_token=stale-client-csrf",
+        "x-csrf-token": "stale-client-csrf",
+      },
+    });
+    const res = createResponse();
+
+    const handled = await handler(req, res, new URL("http://localhost/api/auth/refresh"));
+
+    assert.equal(handled, true);
+    assert.equal(res.statusCode, 200);
+    assert.match(proxiedCookieHeader, /insforge_refresh_token=persisted-refresh-token/);
+    assert.doesNotMatch(proxiedCookieHeader, /stale-client-token/);
+    assert.match(proxiedCookieHeader, /insforge_csrf_token=persisted-csrf/);
+    assert.equal(proxiedCsrfHeader, "persisted-csrf");
+  });
+});
+
 test("stale refresh csrf errors do not clear relay cookies when no relay cookies were replayed", async () => {
   await withTempHome(async (home) => {
     const cookiePath = getCookiePath(home);

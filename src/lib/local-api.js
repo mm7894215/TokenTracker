@@ -837,9 +837,10 @@ function createLocalApiHandler({ queuePath, allowedHosts = [] } = {}) {
     return typeof value === "string" ? value : "";
   }
 
-  function buildRelayCookieHeader(clientCookieHeader) {
+  function buildRelayCookieHeader(clientCookieHeader, { relayPrecedenceNames = [] } = {}) {
     const normalizedClientCookieHeader = normalizeCookieHeader(clientCookieHeader);
     if (relayCookies.size === 0) return normalizedClientCookieHeader;
+    const relayPrecedence = new Set(relayPrecedenceNames);
     const clientPairs = new Map();
     if (normalizedClientCookieHeader) {
       for (const part of normalizedClientCookieHeader.split(";")) {
@@ -849,9 +850,10 @@ function createLocalApiHandler({ queuePath, allowedHosts = [] } = {}) {
         if (n) clientPairs.set(n, part.trim());
       }
     }
-    // Merge relay cookies (client takes precedence)
+    // Merge relay cookies. Normal requests keep client precedence; refresh
+    // recovery can opt relay cookies into precedence over stale WebView cookies.
     for (const [name, raw] of relayCookies) {
-      if (clientPairs.has(name)) continue;
+      if (clientPairs.has(name) && !relayPrecedence.has(name)) continue;
       const scIdx = raw.indexOf(";");
       const pair = scIdx > 0 ? raw.substring(0, scIdx).trim() : raw;
       clientPairs.set(name, pair);
@@ -930,7 +932,7 @@ function createLocalApiHandler({ queuePath, allowedHosts = [] } = {}) {
         const hasClientCookie = normalizeCookieHeader(proxyHeaders["cookie"]).trim().length > 0;
         const hasCsrfHeader = typeof proxyHeaders["x-csrf-token"] === "string" && proxyHeaders["x-csrf-token"].trim().length > 0;
         const relayCsrfToken = getRelayCookieValue(csrfRelayCookieName);
-        if (p === "/api/auth/refresh" && !hasCsrfHeader && relayCsrfToken) {
+        if (p === "/api/auth/refresh" && relayCsrfToken) {
           proxyHeaders["x-csrf-token"] = relayCsrfToken;
         }
         const hasEffectiveCsrfHeader =
@@ -951,7 +953,11 @@ function createLocalApiHandler({ queuePath, allowedHosts = [] } = {}) {
         // Invalid CSRF errors on startup.
         const originalCookieHeader = normalizeCookieHeader(proxyHeaders["cookie"]);
         const mergedCookie = shouldInjectRelayCookies
-          ? buildRelayCookieHeader(originalCookieHeader)
+          ? buildRelayCookieHeader(originalCookieHeader, {
+              relayPrecedenceNames: p === "/api/auth/refresh"
+                ? [csrfRelayCookieName, "insforge_refresh_token"]
+                : [],
+            })
           : originalCookieHeader;
         const injectedRelayCookies =
           shouldInjectRelayCookies && relayCookies.size > 0 && mergedCookie !== originalCookieHeader;
