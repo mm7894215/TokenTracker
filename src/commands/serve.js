@@ -87,7 +87,7 @@ async function cmdServe(argv) {
   }
 
   // 3. Create handler
-  const handleApi = createLocalApiHandler({ queuePath });
+  const handleApi = createLocalApiHandler({ queuePath, allowedHosts: opts.allowedHosts });
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -104,6 +104,11 @@ async function cmdServe(argv) {
       }
 
       // API routes
+      if (url.pathname === "/api/dashboard-config") {
+        serveDashboardConfig(res, { allowedHosts: opts.allowedHosts });
+        return;
+      }
+
       if (
         url.pathname.startsWith("/functions/")
         || url.pathname.startsWith("/api/")
@@ -224,19 +229,66 @@ function resolveDashboardDir() {
   return null;
 }
 
+function splitHostList(value) {
+  if (Array.isArray(value)) return value.flatMap(splitHostList);
+  if (typeof value !== "string") return [];
+  return value.split(",").map((entry) => entry.trim()).filter(Boolean);
+}
+
+function normalizeAllowedHost(value) {
+  if (typeof value !== "string") return null;
+  const raw = value.trim();
+  if (!raw || raw.includes("*") || /\s/.test(raw)) return null;
+  try {
+    const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`;
+    const url = new URL(withScheme);
+    if (!url.hostname || url.username || url.password) return null;
+    return url.hostname.toLowerCase();
+  } catch (_e) {
+    return null;
+  }
+}
+
+function normalizeAllowedHosts(values) {
+  const out = [];
+  const seen = new Set();
+  for (const item of splitHostList(values)) {
+    const host = normalizeAllowedHost(item);
+    if (!host || seen.has(host)) continue;
+    seen.add(host);
+    out.push(host);
+  }
+  return out;
+}
+
+function serveDashboardConfig(res, { allowedHosts } = {}) {
+  const body = Buffer.from(JSON.stringify({ allowedHosts: normalizeAllowedHosts(allowedHosts) }), "utf8");
+  res.writeHead(200, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Length": body.length,
+    "Cache-Control": "no-store",
+  });
+  res.end(body);
+}
+
 function parseArgs(argv) {
-  const opts = { port: DEFAULT_PORT, open: true, sync: true };
+  const opts = { port: DEFAULT_PORT, open: true, sync: true, allowedHosts: [] };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--port" && i + 1 < argv.length) {
       const n = parseInt(argv[++i], 10);
       if (Number.isFinite(n) && n > 0 && n < 65536) opts.port = n;
+    } else if (arg === "--allowed-hosts" && i + 1 < argv.length) {
+      opts.allowedHosts.push(...normalizeAllowedHosts(argv[++i]));
+    } else if (arg.startsWith("--allowed-hosts=")) {
+      opts.allowedHosts.push(...normalizeAllowedHosts(arg.slice("--allowed-hosts=".length)));
     } else if (arg === "--no-open") {
       opts.open = false;
     } else if (arg === "--no-sync") {
       opts.sync = false;
     }
   }
+  opts.allowedHosts = normalizeAllowedHosts(opts.allowedHosts);
   return opts;
 }
 
@@ -246,4 +298,7 @@ module.exports = {
   NPM_PACKAGE_NAME,
   LOCAL_BIND_HOST,
   getLocalServerUrl,
+  parseArgs,
+  normalizeAllowedHosts,
+  serveDashboardConfig,
 };

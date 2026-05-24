@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { getOrCreateInsforgeClient, isCloudInsforgeConfigured } from "../lib/insforge-config";
+import { getOrCreateInsforgeClient, isCloudInsforgeConfigured, loadInsforgeServeConfig } from "../lib/insforge-config";
 import { clearCloudDeviceSession } from "../lib/cloud-sync-prefs";
 import { isLikelyExpiredAccessToken } from "../lib/auth-token";
 import { getPublicVisibility } from "../lib/api";
@@ -63,13 +63,21 @@ export function InsforgeAuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!isCloudInsforgeConfigured()) {
-      setClient(null);
-      setUser(null);
-      setLoading(false);
-      return;
-    }
-    setClient(getOrCreateInsforgeClient());
+    let active = true;
+    (async () => {
+      await loadInsforgeServeConfig();
+      if (!active) return;
+      if (!isCloudInsforgeConfigured()) {
+        setClient(null);
+        setUser(null);
+        setLoading(false);
+        return;
+      }
+      setClient(getOrCreateInsforgeClient());
+    })();
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {

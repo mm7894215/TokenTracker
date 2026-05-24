@@ -207,3 +207,32 @@ test("auth bridge mutation requires the local auth token", async () => {
     restore();
   }
 });
+
+test("auth bridge mutation accepts a configured allowed host origin", async () => {
+  const { mod, restore } = loadLocalApiWithSpawn(createSuccessfulSpawn([]));
+
+  try {
+    const handler = mod.createLocalApiHandler({
+      queuePath: path.join(process.cwd(), "tmp-queue.jsonl"),
+      allowedHosts: ["preview.example.org"],
+    });
+    const localAuthToken = await getLocalAuthToken(handler);
+    const req = createRequest({
+      method: "PUT",
+      headers: {
+        "x-tokentracker-local-auth": localAuthToken,
+        origin: "https://preview.example.org",
+      },
+      body: JSON.stringify({ native: true }),
+    });
+    const res = createResponse();
+
+    const handled = await handler(req, res, new URL("http://127.0.0.1/api/auth-bridge/verifier"));
+
+    assert.equal(handled, true);
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(JSON.parse(res.body.toString("utf8")), { ok: true });
+  } finally {
+    restore();
+  }
+});
