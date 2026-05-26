@@ -34,6 +34,11 @@ export function InsforgeUserHeaderControls({ className, variant = "header", coll
   const { openLoginModal } = useLoginModal();
   const navigate = useNavigate();
   const avatarUrl = useMemo(() => pickAvatarUrl(user), [user]);
+  const [avatarFailed, setAvatarFailed] = React.useState(false);
+
+  React.useEffect(() => {
+    setAvatarFailed(false);
+  }, [avatarUrl]);
 
   if (!enabled) return null;
 
@@ -116,7 +121,7 @@ export function InsforgeUserHeaderControls({ className, variant = "header", coll
       >
         {isSidebar ? (
           <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-            {avatarUrl ? (
+            {avatarUrl && !avatarFailed ? (
               <img
                 src={avatarUrl}
                 alt=""
@@ -124,6 +129,7 @@ export function InsforgeUserHeaderControls({ className, variant = "header", coll
                 height={20}
                 className="h-5 w-5 rounded-full object-cover ring-1 ring-oai-gray-300 dark:ring-oai-gray-700"
                 referrerPolicy="no-referrer"
+                onError={() => setAvatarFailed(true)}
               />
             ) : (
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-oai-brand-600 text-[9px] font-semibold text-white ring-1 ring-oai-brand-500/50">
@@ -131,7 +137,7 @@ export function InsforgeUserHeaderControls({ className, variant = "header", coll
               </span>
             )}
           </span>
-        ) : avatarUrl ? (
+        ) : avatarUrl && !avatarFailed ? (
           <img
             src={avatarUrl}
             alt=""
@@ -139,6 +145,7 @@ export function InsforgeUserHeaderControls({ className, variant = "header", coll
             height={32}
             className="h-8 w-8 rounded-full object-cover ring-1 ring-oai-gray-300 dark:ring-oai-gray-700 shrink-0"
             referrerPolicy="no-referrer"
+            onError={() => setAvatarFailed(true)}
           />
         ) : (
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-oai-brand-600 text-xs font-semibold text-white ring-1 ring-oai-brand-500/50">
