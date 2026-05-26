@@ -14,6 +14,13 @@ const {
 const SYNC_TIMEOUT_MS = 120_000;
 const TRACKER_BIN = path.resolve(__dirname, "../../bin/tracker.js");
 
+// Avatar proxy (see /api/avatar-proxy below). In-memory LRU; survives the
+// CLI server lifetime, which is good enough — the dashboard reloads cheaply.
+const AVATAR_PROXY_TTL_MS = 60 * 60 * 1000; // 1h
+const AVATAR_PROXY_MAX_BYTES = 512 * 1024; // 512 KiB per image
+const AVATAR_PROXY_MAX_ENTRIES = 64;
+const avatarProxyCache = new Map();
+
 // ---------------------------------------------------------------------------
 // Per-model pricing — delegated to src/lib/pricing/
 //   - CURATED overrides (kiro-*, hy3-*, composer-*, kimi-for-coding, etc.)
@@ -1096,6 +1103,111 @@ function createLocalApiHandler({ queuePath }) {
         res.end(resBody);
       } catch (e) {
         json(res, { error: `IP check proxy error: ${e?.message || e}` }, 502);
+      }
+      return true;
+    }
+
+    // --- avatar proxy: fetch third-party avatars server-side ---
+    // Why: WKWebView in TokenTrackerBar fails to load some users' Google /
+    // GitHub avatars directly (network-stack / proxy / TLS quirks vary by
+    // environment), even when the same URL renders fine in Safari. Proxying
+    // through Node's fetch — which honors system proxy + cookies-of-none —
+    // produces a same-origin <img> the WKWebView always accepts.
+    // Lock-down: GET only; host allowlist of well-known avatar CDNs (no open
+    // proxy); strip cookies/auth; small in-memory cache.
+    if (p === "/api/avatar-proxy") {
+      const method = String(req.method || "GET").toUpperCase();
+      if (method !== "GET" && method !== "HEAD") {
+        json(res, { error: "Method Not Allowed" }, 405);
+        return true;
+      }
+      const target = url.searchParams.get("url");
+      if (!target) {
+        json(res, { error: "Missing url" }, 400);
+        return true;
+      }
+      let parsed;
+      try {
+        parsed = new URL(target);
+      } catch {
+        json(res, { error: "Invalid url" }, 400);
+        return true;
+      }
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+        json(res, { error: "Only http(s) allowed" }, 400);
+        return true;
+      }
+      const AVATAR_HOST_ALLOWLIST = [
+        "lh3.googleusercontent.com",
+        "lh4.googleusercontent.com",
+        "lh5.googleusercontent.com",
+        "lh6.googleusercontent.com",
+        "avatars.githubusercontent.com",
+        "secure.gravatar.com",
+        "www.gravatar.com",
+        "gravatar.com",
+        "cdn.discordapp.com",
+        "pbs.twimg.com",
+        "abs.twimg.com",
+        "api.dicebear.com",
+      ];
+      const hostOk = AVATAR_HOST_ALLOWLIST.some(
+        (h) => parsed.hostname === h || parsed.hostname.endsWith(`.${h}`),
+      );
+      if (!hostOk) {
+        json(res, { error: "Host not allowed" }, 403);
+        return true;
+      }
+
+      const cacheKey = parsed.toString();
+      const now = Date.now();
+      const cached = avatarProxyCache.get(cacheKey);
+      if (cached && now - cached.fetchedAt < AVATAR_PROXY_TTL_MS) {
+        res.writeHead(200, {
+          "Content-Type": cached.contentType,
+          "Cache-Control": "public, max-age=3600",
+          "X-Avatar-Cache": "HIT",
+        });
+        res.end(method === "HEAD" ? undefined : cached.body);
+        return true;
+      }
+
+      try {
+        const upstream = await fetch(cacheKey, {
+          method,
+          redirect: "follow",
+          headers: {
+            accept: req.headers["accept"] || "image/*",
+            "accept-language": req.headers["accept-language"] || "en",
+            "user-agent": "TokenTracker/AvatarProxy (https://www.tokentracker.cc)",
+          },
+        });
+        if (!upstream.ok) {
+          json(res, { error: `Upstream ${upstream.status}` }, upstream.status);
+          return true;
+        }
+        const contentType = upstream.headers.get("content-type") || "image/png";
+        if (!contentType.toLowerCase().startsWith("image/")) {
+          json(res, { error: "Not an image" }, 415);
+          return true;
+        }
+        const body = Buffer.from(await upstream.arrayBuffer());
+        if (body.length <= AVATAR_PROXY_MAX_BYTES) {
+          // Simple LRU: drop oldest if over capacity.
+          if (avatarProxyCache.size >= AVATAR_PROXY_MAX_ENTRIES) {
+            const oldestKey = avatarProxyCache.keys().next().value;
+            if (oldestKey) avatarProxyCache.delete(oldestKey);
+          }
+          avatarProxyCache.set(cacheKey, { body, contentType, fetchedAt: now });
+        }
+        res.writeHead(200, {
+          "Content-Type": contentType,
+          "Cache-Control": "public, max-age=3600",
+          "X-Avatar-Cache": "MISS",
+        });
+        res.end(method === "HEAD" ? undefined : body);
+      } catch (e) {
+        json(res, { error: `Avatar proxy error: ${e?.message || e}` }, 502);
       }
       return true;
     }

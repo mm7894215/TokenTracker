@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useInsforgeAuth } from "../contexts/InsforgeAuthContext.jsx";
 import { useLoginModal } from "../contexts/LoginModalContext.jsx";
 import { useLocale } from "../hooks/useLocale.js";
+import { isNativeApp } from "../lib/native-bridge.js";
 import { copy } from "../lib/copy";
 import { cn } from "../lib/cn";
 
@@ -12,6 +13,17 @@ function pickAvatarUrl(user) {
   const prof = user.profile && typeof user.profile === "object" ? user.profile : {};
   const u = meta.avatar_url || meta.picture || prof.avatar_url || user.avatar_url;
   return typeof u === "string" && u.trim() ? u.trim() : null;
+}
+
+// In TokenTrackerBar WKWebView, third-party avatar CDNs (lh3.googleusercontent.com,
+// avatars.githubusercontent.com) intermittently fail to load even when they
+// render fine in Safari. Route them through the local CLI server, which fetches
+// via Node and serves the bytes as same-origin — that path is reliable.
+// On Vercel (no local server) we keep the original URL.
+function resolveAvatarSrc(url) {
+  if (!url) return null;
+  if (!isNativeApp()) return url;
+  return `/api/avatar-proxy?url=${encodeURIComponent(url)}`;
 }
 
 function initialsFromName(name) {
@@ -34,11 +46,12 @@ export function InsforgeUserHeaderControls({ className, variant = "header", coll
   const { openLoginModal } = useLoginModal();
   const navigate = useNavigate();
   const avatarUrl = useMemo(() => pickAvatarUrl(user), [user]);
+  const avatarSrc = useMemo(() => resolveAvatarSrc(avatarUrl), [avatarUrl]);
   const [avatarFailed, setAvatarFailed] = React.useState(false);
 
   React.useEffect(() => {
     setAvatarFailed(false);
-  }, [avatarUrl]);
+  }, [avatarSrc]);
 
   if (!enabled) return null;
 
@@ -121,9 +134,9 @@ export function InsforgeUserHeaderControls({ className, variant = "header", coll
       >
         {isSidebar ? (
           <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-            {avatarUrl && !avatarFailed ? (
+            {avatarSrc && !avatarFailed ? (
               <img
-                src={avatarUrl}
+                src={avatarSrc}
                 alt=""
                 width={20}
                 height={20}
@@ -143,9 +156,9 @@ export function InsforgeUserHeaderControls({ className, variant = "header", coll
               </span>
             )}
           </span>
-        ) : avatarUrl && !avatarFailed ? (
+        ) : avatarSrc && !avatarFailed ? (
           <img
-            src={avatarUrl}
+            src={avatarSrc}
             alt=""
             width={32}
             height={32}
