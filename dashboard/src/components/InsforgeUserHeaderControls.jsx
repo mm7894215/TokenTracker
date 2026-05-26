@@ -131,6 +131,12 @@ export function InsforgeUserHeaderControls({ className, variant = "header", coll
                 referrerPolicy="no-referrer"
                 onError={() => setAvatarFailed(true)}
               />
+            ) : initialsFromName(displayName) === "?" ? (
+              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-oai-brand-600/30 text-white ring-1 ring-oai-brand-500/50">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="w-3 h-3 opacity-80">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                </svg>
+              </span>
             ) : (
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-oai-brand-600 text-[9px] font-semibold text-white ring-1 ring-oai-brand-500/50">
                 {initialsFromName(displayName)}
@@ -147,6 +153,12 @@ export function InsforgeUserHeaderControls({ className, variant = "header", coll
             referrerPolicy="no-referrer"
             onError={() => setAvatarFailed(true)}
           />
+        ) : initialsFromName(displayName) === "?" ? (
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-oai-brand-600/30 text-white ring-1 ring-oai-brand-500/50">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="w-4 h-4 opacity-80">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+            </svg>
+          </span>
         ) : (
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-oai-brand-600 text-xs font-semibold text-white ring-1 ring-oai-brand-500/50">
             {initialsFromName(displayName)}
