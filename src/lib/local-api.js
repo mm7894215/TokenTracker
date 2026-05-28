@@ -91,11 +91,31 @@ function isLegacyInclusiveCodexRow(row) {
 }
 
 function normalizeQueueRow(row) {
-  if (!isLegacyInclusiveCodexRow(row)) return row;
-  return {
-    ...row,
-    input_tokens: Number(row.input_tokens || 0) - Number(row.cached_input_tokens || 0),
-  };
+  let normalized = row;
+  if (isLegacyInclusiveCodexRow(normalized)) {
+    normalized = {
+      ...normalized,
+      input_tokens:
+        Number(normalized.input_tokens || 0) - Number(normalized.cached_input_tokens || 0),
+    };
+  }
+  // Legacy Cursor rows from versions ≤ 0.26.5 wrote billable_total_tokens = 0
+  // for "Included in Pro" / "Enterprise" / "no charge" records (kind-based
+  // gating in cursor-config.js#normalizeCursorUsage). The dashboard headline
+  // sums billable_total_tokens across sources, so those rows silently
+  // disappeared from the displayed total once any other source contributed
+  // non-zero billable usage (GitHub issue #106). Treat billing and usage as
+  // orthogonal: bump billable up to total_tokens at read time so historical
+  // queue.jsonl entries render correctly without requiring a file rewrite.
+  const sourceName = String(normalized.source || "").toLowerCase();
+  if (sourceName === "cursor") {
+    const totalTokens = Number(normalized.total_tokens || 0);
+    const billable = Number(normalized.billable_total_tokens || 0);
+    if (totalTokens > 0 && billable < totalTokens) {
+      normalized = { ...normalized, billable_total_tokens: totalTokens };
+    }
+  }
+  return normalized;
 }
 
 function readQueueData(queuePath) {

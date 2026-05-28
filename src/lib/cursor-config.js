@@ -347,7 +347,18 @@ function normalizeCursorUsage(record) {
     output_tokens: outputTokens,
     reasoning_output_tokens: 0,
     total_tokens: totalTokens,
-    billable_total_tokens: isCursorBillableKind(record?.kind) ? totalTokens : 0,
+    // Usage tracking and billing are orthogonal: a Cursor Enterprise /
+    // Included-in-Pro request still consumes tokens even when the user
+    // pays nothing for them. Cost is computed independently from
+    // per-column tokens × MODEL_PRICING (see computeRowCost — it never
+    // reads this field), while the dashboard headline reads
+    // billable_total_tokens. Writing 0 here silently hides non-billable
+    // Cursor usage from the headline once any other source pushes the
+    // aggregate billable above 0 (see GitHub issue #106).
+    // isCursorBillableKind is retained for a future paid-vs-included
+    // breakdown via a separate is_billable field, not by overloading the
+    // token count.
+    billable_total_tokens: totalTokens,
   };
 }
 
