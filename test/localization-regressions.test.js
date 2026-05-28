@@ -37,25 +37,30 @@ test("native macOS strings are wired through the Swift localization helpers", ()
   const usageLimitsWidget = read("TokenTrackerBar/TokenTrackerWidget/Widgets/UsageLimitsWidget.swift");
   const sharedWidgetViews = read("TokenTrackerBar/TokenTrackerWidget/Views/SharedWidgetViews.swift");
 
-  // NativeLocalization is the single source of truth for the current locale.
+  // NativeLocalization is the single source of truth for the current locale and
+  // recognises all five supported locales (en, zh-CN, zh-TW, ja, ko).
   assert.ok(nativeLocalization.includes("public static var usesChinese: Bool"));
   assert.ok(nativeLocalization.includes("public static let chineseLocale = \"zh-CN\""));
+  assert.ok(nativeLocalization.includes("public static let traditionalChineseLocale = \"zh-TW\""));
+  assert.ok(nativeLocalization.includes("public static let japaneseLocale = \"ja\""));
+  assert.ok(nativeLocalization.includes("public static let koreanLocale = \"ko\""));
 
-  // Strings.swift goes through the t(en, zh) helper bound to NativeLocalization.
-  assert.ok(strings.includes("NativeLocalization.usesChinese"));
-  assert.ok(strings.includes('t("Server Unavailable", "服务器不可用")'));
-  assert.ok(strings.includes('t("Sync Now", "立即同步")'));
-  assert.ok(strings.includes('t("Today", "今日")'));
-  assert.ok(strings.includes('t("Settings", "设置")'));
+  // Strings.swift goes through the t(en, zhCN, zhTW, ja, ko) helper bound to
+  // NativeLocalization.currentResolvedLocale.
+  assert.ok(strings.includes("NativeLocalization.currentResolvedLocale"));
+  assert.ok(strings.includes('t("Server Unavailable", "服务器不可用", "伺服器不可用", "サーバーを利用できません", "서버를 사용할 수 없음")'));
+  assert.ok(strings.includes('t("Sync Now", "立即同步", "立即同步", "今すぐ同期", "지금 동기화")'));
+  assert.ok(strings.includes('t("Today", "今日", "今日", "今日", "오늘")'));
+  assert.ok(strings.includes('t("Settings", "设置", "設定", "設定", "설정")'));
   // Menu-bar inline labels stay English on purpose — they sit next to the token
   // count so they should never swap with system language.
   assert.ok(strings.includes('static var menuTokenLabel: String { "Tokens" }'));
   assert.ok(strings.includes('static var menuCostLabel: String { "Cost" }'));
 
   // WidgetStrings mirrors the same helper for the WidgetKit target.
-  assert.ok(widgetStrings.includes("NativeLocalization.usesChinese"));
-  assert.ok(widgetStrings.includes('t("Usage", "使用情况")'));
-  assert.ok(widgetStrings.includes('t("Activity Heatmap", "活跃热力图")'));
+  assert.ok(widgetStrings.includes("NativeLocalization.currentResolvedLocale"));
+  assert.ok(widgetStrings.includes('t("Usage", "使用情况", "使用情況", "使用状況", "사용량")'));
+  assert.ok(widgetStrings.includes('t("Activity Heatmap", "活跃热力图", "活躍熱力圖", "アクティビティヒートマップ", "활동 히트맵")'));
 
   // DateHelpers / UsageLimitsView / TopModelsView must not re-implement the
   // en/zh branch inline — they must route through Strings.* so the copy table

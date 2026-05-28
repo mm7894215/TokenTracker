@@ -2,8 +2,11 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useLocale } from "../../../hooks/useLocale.js";
 import { setCopyLocale, copy } from "../../../lib/copy";
-import { EN_LOCALE, LOCALE_STORAGE_KEY, ZH_CN_LOCALE } from "../../../lib/locale";
+import { EN_LOCALE, LOCALE_STORAGE_KEY, ZH_CN_LOCALE, ZH_TW_LOCALE } from "../../../lib/locale";
+import zhTwCore from "../../../content/i18n/zh-TW/core.json";
 import { LocaleProvider } from "../LocaleProvider.jsx";
+
+const ZH_TW_LANGUAGE_LABEL = zhTwCore["settings.appearance.language.label"];
 
 function createStorage(seed = {}) {
   const store = { ...seed };
@@ -29,6 +32,9 @@ function LocaleProbe() {
       <span data-testid="language-label">{copy("settings.appearance.language.label")}</span>
       <button type="button" onClick={() => setLocale(ZH_CN_LOCALE)}>
         zh
+      </button>
+      <button type="button" onClick={() => setLocale(ZH_TW_LOCALE)}>
+        zh-tw
       </button>
       <button type="button" onClick={() => setLocale(EN_LOCALE)}>
         en
@@ -64,6 +70,13 @@ it("updates localized copy immediately when the language changes", async () => {
 
   expect(screen.getByTestId("language-label")).toHaveTextContent("语言");
   expect(document.documentElement.lang).toBe("zh-CN");
+
+  await act(async () => {
+    await user.click(screen.getByRole("button", { name: "zh-tw" }));
+  });
+
+  expect(screen.getByTestId("language-label")).toHaveTextContent(ZH_TW_LANGUAGE_LABEL);
+  expect(document.documentElement.lang).toBe("zh-TW");
 
   await act(async () => {
     await user.click(screen.getByRole("button", { name: "en" }));

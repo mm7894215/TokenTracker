@@ -3,7 +3,7 @@ import { ChevronDown, Info, Languages, Monitor, Moon, Sun } from "lucide-react";
 import { useTheme } from "../../hooks/useTheme.js";
 import { useLocale } from "../../hooks/useLocale.js";
 import { useCurrency } from "../../hooks/useCurrency.js";
-import { EN_LOCALE, SYSTEM_LOCALE, ZH_CN_LOCALE } from "../../lib/locale";
+import { EN_LOCALE, JA_LOCALE, KO_LOCALE, SYSTEM_LOCALE, ZH_CN_LOCALE, ZH_TW_LOCALE } from "../../lib/locale";
 import { CURRENCY_USD, getSupportedCurrencies } from "../../lib/currency";
 import { copy } from "../../lib/copy";
 import { cn } from "../../lib/cn";
@@ -19,9 +19,12 @@ function buildThemeOptions() {
 
 function buildLanguageOptions() {
   return [
-    { value: SYSTEM_LOCALE, label: copy("settings.appearance.language.system"), Icon: Monitor },
-    { value: EN_LOCALE, label: copy("settings.appearance.language.english"), Icon: Languages },
-    { value: ZH_CN_LOCALE, label: copy("settings.appearance.language.chinese"), Icon: Languages },
+    { value: SYSTEM_LOCALE, label: copy("settings.appearance.language.system") },
+    { value: EN_LOCALE, label: copy("settings.appearance.language.english") },
+    { value: ZH_CN_LOCALE, label: copy("settings.appearance.language.chinese") },
+    { value: ZH_TW_LOCALE, label: copy("settings.appearance.language.traditional_chinese") },
+    { value: JA_LOCALE, label: copy("settings.appearance.language.japanese") },
+    { value: KO_LOCALE, label: copy("settings.appearance.language.korean") },
   ];
 }
 
@@ -43,6 +46,38 @@ function buildSourceTooltip(rateSource, rateFetchedAt) {
     ? copy("settings.appearance.currency.rate_updated", { when: updatedAt })
     : copy("settings.appearance.currency.rate_never");
   return `${source} · ${when}`;
+}
+
+function LanguageDropdown({ locale, setLocale }) {
+  const options = buildLanguageOptions();
+  return (
+    <div className="relative inline-flex">
+      <Languages
+        className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-oai-gray-500 dark:text-oai-gray-400"
+        aria-hidden
+      />
+      <select
+        value={locale}
+        onChange={(e) => setLocale(e.target.value)}
+        aria-label={copy("settings.appearance.language.label")}
+        className={cn(
+          "appearance-none rounded-lg border border-oai-gray-200 bg-white py-1.5 pl-8 pr-8 text-xs font-medium text-oai-black",
+          "transition-colors hover:bg-oai-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500",
+          "dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white dark:hover:bg-oai-gray-800",
+        )}
+      >
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+      <ChevronDown
+        className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-oai-gray-500 dark:text-oai-gray-400"
+        aria-hidden
+      />
+    </div>
+  );
 }
 
 function CurrencyDropdown({ currency, setCurrency }) {
@@ -108,7 +143,7 @@ export function AppearanceSection() {
       <SettingsRow
         label={copy("settings.appearance.language.label")}
         hint={copy("settings.appearance.language.hint")}
-        control={<SegmentedControl options={buildLanguageOptions()} value={locale} onChange={setLocale} />}
+        control={<LanguageDropdown locale={locale} setLocale={setLocale} />}
       />
       <SettingsRow
         label={copy("settings.appearance.currency.label")}

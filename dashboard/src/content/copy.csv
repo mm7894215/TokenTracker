@@ -561,6 +561,9 @@ settings.appearance.language.hint,ui,SettingsPage,SettingsPage,language_hint,Use
 settings.appearance.language.system,ui,SettingsPage,SettingsPage,language_system,System,,active
 settings.appearance.language.english,ui,SettingsPage,SettingsPage,language_english,English,,active
 settings.appearance.language.chinese,ui,SettingsPage,SettingsPage,language_chinese,Simplified Chinese,,active
+settings.appearance.language.traditional_chinese,ui,SettingsPage,SettingsPage,language_traditional_chinese,Traditional Chinese,,active
+settings.appearance.language.japanese,ui,SettingsPage,SettingsPage,language_japanese,Japanese,,active
+settings.appearance.language.korean,ui,SettingsPage,SettingsPage,language_korean,Korean,,active
 dashboard.context_breakdown.empty,dashboard,DashboardPage,ContextBreakdownPanel,empty,"No Claude Code activity in the selected period.",,active
 dashboard.context_breakdown.empty_codex,dashboard,DashboardPage,ContextBreakdownPanel,empty_codex,"No Codex activity in the selected period.",,active
 dashboard.context_breakdown.error,dashboard,DashboardPage,ContextBreakdownPanel,error,"Couldn't read Claude Code logs for this view.",,active

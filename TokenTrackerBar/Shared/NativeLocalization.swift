@@ -5,17 +5,36 @@ public enum NativeLocalization {
     public static let systemPreference = "system"
     public static let englishLocale = "en"
     public static let chineseLocale = "zh-CN"
+    public static let traditionalChineseLocale = "zh-TW"
+    public static let japaneseLocale = "ja"
+    public static let koreanLocale = "ko"
 
     private static var sharedDefaults: UserDefaults? {
         UserDefaults(suiteName: WidgetSharedConstants.appGroupIdentifier)
     }
 
+    /// Map a BCP-47-ish language tag to one of the supported resolved locales.
+    /// Traditional Chinese covers the Hant script and the Taiwan/Hong Kong/Macau
+    /// regions; everything else under zh-* (zh, zh-Hans, zh-CN, zh-SG, …) is Simplified.
+    /// Unrecognized tags fall back to English.
+    private static func classify(_ tag: String) -> String {
+        let lower = tag.lowercased()
+        if lower.range(of: #"^zh([-_]|$)"#, options: .regularExpression) != nil {
+            if lower.range(of: #"^zh[-_](hant|tw|hk|mo)([-_]|$)"#, options: .regularExpression) != nil {
+                return traditionalChineseLocale
+            }
+            return chineseLocale
+        }
+        if lower.range(of: #"^ja([-_]|$)"#, options: .regularExpression) != nil { return japaneseLocale }
+        if lower.range(of: #"^ko([-_]|$)"#, options: .regularExpression) != nil { return koreanLocale }
+        return englishLocale
+    }
+
     public static func normalizePreference(_ value: Any?) -> String {
-        guard let raw = value as? String else { return systemPreference }
+        guard let raw = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else { return systemPreference }
         if raw == systemPreference { return systemPreference }
-        return raw.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("zh")
-            ? chineseLocale
-            : englishLocale
+        return classify(raw)
     }
 
     public static var currentPreference: String {
@@ -30,7 +49,8 @@ public enum NativeLocalization {
     }
 
     public static var usesChinese: Bool {
-        currentResolvedLocale == chineseLocale
+        let resolved = currentResolvedLocale
+        return resolved == chineseLocale || resolved == traditionalChineseLocale
     }
 
     public static func resolveLocale(
@@ -48,9 +68,7 @@ public enum NativeLocalization {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first { !$0.isEmpty }
         guard let primary else { return englishLocale }
-        return primary.range(of: #"^zh([-_]|$)"#, options: .regularExpression) != nil
-            ? chineseLocale
-            : englishLocale
+        return classify(primary)
     }
 
     public static func storePreference(_ value: Any?) {
