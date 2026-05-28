@@ -456,6 +456,9 @@ function classifyOneMessage(obj, sessionState, breakdown, toolLedger = null, ski
 }
 
 // Read one session jsonl streaming, in timestamp range, dedup by msgId+reqId.
+// When the same message ID appears multiple times (streaming chunks from a
+// proxy), prefer the chunk with the most tokens — earlier chunks typically
+// report zero while the final chunk carries real usage.
 async function categorizeSessionFile(filePath, { fromIso, toIso, seenHashes }, breakdown, toolLedger = null, skillLedger = null, execLedger = null) {
   let stream;
   try {
@@ -464,8 +467,9 @@ async function categorizeSessionFile(filePath, { fromIso, toIso, seenHashes }, b
     return 0;
   }
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-  const sessionState = { systemPrefixSeen: false };
-  let counted = 0;
+
+  // Buffer entries so we can pick the best per hash before classifying.
+  const localEntries = []; // { obj, hash, total }
 
   for await (const line of rl) {
     if (!line || !line.includes('"usage"')) continue;
@@ -480,17 +484,72 @@ async function categorizeSessionFile(filePath, { fromIso, toIso, seenHashes }, b
     if (fromIso && ts < fromIso) continue;
     if (toIso && ts > toIso) continue;
 
+    const usage = obj?.message?.usage;
+    const total = usage
+      ? Math.max(0, Number(usage.input_tokens || 0)) +
+        Math.max(0, Number(usage.cache_read_input_tokens || 0)) +
+        Math.max(0, Number(usage.cache_creation_input_tokens || 0)) +
+        Math.max(0, Number(usage.output_tokens || 0))
+      : 0;
+
+    const hash = claudeMessageDedupKey(obj);
+    localEntries.push({ obj, hash, total });
+  }
+  rl.close();
+  stream.close?.();
+
+  // Deduplicate: for each hash, keep the entry with the most tokens.
+  // Entries without a hash are always kept.
+  const bestPerHash = new Map(); // hash → { obj, total }
+  const ordered = []; // final list in original order
+  for (const entry of localEntries) {
+    if (!entry.hash) {
+      ordered.push(entry.obj);
+      continue;
+    }
+    const prev = bestPerHash.get(entry.hash);
+    if (!prev) {
+      bestPerHash.set(entry.hash, entry);
+      ordered.push(entry.obj);
+    } else if (entry.total > prev.total) {
+      // Replace: mark old as stale, keep new
+      prev._stale = true;
+      bestPerHash.set(entry.hash, entry);
+    }
+  }
+  // Rebuild ordered list with only best entries, preserving file order
+  const finalOrdered = [];
+  const seenBest = new Set();
+  for (const entry of localEntries) {
+    if (!entry.hash) {
+      finalOrdered.push(entry.obj);
+      continue;
+    }
+    if (seenBest.has(entry.hash)) continue;
+    const best = bestPerHash.get(entry.hash);
+    if (best && !best._stale) {
+      finalOrdered.push(best.obj);
+    }
+    seenBest.add(entry.hash);
+  }
+
+  // Cross-file dedup: skip hashes already seen in other files
+  const toProcess = [];
+  for (const obj of finalOrdered) {
     const hash = claudeMessageDedupKey(obj);
     if (hash) {
       if (seenHashes.has(hash)) continue;
       seenHashes.add(hash);
     }
+    toProcess.push(obj);
+  }
 
+  const sessionState = { systemPrefixSeen: false };
+  let counted = 0;
+  for (const obj of toProcess) {
     classifyOneMessage(obj, sessionState, breakdown, toolLedger, skillLedger, execLedger);
     counted += 1;
   }
-  rl.close();
-  stream.close?.();
   return counted;
 }
 
@@ -1146,7 +1205,9 @@ async function computeClaudeGroundTruthBuckets({ rootDir = null } = {}) {
   const root = rootDir || defaultClaudeProjectsDir();
   const files = listSessionFiles(root);
   const buckets = new Map(); // `${model}|${hourStart}` → totals
-  const seenHashes = new Set();
+  // Map hash → { total, bucketKey } so we can retroactively replace a
+  // zero-token streaming chunk with the final chunk that carries real usage.
+  const seenHashes = new Map();
   const userMessageBuckets = new Map(); // for conversation_count tracking
 
   for (const fp of files) {
@@ -1197,12 +1258,6 @@ async function computeClaudeGroundTruthBuckets({ rootDir = null } = {}) {
       const usage = obj?.message?.usage;
       if (!usage || typeof usage !== "object") continue;
 
-      const hash = claudeMessageDedupKey(obj);
-      if (hash) {
-        if (seenHashes.has(hash)) continue;
-        seenHashes.add(hash);
-      }
-
       const model = (obj?.message?.model || obj?.model || "unknown").trim() || "unknown";
       const ts = typeof obj?.timestamp === "string" ? obj.timestamp : null;
       const hourStart = ts ? toUtcHalfHourStart(ts) : null;
@@ -1214,6 +1269,30 @@ async function computeClaudeGroundTruthBuckets({ rootDir = null } = {}) {
       const outputTok = Math.max(0, Number(usage.output_tokens || 0));
       const reasoningTok = Math.max(0, Number(usage.reasoning_output_tokens || 0));
       const total = inputTok + cacheRead + cacheCreate + outputTok;
+
+      const hash = claudeMessageDedupKey(obj);
+      if (hash) {
+        const prev = seenHashes.get(hash);
+        if (prev) {
+          // Same message ID seen again (streaming chunk). Prefer the entry
+          // with more tokens — the final chunk carries real usage while
+          // earlier chunks report zero.
+          if (total > prev.total) {
+            const prevAcc = buckets.get(prev.bucketKey);
+            if (prevAcc) {
+              prevAcc.input_tokens -= prev.inputTok;
+              prevAcc.cached_input_tokens -= prev.cacheRead;
+              prevAcc.cache_creation_input_tokens -= prev.cacheCreate;
+              prevAcc.output_tokens -= prev.outputTok;
+              prevAcc.reasoning_output_tokens -= prev.reasoningTok;
+              prevAcc.total_tokens -= prev.total;
+            }
+          } else {
+            continue; // existing entry has equal or more tokens, skip this one
+          }
+        }
+        seenHashes.set(hash, { total, bucketKey: `${model}|${hourStart}`, inputTok, cacheRead, cacheCreate, outputTok, reasoningTok });
+      }
 
       const key = `${model}|${hourStart}`;
       let acc = buckets.get(key);
