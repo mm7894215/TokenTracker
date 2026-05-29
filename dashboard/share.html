@@ -23,6 +23,30 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
     <meta name="theme-color" content="#000000" />
     <script>
+      // ES2022 built-in polyfills for WebKit < 15.4 (macOS 12.0 Monterey ships Safari 15.0).
+      // Base UI uses Object.hasOwn and Array.prototype.at lands in Safari 15.4; esbuild
+      // down-levels syntax but never polyfills built-ins. Run before the bundle.
+      (function () {
+        try {
+          if (typeof Object.hasOwn !== "function") {
+            Object.defineProperty(Object, "hasOwn", {
+              value: function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); },
+              configurable: true, writable: true,
+            });
+          }
+          function at(n) {
+            n = Math.trunc(n) || 0;
+            if (n < 0) n += this.length;
+            return n < 0 || n >= this.length ? undefined : this[n];
+          }
+          if (typeof Array.prototype.at !== "function") {
+            Object.defineProperty(Array.prototype, "at", { value: at, configurable: true, writable: true });
+          }
+          if (typeof String.prototype.at !== "function") {
+            Object.defineProperty(String.prototype, "at", { value: at, configurable: true, writable: true });
+          }
+        } catch (e) {}
+      })();
       document.documentElement.classList.add("js");
     </script>
     <style>
