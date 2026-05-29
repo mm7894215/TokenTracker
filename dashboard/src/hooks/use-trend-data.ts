@@ -390,6 +390,17 @@ function addUtcDays(date: Date, days: number) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + days));
 }
 
+const HOURLY_ZERO_FIELDS = [
+  "total_tokens",
+  "billable_total_tokens",
+  "input_tokens",
+  "cached_input_tokens",
+  "cache_creation_input_tokens",
+  "output_tokens",
+  "reasoning_output_tokens",
+  "conversation_count",
+];
+
 function fillDailyGaps(
   rows: any[],
   from: any,
@@ -435,6 +446,86 @@ function fillDailyGaps(
   return filled;
 }
 
+function buildHourlyGapRow(hour: string, isFuture: boolean) {
+  const value = isFuture ? null : 0;
+  return {
+    hour,
+    total_tokens: value,
+    billable_total_tokens: value,
+    input_tokens: value,
+    cached_input_tokens: value,
+    cache_creation_input_tokens: value,
+    output_tokens: value,
+    reasoning_output_tokens: value,
+    conversation_count: value,
+    missing: false,
+    future: isFuture,
+  };
+}
+
+function isSyntheticNullHourlyGap(row: any) {
+  if (!row || typeof row !== "object") return false;
+  const models = row.models;
+  if (models && typeof models === "object" && Object.keys(models).length > 0) return false;
+  return HOURLY_ZERO_FIELDS.every((field) => row[field] == null);
+}
+
+function normalizeExistingHourlyRow(row: any, hour: string, isFuture: boolean) {
+  const normalized = { ...row, hour, missing: false, future: isFuture };
+  if (!isFuture && isSyntheticNullHourlyGap(row)) {
+    for (const field of HOURLY_ZERO_FIELDS) {
+      normalized[field] = 0;
+    }
+  }
+  return normalized;
+}
+
+function buildFixedHourlySlotLabels(dayKey: string, stepMinutes: number) {
+  const totalSlots = stepMinutes === 30 ? 48 : 24;
+  const labels = [];
+  for (let slot = 0; slot < totalSlots; slot++) {
+    const hour = Math.floor((slot * stepMinutes) / 60);
+    const minute = (slot * stepMinutes) % 60;
+    labels.push(
+      `${dayKey}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`,
+    );
+  }
+  return labels;
+}
+
+function buildHourlySlotLabels(
+  dayKey: string,
+  stepMinutes: number,
+  { timeZone, offsetMinutes }: any = {},
+) {
+  const fixedLabels = buildFixedHourlySlotLabels(dayKey, stepMinutes);
+  if (!timeZone || typeof Intl === "undefined" || !Intl.DateTimeFormat) {
+    return fixedLabels;
+  }
+
+  const day = parseUtcDate(dayKey);
+  if (!day) return fixedLabels;
+  const targetDayNum =
+    day.getUTCFullYear() * 10000 + (day.getUTCMonth() + 1) * 100 + day.getUTCDate();
+  const startMs = day.getTime() - 36 * 60 * 60 * 1000;
+  const endMs = addUtcDays(day, 2).getTime() + 36 * 60 * 60 * 1000;
+  const labels = [];
+  const seen = new Set();
+  for (let ts = startMs; ts <= endMs; ts += 30 * 60 * 1000) {
+    const parts = getNowParts({ timeZone, offsetMinutes, now: new Date(ts) });
+    if (!parts || parts.dayNum !== targetDayNum) continue;
+    if (stepMinutes === 60 && parts.minute !== 0) continue;
+    if (stepMinutes === 30 && parts.minute !== 0 && parts.minute !== 30) continue;
+    const label =
+      `${dayKey}T${String(parts.hour).padStart(2, "0")}:` +
+      `${String(parts.minute).padStart(2, "0")}:00`;
+    if (seen.has(label)) continue;
+    seen.add(label);
+    labels.push(label);
+  }
+  return labels.length > 0 ? labels : fixedLabels;
+}
+
 function fillHourlyGaps(
   rows: any[],
   dayKey: string,
@@ -457,7 +548,6 @@ function fillHourlyGaps(
   }
 
   const stepMinutes = hasHalfHour ? 30 : 60;
-  const totalSlots = hasHalfHour ? 48 : 24;
 
   const bySlot = new Map<number, any>();
   for (const row of rows || []) {
@@ -469,26 +559,21 @@ function fillHourlyGaps(
   }
 
   const filled = [];
-  const todayKey = nowParts
-    ? `${nowParts.year}-${String(nowParts.month).padStart(2, "0")}-${String(nowParts.day).padStart(2, "0")}`
-    : "";
+  const slotLabels = buildHourlySlotLabels(normalizedDay, stepMinutes, {
+    timeZone,
+    offsetMinutes,
+  });
 
-  for (let slot = 0; slot < totalSlots; slot++) {
-    // Map current slot to existing slot
-    // If it's hourly (24 slots), the slots are 0, 2, 4... so slot mapping is slot * 2
-    const lookupSlot = hasHalfHour ? slot : slot * 2;
+  for (let slot = 0; slot < slotLabels.length; slot++) {
+    const hourLabel = slotLabels[slot];
+    const parsedLabel = parseHourLabel(hourLabel, defaultDayNum);
+    const lookupSlot = parsedLabel ? parsedLabel.slot : hasHalfHour ? slot : slot * 2;
     const existing = bySlot.get(lookupSlot);
-
-    const hour = Math.floor((slot * stepMinutes) / 60);
-    const minute = (slot * stepMinutes) % 60;
-    const hourStr = String(hour).padStart(2, "0");
-    const minuteStr = String(minute).padStart(2, "0");
-    const hourLabel = `${normalizedDay}T${hourStr}:${minuteStr}:00`;
 
     let isFuture = false;
     if (nowParts) {
       const dayNum = nowParts.year * 10000 + nowParts.month * 100 + nowParts.day;
-      const parsedDayNum = Number(normalizedDay.replace(/-/g, ""));
+      const parsedDayNum = parsedLabel?.dayNum ?? Number(normalizedDay.replace(/-/g, ""));
       if (parsedDayNum > dayNum) {
         isFuture = true;
       } else if (parsedDayNum === dayNum) {
@@ -498,19 +583,9 @@ function fillHourlyGaps(
     }
 
     if (existing) {
-      filled.push({ ...existing, hour: hourLabel, missing: false, future: isFuture });
+      filled.push(normalizeExistingHourlyRow(existing, hourLabel, isFuture));
     } else {
-      filled.push({
-        hour: hourLabel,
-        total_tokens: null,
-        billable_total_tokens: null,
-        input_tokens: null,
-        cached_input_tokens: null,
-        output_tokens: null,
-        reasoning_output_tokens: null,
-        missing: !isFuture,
-        future: isFuture,
-      });
+      filled.push(buildHourlyGapRow(hourLabel, isFuture));
     }
   }
 
