@@ -189,20 +189,6 @@ export function ActivityHeatmap({
     }, 150);
   };
 
-  const handleTooltipMouseEnter = () => {
-    if (hideTimeoutRef.current) {
-      clearTimeout(hideTimeoutRef.current);
-      hideTimeoutRef.current = null;
-    }
-  };
-
-  const handleTooltipMouseLeave = () => {
-    if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
-    hideTimeoutRef.current = setTimeout(() => {
-      setHoveredCell(null);
-    }, 150);
-  };
-
   const handleOpenModal = () => {
     setIsClosing(false);
     setIsModalOpen(true);
@@ -864,9 +850,7 @@ export function ActivityHeatmap({
           `overflow-hidden` + `transform` ancestors can't clip it. */}
       {hoveredCell && !isModalOpen && typeof document !== "undefined" && createPortal(
         <div
-          onMouseEnter={handleTooltipMouseEnter}
-          onMouseLeave={handleTooltipMouseLeave}
-          className="fixed z-[9999] w-0 h-0 transition-all duration-100 ease-out pointer-events-auto"
+          className="fixed z-[9999] w-0 h-0 transition-all duration-100 ease-out pointer-events-none"
           style={{
             left: `${tooltipPos.x}px`,
             top: `${tooltipPos.y}px`,
