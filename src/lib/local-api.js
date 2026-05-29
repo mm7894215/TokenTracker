@@ -1786,6 +1786,8 @@ module.exports = {
   createLocalApiHandler,
   resolveAllowedInsforgeBaseUrl,
   resolveQueuePath,
+  readQueueData,
+  aggregateByDay,
   // Exported for cross-consumer tests (pricing + native contract lock).
   MODEL_PRICING,
   getModelPricing,
