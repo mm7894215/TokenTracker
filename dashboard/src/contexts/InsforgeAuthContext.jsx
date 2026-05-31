@@ -4,6 +4,7 @@ import { clearCloudDeviceSession } from "../lib/cloud-sync-prefs";
 import { isLikelyExpiredAccessToken } from "../lib/auth-token";
 import { getPublicVisibility } from "../lib/api";
 import { clearLocalApiAuthToken, getLocalApiAuthHeaders } from "../lib/local-api-auth";
+import { isNativeWindowsApp } from "../lib/native-bridge.js";
 
 const InsforgeAuthContext = createContext(null);
 
@@ -130,11 +131,19 @@ export function InsforgeAuthProvider({ children }) {
       const nativeBridge =
         typeof window !== "undefined" && window.webkit?.messageHandlers?.nativeOAuth;
       if (nativeBridge) {
-        // Native macOS App: open system browser for OAuth.
-        // PKCE must be initialized in the same context that handles the callback.
-        // We pass native=1 in the redirectTo URL so callback page knows to redirect back to app.
-        const redirectTo =
-          typeof redirectToOverride === "string" && redirectToOverride.trim()
+        // Native desktop app (macOS WKWebView / Windows WebView2): open the system
+        // browser for OAuth. PKCE must be initialized in the same context that handles
+        // the callback. The callback MUST land on /auth/callback — only that page relays
+        // the code back into the app via the tokentracker:// URL scheme.
+        //
+        // On Windows the nativeOAuth shim can be injected AFTER LoginModal computed its
+        // (root "/") override, which would send the browser to "/" with no callback
+        // handler and the login never completes — so on Windows we pin /auth/callback and
+        // ignore redirectToOverride. macOS keeps its original behavior untouched (it
+        // already passes /auth/callback) so this stays fully decoupled from the mac path.
+        const redirectTo = isNativeWindowsApp()
+          ? `${window.location.origin}/auth/callback`
+          : typeof redirectToOverride === "string" && redirectToOverride.trim()
             ? redirectToOverride.trim()
             : `${window.location.origin}/auth/callback`;
         const result = await client.auth.signInWithOAuth({

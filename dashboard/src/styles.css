@@ -197,6 +197,52 @@ html.native-app .tt-native-main-card {
   border-radius: var(--tt-main-card-radius, 1rem);
 }
 
+/* Windows WebView2 native shell: DWM acrylic sits underneath the transparent page.
+   Add a subtle tint so the sidebar/title strip reads like glass even when the
+   OS backdrop has little content behind it to blur. */
+html.native-windows-app .tt-native-glass-shell {
+  isolation: isolate;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.018) 36%, rgba(0, 0, 0, 0.14)),
+    rgba(32, 32, 32, 0.72) !important;
+}
+
+html.native-windows-app .tt-native-glass-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.018) 28%, transparent 58%),
+    repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 5px);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+}
+
+html.native-windows-app .tt-native-glass-shell > * {
+  position: relative;
+  z-index: 1;
+}
+
+html.native-windows-app.dark .tt-native-glass-shell::before {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02) 28%, transparent 58%),
+    repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.02) 0 1px, transparent 1px 5px);
+}
+
+html.native-windows-app .tt-native-glass-shell aside[aria-label] {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.018) 42%, rgba(0, 0, 0, 0.1)),
+    rgba(28, 28, 28, 0.58);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    inset -1px 0 0 rgba(0, 0, 0, 0.22),
+    inset 1px 0 0 rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(30px) saturate(155%);
+  -webkit-backdrop-filter: blur(30px) saturate(155%);
+}
+
 @layer components {
   /* ========================================
      OpenAI Design System Components - Light Mode

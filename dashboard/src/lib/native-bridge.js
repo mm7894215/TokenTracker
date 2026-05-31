@@ -65,6 +65,16 @@ export function isNativeEmbed() {
   return Boolean(window.webkit?.messageHandlers?.nativeBridge);
 }
 
+/**
+ * True when running inside the Windows tray app's WebView2 host
+ * (`window.chrome.webview` exists only there) in native-app mode. Used to hide
+ * macOS-only features (e.g. the Widgets page) on Windows.
+ */
+export function isNativeWindowsApp() {
+  if (typeof window === "undefined") return false;
+  return Boolean(window.chrome?.webview) && isNativeApp();
+}
+
 function getHandler() {
   if (typeof window === "undefined") return null;
   return window.webkit?.messageHandlers?.nativeBridge ?? null;

@@ -1,0 +1,6 @@
+# .NET build output
+bin/
+obj/
+
+# Bundled runtime (downloaded on demand by scripts/bundle-node.ps1, like TokenTrackerBar/EmbeddedServer)
+EmbeddedServer/

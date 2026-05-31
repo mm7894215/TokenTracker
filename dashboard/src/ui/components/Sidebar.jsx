@@ -22,7 +22,7 @@ import { useTheme } from "../../hooks/useTheme.js";
 import { useLocale } from "../../hooks/useLocale.js";
 import { shouldFetchGithubStars } from "../dashboard/util/should-fetch-github-stars.js";
 import { InsforgeUserHeaderControls } from "../../components/InsforgeUserHeaderControls.jsx";
-import { isNativeApp, isNativeEmbed } from "../../lib/native-bridge.js";
+import { isNativeApp, isNativeEmbed, isNativeWindowsApp } from "../../lib/native-bridge.js";
 
 const STORAGE_KEY = "tt.sidebarCollapsed";
 
@@ -354,15 +354,19 @@ function SidebarBody({ collapsed, onToggleCollapsed, onItemClick, showCloseButto
           <div key={group.id} className="flex flex-col">
             <NavGroupLabel label={group.label} collapsed={collapsed} first={groupIdx === 0} />
             <div className="flex flex-col gap-0.5">
-              {group.items.map((item) => (
-                <NavItem
-                  key={item.id}
-                  item={item}
-                  collapsed={collapsed}
-                  active={isActive(pathname, item.to)}
-                  onClick={onItemClick}
-                />
-              ))}
+              {group.items
+                // Widgets is a macOS-only feature (system widget gallery); hide it in
+                // the Windows tray app per the upstream author's request.
+                .filter((item) => !(item.to === "/widgets" && isNativeWindowsApp()))
+                .map((item) => (
+                  <NavItem
+                    key={item.id}
+                    item={item}
+                    collapsed={collapsed}
+                    active={isActive(pathname, item.to)}
+                    onClick={onItemClick}
+                  />
+                ))}
             </div>
           </div>
         ))}
@@ -518,6 +522,7 @@ export function AppLayout({ children }) {
     <div
       className={cn(
         "fixed inset-0 flex flex-col text-oai-black dark:text-oai-white font-sans overflow-hidden",
+        isNativeWindowsApp() && "tt-native-glass-shell",
         nativeEmbed ? "bg-transparent" : "bg-oai-gray-100 dark:bg-oai-gray-950",
       )}
     >

@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { copy } from "../../../lib/copy.ts";
+import { isNativeWindowsApp } from "../../../lib/native-bridge.js";
 
 const DISMISS_KEY = "widgetOnboardingDismissed";
 const NATIVE_APP_KEY = "tokentracker_native_app";
@@ -41,7 +42,8 @@ export function WidgetOnboardingCard({ enterDelay = 0 }) {
     }
   }, []);
 
-  if (!isNativeApp) return null;
+  // Widgets are macOS-only; never promote them inside the Windows tray app.
+  if (!isNativeApp || isNativeWindowsApp()) return null;
 
   return (
     <AnimatePresence initial={false}>

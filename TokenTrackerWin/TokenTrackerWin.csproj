@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- Windows SDK version is required (not bare net8.0-windows): the WebView2
+         CompositionControl pulls in WinRT projections (Microsoft.Windows.SDK.NET),
+         which are only brought in when the TFM carries an explicit SDK version. -->
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- WPF is enabled so the dashboard window can host the WPF WebView2 control,
+         which renders via DirectComposition (CoreWebView2CompositionController) and
+         therefore supports a genuinely transparent surface that composites with the
+         window's DWM acrylic backdrop. The windowed WinForms WebView2 control cannot
+         (its child HWND can't alpha-blend with the backdrop -> renders black). The
+         tray (NotifyIcon) stays WinForms. -->
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>TokenTracker</AssemblyName>
+    <RootNamespace>TokenTrackerWin</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>assets\trayicon.ico</ApplicationIcon>
+    <!-- Keep in sync with package.json / project.yml on release. -->
+    <Version>0.29.2</Version>
+    <Product>TokenTracker</Product>
+    <Company>TokenTracker</Company>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Floating 1.0.* so restore picks the latest Evergreen-compatible runtime loader. -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="assets\*.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
