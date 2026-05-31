@@ -3,12 +3,15 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildDashboardPreloadContextKey,
+  discardLeaderboardPreloadState,
   getUsageLimitsPreloadContextKey,
   getDashboardPreloadSnapshot,
   preloadDashboardPageResource,
   publishLeaderboardPreloadState,
+  publishReusablePageState,
   publishUsageLimitsPreloadState,
   readLeaderboardPreloadState,
+  readReusablePageState,
   readUsageLimitsPreloadState,
   resetDashboardPreload,
   skipDashboardPreloadTarget,
@@ -210,6 +213,40 @@ describe("dashboard preload state", () => {
         }),
       ),
     ).toBeNull();
+  });
+
+  it("uses state.context when publishing generic reusable page state", () => {
+    const context = {
+      offset: 0,
+      pageSize: 50,
+      period: "week",
+      userId: "user-1",
+    };
+    const contextKey = buildDashboardPreloadContextKey("leaderboard", context);
+    const data = { rows: [{ user_id: "user-1", total_tokens: 100 }] };
+
+    publishReusablePageState("leaderboard", { data, context });
+
+    expect(readReusablePageState("leaderboard", contextKey)).toMatchObject({
+      status: "fulfilled",
+      data,
+      contextKey,
+    });
+    expect(readReusablePageState("leaderboard", buildDashboardPreloadContextKey("leaderboard"))).toBeNull();
+  });
+
+  it("discards fulfilled leaderboard cache entries by context key", () => {
+    const contextKey = buildDashboardPreloadContextKey("leaderboard", {
+      offset: 0,
+      pageSize: 20,
+      period: "total",
+    });
+    const data = { rows: [{ user_id: "user-1", total_tokens: 100 }] };
+
+    publishLeaderboardPreloadState(data, { contextKey });
+
+    expect(discardLeaderboardPreloadState(contextKey)).toBe(true);
+    expect(readLeaderboardPreloadState(contextKey)).toBeNull();
   });
 
   it("reuses pending and fulfilled resource preloads for duplicate calls", async () => {

@@ -41,6 +41,16 @@ const insforgeMock = vi.hoisted(() => ({
 const pending = vi.hoisted(() => new Promise(() => {}));
 
 vi.mock("./lib/dashboard-preload.js", () => ({
+  getLeaderboardPreloadContextKey: vi.fn((options = {}) =>
+    [
+      options.accessMode || "",
+      options.baseUrl || "",
+      String(Boolean(options.mockEnabled)),
+      String(Boolean(options.signedIn)),
+      String(Boolean(options.authLoading)),
+      options.userId || "null",
+    ].join("|"),
+  ),
   markDashboardMainContentVisible: vi.fn(),
   preloadDashboardPageResources: vi.fn(() => pending),
   preloadLeaderboardDefaultState: vi.fn(() => pending),

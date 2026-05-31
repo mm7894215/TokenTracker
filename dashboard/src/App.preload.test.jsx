@@ -39,6 +39,16 @@ const insforgeMock = vi.hoisted(() => ({
 }));
 
 vi.mock("./lib/dashboard-preload.js", () => ({
+  getLeaderboardPreloadContextKey: vi.fn((options = {}) =>
+    [
+      options.accessMode || "",
+      options.baseUrl || "",
+      String(Boolean(options.mockEnabled)),
+      String(Boolean(options.signedIn)),
+      String(Boolean(options.authLoading)),
+      options.userId || "null",
+    ].join("|"),
+  ),
   markDashboardMainContentVisible: vi.fn(),
   preloadDashboardPageResources: vi.fn(() => Promise.resolve([])),
   preloadLeaderboardDefaultState: vi.fn(() => Promise.resolve(null)),
@@ -229,6 +239,48 @@ describe("App deferred dashboard preload", () => {
         signedIn: true,
         authLoading: false,
         userId: null,
+      });
+    });
+  });
+
+  it("preloads again when the leaderboard auth context changes", async () => {
+    const user = userEvent.setup();
+    insforgeMock.signedIn = false;
+    insforgeMock.user = null;
+    const view = renderApp("/dashboard");
+
+    expect(await screen.findByText(TEXT.dashboard)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: TEXT.reveal }));
+
+    await waitFor(() => {
+      expect(preloadLeaderboardDefaultState).toHaveBeenCalledTimes(1);
+      expect(preloadLeaderboardDefaultState).toHaveBeenLastCalledWith({
+        accessMode: "local",
+        baseUrl: "https://edge.example",
+        mockEnabled: false,
+        signedIn: true,
+        authLoading: false,
+        userId: null,
+      });
+    });
+
+    insforgeMock.signedIn = true;
+    insforgeMock.user = { id: "user-cloud" };
+    view.rerender(
+      <MemoryRouter initialEntries={["/dashboard"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(preloadLeaderboardDefaultState).toHaveBeenCalledTimes(2);
+      expect(preloadLeaderboardDefaultState).toHaveBeenLastCalledWith({
+        accessMode: "cloud",
+        baseUrl: "https://edge.example",
+        mockEnabled: false,
+        signedIn: true,
+        authLoading: false,
+        userId: "user-cloud",
       });
     });
   });

@@ -64,6 +64,17 @@ class WindowSessionCache {
     this.evictLeaderboardEntries(options.activeContextKey || entry.contextKey);
   }
 
+  delete(targetKey, contextKey) {
+    assertTargetKey(targetKey);
+    if (targetKey === "limits") {
+      if (this.limits?.contextKey !== contextKey) return false;
+      this.limits = null;
+      return true;
+    }
+    if (!contextKey) return false;
+    return this.leaderboard.delete(contextKey);
+  }
+
   evictLeaderboardEntries(activeContextKey = null) {
     while (this.leaderboard.size > this.leaderboardMaxEntries) {
       const evictionKey =
@@ -298,7 +309,7 @@ export function publishReusablePageState(targetKey, state) {
     source: normalizePageStateSource(state?.source, "silent-preload"),
     generatedAt: normalizeGeneratedAt(state?.generatedAt),
     updatedAt: Date.now(),
-    contextKey: state?.contextKey || buildDashboardPreloadContextKey(targetKey),
+    contextKey: state?.contextKey || buildDashboardPreloadContextKey(targetKey, state?.context || {}),
   };
 
   target.stateStatus = status;
@@ -325,7 +336,7 @@ export function consumeReusablePageState(targetKey, contextKey) {
 export function discardReusablePageState(targetKey, contextKey) {
   assertTargetKey(targetKey);
   const target = session.targets[targetKey];
-  let discarded = false;
+  let discarded = session.cache.delete(targetKey, contextKey);
   if (target.pendingStateContextKey === contextKey) {
     target.stateRequestId += 1;
     target.statePromise = null;
@@ -435,6 +446,7 @@ function publishSkippedLeaderboardState(reason, contextKey) {
 }
 
 export function preloadLeaderboardDefaultState(options = {}) {
+  const sessionAtStart = session;
   const mockEnabled = Boolean(options.mockEnabled);
   const baseUrl = options.baseUrl ?? "";
   const accessMode = getLeaderboardPreloadAccessMode({ ...options, baseUrl, mockEnabled });
@@ -465,7 +477,7 @@ export function preloadLeaderboardDefaultState(options = {}) {
     return Promise.resolve(publishSkippedLeaderboardState("access-unavailable", contextKey));
   }
 
-  const target = session.targets.leaderboard;
+  const target = sessionAtStart.targets.leaderboard;
   const existing = readLeaderboardPreloadState(contextKey);
   if (existing) return Promise.resolve(existing);
   if (
@@ -493,14 +505,22 @@ export function preloadLeaderboardDefaultState(options = {}) {
       }),
     )
     .then((data) => {
-      if (target.stateRequestId !== requestId || target.statePromise !== promise) {
+      if (
+        session !== sessionAtStart ||
+        target.stateRequestId !== requestId ||
+        target.statePromise !== promise
+      ) {
         return null;
       }
       target.pendingStateContextKey = null;
       return publishLeaderboardPreloadState(data, { contextKey });
     })
     .catch((error) => {
-      if (target.stateRequestId !== requestId || target.statePromise !== promise) {
+      if (
+        session !== sessionAtStart ||
+        target.stateRequestId !== requestId ||
+        target.statePromise !== promise
+      ) {
         return null;
       }
       target.pendingStateContextKey = null;

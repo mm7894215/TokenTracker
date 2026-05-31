@@ -14,6 +14,16 @@ vi.mock("./api", () => ({
   getLeaderboard: vi.fn(),
 }));
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("leaderboard default state preload", () => {
   beforeEach(() => {
     resetDashboardPreload();
@@ -208,6 +218,37 @@ describe("leaderboard default state preload", () => {
         }),
       ),
     ).toBeNull();
+  });
+
+  it("does not let an in-flight preload repopulate cache after reset", async () => {
+    const pending = deferred();
+    const data = { entries: [{ rank: 1, display_name: "Ada" }], page: 1 };
+    const contextKey = getLeaderboardPreloadContextKey({
+      baseUrl: "https://edge.example",
+      mockEnabled: false,
+      userId: "user-1",
+    });
+    getLeaderboard.mockReturnValue(pending.promise);
+
+    const preload = preloadLeaderboardDefaultState({
+      baseUrl: "https://edge.example",
+      mockEnabled: false,
+      signedIn: true,
+      authLoading: false,
+      userId: "user-1",
+    });
+    await Promise.resolve();
+    expect(getDashboardPreloadSnapshot().targets.leaderboard.stateStatus).toBe("pending");
+
+    resetDashboardPreload();
+    pending.resolve(data);
+
+    await expect(preload).resolves.toBeNull();
+    expect(readLeaderboardPreloadState(contextKey)).toBeNull();
+    expect(getDashboardPreloadSnapshot().targets.leaderboard).toMatchObject({
+      stateStatus: "idle",
+      error: null,
+    });
   });
 
   it("does not let rejected leaderboard state overwrite an existing fulfilled cache entry", () => {

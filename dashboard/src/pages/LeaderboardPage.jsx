@@ -427,10 +427,10 @@ export function LeaderboardPage({
       if (!active) return;
       const error = normalizeLeaderboardError(err);
       setListState((prev) => {
-        if (prev.contextKey === leaderboardPreloadContextKey && prev.data) {
+        if (prev.contextKey === leaderboardPreloadContextKey) {
           return { ...prev, loading: false, error };
         }
-        return { loading: false, error, data: null, contextKey: null };
+        return { loading: false, error, data: null, contextKey: leaderboardPreloadContextKey };
       });
     });
     return () => {

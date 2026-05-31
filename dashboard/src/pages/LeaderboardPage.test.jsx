@@ -197,6 +197,24 @@ describe("LeaderboardPage window-session cache reuse", () => {
     expect(readLeaderboardPreloadState(contextKey)).toMatchObject({ data: preloadedData });
   });
 
+  it("shows an error when cold-start fetch fails without cached data", async () => {
+    const contextKey = getLeaderboardPreloadContextKey({
+      accessMode: "cloud",
+      baseUrl: "https://edge.example",
+      mockEnabled: false,
+      userId: "user-1",
+    });
+    getLeaderboard.mockRejectedValue(new Error("network down"));
+
+    renderLeaderboard();
+
+    await waitFor(() => {
+      expect(screen.getByText(/network down/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("leaderboard-skeleton")).not.toBeInTheDocument();
+    expect(readLeaderboardPreloadState(contextKey)).toBeNull();
+  });
+
   it("keeps the existing loading path when the preload context does not match the page defaults", () => {
     const staleContextKey = getLeaderboardPreloadContextKey({
       accessMode: "cloud",

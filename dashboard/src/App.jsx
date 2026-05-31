@@ -16,6 +16,7 @@ import { AppLayout } from "./ui/components/Sidebar.jsx";
 import { CommandPalette } from "./ui/dashboard/components/CommandPalette.jsx";
 import { ToastProvider } from "./ui/components/Toast.jsx";
 import {
+  getLeaderboardPreloadContextKey,
   markDashboardMainContentVisible,
   preloadDashboardPageResources,
   preloadLeaderboardDefaultState,
@@ -73,7 +74,7 @@ export default function App() {
   useCloudUsageSync();
   const dashboardMainContentVisibleRef = useRef(false);
   const dashboardResourcePreloadStartedRef = useRef(false);
-  const leaderboardStatePreloadStartedRef = useRef(false);
+  const leaderboardStatePreloadContextKeysRef = useRef(new Set());
   const mockEnabled = isMockEnabled();
   const screenshotMode = useMemo(() => {
     if (typeof window === "undefined") return false;
@@ -119,18 +120,20 @@ export default function App() {
 
   const tryPreloadLeaderboardDefaultState = useCallback(() => {
     if (!dashboardMainContentVisibleRef.current) return;
-    if (leaderboardStatePreloadStartedRef.current) return;
     if (!mockEnabled && insforge.loading) return;
     if (!mockEnabled && !signedIn) return;
-    leaderboardStatePreloadStartedRef.current = true;
-    void preloadLeaderboardDefaultState({
+    const preloadOptions = {
       accessMode: leaderboardAccessMode,
       baseUrl: getLeaderboardBaseUrl(),
       mockEnabled,
       signedIn,
       authLoading: Boolean(insforge.loading),
       userId: cloudAuthSignedIn ? insforge.user?.id || null : null,
-    });
+    };
+    const contextKey = getLeaderboardPreloadContextKey(preloadOptions);
+    if (leaderboardStatePreloadContextKeysRef.current.has(contextKey)) return;
+    leaderboardStatePreloadContextKeysRef.current.add(contextKey);
+    void preloadLeaderboardDefaultState(preloadOptions);
   }, [
     cloudAuthSignedIn,
     insforge.loading,

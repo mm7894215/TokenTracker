@@ -63,7 +63,7 @@ export interface DashboardPreloadStateOptions {
   status?: DashboardPreloadStatus;
 }
 
-export interface LeaderboardPreloadOptions extends DashboardPreloadContext {
+export interface LeaderboardPreloadOptions {
   accessMode?: string;
   authLoading?: boolean;
   baseUrl?: string;
