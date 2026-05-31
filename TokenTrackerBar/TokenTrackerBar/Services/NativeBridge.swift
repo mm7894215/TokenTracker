@@ -42,6 +42,13 @@ final class NativeBridge {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.pushSettings() }
             .store(in: &cancellables)
+
+        viewModel.$isSyncing
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.pushSettings() }
+            .store(in: &cancellables)
     }
 
     /// Compact "configured && error==nil" snapshot per provider — collapses
