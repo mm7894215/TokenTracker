@@ -90,7 +90,7 @@ UTC, half-hour buckets, append-only — readers take the latest entry per `(sour
 
 **Any change under `src/` or `dashboard/` ships npm + DMG + Windows**, because both `TokenTrackerBar/EmbeddedServer/` (macOS) and `TokenTrackerWin/EmbeddedServer/` (Windows) bundle the CLI runtime and built dashboard. Bumping only `package.json` leaves desktop-app users on the stale embedded copy.
 
-The DMG and Windows workflows are **linked**: `release-windows.yml` is a reusable workflow (`workflow_call`) and `release-dmg.yml` calls it as a `windows` job (`needs: build`). So a **single** `gh workflow run "release DMG" -f version=X.Y.Z` ships **both** macOS and Windows to the same `vX.Y.Z` release (DMG creates the release first; Windows uploads with `--clobber`). `release-windows.yml` can still be dispatched standalone for a Windows-only build.
+The macOS + Windows release is **one workflow**: `release-dmg.yml` (display name **`release (macOS + Windows)`**). A `create-release` job makes the `vX.Y.Z` release first, then a macOS `build` job and a `windows` job (which calls the reusable `release-windows.yml` via `workflow_call`) both `needs: create-release` and run **in parallel**, each uploading its assets with `--clobber`. So a **single** `gh workflow run "release (macOS + Windows)" -f version=X.Y.Z` ships **both** platforms to the same release. `release-windows.yml` can still be dispatched standalone for a Windows-only build.
 
 | Change scope | Bump `package.json` | Bump `project.yml` `MARKETING_VERSION` | Bump `TokenTrackerWin.csproj` `<Version>` | Trigger DMG workflow (→ also builds Windows) |
 |---|---|---|---|---|
@@ -107,7 +107,7 @@ When the user says "release" or "发 release", that is explicit approval for the
 
 1. Bump `package.json`, `project.yml`'s two `MARKETING_VERSION` entries (App + Widget targets), and `TokenTrackerWin/TokenTrackerWin.csproj`'s `<Version>` — keep all four in lockstep.
 2. `git commit && git push origin main` → `npm-publish.yml` auto-publishes when version is new.
-3. For DMG-eligible changes: `gh workflow run "release DMG" -f version=X.Y.Z` → cloud builds DMG **and** the Windows zip + installer, attaching all to the GitHub Release.
+3. For DMG-eligible changes: `gh workflow run "release (macOS + Windows)" -f version=X.Y.Z` → cloud builds DMG **and** the Windows zip + installer (in parallel), attaching all to the GitHub Release.
 4. Homebrew tap `mm7894215/homebrew-tokentracker` self-updates via dispatch (~40s if `HOMEBREW_DISPATCH_TOKEN` set) or hourly cron (≤1h fallback). **Never edit the tap repo manually for routine releases.**
 
 Release notes: one English line, no markdown sections (`Fix token stats inflation caused by duplicate queue entries`).

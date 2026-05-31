@@ -1,4 +1,4 @@
-name: release DMG
+name: release (macOS + Windows)
 
 on:
   workflow_dispatch:
