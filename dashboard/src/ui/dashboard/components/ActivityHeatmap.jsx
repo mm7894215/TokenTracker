@@ -281,9 +281,15 @@ export function ActivityHeatmap({
   }, [view, embedded]);
 
   useEffect(() => {
+    // Re-run on `view` too: the 2D grid is conditionally rendered, so when the
+    // user starts in 3D the scroll container isn't mounted. Switching to 2D
+    // mounts it fresh at scrollLeft=0 (oldest months) — without `view` in the
+    // deps this effect wouldn't fire again and the grid would default to ~12
+    // months ago instead of the current month (rightmost).
+    if (view !== "2d") return;
     const el = scrollRef.current;
     if (el) el.scrollLeft = el.scrollWidth;
-  }, [heatmap?.weeks]);
+  }, [heatmap?.weeks, view]);
 
   useEffect(() => {
     const el = scrollRef.current;
