@@ -1,5 +1,4 @@
 import React from "react";
-import { createPortal } from "react-dom";
 import { Popover } from "@base-ui/react/popover";
 import { X, ChevronLeft, ChevronRight, Terminal } from "lucide-react";
 import { copy } from "../../../lib/copy";
@@ -184,7 +183,15 @@ export function TrendMonitorZoomModal({
     ? formatUsdCurrency(stats.totalCostUsd, { currency, rate })
     : null;
 
-  return createPortal(
+  // Render inline (NOT createPortal to document.body). The fixed-position
+  // overlay still covers the viewport — no ancestor establishes a containing
+  // block for `position: fixed` (verified: only overflow, no transform/filter).
+  // In the Windows WebView2 host's transparent composition, overlays portaled
+  // directly under <body> (outside #root) mount and composite in the renderer
+  // but are NOT presented on-screen, so the modal looked like it "didn't open".
+  // The 3D heatmap modal renders inline for the same reason and works. macOS
+  // WKWebView / browsers are unaffected either way.
+  return (
     <div
       onAnimationEnd={handleAnimationEnd}
       onClick={(e) => {
@@ -418,7 +425,6 @@ export function TrendMonitorZoomModal({
           </div>
         </div>
       </div>
-    </div>,
-    document.body,
+    </div>
   );
 }
