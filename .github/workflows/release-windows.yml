@@ -147,18 +147,23 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           $tag = "v$env:VERSION"
-          $zip = "TokenTracker-win-x64-v$env:VERSION.zip"
-          $setup = "TokenTrackerWin/installer/Output/TokenTracker-Setup-v$env:VERSION.exe"
-          # Stable, version-less aliases so the landing page can deep-link
-          # releases/latest/download/<name> without knowing the version. The
-          # versioned names stay too (clearer when browsing the release page).
-          $setupStable = "TokenTracker-Setup.exe"
-          $zipStable = "TokenTracker-win-x64.zip"
-          Copy-Item $setup $setupStable -Force
-          Copy-Item $zip $zipStable -Force
+          # Build artifacts carry the version in their filename (clearer on the
+          # runner / in the Inno output folder).
+          $zipBuilt = "TokenTracker-win-x64-v$env:VERSION.zip"
+          $setupBuilt = "TokenTrackerWin/installer/Output/TokenTracker-Setup-v$env:VERSION.exe"
+          # Upload version-less names ONLY, matching the macOS DMG (which ships a
+          # single version-less TokenTrackerBar.dmg). The landing page / READMEs
+          # deep-link releases/latest/download/TokenTracker-Setup.exe, so the asset
+          # names must be stable; the release heading already shows the version, so
+          # a second versioned copy of each asset would just be a redundant
+          # duplicate on the release page.
+          $setup = "TokenTracker-Setup.exe"
+          $zip = "TokenTracker-win-x64.zip"
+          Copy-Item $setupBuilt $setup -Force
+          Copy-Item $zipBuilt $zip -Force
           gh release view $tag 2>$null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag $zip $setup $setupStable $zipStable --clobber
+            gh release upload $tag $zip $setup --clobber
           } else {
-            gh release create $tag $zip $setup $setupStable $zipStable --title $tag --generate-notes
+            gh release create $tag $zip $setup --title $tag --generate-notes
           }

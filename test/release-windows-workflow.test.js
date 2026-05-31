@@ -106,11 +106,33 @@ test("workflow builds the installer with Inno Setup", () => {
   );
 });
 
-test("workflow attaches BOTH the zip and the installer to a GitHub release", () => {
+test("workflow attaches the zip and the installer to a GitHub release", () => {
   const content = loadWorkflow();
   assert.ok(content.includes("gh release"));
   assert.ok(content.includes("TokenTracker-win-x64"), "zip asset");
-  assert.ok(content.includes("TokenTracker-Setup-v"), "installer asset");
+  assert.ok(content.includes("TokenTracker-Setup"), "installer asset");
+});
+
+test("workflow uploads version-less assets only (no versioned duplicate)", () => {
+  const content = loadWorkflow();
+  // The gh release upload/create lines must reference the stable $zip / $setup
+  // vars, not the versioned build artifacts ($zipBuilt / $setupBuilt), so the
+  // release page shows a single copy of each Windows asset — mirroring the
+  // version-less macOS DMG instead of doubling up versioned + stable names.
+  const ghLines = content
+    .split("\n")
+    .filter((l) => /gh release (upload|create)/.test(l));
+  assert.ok(ghLines.length >= 1, "should have a gh release upload/create line");
+  for (const line of ghLines) {
+    assert.ok(
+      !/Built/.test(line),
+      `must not upload versioned build artifact: ${line.trim()}`
+    );
+    assert.ok(
+      /\$zip\b/.test(line) && /\$setup\b/.test(line),
+      `must upload the stable $zip + $setup aliases: ${line.trim()}`
+    );
+  }
 });
 
 test("workflow uploads a stable version-less installer alias for landing deep links", () => {
