@@ -8,13 +8,19 @@ import { LimitsPageSkeleton } from "../components/LimitsPageSkeleton.jsx";
 import { UsageLimitsPanel } from "../ui/dashboard/components/UsageLimitsPanel.jsx";
 import { LocalOnlyNotice } from "../components/LocalOnlyNotice.jsx";
 import { isMockEnabled } from "../lib/mock-data";
+import { readUsageLimitsPreloadState } from "../lib/dashboard-preload.js";
 
 const IS_LOCAL_HOST =
   typeof window !== "undefined" &&
   (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
 
 export function LimitsPage() {
-  const { data: usageLimits, error, isLoading } = useUsageLimits({ initialRefresh: true });
+  const preloadedUsageLimits = readUsageLimitsPreloadState();
+  const { data: usageLimits, error, isLoading } = useUsageLimits(
+    preloadedUsageLimits
+      ? { initialRefresh: true, initialState: preloadedUsageLimits, publishToPreloadCache: true }
+      : { initialRefresh: true, publishToPreloadCache: true },
+  );
   const prefs = useLimitsDisplayPrefs();
 
   // Limits read the local plan/rate-limit tier from the machine running the

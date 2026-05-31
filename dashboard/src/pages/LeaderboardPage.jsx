@@ -39,6 +39,11 @@ import {
   getLeaderboard,
   refreshLeaderboard,
 } from "../lib/api";
+import {
+  getLeaderboardPreloadContextKey,
+  publishLeaderboardPreloadState,
+  readLeaderboardPreloadState,
+} from "../lib/dashboard-preload.js";
 import { getCloudSyncEnabled, setCloudSyncEnabled } from "../lib/cloud-sync-prefs";
 import { runCloudUsageSyncNow } from "../lib/cloud-sync";
 import { LeaderboardAvatar } from "../components/LeaderboardAvatar.jsx";
@@ -298,11 +303,6 @@ export function LeaderboardPage({
     }
   }, []);
   const [listReloadToken, setListReloadToken] = useState(0);
-  const [listState, setListState] = useState(() => ({
-    loading: false,
-    error: null,
-    data: null,
-  }));
 
   const [cloudSyncOn, setCloudSyncOn] = useState(() => getCloudSyncEnabled());
   const [syncing, setSyncing] = useState(false);
@@ -339,12 +339,70 @@ export function LeaderboardPage({
     const safePage = clampInt(listPage, { min: 1, max: 1_000_000, fallback: 1 });
     return (safePage - 1) * pageSize;
   }, [listPage, pageSize]);
+  const leaderboardAccessMode = useMemo(() => {
+    if (mockEnabled) return "mock";
+    if (authLoading) return "unavailable";
+    if (cloudSignedIn) return "cloud";
+    if (signedIn) return "local";
+    if (leaderboardBaseUrl) return "public";
+    return "unavailable";
+  }, [authLoading, cloudSignedIn, leaderboardBaseUrl, mockEnabled, signedIn]);
+
+  const leaderboardPreloadContextKey = useMemo(
+    () =>
+      getLeaderboardPreloadContextKey({
+        accessMode: leaderboardAccessMode,
+        baseUrl: leaderboardBaseUrl,
+        mockEnabled,
+        userId: cloudUser?.id || null,
+        period,
+        pageSize,
+        offset: listOffset,
+      }),
+    [cloudUser?.id, leaderboardAccessMode, leaderboardBaseUrl, listOffset, mockEnabled, pageSize, period],
+  );
+
+  const [listState, setListState] = useState(() => {
+    const preloadedState = readLeaderboardPreloadState(leaderboardPreloadContextKey);
+    if (preloadedState) {
+      return {
+        loading: false,
+        error: null,
+        data: preloadedState.data,
+        contextKey: leaderboardPreloadContextKey,
+      };
+    }
+    return {
+      loading: false,
+      error: null,
+      data: null,
+      contextKey: null,
+    };
+  });
 
   useEffect(() => {
     // Mock leaderboard uses local getMockLeaderboard(); real data needs InsForge URL from getLeaderboardBaseUrl().
-    if (!leaderboardBaseUrl && !mockEnabled) return;
+    if ((!leaderboardBaseUrl && !mockEnabled) || (!mockEnabled && leaderboardAccessMode === "unavailable")) {
+      setListState({ loading: false, error: null, data: null, contextKey: null });
+      return;
+    }
+    const cachedState = readLeaderboardPreloadState(leaderboardPreloadContextKey);
     let active = true;
-    setListState((prev) => ({ ...prev, loading: true, error: null }));
+    if (cachedState) {
+      setListState({
+        loading: false,
+        error: null,
+        data: cachedState.data,
+        contextKey: leaderboardPreloadContextKey,
+      });
+    } else {
+      setListState({
+        loading: true,
+        error: null,
+        data: null,
+        contextKey: null,
+      });
+    }
     (async () => {
       const data = await getLeaderboard({
         baseUrl: leaderboardBaseUrl,
@@ -354,17 +412,35 @@ export function LeaderboardPage({
         offset: listOffset,
       });
       if (!active) return;
-      setListState({ loading: false, error: null, data });
+      publishLeaderboardPreloadState(data, {
+        activeContextKey: leaderboardPreloadContextKey,
+        contextKey: leaderboardPreloadContextKey,
+        source: listReloadToken > 0 ? "manual-refresh" : "page-load",
+      });
+      setListState({
+        loading: false,
+        error: null,
+        data,
+        contextKey: leaderboardPreloadContextKey,
+      });
     })().catch((err) => {
       if (!active) return;
-      setListState({ loading: false, error: normalizeLeaderboardError(err), data: null });
+      const error = normalizeLeaderboardError(err);
+      setListState((prev) => {
+        if (prev.contextKey === leaderboardPreloadContextKey && prev.data) {
+          return { ...prev, loading: false, error };
+        }
+        return { loading: false, error, data: null, contextKey: null };
+      });
     });
     return () => {
       active = false;
     };
   }, [
     leaderboardBaseUrl,
+    leaderboardAccessMode,
     cloudUser?.id,
+    leaderboardPreloadContextKey,
     listOffset,
     listReloadToken,
     mockEnabled,
@@ -372,7 +448,35 @@ export function LeaderboardPage({
     pageSize,
   ]);
 
-  const listData = listState.data;
+  const renderCachedState = useMemo(() => {
+    if (listState.contextKey === leaderboardPreloadContextKey) return null;
+    return readLeaderboardPreloadState(leaderboardPreloadContextKey);
+  }, [leaderboardPreloadContextKey, listState.contextKey]);
+  const currentListState = useMemo(() => {
+    if (listState.contextKey === leaderboardPreloadContextKey) return listState;
+    if (renderCachedState) {
+      return {
+        loading: false,
+        error: null,
+        data: renderCachedState.data,
+        contextKey: leaderboardPreloadContextKey,
+      };
+    }
+    return {
+      loading: Boolean(leaderboardBaseUrl || mockEnabled) && leaderboardAccessMode !== "unavailable",
+      error: null,
+      data: null,
+      contextKey: leaderboardPreloadContextKey,
+    };
+  }, [
+    leaderboardAccessMode,
+    leaderboardBaseUrl,
+    leaderboardPreloadContextKey,
+    listState,
+    mockEnabled,
+    renderCachedState,
+  ]);
+  const listData = currentListState.data;
 
   const totalPages = listData?.total_pages ?? null;
   const totalEntries = listData?.total_entries ?? 0;
@@ -426,12 +530,12 @@ export function LeaderboardPage({
 
   const hasEntries = Array.isArray(displayEntries) && displayEntries.length !== 0;
   let listBody = null;
-  if (listState.loading) {
+  if (currentListState.loading && !hasEntries) {
     listBody = <LeaderboardSkeleton rows={pageSize} />;
-  } else if (listState.error) {
+  } else if (currentListState.error && !hasEntries) {
     listBody = (
       <div className="px-6 py-12 text-center">
-        <p className="text-sm text-red-500 dark:text-red-400">{listState.error}</p>
+        <p className="text-sm text-red-500 dark:text-red-400">{currentListState.error}</p>
       </div>
     );
   } else if (hasEntries) {
@@ -628,7 +732,7 @@ export function LeaderboardPage({
               : "text-oai-gray-500 dark:text-oai-gray-400 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white"
           )}
           onClick={() => setListPage(p)}
-          disabled={listState.loading}
+          disabled={currentListState.loading}
         >
           {String(p)}
         </button>
@@ -675,7 +779,7 @@ export function LeaderboardPage({
                   <button
                     key={p}
                     onClick={() => handlePeriodChange(p)}
-                    disabled={listState.loading}
+                    disabled={currentListState.loading}
                     className={cn(
                       "px-3 sm:px-4 h-7 text-sm font-medium rounded-full flex items-center justify-center transition-colors relative",
                       isActive
@@ -704,7 +808,7 @@ export function LeaderboardPage({
               meLabel={meLabel}
               onOpenProfile={me?.user_id ? () => openProfileModal(me.user_id) : undefined}
               onJumpToMe={handleJumpToMe}
-              canJump={myPage != null && !onMyPage && !listState.loading}
+              canJump={myPage != null && !onMyPage && !currentListState.loading}
               className="shrink-0"
             />
           </div>
@@ -735,6 +839,11 @@ export function LeaderboardPage({
           )}
 
           <div className="rounded-xl border border-oai-gray-200 dark:border-oai-gray-800 overflow-hidden">
+            {currentListState.error && hasEntries ? (
+              <div className="border-b border-oai-gray-200 dark:border-oai-gray-800 px-6 py-3">
+                <p className="text-sm text-red-500 dark:text-red-400">{currentListState.error}</p>
+              </div>
+            ) : null}
             {listBody}
 
             <div className="px-6 py-3 border-t border-oai-gray-200 dark:border-oai-gray-800 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
@@ -747,7 +856,7 @@ export function LeaderboardPage({
                     id="leaderboard-page-size"
                     value={pageSize}
                     onChange={(e) => setPageSize(Number(e.target.value))}
-                    disabled={listState.loading}
+                    disabled={currentListState.loading}
                     className="appearance-none pl-3 pr-8 py-1 rounded-md bg-white dark:bg-oai-gray-950 border border-oai-gray-300 dark:border-oai-gray-700 text-oai-gray-700 dark:text-oai-gray-300 hover:border-oai-gray-400 dark:hover:border-oai-gray-600 focus:outline-none focus:ring-2 focus:ring-oai-brand-500 disabled:opacity-50 transition-colors"
                   >
                     {PAGE_SIZE_OPTIONS.map((n) => (
@@ -765,12 +874,12 @@ export function LeaderboardPage({
               <button
                 className={cn(
                   "px-3 py-1.5 text-sm font-medium text-oai-gray-500 dark:text-oai-gray-400 rounded-md transition-colors",
-                  canPrev && !listState.loading
+                  canPrev && !currentListState.loading
                     ? "hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white"
                     : "opacity-50 cursor-not-allowed"
                 )}
                 onClick={() => setListPage((p) => Math.max(1, p - 1))}
-                disabled={!canPrev || listState.loading}
+                disabled={!canPrev || currentListState.loading}
               >
                 {copy("leaderboard.pagination.prev")}
               </button>
@@ -778,12 +887,12 @@ export function LeaderboardPage({
               <button
                 className={cn(
                   "px-3 py-1.5 text-sm font-medium text-oai-gray-500 dark:text-oai-gray-400 rounded-md transition-colors",
-                  canNext && !listState.loading
+                  canNext && !currentListState.loading
                     ? "hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white"
                     : "opacity-50 cursor-not-allowed"
                 )}
                 onClick={() => setListPage((p) => p + 1)}
-                disabled={!canNext || listState.loading}
+                disabled={!canNext || currentListState.loading}
               >
                 {copy("leaderboard.pagination.next")}
               </button>

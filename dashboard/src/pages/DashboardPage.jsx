@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useActivityHeatmap } from "../hooks/use-activity-heatmap.js";
 import { useProjectUsageSummary } from "../hooks/use-project-usage-summary";
 import { useTrendData } from "../hooks/use-trend-data.js";
@@ -24,6 +24,7 @@ import {
 } from "../lib/format";
 import { shouldShowInstallCard } from "../lib/install-status";
 import { getMockNow, isMockEnabled } from "../lib/mock-data";
+import { publishUsageLimitsPreloadState } from "../lib/dashboard-preload.js";
 import { buildFleetData, buildTopModels, resolveDisplayTokens } from "../lib/model-breakdown";
 import { safeWriteClipboard, safeWriteClipboardImage } from "../lib/safe-browser";
 import { isScreenshotModeEnabled } from "../lib/screenshot-mode";
@@ -117,6 +118,7 @@ export function DashboardPage({
   publicToken = null,
   signInUrl = "/sign-in",
   signUpUrl = "/sign-up",
+  onMainContentVisible,
 }) {
   const { resolvedLocale } = useLocale();
   const { currency, rate } = useCurrency();
@@ -144,6 +146,7 @@ export function DashboardPage({
   const [installCopied, setInstallCopied] = useState(false);
   const [sessionExpiredCopied, setSessionExpiredCopied] = useState(false);
   const [manualSyncLoading, setManualSyncLoading] = useState(false);
+  const mainContentVisibleNotifiedRef = useRef(false);
   const mockEnabled = isMockEnabled();
   const authTokenAllowed = signedIn && !sessionSoftExpired;
   const authAccessToken = useMemo(() => {
@@ -515,6 +518,12 @@ export function DashboardPage({
     data: usageLimits,
     refresh: refreshUsageLimits,
   } = useUsageLimits();
+
+  useEffect(() => {
+    if (usageLimits && typeof usageLimits === "object") {
+      publishUsageLimitsPreloadState(usageLimits);
+    }
+  }, [usageLimits]);
 
   const detailsDateKey = useMemo(() => {
     if (period === "day") return "hour";
@@ -1206,6 +1215,14 @@ export function DashboardPage({
   // 使用上面定义的 isLocalMode
   const requireAuthGate = !signedIn && !mockEnabled && !sessionSoftExpired && !isLocalMode;
   const showAuthGate = requireAuthGate && !publicMode;
+
+  useEffect(() => {
+    if (mainContentVisibleNotifiedRef.current) return;
+    if (showExpiredGate || showAuthGate) return;
+    if (usageLoadingState) return;
+    mainContentVisibleNotifiedRef.current = true;
+    onMainContentVisible?.();
+  }, [onMainContentVisible, showAuthGate, showExpiredGate, usageLoadingState]);
 
   return (
     <>
