@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildDashboardPreloadContextKey,
-  discardLeaderboardPreloadState,
   getUsageLimitsPreloadContextKey,
   getDashboardPreloadSnapshot,
   preloadDashboardPageResource,
@@ -14,7 +13,6 @@ import {
   readReusablePageState,
   readUsageLimitsPreloadState,
   resetDashboardPreload,
-  skipDashboardPreloadTarget,
 } from "./dashboard-preload.js";
 
 function deferred() {
@@ -235,20 +233,6 @@ describe("dashboard preload state", () => {
     expect(readReusablePageState("leaderboard", buildDashboardPreloadContextKey("leaderboard"))).toBeNull();
   });
 
-  it("discards fulfilled leaderboard cache entries by context key", () => {
-    const contextKey = buildDashboardPreloadContextKey("leaderboard", {
-      offset: 0,
-      pageSize: 20,
-      period: "total",
-    });
-    const data = { rows: [{ user_id: "user-1", total_tokens: 100 }] };
-
-    publishLeaderboardPreloadState(data, { contextKey });
-
-    expect(discardLeaderboardPreloadState(contextKey)).toBe(true);
-    expect(readLeaderboardPreloadState(contextKey)).toBeNull();
-  });
-
   it("reuses pending and fulfilled resource preloads for duplicate calls", async () => {
     const pending = deferred();
     const loader = vi.fn(() => pending.promise);
@@ -281,18 +265,6 @@ describe("dashboard preload state", () => {
     });
   });
 
-  it("keeps skipped targets silent and reusable reads ignorable", async () => {
-    skipDashboardPreloadTarget("leaderboard", "auth-loading");
-
-    await expect(preloadDashboardPageResource("leaderboard", { loader: vi.fn() })).resolves.toBeNull();
-    expect(getDashboardPreloadSnapshot().targets.leaderboard).toMatchObject({
-      resourceStatus: "skipped",
-      stateStatus: "skipped",
-      error: "auth-loading",
-    });
-    expect(readLeaderboardPreloadState("leaderboard:any")).toBeNull();
-  });
-
   it("does not let skipped state overwrite existing fulfilled page data cache", () => {
     const contextKey = buildDashboardPreloadContextKey("leaderboard", {
       offset: 0,
@@ -315,23 +287,6 @@ describe("dashboard preload state", () => {
     expect(readLeaderboardPreloadState(contextKey)).toMatchObject({
       status: "fulfilled",
       data,
-    });
-  });
-
-  it("does not let stale pending resource preload overwrite a newer skipped target", async () => {
-    const pending = deferred();
-    const loader = vi.fn(() => pending.promise);
-    const preload = preloadDashboardPageResource("limits", { loader });
-
-    await Promise.resolve();
-    skipDashboardPreloadTarget("limits", "not-eligible");
-    pending.resolve({ LimitsPage: () => null });
-
-    await expect(preload).resolves.toBeNull();
-    expect(getDashboardPreloadSnapshot().targets.limits).toMatchObject({
-      resourceStatus: "skipped",
-      stateStatus: "skipped",
-      error: "not-eligible",
     });
   });
 

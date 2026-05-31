@@ -64,17 +64,6 @@ class WindowSessionCache {
     this.evictLeaderboardEntries(options.activeContextKey || entry.contextKey);
   }
 
-  delete(targetKey, contextKey) {
-    assertTargetKey(targetKey);
-    if (targetKey === "limits") {
-      if (this.limits?.contextKey !== contextKey) return false;
-      this.limits = null;
-      return true;
-    }
-    if (!contextKey) return false;
-    return this.leaderboard.delete(contextKey);
-  }
-
   evictLeaderboardEntries(activeContextKey = null) {
     while (this.leaderboard.size > this.leaderboardMaxEntries) {
       const evictionKey =
@@ -184,8 +173,7 @@ function updateCompletedAt() {
     const target = session.targets[key];
     return (
       target.resourceStatus === "fulfilled" ||
-      target.resourceStatus === "rejected" ||
-      target.resourceStatus === "skipped"
+      target.resourceStatus === "rejected"
     );
   });
   session.completedAt = settled ? Date.now() : null;
@@ -222,34 +210,9 @@ export function buildDashboardPreloadContextKey(targetKey, context = {}) {
   return `${targetKey}:${entries.join("|")}`;
 }
 
-export function skipDashboardPreloadTarget(targetKey, reason = "skipped") {
-  assertTargetKey(targetKey);
-  const target = session.targets[targetKey];
-  target.resourceStatus = "skipped";
-  target.stateStatus = "skipped";
-  target.error = normalizeError(reason);
-  target.resourceRequestId += 1;
-  target.resourcePromise = Promise.resolve(null);
-  const skippedState = {
-    targetKey,
-    status: "skipped",
-    data: null,
-    error: target.error,
-    source: "silent-preload",
-    generatedAt: Date.now(),
-    updatedAt: Date.now(),
-    contextKey: buildDashboardPreloadContextKey(targetKey, { skipped: target.error || "true" }),
-  };
-  updateCompletedAt();
-  return skippedState;
-}
-
 export function preloadDashboardPageResource(targetKey, options = {}) {
   assertTargetKey(targetKey);
   const target = session.targets[targetKey];
-  if (target.resourceStatus === "skipped") {
-    return Promise.resolve(null);
-  }
   if (target.resourceStatus === "fulfilled") {
     return Promise.resolve(target.resourceModule);
   }
@@ -329,26 +292,6 @@ export function readReusablePageState(targetKey, contextKey) {
   return session.cache.read(targetKey, contextKey);
 }
 
-export function consumeReusablePageState(targetKey, contextKey) {
-  return readReusablePageState(targetKey, contextKey);
-}
-
-export function discardReusablePageState(targetKey, contextKey) {
-  assertTargetKey(targetKey);
-  const target = session.targets[targetKey];
-  let discarded = session.cache.delete(targetKey, contextKey);
-  if (target.pendingStateContextKey === contextKey) {
-    target.stateRequestId += 1;
-    target.statePromise = null;
-    target.pendingStateContextKey = null;
-    if (target.stateStatus === "pending") {
-      target.stateStatus = "idle";
-    }
-    discarded = true;
-  }
-  return discarded;
-}
-
 export function publishUsageLimitsPreloadState(data, options = {}) {
   return publishReusablePageState("limits", {
     data,
@@ -382,14 +325,6 @@ export function publishLeaderboardPreloadState(data, options = {}) {
 
 export function readLeaderboardPreloadState(contextKey) {
   return readReusablePageState("leaderboard", contextKey);
-}
-
-export function consumeLeaderboardPreloadState(contextKey) {
-  return consumeReusablePageState("leaderboard", contextKey);
-}
-
-export function discardLeaderboardPreloadState(contextKey) {
-  return discardReusablePageState("leaderboard", contextKey);
 }
 
 export function getLeaderboardPreloadPageSize() {

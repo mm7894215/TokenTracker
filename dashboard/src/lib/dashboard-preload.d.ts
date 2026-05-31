@@ -86,10 +86,6 @@ export function buildDashboardPreloadContextKey(
   targetKey: DashboardPreloadTarget,
   context?: DashboardPreloadContext,
 ): string;
-export function skipDashboardPreloadTarget(
-  targetKey: DashboardPreloadTarget,
-  reason?: unknown,
-): DashboardPreloadCacheEntry<null>;
 export function preloadDashboardPageResource(
   targetKey: DashboardPreloadTarget,
   options?: { loader?: () => Promise<unknown> },
@@ -105,14 +101,6 @@ export function readReusablePageState<TData = unknown>(
   targetKey: DashboardPreloadTarget,
   contextKey?: string,
 ): DashboardPreloadCacheEntry<TData> | null;
-export function consumeReusablePageState<TData = unknown>(
-  targetKey: DashboardPreloadTarget,
-  contextKey?: string,
-): DashboardPreloadCacheEntry<TData> | null;
-export function discardReusablePageState(
-  targetKey: DashboardPreloadTarget,
-  contextKey?: string,
-): boolean;
 export function publishUsageLimitsPreloadState<TData = unknown>(
   data: TData | null,
   options?: DashboardPreloadStateOptions,
@@ -128,10 +116,6 @@ export function publishLeaderboardPreloadState<TData = unknown>(
 export function readLeaderboardPreloadState<TData = unknown>(
   contextKey: string,
 ): DashboardPreloadCacheEntry<TData> | null;
-export function consumeLeaderboardPreloadState<TData = unknown>(
-  contextKey: string,
-): DashboardPreloadCacheEntry<TData> | null;
-export function discardLeaderboardPreloadState(contextKey: string): boolean;
 export function getLeaderboardPreloadPageSize(): number;
 export function getLeaderboardPreloadContextKey(options?: LeaderboardPreloadOptions): string;
 export function preloadLeaderboardDefaultState<TData = unknown>(
