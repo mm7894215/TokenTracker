@@ -4,3 +4,8 @@ obj/
 
 # Bundled runtime (downloaded on demand by scripts/bundle-node.ps1, like TokenTrackerBar/EmbeddedServer)
 EmbeddedServer/
+
+# Release packaging output (produced by dotnet publish + the release-windows workflow)
+publish/
+*.zip
+installer/Output/

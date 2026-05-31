@@ -11,7 +11,9 @@ internal static class Program
         // Windows launches us with the full tokentracker://… URL as an argument when a
         // deep link fires (OAuth callback). Extract it if present.
         var deepLink = FindDeepLink(args);
-        Diag.Log("program", $"Main argc={args.Length} deepLink={(deepLink ?? "<none>")}");
+        var launchedAtStartup = args.Any(a =>
+            string.Equals(a, LaunchAtStartup.StartupArgument, StringComparison.OrdinalIgnoreCase));
+        Diag.Log("program", $"Main argc={args.Length} deepLink={(deepLink ?? "<none>")} startup={launchedAtStartup}");
 
         using var mutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out var isNew);
         Diag.Log("program", $"mutex isNew={isNew}");
@@ -38,7 +40,11 @@ internal static class Program
         _ = new System.Windows.Application { ShutdownMode = System.Windows.ShutdownMode.OnExplicitShutdown };
 
         ApplicationConfiguration.Initialize();
-        var ctx = new TrayApplicationContext();
+        // Pop the dashboard open on a normal launch (manual run or post-install), but
+        // stay quietly in the tray when Windows auto-starts us at login or when we were
+        // only spun up to relay an OAuth deep link.
+        var showDashboardOnLaunch = deepLink is null && !launchedAtStartup;
+        var ctx = new TrayApplicationContext(showDashboardOnLaunch);
 
         // Listen for deep links forwarded by secondary launches.
         using var listenerCts = new CancellationTokenSource();

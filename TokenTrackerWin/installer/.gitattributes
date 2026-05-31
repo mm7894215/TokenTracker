@@ -1,0 +1,3 @@
+# Inno Setup language files are UTF-8 (with BOM) in fixed encodings; never let
+# git normalize line endings or re-encode them, or the wizard renders mojibake.
+*.isl binary

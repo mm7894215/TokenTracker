@@ -1,0 +1,136 @@
+name: release Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g. 0.31.1)"
+        required: true
+        type: string
+
+concurrency:
+  group: release-windows
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      # Verify the requested version matches BOTH package.json (the CLI/dashboard
+      # runtime bundled into EmbeddedServer) AND TokenTrackerWin.csproj <Version>
+      # (the .exe's file version). If they drift, users download a build whose
+      # advertised version disagrees with the embedded runtime — keep them locked.
+      - name: Verify version
+        shell: pwsh
+        run: |
+          $pkg = node -p "require('./package.json').version"
+          if ($pkg -ne "${{ inputs.version }}") {
+            Write-Host "::error::package.json version ($pkg) does not match input (${{ inputs.version }})"
+            exit 1
+          }
+          $csproj = Get-Content TokenTrackerWin/TokenTrackerWin.csproj -Raw
+          if ($csproj -notmatch "<Version>${{ inputs.version }}</Version>") {
+            Write-Host "::error::TokenTrackerWin.csproj <Version> does not match ${{ inputs.version }}"
+            exit 1
+          }
+          Write-Host "Version OK: ${{ inputs.version }}"
+
+      # 1. Build dashboard. InsForge URL + anon key are public client-side values
+      # (shipped in every dashboard bundle) but MUST be present at build time or
+      # Vite inlines empty strings — breaks the leaderboard fetch and disables
+      # cloud OAuth. `dashboard/.env.local` is gitignored so CI cannot read it.
+      - name: Install dashboard dependencies
+        run: npm ci --prefix dashboard
+
+      - name: Build dashboard
+        env:
+          VITE_INSFORGE_BASE_URL: https://srctyff5.us-east.insforge.app
+          VITE_INSFORGE_ANON_KEY: ik_9f35735991b684f7cf57fa00bb4d0487
+        run: npm run dashboard:build
+
+      # 2. Bundle EmbeddedServer (pinned Node.js win-x64 + tokentracker source +
+      # the dashboard/dist built above) so the .exe is self-contained.
+      - name: Bundle EmbeddedServer
+        run: powershell -ExecutionPolicy Bypass -File TokenTrackerWin/scripts/bundle-node.ps1
+
+      # 3. Publish a self-contained win-x64 build (bundles the .NET 8 runtime, so
+      # end users do NOT need to install the .NET Desktop Runtime first).
+      - name: Publish app
+        run: dotnet publish TokenTrackerWin/TokenTrackerWin.csproj -c Release -r win-x64 --self-contained true -o TokenTrackerWin/publish
+
+      # 4. dotnet publish does NOT include EmbeddedServer (it's outside the .csproj).
+      # ServerManager.FindEmbeddedServer() resolves it from
+      # AppContext.BaseDirectory\EmbeddedServer, so it MUST sit next to the exe.
+      - name: Stage EmbeddedServer next to exe
+        shell: pwsh
+        run: Copy-Item TokenTrackerWin/EmbeddedServer TokenTrackerWin/publish/EmbeddedServer -Recurse -Force
+
+      # 4b. Fail loudly if the packaged runtime is incomplete — a missing node.exe
+      # or tracker.js ships an .exe that launches but can never start its server.
+      - name: Verify package contents
+        shell: pwsh
+        run: |
+          $required = @(
+            "TokenTrackerWin/publish/TokenTracker.exe",
+            "TokenTrackerWin/publish/EmbeddedServer/node.exe",
+            "TokenTrackerWin/publish/EmbeddedServer/tokentracker/bin/tracker.js",
+            "TokenTrackerWin/publish/EmbeddedServer/tokentracker/dashboard/dist/index.html"
+          )
+          foreach ($f in $required) {
+            if (-not (Test-Path $f)) { Write-Host "::error::missing required file: $f"; exit 1 }
+          }
+          Write-Host "All required files present."
+
+      # 5. Package the publish folder into a portable zip release asset.
+      - name: Package zip
+        shell: pwsh
+        run: Compress-Archive -Path TokenTrackerWin/publish/* -DestinationPath "TokenTracker-win-x64-v${{ inputs.version }}.zip" -CompressionLevel Optimal
+
+      # 6. Build the per-user installer (setup.exe) with Inno Setup. windows-latest
+      # ships Inno Setup 6; fall back to installing it via choco if the path moves.
+      # Output: TokenTrackerWin/installer/Output/TokenTracker-Setup-v<version>.exe
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            Write-Host "Inno Setup not found; installing via choco..."
+            choco install innosetup -y --no-progress
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          if (-not (Test-Path $iscc)) { Write-Host "::error::ISCC.exe not found after install"; exit 1 }
+          & $iscc "/DMyAppVersion=${{ inputs.version }}" TokenTrackerWin\installer\TokenTracker.iss
+          $setup = "TokenTrackerWin/installer/Output/TokenTracker-Setup-v${{ inputs.version }}.exe"
+          if (-not (Test-Path $setup)) { Write-Host "::error::installer not produced at $setup"; exit 1 }
+          Write-Host "Installer built: $setup"
+
+      # 7. Attach BOTH the zip and the installer to the GitHub Release for this
+      # version. The macOS DMG workflow may have already created the `vX.Y.Z`
+      # release for the same version (CLI/macOS/Windows release together) — so
+      # upload-with-clobber if the release exists, otherwise create it.
+      - name: Create or update release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "v${{ inputs.version }}"
+          $zip = "TokenTracker-win-x64-v${{ inputs.version }}.zip"
+          $setup = "TokenTrackerWin/installer/Output/TokenTracker-Setup-v${{ inputs.version }}.exe"
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $zip $setup --clobber
+          } else {
+            gh release create $tag $zip $setup --title $tag --generate-notes
+          }

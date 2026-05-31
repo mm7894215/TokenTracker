@@ -45,7 +45,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly System.Windows.Forms.Timer _refreshTimer = new() { Interval = 2000 };
     private readonly System.Windows.Forms.Timer _syncTimer = new() { Interval = 5 * 60 * 1000 };
 
-    public TrayApplicationContext()
+    public TrayApplicationContext(bool showDashboardOnLaunch = false)
     {
         _poller = new UsagePoller(() => _server.BaseUrl);
         _menuRenderer = new TrayMenuRenderer(_menuPalette);
@@ -112,6 +112,12 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _syncTimer.Tick += (_, _) => TriggerBackgroundSync();
         _refreshTimer.Start();
         _ = _server.EnsureServerRunningAsync();
+
+        // Open the dashboard window for a normal launch. Deferred onto the dispatcher so
+        // it shows once the message pump is running; the WebView navigates itself when the
+        // server + WebView core are both ready (it tolerates being shown before then).
+        if (showDashboardOnLaunch)
+            _uiDispatcher.BeginInvoke(new Action(OpenDashboard));
     }
 
     private ToolStripMenuItem CreateMenuItem(string text, EventHandler onClick)
