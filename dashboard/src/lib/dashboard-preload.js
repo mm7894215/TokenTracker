@@ -32,8 +32,6 @@ const PAGE_STATE_SOURCES = Object.freeze([
   "page-load",
   "manual-refresh",
 ]);
-export const DASHBOARD_PRELOAD_STATE_MAX_AGE_MS = 60_000;
-
 let sessionCounter = 0;
 let session;
 
@@ -405,7 +403,7 @@ function getLeaderboardPreloadAccessMode(options = {}) {
   if (typeof options.accessMode === "string" && options.accessMode.trim()) {
     return options.accessMode.trim();
   }
-  if (Boolean(options.mockEnabled)) return "mock";
+  if (options.mockEnabled) return "mock";
   if (options.baseUrl) return "cloud";
   return "unavailable";
 }

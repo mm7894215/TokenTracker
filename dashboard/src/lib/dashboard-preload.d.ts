@@ -78,7 +78,6 @@ export interface LeaderboardPreloadOptions extends DashboardPreloadContext {
 
 export const DASHBOARD_PRELOAD_TARGETS: readonly DashboardPreloadTarget[];
 export const DASHBOARD_PRELOAD_STATUSES: readonly DashboardPreloadStatus[];
-export const DASHBOARD_PRELOAD_STATE_MAX_AGE_MS: number;
 
 export function resetDashboardPreload(options?: { leaderboardMaxEntries?: number }): void;
 export function markDashboardMainContentVisible(): void;
