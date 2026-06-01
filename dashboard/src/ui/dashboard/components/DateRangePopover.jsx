@@ -1,18 +1,37 @@
 import React, { useState, useMemo } from "react";
 import { DayPicker } from "react-day-picker";
 import { format } from "date-fns";
+import { enUS, zhCN, zhTW, ja, ko } from "date-fns/locale";
 import { Button } from "../../components";
+import { copy, getCopyLocale } from "../../../lib/copy";
+
+// Map the dashboard's resolved locale to a date-fns locale object so the
+// calendar (month captions + weekday headers) and the in-popover date summary
+// render in the selected language instead of always English.
+const DATE_FNS_LOCALES = {
+  en: enUS,
+  "zh-CN": zhCN,
+  "zh-TW": zhTW,
+  ja,
+  ko,
+};
+
+/** Resolve a dashboard locale (en/zh-CN/zh-TW/ja/ko) to a date-fns Locale. */
+export function getDateFnsLocale(resolvedLocale) {
+  return DATE_FNS_LOCALES[resolvedLocale] || enUS;
+}
 
 /**
  * Format a YYYY-MM-DD string to short display like "Mar 1".
+ * Pass a date-fns `locale` (see getDateFnsLocale) to localize the month name.
  */
-export function formatDateShort(dateStr) {
+export function formatDateShort(dateStr, locale) {
   if (!dateStr) return "";
   const parts = dateStr.split("-");
   if (parts.length !== 3) return dateStr;
   const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
   if (!Number.isFinite(d.getTime())) return dateStr;
-  return format(d, "MMM d");
+  return format(d, "MMM d", locale ? { locale } : undefined);
 }
 
 /**
@@ -35,6 +54,8 @@ export function DateRangePopover({ from, to, onApply, onCancel }) {
 
   const [range, setRange] = useState(initialRange);
 
+  const dateLocale = getDateFnsLocale(getCopyLocale());
+
   const handleApply = () => {
     if (!range?.from) return;
     const fromStr = format(range.from, "yyyy-MM-dd");
@@ -48,6 +69,7 @@ export function DateRangePopover({ from, to, onApply, onCancel }) {
     <div className="p-4">
       <DayPicker
         mode="range"
+        locale={dateLocale}
         selected={range}
         onSelect={setRange}
         numberOfMonths={2}
@@ -84,17 +106,17 @@ export function DateRangePopover({ from, to, onApply, onCancel }) {
       <div className="flex items-center justify-end gap-2 mt-4 pt-3 border-t border-oai-gray-200 dark:border-oai-gray-700">
         {hasSelection && range.from && (
           <span className="text-xs text-oai-gray-500 dark:text-oai-gray-400 mr-auto">
-            {format(range.from, "MMM d, yyyy")}
+            {format(range.from, "MMM d, yyyy", { locale: dateLocale })}
             {range.to && range.to.getTime() !== range.from.getTime()
-              ? ` — ${format(range.to, "MMM d, yyyy")}`
+              ? ` — ${format(range.to, "MMM d, yyyy", { locale: dateLocale })}`
               : ""}
           </span>
         )}
         <Button variant="secondary" size="sm" onClick={onCancel}>
-          Cancel
+          {copy("shared.action.cancel")}
         </Button>
         <Button variant="primary" size="sm" onClick={handleApply} disabled={!hasSelection}>
-          Apply
+          {copy("shared.action.apply")}
         </Button>
       </div>
     </div>

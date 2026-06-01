@@ -5,9 +5,9 @@ import { Popover } from "@base-ui/react/popover";
 import { Card, Button, Counter } from "../../components";
 import { useTheme } from "../../../hooks/useTheme.js";
 import { useCurrency } from "../../../hooks/useCurrency.js";
-import { copy } from "../../../lib/copy";
+import { copy, getCopyLocale } from "../../../lib/copy";
 import { CURRENCY_USD, getCurrencySymbol } from "../../../lib/currency";
-import { DateRangePopover, formatDateShort } from "./DateRangePopover.jsx";
+import { DateRangePopover, formatDateShort, getDateFnsLocale } from "./DateRangePopover.jsx";
 import { ProviderIcon } from "./ProviderIcon.jsx";
 import { formatCompactNumber, formatUsdCurrency } from "../../../lib/format";
 import { ContextBreakdownPanel } from "./ContextBreakdownPanel.jsx";
@@ -135,6 +135,7 @@ export function UsageOverview({
   to,
 }) {
   const tabs = normalizePeriods(periods);
+  const dateLocale = getDateFnsLocale(getCopyLocale());
   const summaryCounterValue = parseAnimatedCounterValue(String(summaryValue ?? ""));
   // The digit-by-digit Counter renders at a fixed 72px and would clip on
   // phones. Below sm we drop it and render the plain value, which scales
@@ -188,7 +189,7 @@ export function UsageOverview({
 
               if (p.key === "custom") {
                 const customLabel = isActive && customFrom && customTo
-                  ? `${formatDateShort(customFrom)} — ${formatDateShort(customTo)}`
+                  ? `${formatDateShort(customFrom, dateLocale)} — ${formatDateShort(customTo, dateLocale)}`
                   : p.label;
 
                 return (

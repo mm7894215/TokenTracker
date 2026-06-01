@@ -176,6 +176,13 @@ export function setCopyLocale(locale: any) {
   currentLocale = normalizeResolvedLocale(locale);
 }
 
+// The resolved locale that copy() is currently translating into. Mirrors the
+// same module-level state copy() reads, so components can localize non-string
+// output (e.g. date-fns formatting) without depending on LocaleProvider context.
+export function getCopyLocale() {
+  return currentLocale;
+}
+
 export function copy(key: any, params?: AnyRecord) {
   const registry = getRegistry();
   const record = registry.map.get(key);
