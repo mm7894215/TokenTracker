@@ -1,6 +1,6 @@
 import React from "react";
 import { Select as BaseSelect } from "@base-ui/react/select";
-import { ChevronDown } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { cn } from "../../lib/cn";
 
 // Shared rounded dropdown built on @base-ui/react Select. Replaces native
@@ -90,9 +90,12 @@ export function Select({
         >
           <BaseSelect.Popup
             className={cn(
-              "max-h-[min(18rem,var(--available-height))] overflow-y-auto rounded-lg",
-              "border border-oai-gray-200 bg-white py-1 shadow-lg",
-              "dark:border-oai-gray-700 dark:bg-oai-gray-900",
+              "max-h-[min(18rem,var(--available-height))] origin-[var(--transform-origin)] overflow-y-auto",
+              "rounded-xl border border-oai-gray-200 bg-white p-1 shadow-lg ring-1 ring-black/[0.04]",
+              "dark:border-oai-gray-700 dark:bg-oai-gray-900 dark:ring-white/[0.05]",
+              "transition-[opacity,transform] duration-150 ease-out",
+              "data-[starting-style]:scale-95 data-[starting-style]:opacity-0",
+              "data-[ending-style]:scale-95 data-[ending-style]:opacity-0",
               matchTriggerWidth && "min-w-[var(--anchor-width)]",
               popupClassName,
             )}
@@ -105,16 +108,22 @@ export function Select({
                   disabled={opt.disabled}
                   className={({ selected, disabled: itemDisabled }) =>
                     cn(
-                      "flex w-full cursor-pointer items-center whitespace-nowrap px-3 py-2 text-left text-xs outline-none",
+                      "flex w-full cursor-pointer items-center gap-2 whitespace-nowrap rounded-lg px-2.5 py-1.5",
+                      "text-left text-xs outline-none transition-colors",
                       selected
-                        ? "bg-oai-gray-100 text-oai-black dark:bg-oai-gray-800 dark:text-oai-white"
-                        : "text-oai-gray-600 hover:bg-oai-gray-50 dark:text-oai-gray-300 dark:hover:bg-oai-gray-800",
+                        ? "bg-oai-gray-100 text-oai-black dark:bg-oai-gray-800/70 dark:text-white"
+                        : "text-oai-gray-600 hover:bg-oai-gray-50 dark:text-oai-gray-300 dark:hover:bg-oai-gray-800/60",
                       itemDisabled &&
                         "cursor-not-allowed opacity-50 hover:bg-transparent dark:hover:bg-transparent",
                     )
                   }
                 >
-                  <BaseSelect.ItemText>{opt.label}</BaseSelect.ItemText>
+                  <span className="min-w-0 flex-1 truncate">
+                    <BaseSelect.ItemText>{opt.label}</BaseSelect.ItemText>
+                  </span>
+                  <BaseSelect.ItemIndicator className="shrink-0 text-oai-gray-500 dark:text-oai-gray-400">
+                    <Check className="h-3.5 w-3.5" aria-hidden />
+                  </BaseSelect.ItemIndicator>
                 </BaseSelect.Item>
               ))}
             </BaseSelect.List>
