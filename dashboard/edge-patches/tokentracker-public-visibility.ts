@@ -182,14 +182,16 @@ export default async function (req: Request): Promise<Response> {
     // here so the POST still returned 200 with an optimistic result, the UI
     // showed "saved", but the next GET read back the unchanged name — the
     // display name silently reverted on every revisit. Do not re-add it.
+    // Trim + cap once so the saved value and the returned value can't drift.
+    let normalizedDisplayName: string | null | undefined = undefined;
     if (typeof body.display_name === "string") {
-      const trimmed = body.display_name.trim().slice(0, 50);
+      normalizedDisplayName = body.display_name.trim().slice(0, 50) || null;
       const { error: profileErr } = await client.database
         .from("tokentracker_user_profiles")
         .upsert(
           {
             user_id: userId,
-            display_name: trimmed || null,
+            display_name: normalizedDisplayName,
           },
           { onConflict: "user_id" },
         );
@@ -201,7 +203,7 @@ export default async function (req: Request): Promise<Response> {
     const result: Record<string, unknown> = { updated_at: now };
     if (body.enabled !== undefined) result.enabled = Boolean(body.enabled);
     if (body.anonymous !== undefined) result.anonymous = Boolean(body.anonymous);
-    if (typeof body.display_name === "string") result.display_name = body.display_name.trim().slice(0, 50) || null;
+    if (normalizedDisplayName !== undefined) result.display_name = normalizedDisplayName;
     if (normalizedGithubUrl !== undefined) result.github_url = normalizedGithubUrl;
     if (body.show_github_url !== undefined) result.show_github_url = Boolean(body.show_github_url);
     return json(result);
