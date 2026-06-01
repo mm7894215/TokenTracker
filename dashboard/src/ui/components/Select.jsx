@@ -107,7 +107,7 @@ export function Select({
                   disabled={opt.disabled}
                   className={({ selected, disabled: itemDisabled }) =>
                     cn(
-                      "flex w-full cursor-pointer items-center gap-2 whitespace-nowrap rounded-lg py-1.5 pl-2 pr-3",
+                      "flex w-full cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg py-1.5 pl-1.5 pr-6",
                       "text-left text-xs outline-none transition-colors",
                       selected
                         ? "bg-oai-gray-100 text-oai-black dark:bg-oai-gray-800/70 dark:text-white"
@@ -117,9 +117,9 @@ export function Select({
                     )
                   }
                 >
-                  <span className="flex w-4 shrink-0 items-center justify-center text-oai-gray-500 dark:text-oai-gray-300">
+                  <span className="flex w-3.5 shrink-0 items-center justify-center text-oai-gray-500 dark:text-oai-gray-300">
                     <BaseSelect.ItemIndicator>
-                      <Check className="h-3.5 w-3.5" aria-hidden />
+                      <Check className="h-3 w-3" aria-hidden />
                     </BaseSelect.ItemIndicator>
                   </span>
                   <span className="min-w-0 flex-1 truncate">
