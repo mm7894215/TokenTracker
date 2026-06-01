@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowUpRight, ChevronDown, Download, Monitor } from "lucide-react";
+import { ArrowUpRight, Download, Monitor } from "lucide-react";
 import { copy } from "../lib/copy";
 import { cn } from "../lib/cn";
+import { Select } from "../ui/components";
 import { isNativeEmbed, nativeAction } from "../lib/native-bridge.js";
 import { useNativeSettings } from "../hooks/use-native-settings.js";
 import {
@@ -354,33 +355,20 @@ function MenuBarPreview({ slotConfigs, showStats }) {
 function MenuBarSlotSelect({ slot, value, options, disabled, onChange }) {
   const slotLabel = slot === 0 ? copy("menubar.slot.primary") : copy("menubar.slot.secondary");
   return (
-    <label className="flex min-w-0 flex-col gap-1.5">
+    <div className="flex min-w-0 flex-col gap-1.5">
       <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-oai-gray-500 dark:text-oai-gray-400">
         {slotLabel}
       </span>
-      <div className="relative">
-        <select
-          value={value}
-          disabled={disabled}
-          aria-label={slotLabel}
-          onChange={(event) => onChange(slot, event.target.value)}
-          className={cn(
-            "w-full appearance-none rounded-lg border border-oai-gray-200 bg-white px-3 py-2 pr-9 text-sm font-medium text-oai-black transition-colors hover:border-oai-gray-300 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white dark:hover:border-oai-gray-700",
-            disabled && "cursor-not-allowed opacity-50 hover:border-oai-gray-200 dark:hover:border-oai-gray-800",
-          )}
-        >
-          {options.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.displayLabel}
-            </option>
-          ))}
-        </select>
-        <ChevronDown
-          className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-oai-gray-400"
-          aria-hidden="true"
-        />
-      </div>
-    </label>
+      <Select
+        value={value}
+        disabled={disabled}
+        ariaLabel={slotLabel}
+        onValueChange={(next) => onChange(slot, next)}
+        options={options.map((option) => ({ value: option.id, label: option.displayLabel }))}
+        matchTriggerWidth
+        className="w-full px-3 py-2 text-sm font-medium"
+      />
+    </div>
   );
 }
 

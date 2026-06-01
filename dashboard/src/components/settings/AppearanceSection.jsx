@@ -1,12 +1,12 @@
 import React from "react";
-import { ChevronDown, Info, Languages, Monitor, Moon, Sun } from "lucide-react";
+import { Info, Languages, Monitor, Moon, Sun } from "lucide-react";
 import { useTheme } from "../../hooks/useTheme.js";
 import { useLocale } from "../../hooks/useLocale.js";
 import { useCurrency } from "../../hooks/useCurrency.js";
 import { EN_LOCALE, JA_LOCALE, KO_LOCALE, SYSTEM_LOCALE, ZH_CN_LOCALE, ZH_TW_LOCALE } from "../../lib/locale";
 import { CURRENCY_USD, getSupportedCurrencies } from "../../lib/currency";
 import { copy } from "../../lib/copy";
-import { cn } from "../../lib/cn";
+import { Select } from "../../ui/components";
 import { SectionCard, SegmentedControl, SettingsRow } from "./Controls.jsx";
 
 function buildThemeOptions() {
@@ -51,60 +51,35 @@ function buildSourceTooltip(rateSource, rateFetchedAt) {
 function LanguageDropdown({ locale, setLocale }) {
   const options = buildLanguageOptions();
   return (
-    <div className="relative inline-flex">
-      <Languages
-        className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-oai-gray-500 dark:text-oai-gray-400"
-        aria-hidden
-      />
-      <select
-        value={locale}
-        onChange={(e) => setLocale(e.target.value)}
-        aria-label={copy("settings.appearance.language.label")}
-        className={cn(
-          "appearance-none rounded-lg border border-oai-gray-200 bg-white py-1.5 pl-8 pr-8 text-xs font-medium text-oai-black",
-          "transition-colors hover:bg-oai-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500",
-          "dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white dark:hover:bg-oai-gray-800",
-        )}
-      >
-        {options.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
-      <ChevronDown
-        className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-oai-gray-500 dark:text-oai-gray-400"
-        aria-hidden
-      />
-    </div>
+    <Select
+      value={locale}
+      onValueChange={setLocale}
+      options={options}
+      ariaLabel={copy("settings.appearance.language.label")}
+      className="px-2.5 py-1.5 text-xs font-medium"
+      leadingIcon={
+        <Languages
+          className="h-3.5 w-3.5 text-oai-gray-500 dark:text-oai-gray-400"
+          aria-hidden
+        />
+      }
+    />
   );
 }
 
 function CurrencyDropdown({ currency, setCurrency }) {
-  const options = getSupportedCurrencies();
+  const options = getSupportedCurrencies().map((opt) => ({
+    value: opt.code,
+    label: copy(opt.labelKey),
+  }));
   return (
-    <div className="relative inline-flex">
-      <select
-        value={currency}
-        onChange={(e) => setCurrency(e.target.value)}
-        aria-label={copy("settings.appearance.currency.label")}
-        className={cn(
-          "appearance-none rounded-lg border border-oai-gray-200 bg-white py-1.5 pl-3 pr-8 text-xs font-medium text-oai-black",
-          "transition-colors hover:bg-oai-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500",
-          "dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white dark:hover:bg-oai-gray-800",
-        )}
-      >
-        {options.map((opt) => (
-          <option key={opt.code} value={opt.code}>
-            {copy(opt.labelKey)}
-          </option>
-        ))}
-      </select>
-      <ChevronDown
-        className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-oai-gray-500 dark:text-oai-gray-400"
-        aria-hidden
-      />
-    </div>
+    <Select
+      value={currency}
+      onValueChange={setCurrency}
+      options={options}
+      ariaLabel={copy("settings.appearance.currency.label")}
+      className="px-3 py-1.5 text-xs font-medium"
+    />
   );
 }
 

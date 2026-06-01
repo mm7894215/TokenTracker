@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Select } from "@base-ui/react/select";
 
+import { Select } from "../../components";
 import { copy } from "../../../lib/copy";
 import { formatCompactNumber, toDisplayNumber, toFiniteNumber } from "../../../lib/format";
 import { shouldFetchGithubStars } from "../util/should-fetch-github-stars.js";
@@ -137,48 +137,18 @@ export function ProjectUsagePanel({
         <h3 className="text-sm font-medium text-oai-gray-500 dark:text-oai-gray-300 uppercase tracking-wide">
           {copy("dashboard.projects.title")}
         </h3>
-        <Select.Root
+        <Select
           value={resolvedLimit}
-          items={LIMIT_OPTIONS.map((value) => ({
-            value,
-            label: optionLabels[value],
-          }))}
           onValueChange={(value) => {
             if (typeof onLimitChange === "function" && value != null) {
               onLimitChange(value);
             }
           }}
-        >
-          <Select.Trigger
-            aria-label={limitAria}
-            className="px-2 py-1 text-xs text-oai-gray-600 dark:text-oai-gray-300 bg-white dark:bg-oai-gray-900 border border-oai-gray-200 dark:border-oai-gray-700 rounded hover:border-oai-gray-300 dark:hover:border-oai-gray-600"
-          >
-            <Select.Value />
-          </Select.Trigger>
-          <Select.Portal>
-            <Select.Positioner align="end" side="bottom" sideOffset={4} className="z-50">
-              <Select.Popup className="w-32 border border-oai-gray-200 dark:border-oai-gray-700 bg-white dark:bg-oai-gray-900 rounded-lg shadow-lg">
-                <Select.List aria-label={limitAria} role="listbox">
-                  {LIMIT_OPTIONS.map((value) => (
-                    <Select.Item
-                      key={value}
-                      value={value}
-                      className={({ selected }) =>
-                        `w-full text-left px-3 py-2 text-xs ${
-                          selected
-                            ? "bg-oai-gray-100 dark:bg-oai-gray-800 text-oai-black dark:text-oai-white"
-                            : "text-oai-gray-600 dark:text-oai-gray-300 hover:bg-oai-gray-50 dark:hover:bg-oai-gray-800"
-                        }`
-                      }
-                    >
-                      <Select.ItemText>{optionLabels[value]}</Select.ItemText>
-                    </Select.Item>
-                  ))}
-                </Select.List>
-              </Select.Popup>
-            </Select.Positioner>
-          </Select.Portal>
-        </Select.Root>
+          options={LIMIT_OPTIONS.map((value) => ({ value, label: optionLabels[value] }))}
+          ariaLabel={limitAria}
+          align="end"
+          className="px-2 py-1 text-xs text-oai-gray-600 dark:text-oai-gray-300"
+        />
       </div>
 
       {displayEntries.length === 0 ? (

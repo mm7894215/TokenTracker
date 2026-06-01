@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
-import { ChevronDown } from "lucide-react";
+import { Select } from "../ui/components";
 import { motion } from "motion/react";
 import {
   DndContext,
@@ -851,24 +851,15 @@ export function LeaderboardPage({
                 <label htmlFor="leaderboard-page-size" className="whitespace-nowrap">
                   {copy("leaderboard.pagination.page_size_label")}
                 </label>
-                <div className="relative">
-                  <select
-                    id="leaderboard-page-size"
-                    value={pageSize}
-                    onChange={(e) => setPageSize(Number(e.target.value))}
-                    disabled={currentListState.loading}
-                    className="appearance-none pl-3 pr-8 py-1 rounded-md bg-white dark:bg-oai-gray-950 border border-oai-gray-300 dark:border-oai-gray-700 text-oai-gray-700 dark:text-oai-gray-300 hover:border-oai-gray-400 dark:hover:border-oai-gray-600 focus:outline-none focus:ring-2 focus:ring-oai-brand-500 disabled:opacity-50 transition-colors"
-                  >
-                    {PAGE_SIZE_OPTIONS.map((n) => (
-                      <option key={n} value={n}>{n}</option>
-                    ))}
-                  </select>
-                  <ChevronDown
-                    className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-oai-gray-500 dark:text-oai-gray-400"
-                    strokeWidth={2}
-                    aria-hidden="true"
-                  />
-                </div>
+                <Select
+                  value={pageSize}
+                  onValueChange={(value) => setPageSize(Number(value))}
+                  disabled={currentListState.loading}
+                  ariaLabel={copy("leaderboard.pagination.page_size_label")}
+                  options={PAGE_SIZE_OPTIONS.map((n) => ({ value: n, label: String(n) }))}
+                  align="end"
+                  className="px-3 py-1 text-oai-gray-700 dark:text-oai-gray-300"
+                />
               </div>
               <div className="h-5 w-px bg-oai-gray-200 dark:bg-oai-gray-800" aria-hidden="true" />
               <button

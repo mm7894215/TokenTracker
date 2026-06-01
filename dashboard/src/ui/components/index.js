@@ -7,5 +7,6 @@ export { Shell } from "./Shell";
 export { Badge } from "./Badge";
 export { ConfirmModal } from "./ConfirmModal";
 export { Input } from "./Input";
+export { Select } from "./Select";
 export { DismissibleHint } from "./DismissibleHint.jsx";
 export { default as Counter } from "./Counter";

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Card } from "../../components";
+import { Card, Select } from "../../components";
 
 export function DataDetails({
   // Project props
@@ -67,16 +67,18 @@ export function DataDetails({
           </button>
         </div>
         {activeTab === "projects" && (
-          <select
-            aria-label="Number of projects to display"
+          <Select
+            ariaLabel="Number of projects to display"
             value={projectLimit}
-            onChange={(e) => onProjectLimitChange?.(Number(e.target.value))}
-            className="text-xs text-oai-gray-600 dark:text-oai-gray-300 bg-white dark:bg-oai-gray-900 border border-oai-gray-200 dark:border-oai-gray-700 rounded px-2 py-1 hover:border-oai-gray-300 dark:hover:border-oai-gray-600 focus:border-oai-brand dark:focus:border-oai-brand focus:outline-none transition-colors"
-          >
-            <option value={3}>{copy("dashboard.projects.limit_top_3")}</option>
-            <option value={6}>{copy("dashboard.projects.limit_top_6")}</option>
-            <option value={10}>{copy("dashboard.projects.limit_top_10")}</option>
-          </select>
+            onValueChange={(value) => onProjectLimitChange?.(Number(value))}
+            options={[
+              { value: 3, label: copy("dashboard.projects.limit_top_3") },
+              { value: 6, label: copy("dashboard.projects.limit_top_6") },
+              { value: 10, label: copy("dashboard.projects.limit_top_10") },
+            ]}
+            align="end"
+            className="px-2 py-1 text-xs text-oai-gray-600 dark:text-oai-gray-300"
+          />
         )}
       </div>
 
