@@ -32,6 +32,7 @@ function getPortalContainer() {
  * @param {(value:*) => void} props.onValueChange
  * @param {Array<{value:*, label:React.ReactNode, disabled?:boolean}>} props.options
  * @param {string} [props.ariaLabel]
+ * @param {string} [props.id] - id for the trigger button (lets a `<label htmlFor>` associate)
  * @param {boolean} [props.disabled]
  * @param {React.ReactNode} [props.leadingIcon] - icon rendered before the value
  * @param {string} [props.className] - extra classes for the trigger button
@@ -44,6 +45,7 @@ export function Select({
   onValueChange,
   options = [],
   ariaLabel,
+  id,
   disabled = false,
   leadingIcon = null,
   className = "",
@@ -63,6 +65,7 @@ export function Select({
       }}
     >
       <BaseSelect.Trigger
+        id={id}
         aria-label={ariaLabel}
         className={cn(
           TRIGGER_BASE,

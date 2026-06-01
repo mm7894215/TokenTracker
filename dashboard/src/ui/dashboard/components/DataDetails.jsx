@@ -68,7 +68,7 @@ export function DataDetails({
         </div>
         {activeTab === "projects" && (
           <Select
-            ariaLabel="Number of projects to display"
+            ariaLabel={copy("dashboard.projects.limit_aria")}
             value={projectLimit}
             onValueChange={(value) => onProjectLimitChange?.(Number(value))}
             options={[

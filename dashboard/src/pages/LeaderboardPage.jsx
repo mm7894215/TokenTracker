@@ -852,6 +852,7 @@ export function LeaderboardPage({
                   {copy("leaderboard.pagination.page_size_label")}
                 </label>
                 <Select
+                  id="leaderboard-page-size"
                   value={pageSize}
                   onValueChange={(value) => setPageSize(Number(value))}
                   disabled={currentListState.loading}
