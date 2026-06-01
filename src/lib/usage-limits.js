@@ -6,6 +6,7 @@ const http = require("node:http");
 const https = require("node:https");
 
 const {
+  detectClaudeCodeSubscriptionDetails,
   readClaudeCodeAccessToken,
   readCodexAccessToken,
   readCodexAuthBundle,
@@ -1598,6 +1599,33 @@ async function fetchAntigravityLimits({ home, commandRunner, requestFn, timeoutM
   }
 }
 
+function toTitleCase(s) {
+  return s.split(/\s+/).filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+}
+
+// Normalize a plan tier name: free/empty/placeholder -> null; otherwise strip the
+// leading brand word and Title Case the rest.
+function normalizePlanLabel(raw, brand) {
+  if (raw == null) return null;
+  let s = String(raw).trim();
+  if (!s) return null;
+  const lower = s.toLowerCase();
+  if (["free", "none", "unknown"].includes(lower)) return null;
+  if (brand && lower === brand.toLowerCase()) return null; // e.g. Kiro defaults plan_name to "Kiro" when parse fails
+  if (brand) {
+    s = s.replace(new RegExp("^" + brand + "\\s+", "i"), "").trim();
+    if (!s) return null;
+  }
+  return toTitleCase(s);
+}
+
+// Attach plan_label only to a configured, error-free provider object (immutable).
+function withPlanLabel(obj, raw, brand) {
+  if (!obj || !obj.configured || obj.error) return obj;
+  return { ...obj, plan_label: normalizePlanLabel(raw, brand) };
+}
+
 async function getUsageLimits({
   home,
   env,
@@ -1614,10 +1642,12 @@ async function getUsageLimits({
     return cache.data;
   }
 
-  const [claudeToken, codexAuth] = await Promise.all([
+  const [claudeToken, claudeSubscription, codexAuth] = await Promise.all([
     Promise.resolve().then(() => readClaudeCodeAccessToken({ platform, securityRunner, home })),
+    Promise.resolve().then(() => detectClaudeCodeSubscriptionDetails({ platform, securityRunner, home })),
     readCodexAuthBundle({ home, env }),
   ]);
+  const claudePlanType = claudeSubscription?.planType || null;
 
   // Proactively refresh Codex tokens that are >8 days stale, mirroring CodexBar's
   // CodexTokenRefresher.swift. Without this, users who logged in once and didn't run
@@ -1724,14 +1754,14 @@ async function getUsageLimits({
 
   const data = {
     fetched_at: new Date(nowMs).toISOString(),
-    claude,
-    codex,
-    cursor,
-    kimi,
-    gemini,
-    kiro,
-    antigravity,
-    copilot,
+    claude: withPlanLabel(claude, claudePlanType, "Claude"),
+    codex: withPlanLabel(codex, codex.plan_type, "Codex"),
+    cursor: withPlanLabel(cursor, cursor.membership_type, "Cursor"),
+    kimi: withPlanLabel(kimi, kimi.subscription_type || kimi.membership_level, "Kimi"),
+    gemini: withPlanLabel(gemini, gemini.account_plan, "Gemini"),
+    kiro: withPlanLabel(kiro, kiro.plan_name, "Kiro"),
+    antigravity: withPlanLabel(antigravity, antigravity.account_plan, "Antigravity"),
+    copilot: withPlanLabel(copilot, copilot.plan_name, "Copilot"),
   };
 
   cache = { data, fetchedAt: nowMs };
@@ -1744,6 +1774,7 @@ function resetUsageLimitsCache() {
 
 module.exports = {
   getUsageLimits,
+  normalizePlanLabel,
   resetUsageLimitsCache,
   extractGeminiOauthClientCredentials,
   loadKimiCredentials,

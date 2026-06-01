@@ -56,6 +56,11 @@ struct UsageLimitsView: View {
 
     // MARK: - Visible Groups (respect settings order + visibility, hide errors)
 
+    /// Append the plan tier to the provider name when known, e.g. "Claude Max".
+    private func planTitle(_ base: String, _ label: String?) -> String {
+        label.map { "\(base) \($0)" } ?? base
+    }
+
     private func buildVisibleGroups(_ limits: UsageLimitsResponse) -> [AnyView] {
         var groups: [AnyView] = []
 
@@ -64,24 +69,24 @@ struct UsageLimitsView: View {
 
             switch id {
             case "claude" where limits.claude.configured && limits.claude.error == nil:
-                groups.append(AnyView(toolSection(title: "Claude", assetName: "ClaudeLogo") { claudeContent(limits.claude) }))
+                groups.append(AnyView(toolSection(title: planTitle("Claude", limits.claude.planLabel), assetName: "ClaudeLogo") { claudeContent(limits.claude) }))
             case "codex" where limits.codex.configured && limits.codex.error == nil:
-                groups.append(AnyView(toolSection(title: "Codex", assetName: "CodexLogo") { codexContent(limits.codex) }))
+                groups.append(AnyView(toolSection(title: planTitle("Codex", limits.codex.planLabel), assetName: "CodexLogo") { codexContent(limits.codex) }))
             case "cursor" where limits.cursor.configured && limits.cursor.error == nil:
-                groups.append(AnyView(toolSection(title: "Cursor", assetName: "CursorLogo") { cursorContent(limits.cursor) }))
+                groups.append(AnyView(toolSection(title: planTitle("Cursor", limits.cursor.planLabel), assetName: "CursorLogo") { cursorContent(limits.cursor) }))
             case "gemini" where limits.gemini.configured && limits.gemini.error == nil:
-                groups.append(AnyView(toolSection(title: "Gemini", assetName: "GeminiLogo") { geminiContent(limits.gemini) }))
+                groups.append(AnyView(toolSection(title: planTitle("Gemini", limits.gemini.planLabel), assetName: "GeminiLogo") { geminiContent(limits.gemini) }))
             case "kimi":
                 if let kimi = limits.kimi, kimi.configured, kimi.error == nil {
-                    groups.append(AnyView(toolSection(title: "Kimi", assetName: "KimiLogo") { kimiContent(kimi) }))
+                    groups.append(AnyView(toolSection(title: planTitle("Kimi", kimi.planLabel), assetName: "KimiLogo") { kimiContent(kimi) }))
                 }
             case "kiro" where limits.kiro.configured && limits.kiro.error == nil:
-                groups.append(AnyView(toolSection(title: "Kiro", assetName: "KiroLogo") { kiroContent(limits.kiro) }))
+                groups.append(AnyView(toolSection(title: planTitle("Kiro", limits.kiro.planLabel), assetName: "KiroLogo") { kiroContent(limits.kiro) }))
             case "antigravity" where limits.antigravity.configured && limits.antigravity.error == nil:
-                groups.append(AnyView(toolSection(title: "Antigravity", assetName: "AntigravityLogo") { antigravityContent(limits.antigravity) }))
+                groups.append(AnyView(toolSection(title: planTitle("Antigravity", limits.antigravity.planLabel), assetName: "AntigravityLogo") { antigravityContent(limits.antigravity) }))
             case "copilot":
                 if let copilot = limits.copilot, copilot.configured, copilot.error == nil {
-                    groups.append(AnyView(toolSection(title: "GitHub Copilot", assetName: "CopilotLogo") { copilotContent(copilot) }))
+                    groups.append(AnyView(toolSection(title: planTitle("GitHub Copilot", copilot.planLabel), assetName: "CopilotLogo") { copilotContent(copilot) }))
                 }
             default:
                 break

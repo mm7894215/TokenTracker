@@ -116,10 +116,12 @@ function renderProviderGroup(id, data, mode) {
     );
   }
 
+  const title = data.plan_label ? `${meta.name} ${data.plan_label}` : meta.name;
+
   switch (id) {
     case "claude":
       return (
-        <ToolGroup key="claude" name={meta.name} icon={meta.icon}>
+        <ToolGroup key="claude" name={title} icon={meta.icon}>
           {data.five_hour ? <LimitBar label="5h" pct={data.five_hour.utilization} reset={formatReset(data.five_hour.resets_at)} mode={mode} /> : null}
           {data.seven_day ? <LimitBar label="7d" pct={data.seven_day.utilization} reset={formatReset(data.seven_day.resets_at)} mode={mode} /> : null}
           {data.seven_day_opus ? <LimitBar label="Opus" pct={data.seven_day_opus.utilization} reset={formatReset(data.seven_day_opus.resets_at)} mode={mode} /> : null}
@@ -128,7 +130,7 @@ function renderProviderGroup(id, data, mode) {
       );
     case "codex":
       return (
-        <ToolGroup key="codex" name={meta.name} icon={meta.icon}>
+        <ToolGroup key="codex" name={title} icon={meta.icon}>
           {data.primary_window ? <LimitBar label="5h" pct={data.primary_window.used_percent} reset={formatReset(data.primary_window.reset_at)} mode={mode} /> : null}
           {data.secondary_window ? <LimitBar label="7d" pct={data.secondary_window.used_percent} reset={formatReset(data.secondary_window.reset_at)} mode={mode} /> : null}
           {!data.primary_window && !data.secondary_window ? <StatusLine>{copy("limits.status.no_data")}</StatusLine> : null}
@@ -136,7 +138,7 @@ function renderProviderGroup(id, data, mode) {
       );
     case "cursor":
       return (
-        <ToolGroup key="cursor" name={meta.name} icon={meta.icon}>
+        <ToolGroup key="cursor" name={title} icon={meta.icon}>
           {data.primary_window ? <LimitBar label={copy("limits.label.cursor_plan")} pct={data.primary_window.used_percent} reset={formatReset(data.primary_window.reset_at)} mode={mode} /> : null}
           {data.secondary_window ? <LimitBar label={copy("limits.label.cursor_auto")} pct={data.secondary_window.used_percent} reset={formatReset(data.secondary_window.reset_at)} mode={mode} /> : null}
           {data.tertiary_window ? <LimitBar label={copy("limits.label.cursor_api")} pct={data.tertiary_window.used_percent} reset={formatReset(data.tertiary_window.reset_at)} mode={mode} /> : null}
@@ -145,7 +147,7 @@ function renderProviderGroup(id, data, mode) {
       );
     case "gemini":
       return (
-        <ToolGroup key="gemini" name={meta.name} icon={meta.icon}>
+        <ToolGroup key="gemini" name={title} icon={meta.icon}>
           {data.primary_window ? <LimitBar label="Pro" pct={data.primary_window.used_percent} reset={formatReset(data.primary_window.reset_at)} mode={mode} /> : null}
           {data.secondary_window ? <LimitBar label="Flash" pct={data.secondary_window.used_percent} reset={formatReset(data.secondary_window.reset_at)} mode={mode} /> : null}
           {data.tertiary_window ? <LimitBar label="Lite" pct={data.tertiary_window.used_percent} reset={formatReset(data.tertiary_window.reset_at)} mode={mode} /> : null}
@@ -154,7 +156,7 @@ function renderProviderGroup(id, data, mode) {
       );
     case "kimi":
       return (
-        <ToolGroup key="kimi" name={meta.name} icon={meta.icon}>
+        <ToolGroup key="kimi" name={title} icon={meta.icon}>
           {data.primary_window ? <LimitBar label={copy("limits.label.kimi_weekly")} pct={data.primary_window.used_percent} reset={formatReset(data.primary_window.reset_at)} mode={mode} /> : null}
           {data.secondary_window ? <LimitBar label={copy("limits.label.kimi_5h")} pct={data.secondary_window.used_percent} reset={formatReset(data.secondary_window.reset_at)} mode={mode} /> : null}
           {data.tertiary_window ? <LimitBar label={copy("limits.label.kimi_total")} pct={data.tertiary_window.used_percent} reset={formatReset(data.tertiary_window.reset_at)} mode={mode} /> : null}
@@ -164,7 +166,7 @@ function renderProviderGroup(id, data, mode) {
       );
     case "kiro":
       return (
-        <ToolGroup key="kiro" name={meta.name} icon={meta.icon}>
+        <ToolGroup key="kiro" name={title} icon={meta.icon}>
           {data.primary_window ? <LimitBar label={copy("limits.label.kiro_month")} pct={data.primary_window.used_percent} reset={formatReset(data.primary_window.reset_at)} mode={mode} /> : null}
           {data.secondary_window ? <LimitBar label={copy("limits.label.kiro_bonus")} pct={data.secondary_window.used_percent} reset={formatReset(data.secondary_window.reset_at)} mode={mode} /> : null}
           {!data.primary_window && !data.secondary_window ? <StatusLine>{copy("limits.status.no_data")}</StatusLine> : null}
@@ -172,7 +174,7 @@ function renderProviderGroup(id, data, mode) {
       );
     case "antigravity":
       return (
-        <ToolGroup key="antigravity" name={meta.name} icon={meta.icon}>
+        <ToolGroup key="antigravity" name={title} icon={meta.icon}>
           {data.primary_window ? <LimitBar label="Claude" pct={data.primary_window.used_percent} reset={formatReset(data.primary_window.reset_at)} mode={mode} /> : null}
           {data.secondary_window ? <LimitBar label="G Pro" pct={data.secondary_window.used_percent} reset={formatReset(data.secondary_window.reset_at)} mode={mode} /> : null}
           {data.tertiary_window ? <LimitBar label="Flash" pct={data.tertiary_window.used_percent} reset={formatReset(data.tertiary_window.reset_at)} mode={mode} /> : null}
@@ -181,7 +183,7 @@ function renderProviderGroup(id, data, mode) {
       );
     case "copilot":
       return (
-        <ToolGroup key="copilot" name={meta.name} icon={meta.icon}>
+        <ToolGroup key="copilot" name={title} icon={meta.icon}>
           {data.primary_window ? <LimitBar label={copy("limits.label.copilot_premium")} pct={data.primary_window.used_percent} reset={formatReset(data.primary_window.reset_at)} mode={mode} /> : null}
           {data.secondary_window ? <LimitBar label={copy("limits.label.copilot_chat")} pct={data.secondary_window.used_percent} reset={formatReset(data.secondary_window.reset_at)} mode={mode} /> : null}
           {!data.primary_window && !data.secondary_window ? <StatusLine>{copy("limits.status.no_data")}</StatusLine> : null}

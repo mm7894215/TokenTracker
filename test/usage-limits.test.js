@@ -7,6 +7,7 @@ const path = require("node:path");
 const {
   extractGeminiOauthClientCredentials,
   getUsageLimits,
+  normalizePlanLabel,
   loadKimiCredentials,
   normalizeCursorUsageSummary,
   normalizeGeminiQuotaResponse,
@@ -1187,6 +1188,137 @@ lang 123 me 22u IPv4 0x123 0t0 TCP 127.0.0.1:51234 (LISTEN)
 
       assert.equal(result.configured, false);
     } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("normalizePlanLabel", () => {
+  it("Title-cases a bare paid tier", () => {
+    assert.equal(normalizePlanLabel("max", "Claude"), "Max");
+  });
+
+  it("returns null for the free tier", () => {
+    assert.equal(normalizePlanLabel("free", "Cursor"), null);
+  });
+
+  it("strips a leading brand word and Title-cases the rest", () => {
+    assert.equal(normalizePlanLabel("KIRO PROFESSIONAL", "Kiro"), "Professional");
+  });
+
+  it("Title-cases a lowercase tier", () => {
+    assert.equal(normalizePlanLabel("business", "Codex"), "Business");
+  });
+
+  it("returns null for a null tier", () => {
+    assert.equal(normalizePlanLabel(null, "Codex"), null);
+  });
+
+  it("returns null when the tier is just the brand placeholder", () => {
+    assert.equal(normalizePlanLabel("Kiro", "Kiro"), null);
+  });
+});
+
+describe("getUsageLimits plan_label", () => {
+  it("populates plan_label for a paid Claude account", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-plan-paid-"));
+    try {
+      const claudeDir = path.join(tmp, ".claude");
+      fs.mkdirSync(claudeDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(claudeDir, ".credentials.json"),
+        JSON.stringify({
+          claudeAiOauth: {
+            accessToken: "paid-claude-token",
+            subscriptionType: "max",
+            rateLimitTier: "tier-1",
+          },
+        }),
+      );
+
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 1000,
+        securityRunner() {
+          return { status: 1, stdout: "" };
+        },
+        commandRunner() {
+          return { status: 1, stdout: "" };
+        },
+        fetchImpl(url) {
+          if (typeof url === "string" && url === "https://api.anthropic.com/api/oauth/usage") {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                five_hour: { utilization: 0.4 },
+                seven_day: { utilization: 0.12 },
+                seven_day_opus: null,
+              }),
+            });
+          }
+          return new Promise(() => {});
+        },
+      });
+
+      assert.equal(result.claude.configured, true);
+      assert.equal(result.claude.error, null);
+      assert.equal(result.claude.plan_label, "Max");
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves plan_label null for a free Claude account", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-plan-free-"));
+    try {
+      const claudeDir = path.join(tmp, ".claude");
+      fs.mkdirSync(claudeDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(claudeDir, ".credentials.json"),
+        JSON.stringify({
+          claudeAiOauth: {
+            accessToken: "free-claude-token",
+            subscriptionType: "free",
+          },
+        }),
+      );
+
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 1000,
+        securityRunner() {
+          return { status: 1, stdout: "" };
+        },
+        commandRunner() {
+          return { status: 1, stdout: "" };
+        },
+        fetchImpl(url) {
+          if (typeof url === "string" && url === "https://api.anthropic.com/api/oauth/usage") {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                five_hour: { utilization: 0.1 },
+                seven_day: { utilization: 0.05 },
+                seven_day_opus: null,
+              }),
+            });
+          }
+          return new Promise(() => {});
+        },
+      });
+
+      assert.equal(result.claude.configured, true);
+      assert.equal(result.claude.error, null);
+      assert.equal(result.claude.plan_label, null);
+    } finally {
+      resetUsageLimitsCache();
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });

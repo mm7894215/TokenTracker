@@ -446,6 +446,7 @@ async function readCodexAuthBundle({ home, env } = {}) {
 
 module.exports = {
   collectLocalSubscriptions,
+  detectClaudeCodeSubscriptionDetails,
   readClaudeCodeAccessToken,
   readCodexAccessToken,
   readCodexAuthBundle,

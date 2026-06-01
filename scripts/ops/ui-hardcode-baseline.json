@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-01T05:17:10.057Z",
+  "generatedAt": "2026-06-01T05:54:25.303Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
@@ -7,7 +7,7 @@
   },
   "totals": {
     "colors": 262,
-    "rawText": 171
+    "rawText": 172
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -317,6 +317,13 @@
         "0 && rounded === 0 ? \"",
         "0 ? groups :",
         "renderProviderGroup(id, dataById[id], effectiveMode)) .filter(Boolean); return ("
+      ]
+    },
+    "dashboard/src/ui/dashboard/components/UsageLimitsPanel.test.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        ", ); expect(screen.getByText(\"Cursor\")).toBeInTheDocument(); rerender("
       ]
     },
     "dashboard/src/ui/dashboard/components/UsageOverview.jsx": {

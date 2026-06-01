@@ -55,4 +55,50 @@ describe("UsageLimitsPanel", () => {
     expect(screen.getByText("Kimi")).toBeInTheDocument();
     expect(screen.getByText("Not connected")).toBeInTheDocument();
   });
+
+  it("appends plan_label to the provider title when present", () => {
+    render(
+      <UsageLimitsPanel
+        cursor={{
+          configured: true,
+          error: null,
+          plan_label: "Pro",
+          primary_window: { used_percent: 50, reset_at: "2026-05-10T10:39:54.000Z" },
+        }}
+        order={["cursor"]}
+      />,
+    );
+
+    expect(screen.getByText("Cursor Pro")).toBeInTheDocument();
+    expect(screen.queryByText("Cursor")).not.toBeInTheDocument();
+  });
+
+  it("renders just the provider name when plan_label is null or absent", () => {
+    const { rerender } = render(
+      <UsageLimitsPanel
+        cursor={{
+          configured: true,
+          error: null,
+          plan_label: null,
+          primary_window: { used_percent: 50, reset_at: "2026-05-10T10:39:54.000Z" },
+        }}
+        order={["cursor"]}
+      />,
+    );
+
+    expect(screen.getByText("Cursor")).toBeInTheDocument();
+
+    rerender(
+      <UsageLimitsPanel
+        cursor={{
+          configured: true,
+          error: null,
+          primary_window: { used_percent: 50, reset_at: "2026-05-10T10:39:54.000Z" },
+        }}
+        order={["cursor"]}
+      />,
+    );
+
+    expect(screen.getByText("Cursor")).toBeInTheDocument();
+  });
 });

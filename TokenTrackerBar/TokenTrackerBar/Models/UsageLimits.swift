@@ -20,6 +20,7 @@ struct UsageLimitsResponse: Codable, Equatable {
 struct ClaudeLimits: Codable, Equatable {
     let configured: Bool
     let error: String?
+    let planLabel: String?
     let fiveHour: ClaudeWindow?
     let sevenDay: ClaudeWindow?
     let sevenDayOpus: ClaudeWindow?
@@ -27,6 +28,7 @@ struct ClaudeLimits: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case configured, error
+        case planLabel = "plan_label"
         case fiveHour = "five_hour"
         case sevenDay = "seven_day"
         case sevenDayOpus = "seven_day_opus"
@@ -61,11 +63,13 @@ struct ClaudeExtraUsage: Codable, Equatable {
 struct CodexLimits: Codable, Equatable {
     let configured: Bool
     let error: String?
+    let planLabel: String?
     let primaryWindow: CodexWindow?
     let secondaryWindow: CodexWindow?
 
     enum CodingKeys: String, CodingKey {
         case configured, error
+        case planLabel = "plan_label"
         case primaryWindow = "primary_window"
         case secondaryWindow = "secondary_window"
     }
@@ -96,6 +100,7 @@ struct GenericLimitWindow: Codable, Equatable {
 struct CursorLimits: Codable, Equatable {
     let configured: Bool
     let error: String?
+    let planLabel: String?
     let membershipType: String?
     let primaryWindow: GenericLimitWindow?
     let secondaryWindow: GenericLimitWindow?
@@ -103,6 +108,7 @@ struct CursorLimits: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case configured, error
+        case planLabel = "plan_label"
         case membershipType = "membership_type"
         case primaryWindow = "primary_window"
         case secondaryWindow = "secondary_window"
@@ -113,6 +119,7 @@ struct CursorLimits: Codable, Equatable {
 struct KimiLimits: Codable, Equatable {
     let configured: Bool
     let error: String?
+    let planLabel: String?
     let membershipLevel: String?
     let subscriptionType: String?
     let parallelLimit: Int?
@@ -122,6 +129,7 @@ struct KimiLimits: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case configured, error
+        case planLabel = "plan_label"
         case membershipLevel = "membership_level"
         case subscriptionType = "subscription_type"
         case parallelLimit = "parallel_limit"
@@ -134,12 +142,14 @@ struct KimiLimits: Codable, Equatable {
 struct KiroLimits: Codable, Equatable {
     let configured: Bool
     let error: String?
+    let planLabel: String?
     let planName: String?
     let primaryWindow: GenericLimitWindow?
     let secondaryWindow: GenericLimitWindow?
 
     enum CodingKeys: String, CodingKey {
         case configured, error
+        case planLabel = "plan_label"
         case planName = "plan_name"
         case primaryWindow = "primary_window"
         case secondaryWindow = "secondary_window"
@@ -149,6 +159,7 @@ struct KiroLimits: Codable, Equatable {
 struct GeminiLimits: Codable, Equatable {
     let configured: Bool
     let error: String?
+    let planLabel: String?
     let accountEmail: String?
     let accountPlan: String?
     let primaryWindow: GenericLimitWindow?
@@ -157,6 +168,7 @@ struct GeminiLimits: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case configured, error
+        case planLabel = "plan_label"
         case accountEmail = "account_email"
         case accountPlan = "account_plan"
         case primaryWindow = "primary_window"
@@ -168,12 +180,14 @@ struct GeminiLimits: Codable, Equatable {
 struct CopilotLimits: Codable, Equatable {
     let configured: Bool
     let error: String?
+    let planLabel: String?
     let planName: String?
     let primaryWindow: GenericLimitWindow?
     let secondaryWindow: GenericLimitWindow?
 
     enum CodingKeys: String, CodingKey {
         case configured, error
+        case planLabel = "plan_label"
         case planName = "plan_name"
         case primaryWindow = "primary_window"
         case secondaryWindow = "secondary_window"
@@ -183,6 +197,7 @@ struct CopilotLimits: Codable, Equatable {
 struct AntigravityLimits: Codable, Equatable {
     let configured: Bool
     let error: String?
+    let planLabel: String?
     let accountEmail: String?
     let accountPlan: String?
     let primaryWindow: GenericLimitWindow?
@@ -191,6 +206,7 @@ struct AntigravityLimits: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case configured, error
+        case planLabel = "plan_label"
         case accountEmail = "account_email"
         case accountPlan = "account_plan"
         case primaryWindow = "primary_window"
