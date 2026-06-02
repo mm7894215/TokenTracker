@@ -383,13 +383,22 @@ function Pet() {
     const anim = TAP_ANIMATIONS[tapIndexRef.current % TAP_ANIMATIONS.length];
     tapIndexRef.current += 1;
     setTapState(anim);
-    setSpeech(pickQuip(locale, today.tokens, isSyncing));
+    // Feed the quip the SAME formatted figures the hover bubble shows, so a tap can
+    // bake in today's real token count + cost (macOS parity) instead of staying generic.
+    const costValue = today.costUsd * currency.rate;
+    setSpeech(pickQuip(locale, {
+      tokens: today.tokens,
+      tokensText: formatTokens(today.tokens),
+      costText: `${currency.symbol}${costValue.toFixed(2)}`,
+      costValue,
+      isSyncing,
+    }));
     clearTimeout(tapTimer.current);
     tapTimer.current = window.setTimeout(() => {
       setTapState(null);
       setSpeech(null);
     }, TAP_HOLD_MS);
-  }, [locale, today.tokens, isSyncing]);
+  }, [locale, today.tokens, today.costUsd, currency.symbol, currency.rate, isSyncing]);
 
   // Distinguish a tap (→ cycle animation) from a drag (→ native window move):
   // only hand the move to the OS once the pointer travels past a small threshold.

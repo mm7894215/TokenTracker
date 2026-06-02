@@ -4,8 +4,13 @@
  * a standalone data module — like Strings.swift — rather than the dashboard copy
  * registry, because the pet is a minimal standalone entry without the i18n provider.
  *
- * Tiering matches macOS: today's token volume picks a pool; personality lines are
- * always mixed in. (The "syncing" pool is omitted — the pet can't observe sync state.)
+ * Tiering matches macOS: today's token volume picks a tier pool. On a non-empty day
+ * the tap quip is usage-aware — it bakes in today's real token count + cost (the
+ * macOS companion's "today data" quips: tokensToday / tokensSpentToday / … ). Generic
+ * personality lines are down-weighted to a ~25% minority so most taps reflect the
+ * actual numbers rather than saying random nice things. macOS stays usage-dominant by
+ * also mixing in 7d/30d/streak/model lines; the Windows pet only receives today's
+ * figures from the host, so it down-weights personality directly instead.
  */
 
 const QUIPS = {
@@ -75,6 +80,59 @@ const QUIPS = {
   },
 };
 
+// Usage-aware "today data" quips — ported 1:1 from the macOS companion's quipPool
+// (tokensToday / tokensSpentToday / aiInvestedToday / billToday / aiTabToday). The
+// `{tokens}` / `{cost}` placeholders are filled with the SAME formatted figures the
+// hover bubble shows. `tokens` is always eligible; the `cost` lines only when today's
+// cost rounds above zero (matching macOS, which skips them at $0.00).
+const TODAY_QUIPS = {
+  "en": {
+    tokens: ["📊 Today: {tokens} tokens"],
+    cost: [
+      "📈 {tokens} tokens — {cost} spent today",
+      "💰 {cost} invested in AI so far",
+      "🧾 Today's bill: {cost} for {tokens} tokens",
+      "💳 AI tab today: {cost}",
+    ],
+  },
+  "zh-CN": {
+    tokens: ["📊 今日：{tokens} tokens"],
+    cost: [
+      "📈 今日 {tokens} tokens，花费 {cost}",
+      "💰 今日 AI 投入：{cost}",
+      "🧾 今日账单：{cost}，{tokens} tokens",
+      "💳 今日 AI 账单：{cost}",
+    ],
+  },
+  "zh-TW": {
+    tokens: ["📊 今日：{tokens} tokens"],
+    cost: [
+      "📈 今日 {tokens} tokens，花費 {cost}",
+      "💰 今日 AI 投入：{cost}",
+      "🧾 今日賬單：{cost}，{tokens} tokens",
+      "💳 今日 AI 賬單：{cost}",
+    ],
+  },
+  "ja": {
+    tokens: ["📊 今日：{tokens} tokens"],
+    cost: [
+      "📈 今日 {tokens} tokens、{cost} 使用",
+      "💰 これまでの AI 投資：{cost}",
+      "🧾 今日の請求：{cost}（{tokens} tokens）",
+      "💳 今日の AI 利用料：{cost}",
+    ],
+  },
+  "ko": {
+    tokens: ["📊 오늘: {tokens} tokens"],
+    cost: [
+      "📈 오늘 {tokens} tokens, {cost} 지출",
+      "💰 지금까지 AI 투자: {cost}",
+      "🧾 오늘 청구: {cost}, {tokens} tokens",
+      "💳 오늘 AI 비용: {cost}",
+    ],
+  },
+};
+
 // Shown (and used for tap quips) while a sync is in progress — ported from the
 // macOS app's syncingQuips.
 const SYNCING_QUIPS = {
@@ -128,15 +186,47 @@ function systemPetLocale() {
   }
 }
 
-/** Pick a random quip for the given locale + today's token volume (syncing quips
- *  while a sync is in progress, matching macOS). */
-export function pickQuip(locale, tokens, isSyncing = false) {
+function pick(arr) {
+  return arr[Math.floor(Math.random() * arr.length)] || "";
+}
+
+function fill(tpl, tokensText, costText) {
+  return tpl.replace(/\{tokens\}/g, tokensText).replace(/\{cost\}/g, costText);
+}
+
+// Share of taps that fall back to a generic personality line on a non-empty day; the
+// rest are usage-aware (bake in today's real figures). Keeps the pet feeling like it's
+// reacting to YOUR usage rather than saying random nice things.
+const PERSONALITY_CHANCE = 0.25;
+
+/**
+ * Pick a random tap quip for the given locale.
+ *
+ * `ctx`: { tokens, tokensText, costText, costValue, isSyncing }
+ *   - tokens     today's token count (number) — selects the tier / empty-day pool
+ *   - tokensText today's tokens, pre-formatted exactly as the hover bubble shows
+ *   - costText   today's cost, pre-formatted in the user's currency (e.g. "$3.45")
+ *   - costValue  today's cost as a number (display currency) — gates the cost lines
+ *   - isSyncing  show a syncing quip instead (matching macOS)
+ */
+export function pickQuip(locale, ctx = {}) {
+  const { tokens = 0, tokensText = "", costText = "", costValue = 0, isSyncing = false } = ctx;
   const loc = normalizePetLocale(locale);
-  if (isSyncing) {
-    const s = SYNCING_QUIPS[loc] || SYNCING_QUIPS.en;
-    return s[Math.floor(Math.random() * s.length)] || "";
-  }
+  if (isSyncing) return pick(SYNCING_QUIPS[loc] || SYNCING_QUIPS.en);
+
   const pool = QUIPS[loc] || QUIPS.en;
-  const candidates = [...(pool[tierFor(tokens)] || []), ...pool.personality];
-  return candidates[Math.floor(Math.random() * candidates.length)] || "";
+  // Nothing logged yet — quiet-day lines + personality (no numbers to report).
+  if (tokens <= 0) return pick([...pool.empty, ...pool.personality]);
+
+  // Usage-aware lines first: today's real token/cost figures + the qualitative tier
+  // line. Cost lines only when today's cost rounds above zero (matches macOS).
+  const today = TODAY_QUIPS[loc] || TODAY_QUIPS.en;
+  const dataLines = [
+    ...today.tokens,
+    ...(costValue >= 0.005 ? today.cost : []),
+    ...(pool[tierFor(tokens)] || []),
+  ].map((tpl) => fill(tpl, tokensText, costText));
+
+  if (Math.random() < PERSONALITY_CHANCE) return pick(pool.personality);
+  return pick(dataLines) || pick(pool.personality);
 }
