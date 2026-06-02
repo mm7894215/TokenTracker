@@ -2,18 +2,12 @@ import React from "react";
 import { Select as BaseSelect } from "@base-ui/react/select";
 import { Check, ChevronDown } from "lucide-react";
 import { cn } from "../../lib/cn";
-import { getPortalRoot } from "../../lib/portal-root";
 
 // Shared rounded dropdown built on @base-ui/react Select. Replaces native
-// HTML select elements so the open list matches the app's design (rounded
+// HTML <select> elements so the open list matches the app's design (rounded
 // corners, shadow, hover states) on every platform — a native select popup is
-// OS-rendered and looks out of place on Windows WebView2.
-//
-// The popup is portaled into `#root` (NOT document.body): under the Windows
-// tray app's transparent WebView2 composition surface, overlays portaled to
-// body mount in the DOM but never paint on-screen. Staying inside `#root`
-// renders correctly there while still escaping ancestor `overflow` clipping.
-// See memory: windows-webview2-body-portal-gotcha.
+// OS-rendered and can't be styled. The popup uses base-ui's default portal,
+// which renders it above the page so it escapes ancestor `overflow` clipping.
 
 const TRIGGER_BASE =
   "relative inline-flex items-center justify-between gap-2 rounded-lg border " +
@@ -79,7 +73,7 @@ export function Select({
           aria-hidden
         />
       </BaseSelect.Trigger>
-      <BaseSelect.Portal container={getPortalRoot()}>
+      <BaseSelect.Portal>
         <BaseSelect.Positioner
           align={align}
           side="bottom"
