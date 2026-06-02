@@ -534,20 +534,24 @@ internal sealed class TrayApplicationContext : ApplicationContext
     /// <summary>Render the today summary into the menu + tooltip, in the user's currency.</summary>
     private async void RefreshSummary()
     {
-        if (_lastStats is not { } s)
-        {
-            _summaryItem.Text = $"{_strings.TodayTitle}: {_strings.NoData}";
-            return;
-        }
-
         // Convert USD → the dashboard's chosen currency (read from its localStorage).
         var (symbol, rate) = _dashboard is not null
             ? await _dashboard.ReadCurrencyAsync()
             : ("$", 1m);
-        // Feed the floating pet the SAME numbers the tray shows (same poller, same
-        // moment) so they never drift, plus currency/language/connection state.
+        // Push currency + language to the pet even before the first usage poll lands, so
+        // a freshly launched pet never sits in default USD/English until polling finishes
+        // (connection state is owned by OnServerStatusChanged).
         _petWindow?.ApplyCurrency(symbol, rate);
         _petWindow?.ApplyLocale(NativeLocalization.ResolveLocale(_localePreference));
+
+        if (_lastStats is not { } s)
+        {
+            _petWindow?.ApplyUsage(0, 0m);
+            _summaryItem.Text = $"{_strings.TodayTitle}: {_strings.NoData}";
+            return;
+        }
+
+        // Feed the floating pet the SAME numbers the tray shows (same poller, same moment).
         _petWindow?.ApplyUsage(s.TodayTokens, s.TodayCostUsd);
         _petWindow?.ApplyConnected(_server.Status == ServerManager.ServerStatus.Running);
         var cost = symbol + (s.TodayCostUsd * rate).ToString("0.00", CultureInfo.InvariantCulture);

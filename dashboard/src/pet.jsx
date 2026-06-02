@@ -410,6 +410,9 @@ function Pet() {
     if (!d || d.dragging) return;
     if (Math.abs(e.clientX - d.x) > DRAG_THRESHOLD || Math.abs(e.clientY - d.y) > DRAG_THRESHOLD) {
       d.dragging = true;
+      // The native move loop swallows the matching mouseup, so clear the drag ref now —
+      // otherwise `dragging` stays true and suppresses hover lean + taps until the next click.
+      dragRef.current = null;
       post("pet:drag"); // native move loop takes over from here
     }
   }, []);
