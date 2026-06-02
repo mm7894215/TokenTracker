@@ -51,6 +51,9 @@ internal sealed class ServerManager : IDisposable
     /// <summary>Raised on the thread-pool when the running state flips. UI must marshal to the UI thread.</summary>
     public event Action<ServerStatus>? StatusChanged;
 
+    /// <summary>Raised on the thread-pool when a sync process starts. UI must marshal if needed.</summary>
+    public event Action? SyncStarted;
+
     /// <summary>Raised on the thread-pool after a sync process exits. UI must marshal if needed.</summary>
     public event Action? SyncCompleted;
 
@@ -123,6 +126,7 @@ internal sealed class ServerManager : IDisposable
                 try { proc.Dispose(); } catch { }
                 SyncCompleted?.Invoke();
             };
+            SyncStarted?.Invoke();
             return true;
         }
     }

@@ -74,6 +74,9 @@ jobs:
         env:
           VITE_INSFORGE_BASE_URL: https://srctyff5.us-east.insforge.app
           VITE_INSFORGE_ANON_KEY: ik_9f35735991b684f7cf57fa00bb4d0487
+          # Include the floating-pet entry (pet.html). Off by default so the macOS +
+          # web builds stay byte-identical; only the Windows build opts in.
+          TOKENTRACKER_BUILD_PET: "1"
         run: npm run dashboard:build
 
       # 2. Bundle EmbeddedServer (pinned Node.js win-x64 + tokentracker source +

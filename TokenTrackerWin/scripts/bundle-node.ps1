@@ -7,7 +7,9 @@
 #   powershell -ExecutionPolicy Bypass -File scripts\bundle-node.ps1
 #   ... -Clean       # wipe EmbeddedServer\ and exit
 #
-# Build the dashboard first:  npm run dashboard:build   (from the repo root)
+# Build the dashboard first, WITH the floating-pet entry (off by default so the
+# macOS/web builds stay byte-identical):
+#   $env:TOKENTRACKER_BUILD_PET = "1"; npm run dashboard:build   (from the repo root)
 # ──────────────────────────────────────────────
 param([switch]$Clean)
 

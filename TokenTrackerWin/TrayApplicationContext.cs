@@ -20,13 +20,29 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly ServerManager _server = new();
     private readonly UsagePoller _poller;
     private DashboardWindow? _dashboard;
+    private PetWindow? _petWindow;
 
     private readonly ContextMenuStrip _menu;
     private readonly TrayMenuRenderer _menuRenderer;
     private readonly ToolStripMenuItem _summaryItem;
     private readonly ToolStripMenuItem _openDashboardItem;
     private readonly ToolStripMenuItem _syncItem;
+    private readonly ToolStripMenuItem _petItem;
+    private readonly ToolStripMenuItem _petSizeItem;
+    private readonly ToolStripMenuItem _petSizeSmall;
+    private readonly ToolStripMenuItem _petSizeMedium;
+    private readonly ToolStripMenuItem _petSizeLarge;
     private readonly ToolStripMenuItem _startupItem;
+
+    // Right-click-the-pet context menu (separate ToolStrip items — an item can't
+    // live in two menus at once).
+    private readonly ContextMenuStrip _petMenu;
+    private readonly ToolStripMenuItem _petCtxOpen;
+    private readonly ToolStripMenuItem _petCtxSizeItem;
+    private readonly ToolStripMenuItem _petCtxSizeSmall;
+    private readonly ToolStripMenuItem _petCtxSizeMedium;
+    private readonly ToolStripMenuItem _petCtxSizeLarge;
+    private readonly ToolStripMenuItem _petCtxClose;
     private readonly ToolStripMenuItem _starItem;
     private readonly ToolStripMenuItem _quitItem;
 
@@ -45,7 +61,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly System.Windows.Forms.Timer _refreshTimer = new() { Interval = 2000 };
     private readonly System.Windows.Forms.Timer _syncTimer = new() { Interval = 5 * 60 * 1000 };
 
-    public TrayApplicationContext(bool showDashboardOnLaunch = false)
+    public TrayApplicationContext(bool showPetOnLaunch = false)
     {
         _poller = new UsagePoller(() => _server.BaseUrl);
         _menuRenderer = new TrayMenuRenderer(_menuPalette);
@@ -53,6 +69,47 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _summaryItem = CreateMenuItem("", (_, _) => OpenDashboard());
         _openDashboardItem = CreateMenuItem("", (_, _) => OpenDashboard());
         _syncItem = CreateMenuItem("", (_, _) => _server.TriggerSync());
+        _petItem = CreateMenuItem("", (_, _) => TogglePet());
+        _petSizeSmall = CreateMenuItem("", (_, _) => SetPetSize(PetWindow.SizeSmall));
+        _petSizeMedium = CreateMenuItem("", (_, _) => SetPetSize(PetWindow.SizeMedium));
+        _petSizeLarge = CreateMenuItem("", (_, _) => SetPetSize(PetWindow.SizeLarge));
+        _petSizeItem = CreateMenuItem("", (_, _) => { });
+        _petSizeItem.DropDownItems.Add(_petSizeSmall);
+        _petSizeItem.DropDownItems.Add(_petSizeMedium);
+        _petSizeItem.DropDownItems.Add(_petSizeLarge);
+        StyleSubmenu(_petSizeItem.DropDown);
+
+        // Pet right-click context menu: open/close dashboard / size / close pet.
+        // The first item toggles the dashboard; its label flips to "Close" while it's open.
+        _petCtxOpen = CreateMenuItem("", (_, _) => ToggleDashboard());
+        _petCtxSizeSmall = CreateMenuItem("", (_, _) => SetPetSize(PetWindow.SizeSmall));
+        _petCtxSizeMedium = CreateMenuItem("", (_, _) => SetPetSize(PetWindow.SizeMedium));
+        _petCtxSizeLarge = CreateMenuItem("", (_, _) => SetPetSize(PetWindow.SizeLarge));
+        _petCtxSizeItem = CreateMenuItem("", (_, _) => { });
+        _petCtxSizeItem.DropDownItems.Add(_petCtxSizeSmall);
+        _petCtxSizeItem.DropDownItems.Add(_petCtxSizeMedium);
+        _petCtxSizeItem.DropDownItems.Add(_petCtxSizeLarge);
+        _petCtxClose = CreateMenuItem("", (_, _) => ClosePet());
+        _petMenu = new ContextMenuStrip
+        {
+            AllowTransparency = true,
+            DropShadowEnabled = false,
+            Renderer = _menuRenderer,
+            BackColor = _menuPalette.MenuBackground,
+            ForeColor = _menuPalette.Text,
+            Padding = new Padding(6),
+            ShowCheckMargin = true,
+            ShowImageMargin = false,
+        };
+        _petMenu.Items.Add(_petCtxOpen);
+        _petMenu.Items.Add(_petCtxSizeItem);
+        _petMenu.Items.Add(CreateSeparator());
+        _petMenu.Items.Add(_petCtxClose);
+        StyleSubmenu(_petCtxSizeItem.DropDown);
+        _petMenu.Opened += (_, _) => TrayMenuRenderer.ApplyRoundedRegion(_petMenu);
+        _petMenu.SizeChanged += (_, _) => TrayMenuRenderer.ApplyRoundedRegion(_petMenu);
+        _petMenu.Opening += (_, _) => { UpdatePetSizeChecks(); UpdatePetDashboardItem(); };
+
         _startupItem = CreateMenuItem("", OnToggleStartup);
         _startupItem.Checked = LaunchAtStartup.IsEnabled;
         _startupItem.CheckOnClick = false;
@@ -74,6 +131,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _menu.Items.Add(CreateSeparator());
         _menu.Items.Add(_openDashboardItem);
         _menu.Items.Add(_syncItem);
+        _menu.Items.Add(_petItem);
+        _menu.Items.Add(_petSizeItem);
         _menu.Items.Add(CreateSeparator());
         _menu.Items.Add(_startupItem);
         _menu.Items.Add(_starItem);
@@ -90,6 +149,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
             RefreshThemeFromDashboard();
             RefreshLocaleFromDashboard();
             RefreshSummary();
+            UpdatePetMenuText();
+            UpdatePetSizeChecks();
         };
 
         _trayIcon = new NotifyIcon
@@ -106,6 +167,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         };
 
         _server.StatusChanged += OnServerStatusChanged;
+        _server.SyncStarted += OnSyncStarted;
         _server.SyncCompleted += OnSyncCompleted;
         _poller.StatsUpdated += OnStatsUpdated;
         _refreshTimer.Tick += (_, _) => RefreshSummary();
@@ -113,11 +175,19 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _refreshTimer.Start();
         _ = _server.EnsureServerRunningAsync();
 
-        // Open the dashboard window for a normal launch. Deferred onto the dispatcher so
-        // it shows once the message pump is running; the WebView navigates itself when the
-        // server + WebView core are both ready (it tolerates being shown before then).
-        if (showDashboardOnLaunch)
-            _uiDispatcher.BeginInvoke(new Action(OpenDashboard));
+        // The desktop pet is the app's visible presence now — the dashboard no longer
+        // auto-opens. Show the pet on a normal launch, or whenever it was open last exit.
+        // Deferred onto the dispatcher so it shows once the message pump is running.
+        if (showPetOnLaunch || PetWindow.WasVisible)
+        {
+            _uiDispatcher.BeginInvoke(new Action(() =>
+            {
+                EnsurePet();
+                _petWindow!.ShowPet();
+                UpdatePetMenuText();
+                RefreshSummary();
+            }));
+        }
     }
 
     private ToolStripMenuItem CreateMenuItem(string text, EventHandler onClick)
@@ -126,9 +196,35 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             BackColor = _menuPalette.MenuBackground,
             ForeColor = _menuPalette.Text,
+            // No horizontal item padding: WinForms ignores it in the menu width
+            // calc but includes it in the item bounds, so it overflows right and
+            // pushes submenus away from the parent. The left gutter comes from the
+            // framework's check-margin column (ShowCheckMargin) instead.
             Margin = new Padding(0, 1, 0, 1),
-            Padding = new Padding(10, 6, 16, 6),
+            Padding = new Padding(0, 6, 0, 6),
         };
+    }
+
+    /// <summary>
+    /// Match a submenu / popup to the main menu's chrome: shared custom renderer,
+    /// background, and — crucially — the rounded Region + DWM corners (without this
+    /// the popup is a square window and the rounded paint leaves jagged corner pixels).
+    /// </summary>
+    private void StyleSubmenu(ToolStripDropDown dropDown)
+    {
+        dropDown.Renderer = _menuRenderer;
+        dropDown.BackColor = _menuPalette.MenuBackground;
+        dropDown.Padding = new Padding(6);   // same inner gutter as the main menu
+        // The auto-created submenu defaults to ShowImageMargin=true (a left icon
+        // column) — turn it off so its layout matches the top-level menu and our
+        // padding / check positioning apply consistently.
+        if (dropDown is ToolStripDropDownMenu m)
+        {
+            m.ShowCheckMargin = true;
+            m.ShowImageMargin = false;
+        }
+        dropDown.Opened += (_, _) => TrayMenuRenderer.ApplyRoundedRegion(dropDown);
+        dropDown.SizeChanged += (_, _) => TrayMenuRenderer.ApplyRoundedRegion(dropDown);
     }
 
     private ToolStripSeparator CreateSeparator()
@@ -136,7 +232,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         return new ToolStripSeparator
         {
             BackColor = _menuPalette.MenuBackground,
-            ForeColor = _menuPalette.Separator,
+            ForeColor = _menuPalette.Border,
             Margin = new Padding(0, 4, 0, 4),
         };
     }
@@ -155,6 +251,20 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _summaryItem.Text = $"{_strings.TodayTitle}: {_strings.NoData}";
         _openDashboardItem.Text = _strings.OpenDashboard;
         _syncItem.Text = _strings.SyncNow;
+        UpdatePetMenuText();
+        _petSizeItem.Text = _strings.PetSize;
+        _petSizeSmall.Text = _strings.SizeSmall;
+        _petSizeMedium.Text = _strings.SizeMedium;
+        _petSizeLarge.Text = _strings.SizeLarge;
+        // Pet right-click context menu.
+        _petMenu.Font = _menuFont;
+        _petCtxOpen.Text = _strings.OpenDashboard;
+        _petCtxSizeItem.Text = _strings.PetSize;
+        _petCtxSizeSmall.Text = _strings.SizeSmall;
+        _petCtxSizeMedium.Text = _strings.SizeMedium;
+        _petCtxSizeLarge.Text = _strings.SizeLarge;
+        _petCtxClose.Text = _strings.ClosePet;
+        UpdatePetSizeChecks();
         _startupItem.Text = _strings.LaunchAtLogin;
         _starItem.Text = _strings.StarOnGitHub;
         _quitItem.Text = _strings.Quit;
@@ -174,11 +284,19 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             item.BackColor = _menuPalette.MenuBackground;
             item.ForeColor = item is ToolStripSeparator
-                ? _menuPalette.Separator
+                ? _menuPalette.Border
                 : item.Enabled ? _menuPalette.Text : _menuPalette.DisabledText;
         }
 
         _menu.Invalidate(true);
+
+        // Pet right-click menu shares the renderer; just keep its background in sync
+        // (text/hover are painted by the renderer from the current palette).
+        if (_petMenu is not null)
+        {
+            _petMenu.BackColor = _menuPalette.MenuBackground;
+            _petMenu.Invalidate(true);
+        }
     }
 
     private void ApplyThemePreference(string preference)
@@ -224,6 +342,82 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         EnsureDashboard();
         _dashboard!.ToggleDashboard();
+    }
+
+    private void TogglePet()
+    {
+        EnsurePet();
+        _petWindow!.TogglePet();
+        _petWindow.StoreVisible(_petWindow.IsVisible);
+        UpdatePetMenuText();
+        if (_petWindow.IsVisible)
+        {
+            RefreshSummary();      // push the current numbers right away
+            _poller.RefreshNow();  // and fetch the freshest
+        }
+    }
+
+    private void EnsurePet()
+    {
+        if (_petWindow is not null) return;
+        _petWindow = new PetWindow(_server);
+        // Right-clicking the pet pops a context menu (open dashboard / size / close).
+        _petWindow.ContextMenuRequested += () => PostToUi(ShowPetContextMenu);
+    }
+
+    /// <summary>Toggle the menu label between "Show" / "Hide" based on current visibility.</summary>
+    private void UpdatePetMenuText()
+    {
+        var visible = _petWindow?.IsVisible == true;
+        _petItem.Text = visible ? _strings.HidePet : _strings.ShowPet;
+    }
+
+    private void SetPetSize(string size)
+    {
+        var normalized = PetWindow.NormalizeSize(size);
+        if (_petWindow is not null) _petWindow.ApplySize(normalized);
+        else PetWindow.PersistSize(normalized);
+        UpdatePetSizeChecks(normalized);
+    }
+
+    /// <summary>Tick the active size in both the tray submenu and the pet context menu.</summary>
+    private void UpdatePetSizeChecks(string? size = null)
+    {
+        var s = PetWindow.NormalizeSize(size ?? PetWindow.CurrentSize);
+        _petSizeSmall.Checked = s == PetWindow.SizeSmall;
+        _petSizeMedium.Checked = s == PetWindow.SizeMedium;
+        _petSizeLarge.Checked = s == PetWindow.SizeLarge;
+        _petCtxSizeSmall.Checked = s == PetWindow.SizeSmall;
+        _petCtxSizeMedium.Checked = s == PetWindow.SizeMedium;
+        _petCtxSizeLarge.Checked = s == PetWindow.SizeLarge;
+    }
+
+    /// <summary>True while the dashboard window is shown (not hidden / minimized).</summary>
+    private bool IsDashboardOpen()
+        => _dashboard is not null
+           && _dashboard.IsVisible
+           && _dashboard.WindowState != System.Windows.WindowState.Minimized;
+
+    /// <summary>Flip the pet menu's first item between "Open" and "Close Dashboard".</summary>
+    private void UpdatePetDashboardItem()
+        => _petCtxOpen.Text = IsDashboardOpen() ? _strings.CloseDashboard : _strings.OpenDashboard;
+
+    /// <summary>Show the pet's right-click context menu at the cursor.</summary>
+    private void ShowPetContextMenu()
+    {
+        UpdatePetMenuText();
+        UpdatePetDashboardItem();
+        UpdatePetSizeChecks();
+        _petMenu.Show(System.Windows.Forms.Cursor.Position);
+    }
+
+    /// <summary>Hide the floating pet (from its context menu) and remember it's closed.</summary>
+    private void ClosePet()
+    {
+        if (_petWindow is null) return;
+        _petWindow.HidePet();
+        _petWindow.StoreVisible(false);
+        UpdatePetMenuText();
     }
 
     private void EnsureDashboard()
@@ -297,6 +491,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         PostToUi(() =>
         {
+            _petWindow?.ApplyConnected(status == ServerManager.ServerStatus.Running);
             if (status == ServerManager.ServerStatus.Running)
             {
                 _poller.Start();   // begin (or resume) polling once the server answers
@@ -319,9 +514,15 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _server.TriggerBackgroundSync();
     }
 
+    private void OnSyncStarted()
+    {
+        PostToUi(() => _petWindow?.ApplySyncing(true));
+    }
+
     private void OnSyncCompleted()
     {
         _poller.RefreshNow();
+        PostToUi(() => _petWindow?.ApplySyncing(false));
     }
 
     private void OnStatsUpdated(UsagePoller.UsageStats stats)
@@ -343,14 +544,20 @@ internal sealed class TrayApplicationContext : ApplicationContext
         var (symbol, rate) = _dashboard is not null
             ? await _dashboard.ReadCurrencyAsync()
             : ("$", 1m);
+        // Feed the floating pet the SAME numbers the tray shows (same poller, same
+        // moment) so they never drift, plus currency/language/connection state.
+        _petWindow?.ApplyCurrency(symbol, rate);
+        _petWindow?.ApplyLocale(NativeLocalization.ResolveLocale(_localePreference));
+        _petWindow?.ApplyUsage(s.TodayTokens, s.TodayCostUsd);
+        _petWindow?.ApplyConnected(_server.Status == ServerManager.ServerStatus.Running);
         var cost = symbol + (s.TodayCostUsd * rate).ToString("0.00", CultureInfo.InvariantCulture);
         var text = s.TodayTokens <= 0
             ? $"{_strings.TodayTitle}: {_strings.NoData}"
             : $"{_strings.TodayTitle}: {UsagePoller.FormatTokens(s.TodayTokens)} {_strings.TokensUnit} · {cost}";
 
         _summaryItem.Text = text;
-        // NotifyIcon.Text is capped at 63 chars; the summary fits comfortably.
-        _trayIcon.Text = text.Length <= 63 ? text : text[..63];
+        // The tray-icon tooltip stays the app name (set once in the ctor). The floating
+        // pet now surfaces live usage, so the hover tooltip no longer mirrors the summary.
         RefreshTrayIconForTheme();
     }
 
@@ -442,9 +649,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
             _server.Dispose();
             _trayIcon.Dispose();
             _menu.Dispose();
+            _petMenu.Dispose();
             _menuFont?.Dispose();
             _summaryFont?.Dispose();
             _dashboard?.Shutdown();   // WPF Window has no Dispose; really close it
+            _petWindow?.Shutdown();
         }
         base.Dispose(disposing);
     }

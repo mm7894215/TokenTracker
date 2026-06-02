@@ -4,42 +4,56 @@ using System.Runtime.InteropServices;
 
 namespace TokenTrackerWin;
 
+/// <summary>
+/// Renders the tray + pet context menus to match the dashboard's shared Select
+/// dropdown (<c>dashboard/src/ui/components/Select.jsx</c>) exactly:
+///   • popup: rounded-xl (12px), 1px gray-200 border, white bg
+///   • item:  rounded-lg (8px), reserved left check column
+///   • selected (Checked) row: gray-100 bg + gray-500 check + oai-black text
+///   • hover row: gray-50 bg
+///   • unselected text: gray-600
+///
+/// Light palette uses the Select's exact oai-gray values (OKLCH → sRGB). The
+/// dashboard's *dark* gray scale is inverted in a way that makes the Select popup
+/// render near-white with invisible selected text, so the dark palette here is a
+/// sane dark equivalent rather than a literal copy.
+/// </summary>
 internal sealed class TrayMenuRenderer : ToolStripProfessionalRenderer
 {
-    private const int MenuCornerRadius = 10;
+    private const int MenuCornerRadius = 12;   // Select popup rounded-xl
+    private const int ItemCornerRadius = 8;    // Select item rounded-lg
 
     public sealed record Palette(
         Color MenuBackground,
         Color ItemHover,
-        Color ItemPressed,
+        Color ItemSelected,
         Color Text,
+        Color TextStrong,
         Color DisabledText,
-        Color Separator,
         Color Border,
-        Color CheckBackground,
-        Color CheckForeground);
+        Color Indicator);
 
+    // Sane dark equivalent (the Select's literal dark values are broken — see remarks).
     public static readonly Palette DarkPalette = new(
-        Color.FromArgb(22, 22, 23),
-        Color.FromArgb(40, 40, 42),
-        Color.FromArgb(48, 48, 50),
-        Color.FromArgb(238, 238, 239),
-        Color.FromArgb(120, 120, 124),
-        Color.FromArgb(58, 58, 62),
-        Color.FromArgb(76, 76, 82),
-        Color.FromArgb(44, 159, 119),
-        Color.White);
+        MenuBackground: Color.FromArgb(28, 28, 30),
+        ItemHover: Color.FromArgb(44, 44, 47),
+        ItemSelected: Color.FromArgb(54, 54, 58),
+        Text: Color.FromArgb(165, 171, 165),
+        TextStrong: Color.FromArgb(245, 247, 245),
+        DisabledText: Color.FromArgb(110, 112, 114),
+        Border: Color.FromArgb(62, 62, 66),
+        Indicator: Color.FromArgb(150, 156, 150));
 
+    // Exact Select (light) values: oai-gray-* (OKLCH hue 145) converted to sRGB.
     public static readonly Palette LightPalette = new(
-        Color.FromArgb(255, 255, 255),
-        Color.FromArgb(244, 244, 245),
-        Color.FromArgb(236, 236, 238),
-        Color.FromArgb(28, 28, 30),
-        Color.FromArgb(142, 142, 147),
-        Color.FromArgb(224, 224, 226),
-        Color.FromArgb(202, 202, 206),
-        Color.FromArgb(31, 138, 105),
-        Color.White);
+        MenuBackground: Color.FromArgb(255, 255, 255),   // bg-white
+        ItemHover: Color.FromArgb(246, 249, 246),        // gray-50
+        ItemSelected: Color.FromArgb(238, 244, 238),     // gray-100
+        Text: Color.FromArgb(77, 89, 77),                // gray-600
+        TextStrong: Color.FromArgb(10, 10, 10),          // oai-black
+        DisabledText: Color.FromArgb(149, 163, 149),     // gray-400
+        Border: Color.FromArgb(216, 225, 216),           // gray-200
+        Indicator: Color.FromArgb(103, 118, 103));       // gray-500
 
     private readonly TrayMenuColorTable _colorTable;
     private Palette _palette;
@@ -85,24 +99,44 @@ internal sealed class TrayMenuRenderer : ToolStripProfessionalRenderer
 
         var bounds = new Rectangle(Point.Empty, item.Size);
         bounds.Inflate(-5, -2);
-        var color = item.Pressed ? _palette.ItemPressed : item.Selected ? _palette.ItemHover : _palette.MenuBackground;
 
-        if (color == _palette.MenuBackground)
+        // Select dropdown: hovered row = gray-50, selected (Checked) row = gray-100.
+        Color color;
+        if (item.Selected) color = _palette.ItemHover;
+        else if (item.Checked) color = _palette.ItemSelected;
+        else color = _palette.MenuBackground;
+
+        if (color != _palette.MenuBackground)
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using var path = RoundedRectangle(bounds, ItemCornerRadius);
+            using var brush = new SolidBrush(color);
+            e.Graphics.FillPath(brush, path);
+        }
+        else
         {
             using var clear = new SolidBrush(_palette.MenuBackground);
             e.Graphics.FillRectangle(clear, new Rectangle(Point.Empty, item.Size));
-            return;
         }
+    }
 
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        using var path = RoundedRectangle(bounds, 6);
-        using var brush = new SolidBrush(color);
-        e.Graphics.FillPath(brush, path);
+    protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
+    {
+        // Submenu expand arrow: follow the theme text colour (the default dark glyph
+        // is invisible on the dark menu background).
+        e.ArrowColor = _palette.Text;
+        base.OnRenderArrow(e);
     }
 
     protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
     {
-        var color = e.Item.Enabled ? _palette.Text : _palette.DisabledText;
+        // Match the Select: selected row = strong (oai-black) text, others = gray-600.
+        var checkedRow = e.Item is ToolStripMenuItem { Checked: true };
+        var color = !e.Item.Enabled
+            ? _palette.DisabledText
+            : checkedRow ? _palette.TextStrong : _palette.Text;
+        // The framework's check-margin column provides the left gutter, so the laid-out
+        // text rect is already correctly indented.
         var rect = new Rectangle(
             e.TextRectangle.Left,
             0,
@@ -123,7 +157,7 @@ internal sealed class TrayMenuRenderer : ToolStripProfessionalRenderer
     protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
     {
         var y = e.Item.Height / 2;
-        using var pen = new Pen(_palette.Separator);
+        using var pen = new Pen(_palette.Border);
         e.Graphics.DrawLine(pen, 10, y, e.Item.Width - 10, y);
     }
 
@@ -138,25 +172,31 @@ internal sealed class TrayMenuRenderer : ToolStripProfessionalRenderer
 
     protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
     {
+        // Gray check in the framework's check-margin column, like the Select dropdown's
+        // ItemIndicator. The check margin is reserved + counted in the menu width, so
+        // (unlike item Padding) it adds a left gutter without overflowing the layout.
+        if (e.Item is not ToolStripMenuItem { Checked: true }) return;
         var rect = e.ImageRectangle;
-        rect.Inflate(2, 2);
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        using var path = RoundedRectangle(rect, 4);
-        using var brush = new SolidBrush(_palette.CheckBackground);
-        e.Graphics.FillPath(brush, path);
-
-        using var pen = new Pen(_palette.CheckForeground, 1.7f)
+        using var pen = new Pen(_palette.Indicator, 1.9f)
         {
             StartCap = LineCap.Round,
             EndCap = LineCap.Round,
+            LineJoin = LineJoin.Round,
         };
-        var x = rect.Left + rect.Width * 0.28f;
-        var y = rect.Top + rect.Height * 0.52f;
+        // The framework hands us a small glyph rect jammed against the row's left edge,
+        // leaving the ✓ cramped against the menu border. Nudge it right into the (ample)
+        // gap before the text so it has breathing room on its left.
+        const float CheckShiftX = 7f;
+        float cx = rect.Left + rect.Width / 2f + CheckShiftX;
+        // Center on the full row height — the framework's glyph rect isn't vertically
+        // centered in the row, which left the ✓ sitting high.
+        float cy = e.Item.Height / 2f;
         e.Graphics.DrawLines(pen, new[]
         {
-            new PointF(x, y),
-            new PointF(rect.Left + rect.Width * 0.45f, rect.Bottom - rect.Height * 0.28f),
-            new PointF(rect.Right - rect.Width * 0.22f, rect.Top + rect.Height * 0.30f),
+            new PointF(cx - 4f, cy + 1f),
+            new PointF(cx - 1f, cy + 4f),
+            new PointF(cx + 5f, cy - 4f),
         });
     }
 
@@ -223,10 +263,10 @@ internal sealed class TrayMenuRenderer : ToolStripProfessionalRenderer
         public override Color MenuItemSelected => Colors.ItemHover;
         public override Color MenuItemSelectedGradientBegin => Colors.ItemHover;
         public override Color MenuItemSelectedGradientEnd => Colors.ItemHover;
-        public override Color MenuItemPressedGradientBegin => Colors.ItemPressed;
-        public override Color MenuItemPressedGradientMiddle => Colors.ItemPressed;
-        public override Color MenuItemPressedGradientEnd => Colors.ItemPressed;
-        public override Color SeparatorDark => Colors.Separator;
-        public override Color SeparatorLight => Colors.Separator;
+        public override Color MenuItemPressedGradientBegin => Colors.ItemSelected;
+        public override Color MenuItemPressedGradientMiddle => Colors.ItemSelected;
+        public override Color MenuItemPressedGradientEnd => Colors.ItemSelected;
+        public override Color SeparatorDark => Colors.Border;
+        public override Color SeparatorLight => Colors.Border;
     }
 }

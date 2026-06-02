@@ -6,10 +6,18 @@
     "rawText": "JSX text nodes containing letters or digits"
   },
   "totals": {
-    "colors": 262,
+    "colors": 265,
     "rawText": 172
   },
   "files": {
+    "dashboard/src/pet.jsx": {
+      "colors": 3,
+      "rawText": 2,
+      "rawTextTokens": [
+        "/@keyframes // so the animations still run. const result = raw.replace(/",
+        "whose class/id contains \"eye\" (e.g. eyes-look, * eyes-focus, eyes-read). Those groups already run their own blink/track transform * animations, which would override any transform we set directly — so after a pose * loads we wrap each (non-shut) eye group in our own"
+      ]
+    },
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
       "colors": 0,
       "rawText": 3,

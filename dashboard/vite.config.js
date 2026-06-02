@@ -1156,15 +1156,26 @@ export default defineConfig(({ mode }) => {
     define["import.meta.env.VITE_APP_VERSION"] = JSON.stringify(fallbackVersion);
   }
 
+  // Build inputs. The Windows tray app's floating-pet page (pet.html) is an
+  // OPT-IN extra entry, enabled only when TOKENTRACKER_BUILD_PET=1 (set by the
+  // Windows build). Adding a rollup entry reshuffles shared chunks, so keeping it
+  // off by default makes the macOS + web builds byte-identical to a no-pet build —
+  // this matters because this project has a history of chunk-split changes subtly
+  // breaking the native OAuth callback (see CLAUDE.md). macOS never loads pet.html.
+  const rollupInput = {
+    main: path.resolve(ROOT_DIR, "index.html"),
+    share: path.resolve(ROOT_DIR, "share.html"),
+  };
+  if (process.env.TOKENTRACKER_BUILD_PET === "1") {
+    rollupInput.pet = path.resolve(ROOT_DIR, "pet.html");
+  }
+
   return {
     plugins: [react(), richLinkMetaPlugin(), localDataApiPlugin()],
     ...(Object.keys(define).length ? { define } : {}),
     build: {
       rollupOptions: {
-        input: {
-          main: path.resolve(ROOT_DIR, "index.html"),
-          share: path.resolve(ROOT_DIR, "share.html"),
-        },
+        input: rollupInput,
       },
     },
     server: {
