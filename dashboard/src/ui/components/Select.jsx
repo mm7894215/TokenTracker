@@ -2,6 +2,7 @@ import React from "react";
 import { Select as BaseSelect } from "@base-ui/react/select";
 import { Check, ChevronDown } from "lucide-react";
 import { cn } from "../../lib/cn";
+import { getPortalRoot } from "../../lib/portal-root";
 
 // Shared rounded dropdown built on @base-ui/react Select. Replaces native
 // HTML select elements so the open list matches the app's design (rounded
@@ -20,11 +21,6 @@ const TRIGGER_BASE =
   "hover:border-oai-gray-300 focus:outline-none focus-visible:ring-2 " +
   "focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 " +
   "dark:bg-oai-gray-900 dark:text-white dark:hover:border-oai-gray-700";
-
-function getPortalContainer() {
-  if (typeof document === "undefined") return undefined;
-  return document.getElementById("root") || undefined;
-}
 
 /**
  * @param {object} props
@@ -83,7 +79,7 @@ export function Select({
           aria-hidden
         />
       </BaseSelect.Trigger>
-      <BaseSelect.Portal container={getPortalContainer()}>
+      <BaseSelect.Portal container={getPortalRoot()}>
         <BaseSelect.Positioner
           align={align}
           side="bottom"

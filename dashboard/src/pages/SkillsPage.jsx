@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { Select } from "@base-ui/react/select";
+import { getPortalRoot } from "../lib/portal-root";
 import { LocalOnlyNotice } from "../components/LocalOnlyNotice.jsx";
 import { isMockEnabled } from "../lib/mock-data";
 
@@ -247,7 +248,7 @@ function FilterToolbar({
             <ChevronDown className="h-3.5 w-3.5" aria-hidden />
           </Select.Icon>
         </Select.Trigger>
-        <Select.Portal>
+        <Select.Portal container={getPortalRoot()}>
           <Select.Positioner sideOffset={4} alignItemWithTrigger={false} className="z-[60]">
             <Select.Popup className="min-w-[var(--anchor-width)] overflow-hidden rounded-md border border-oai-gray-200 bg-white p-1 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.18)] outline-none dark:border-oai-gray-800 dark:bg-oai-gray-950 dark:shadow-[0_12px_32px_-12px_rgba(0,0,0,0.6)]">
               <Select.Item
@@ -1477,7 +1478,7 @@ export function SkillsPage() {
                       <ChevronDown className="h-4 w-4" aria-hidden />
                     </Select.Icon>
                   </Select.Trigger>
-                  <Select.Portal>
+                  <Select.Portal container={getPortalRoot()}>
                     <Select.Positioner sideOffset={4} alignItemWithTrigger={false} className="z-[60]">
                       <Select.Popup className="min-w-[var(--anchor-width)] overflow-hidden rounded-md border border-oai-gray-200 bg-white p-1 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.18)] outline-none transition-[opacity,transform] duration-150 ease-out data-[ending-style]:scale-[0.97] data-[ending-style]:opacity-0 data-[starting-style]:scale-[0.97] data-[starting-style]:opacity-0 dark:border-oai-gray-800 dark:bg-oai-gray-950 dark:shadow-[0_12px_32px_-12px_rgba(0,0,0,0.6)]">
                         <Select.Item

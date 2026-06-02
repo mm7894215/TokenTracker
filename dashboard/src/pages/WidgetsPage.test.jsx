@@ -63,7 +63,10 @@ describe("WidgetsPage menu bar configurator", () => {
     await act(async () => {
       await user.click(secondary);
     });
-    const listbox = screen.getByRole("listbox", { name: secondaryLabel });
+    // The popup mounts asynchronously (base-ui portal + floating-ui positioning),
+    // so wait for the listbox rather than querying synchronously right after the
+    // click — a sync getByRole races the mount and fails intermittently.
+    const listbox = await screen.findByRole("listbox", { name: secondaryLabel });
     expect(
       within(listbox).queryByRole("option", { name: copy("menubar.metric.today_tokens") }),
     ).not.toBeInTheDocument();
