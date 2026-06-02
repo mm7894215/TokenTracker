@@ -28,6 +28,8 @@ const {
   parseCopilotIncremental,
   resolveKimiWireFiles,
   parseKimiIncremental,
+  resolveKimiCodeWireFiles,
+  parseKimiCodeIncremental,
   resolveOmpSessionFiles,
   parseOmpIncremental,
   resolvePiSessionFiles,
@@ -695,6 +697,28 @@ async function cmdSync(argv) {
       });
     }
 
+    // ── Kimi Code official (@moonshot-ai/kimi-code, ~/.kimi-code) ──
+    let kimiCodeResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    const kimiCodeWireFiles = resolveKimiCodeWireFiles(process.env);
+    if (kimiCodeWireFiles.length > 0) {
+      if (progress?.enabled) {
+        progress.start(`Parsing Kimi Code (official) ${renderBar(0)} | buckets 0`);
+      }
+      kimiCodeResult = await parseKimiCodeIncremental({
+        wireFiles: kimiCodeWireFiles,
+        cursors,
+        queuePath,
+        env: process.env,
+        onProgress: (p) => {
+          if (!progress?.enabled) return;
+          const pct = p.total > 0 ? p.index / p.total : 1;
+          progress.update(
+            `Parsing Kimi Code (official) ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} files | buckets ${formatNumber(p.bucketsQueued)}`,
+          );
+        },
+      });
+    }
+
     // ── CodeBuddy CLI (passive ~/.codebuddy/projects/**/*.jsonl reader) ──
     // Tencent's CodeBuddy CLI is a Claude Code clone; no hook system, so we
     // tail the per-session JSONL conversation logs incrementally on each sync.
@@ -981,6 +1005,7 @@ async function cmdSync(argv) {
         kiroCliResult.recordsProcessed +
         hermesResult.recordsProcessed +
         kimiResult.recordsProcessed +
+        kimiCodeResult.recordsProcessed +
         codebuddyResult.recordsProcessed +
         ompResult.recordsProcessed +
         piResult.recordsProcessed +
@@ -1005,6 +1030,7 @@ async function cmdSync(argv) {
         kiroCliResult.bucketsQueued +
         hermesResult.bucketsQueued +
         kimiResult.bucketsQueued +
+        kimiCodeResult.bucketsQueued +
         codebuddyResult.bucketsQueued +
         ompResult.bucketsQueued +
         piResult.bucketsQueued +

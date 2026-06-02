@@ -480,12 +480,12 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
   }
 
   // Kimi: passive reader — no hook installation needed.
-  // TokenTracker reads ~/.kimi/sessions/**/wire.jsonl directly.
+  // TokenTracker reads both legacy ~/.kimi/ and official ~/.kimi-code/ sessions.
   {
     const kimiHome = process.env.KIMI_HOME || path.join(home, ".kimi");
-    const kimiSessions = path.join(kimiHome, "sessions");
+    const kimiCodeHome = process.env.KIMI_CODE_HOME || path.join(home, ".kimi-code");
     const fssync = require("node:fs");
-    if (fssync.existsSync(kimiSessions)) {
+    if (fssync.existsSync(path.join(kimiHome, "sessions")) || fssync.existsSync(path.join(kimiCodeHome, "sessions"))) {
       summary.push({ label: "Kimi Code", status: "detected", detail: "Passive reader (no hook needed)" });
     }
   }

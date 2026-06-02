@@ -35,6 +35,9 @@ const {
   parseAntigravityIncremental,
   listAntigravitySessionFiles,
   estimateAntigravityTokens,
+  parseKimiCodeIncremental,
+  resolveKimiCodeWireFiles,
+  resolveKimiCodeDefaultModel,
 } = require("../src/lib/rollout");
 
 const antigravityTestTokens = (text) => estimateAntigravityTokens(text || "");
@@ -6868,6 +6871,159 @@ test("parseAntigravityIncremental normalizes non-Flash model settings without de
     const queued = await readJsonLines(queuePath);
     assert.equal(queued.length, 1);
     assert.equal(queued[0].model, "claude-haiku-4.6");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── Kimi Code official (@moonshot-ai/kimi-code) ──────────────────────────────
+
+test("parseKimiCodeIncremental reads step.end events with Anthropic-style usage", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-kimi-code-"));
+  try {
+    const sessDir = path.join(tmp, "sessions", "wd_proj_abc123", "session_001", "agents", "main");
+    await fs.mkdir(sessDir, { recursive: true });
+    const wireFile = path.join(sessDir, "wire.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const now = 1780000000000;
+    const lines = [
+      JSON.stringify({ type: "metadata", protocol_version: "1.0", created_at: now }),
+      JSON.stringify({ type: "config.update", modelAlias: "kimi-code/kimi-k2.6", time: now }),
+      JSON.stringify({ type: "context.append_loop_event", event: { type: "step.begin", uuid: "sb1", turnId: "0", step: 1 }, time: now }),
+      JSON.stringify({ type: "context.append_loop_event", event: { type: "step.end", uuid: "se1", turnId: "0", step: 1, usage: { input_tokens: 9000, output_tokens: 250, cache_read_input_tokens: 8000, cache_creation_input_tokens: 100 } }, time: now + 1000 }),
+      JSON.stringify({ type: "context.append_loop_event", event: { type: "step.end", uuid: "se2", turnId: "0", step: 2, usage: { input_tokens: 2000, output_tokens: 80, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }, time: now + 2000 }),
+    ];
+    await fs.writeFile(wireFile, lines.join("\n") + "\n");
+
+    const cursors = {};
+    const result = await parseKimiCodeIncremental({ wireFiles: [wireFile], cursors, queuePath });
+    assert.equal(result.recordsProcessed, 2);
+    assert.equal(result.eventsAggregated, 2);
+    assert.equal(result.bucketsQueued, 1);
+
+    assert.ok(Array.isArray(cursors.kimiCode?.seenIds));
+    assert.equal(cursors.kimiCode.seenIds.length, 2);
+    assert.ok(cursors.kimiCode.seenIds.includes("se1"));
+    assert.ok(cursors.kimiCode.seenIds.includes("se2"));
+
+    const queued = (await fs.readFile(queuePath, "utf8")).trim().split("\n").map(JSON.parse);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].source, "kimi");
+    assert.equal(queued[0].model, "kimi-k2.6");
+    assert.equal(queued[0].input_tokens, 11000);
+    assert.equal(queued[0].output_tokens, 330);
+    assert.equal(queued[0].cached_input_tokens, 8000);
+    assert.equal(queued[0].cache_creation_input_tokens, 100);
+    assert.equal(queued[0].total_tokens, 11000 + 330 + 8000 + 100);
+
+    // idempotent re-parse
+    const result2 = await parseKimiCodeIncremental({ wireFiles: [wireFile], cursors, queuePath });
+    assert.equal(result2.eventsAggregated, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseKimiCodeIncremental handles OpenAI-compat usage (cached folded into input_tokens)", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-kimi-code-oai-"));
+  try {
+    const sessDir = path.join(tmp, "sessions", "wd_proj_abc", "session_002", "agents", "main");
+    await fs.mkdir(sessDir, { recursive: true });
+    const wireFile = path.join(sessDir, "wire.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const now = 1780000000000;
+    const lines = [
+      JSON.stringify({ type: "metadata", protocol_version: "1.3", created_at: now }),
+      JSON.stringify({ type: "config.update", modelAlias: "kimi-code/kimi-k2.6", time: now }),
+      JSON.stringify({ type: "context.append_loop_event", event: { type: "step.end", uuid: "oai1", turnId: "0", step: 1, usage: { input_tokens: 5000, output_tokens: 120, input_tokens_details: { cached_tokens: 4000 } } }, time: now + 1000 }),
+    ];
+    await fs.writeFile(wireFile, lines.join("\n") + "\n");
+
+    const cursors = {};
+    const result = await parseKimiCodeIncremental({ wireFiles: [wireFile], cursors, queuePath });
+    assert.equal(result.eventsAggregated, 1);
+
+    const queued = (await fs.readFile(queuePath, "utf8")).trim().split("\n").map(JSON.parse);
+    assert.equal(queued[0].input_tokens, 1000); // 5000 - 4000 cached
+    assert.equal(queued[0].cached_input_tokens, 4000);
+    assert.equal(queued[0].output_tokens, 120);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseKimiCodeIncremental returns zero when no wire files exist", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-kimi-code-empty-"));
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = {};
+    const result = await parseKimiCodeIncremental({ wireFiles: [], cursors, queuePath });
+    assert.equal(result.recordsProcessed, 0);
+    assert.equal(result.eventsAggregated, 0);
+    assert.equal(result.bucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveKimiCodeWireFiles walks agents/<name>/wire.jsonl inside sessions", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-kimi-code-resolve-"));
+  try {
+    const d1 = path.join(tmp, ".kimi-code", "sessions", "wd_a_123", "session_x", "agents", "main");
+    const d2 = path.join(tmp, ".kimi-code", "sessions", "wd_b_456", "session_y", "agents", "sub");
+    await fs.mkdir(d1, { recursive: true });
+    await fs.mkdir(d2, { recursive: true });
+    await fs.writeFile(path.join(d1, "wire.jsonl"), "");
+    await fs.writeFile(path.join(d2, "wire.jsonl"), "");
+
+    const files = resolveKimiCodeWireFiles({ KIMI_CODE_HOME: path.join(tmp, ".kimi-code") });
+    assert.equal(files.length, 2);
+    assert.ok(files.every((f) => f.endsWith("wire.jsonl")));
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveKimiCodeDefaultModel extracts model from config.toml", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-kimi-code-model-"));
+  try {
+    await fs.writeFile(path.join(tmp, "config.toml"), 'default_model = "kimi-code/kimi-k2.6"\n');
+    const model = resolveKimiCodeDefaultModel({ KIMI_CODE_HOME: tmp });
+    assert.equal(model, "kimi-k2.6");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseKimiCodeIncremental persists model from config.update on cursor for incremental resumes", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-kimi-code-resume-"));
+  try {
+    const sessDir = path.join(tmp, "sessions", "wd_z_999", "session_r", "agents", "main");
+    await fs.mkdir(sessDir, { recursive: true });
+    const wireFile = path.join(sessDir, "wire.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const now = 1780000000000;
+
+    // First write: config.update + one step.end
+    await fs.writeFile(wireFile, [
+      JSON.stringify({ type: "metadata", protocol_version: "1.0", created_at: now }),
+      JSON.stringify({ type: "config.update", modelAlias: "kimi-code/kimi-k2.6", time: now }),
+      JSON.stringify({ type: "context.append_loop_event", event: { type: "step.end", uuid: "r1", turnId: "0", step: 1, usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }, time: now + 500 }),
+    ].join("\n") + "\n");
+
+    const cursors = {};
+    await parseKimiCodeIncremental({ wireFiles: [wireFile], cursors, queuePath });
+    assert.equal(cursors.kimiCode.fileOffsets[wireFile].model, "kimi-k2.6");
+
+    // Second write: append step.end without config.update (incremental resume)
+    await fs.appendFile(wireFile, JSON.stringify({ type: "context.append_loop_event", event: { type: "step.end", uuid: "r2", turnId: "0", step: 2, usage: { input_tokens: 200, output_tokens: 30, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }, time: now + 2000 }) + "\n");
+
+    const result2 = await parseKimiCodeIncremental({ wireFiles: [wireFile], cursors, queuePath });
+    assert.equal(result2.eventsAggregated, 1);
+
+    const queued = (await fs.readFile(queuePath, "utf8")).trim().split("\n").map(JSON.parse);
+    const lastEntry = queued[queued.length - 1];
+    assert.equal(lastEntry.model, "kimi-k2.6");
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

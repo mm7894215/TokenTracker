@@ -4292,6 +4292,210 @@ async function parseKimiIncremental({ wireFiles, cursors, queuePath, onProgress,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Kimi Code (official @moonshot-ai/kimi-code) — passive JSONL reader.
+//
+// Distinct from the legacy community `kimi-cli` above (Python, ~/.kimi). The
+// official single-binary product stores under ~/.kimi-code/ with a different
+// session layout and wire protocol:
+//
+//   ~/.kimi-code/sessions/<wd_dir_hash>/<session_id>/agents/<name>/wire.jsonl
+//
+// proto 1.x events are namespaced and carry `type` at the top level. Per-step
+// token usage rides on a `step.end` loop event (wrapped in
+// `context.append_loop_event`) with an Anthropic-style usage object:
+//
+//   {"type":"context.append_loop_event",
+//    "event":{"type":"step.end","uuid":"<stepUuid>","turnId":"..","step":N,
+//      "usage":{"input_tokens":N,"output_tokens":N,
+//               "cache_read_input_tokens":N,"cache_creation_input_tokens":N}},
+//    "time":<epoch_ms>}
+//
+// Model comes from the per-session `config.update` event's `modelAlias`
+// (e.g. "kimi-code/kimi-k2.6" -> "kimi-k2.6"). Emitted under source "kimi" so
+// new + legacy sessions aggregate together. Independent cursor (cursors.kimiCode)
+// keeps state from colliding with the legacy reader's cursors.kimi.
+function resolveKimiCodeHome(env = process.env) {
+  const home = require("node:os").homedir();
+  const explicit = typeof env?.KIMI_CODE_HOME === "string" ? env.KIMI_CODE_HOME.trim() : "";
+  return explicit ? path.resolve(explicit) : path.join(home, ".kimi-code");
+}
+
+function resolveKimiCodeWireFiles(env = process.env) {
+  const sessionsDir = path.join(resolveKimiCodeHome(env), "sessions");
+  if (!fssync.existsSync(sessionsDir)) return [];
+  const files = [];
+  const walk = (dir, depth) => {
+    if (depth > 5) return;
+    let entries;
+    try { entries = fssync.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const ent of entries) {
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory()) walk(full, depth + 1);
+      else if (ent.name === "wire.jsonl") files.push(full);
+    }
+  };
+  walk(sessionsDir, 0);
+  return files;
+}
+
+function resolveKimiCodeDefaultModel(env = process.env) {
+  const fallback = "kimi-for-coding";
+  try {
+    const cfgPath = path.join(resolveKimiCodeHome(env), "config.toml");
+    const raw = fssync.readFileSync(cfgPath, "utf8");
+    const m = raw.match(/^\s*default_model\s*=\s*"([^"]+)"/m);
+    if (!m) return fallback;
+    return m[1].includes("/") ? m[1].split("/").pop() : m[1] || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function kimiCodeModelAlias(value) {
+  if (typeof value !== "string" || !value) return null;
+  return value.includes("/") ? value.split("/").pop() : value;
+}
+
+async function parseKimiCodeIncremental({ wireFiles, cursors, queuePath, onProgress, env, model } = {}) {
+  await ensureDir(path.dirname(queuePath));
+  const state = cursors.kimiCode && typeof cursors.kimiCode === "object" ? cursors.kimiCode : {};
+  const seenIds = new Set(Array.isArray(state.seenIds) ? state.seenIds : []);
+  const fileOffsets =
+    state.fileOffsets && typeof state.fileOffsets === "object" ? { ...state.fileOffsets } : {};
+
+  const files = Array.isArray(wireFiles) ? wireFiles : resolveKimiCodeWireFiles(env || process.env);
+  const fallbackModel = model || resolveKimiCodeDefaultModel(env || process.env);
+  if (files.length === 0) {
+    cursors.kimiCode = { ...state, seenIds: Array.from(seenIds), fileOffsets, updatedAt: new Date().toISOString() };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
+
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const touchedBuckets = new Set();
+  const cb = typeof onProgress === "function" ? onProgress : null;
+  let recordsProcessed = 0;
+  let eventsAggregated = 0;
+
+  for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+    const filePath = files[fileIdx];
+    let stat;
+    try { stat = fssync.statSync(filePath); } catch { continue; }
+
+    const prevEntry = fileOffsets[filePath] || {};
+    const prevSize = Number(prevEntry.size) || 0;
+    const prevIno = prevEntry.ino;
+    const inodeChanged = typeof prevIno === "number" && prevIno !== stat.ino;
+    const startOffset = stat.size < prevSize || inodeChanged ? 0 : prevSize;
+    // Model is declared in a `config.update` near the file head; persist it on
+    // the cursor so incremental resumes (which start past that line) keep it.
+    let fileModel = (typeof prevEntry.model === "string" && prevEntry.model) || fallbackModel;
+    if (stat.size <= startOffset) continue;
+
+    let stream;
+    try {
+      stream = fssync.createReadStream(filePath, { encoding: "utf8", start: startOffset });
+    } catch { continue; }
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+    for await (const line of rl) {
+      if (!line || !line.trim()) continue;
+      let entry;
+      try { entry = JSON.parse(line); } catch { continue; }
+
+      if (entry.type === "config.update") {
+        const alias = kimiCodeModelAlias(entry.modelAlias);
+        if (alias) fileModel = alias;
+        continue;
+      }
+
+      const evt =
+        entry.type === "context.append_loop_event" && entry.event && typeof entry.event === "object"
+          ? entry.event
+          : entry;
+      if (!evt || evt.type !== "step.end") continue;
+      const usage = evt.usage;
+      if (!usage || typeof usage !== "object") continue;
+      const id = evt.uuid;
+      if (!id || seenIds.has(id)) continue;
+
+      recordsProcessed++;
+
+      // Anthropic-style usage: input_tokens already excludes cache. OpenAI-compat
+      // models instead fold cached reads into input_tokens and expose them via
+      // input_tokens_details.cached_tokens — mirror kimi-code's own extractUsage
+      // so we never double-count cache as fresh input.
+      const cacheCreation = toNonNegativeInt(usage.cache_creation_input_tokens);
+      let cacheRead;
+      let input;
+      if (usage.cache_read_input_tokens != null) {
+        cacheRead = toNonNegativeInt(usage.cache_read_input_tokens);
+        input = toNonNegativeInt(usage.input_tokens);
+      } else {
+        const details =
+          usage.input_tokens_details && typeof usage.input_tokens_details === "object"
+            ? usage.input_tokens_details
+            : null;
+        const cached = toNonNegativeInt(details ? details.cached_tokens : 0);
+        cacheRead = cached;
+        input = Math.max(0, toNonNegativeInt(usage.input_tokens) - cached);
+      }
+      const output = toNonNegativeInt(usage.output_tokens);
+      if (input === 0 && output === 0 && cacheRead === 0 && cacheCreation === 0) {
+        seenIds.add(id);
+        continue;
+      }
+
+      const ms = entry.time ?? evt.time;
+      if (ms == null || !Number.isFinite(Number(ms))) continue;
+      const tsIso = new Date(Number(ms)).toISOString();
+      const bucketStart = toUtcHalfHourStart(tsIso);
+      if (!bucketStart) continue;
+
+      const delta = {
+        input_tokens: input,
+        cached_input_tokens: cacheRead,
+        cache_creation_input_tokens: cacheCreation,
+        output_tokens: output,
+        reasoning_output_tokens: 0,
+        total_tokens: input + output + cacheRead + cacheCreation,
+        conversation_count: 1,
+      };
+
+      const bucket = getHourlyBucket(hourlyState, "kimi", fileModel, bucketStart);
+      addTotals(bucket.totals, delta);
+      touchedBuckets.add(bucketKey("kimi", fileModel, bucketStart));
+      seenIds.add(id);
+      eventsAggregated++;
+
+      if (cb) {
+        cb({
+          index: fileIdx + 1,
+          total: files.length,
+          recordsProcessed,
+          eventsAggregated,
+          bucketsQueued: touchedBuckets.size,
+        });
+      }
+    }
+
+    let postStat = stat;
+    try { postStat = fssync.statSync(filePath); } catch {}
+    fileOffsets[filePath] = { size: postStat.size, mtimeMs: postStat.mtimeMs, ino: postStat.ino, model: fileModel };
+  }
+
+  const seenArr = Array.from(seenIds);
+  const cappedSeen = seenArr.length > 10_000 ? seenArr.slice(seenArr.length - 10_000) : seenArr;
+
+  const bucketsQueued = await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets });
+  const updatedAt = new Date().toISOString();
+  hourlyState.updatedAt = updatedAt;
+  cursors.hourly = hourlyState;
+  cursors.kimiCode = { ...state, seenIds: cappedSeen, fileOffsets, updatedAt };
+
+  return { recordsProcessed, eventsAggregated, bucketsQueued };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // CodeBuddy CLI — passive JSONL reader (~/.codebuddy/projects/<cwd>/<sid>.jsonl)
 //
 // Tencent's CodeBuddy CLI is structurally cloned from Claude Code:
@@ -8152,6 +8356,10 @@ module.exports = {
   resolveKimiWireFiles,
   resolveKimiDefaultModel,
   parseKimiIncremental,
+  resolveKimiCodeHome,
+  resolveKimiCodeWireFiles,
+  resolveKimiCodeDefaultModel,
+  parseKimiCodeIncremental,
   resolveCodebuddyHome,
   resolveCodebuddyProjectFiles,
   resolveCodebuddyDefaultModel,

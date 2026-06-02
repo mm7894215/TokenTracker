@@ -31,6 +31,7 @@
     "kimi-for-coding":  { "input": 0.6,  "output": 2,    "cache_read": 0.15 },
     "kimi-k2.5":        { "input": 0.6,  "output": 2,    "cache_read": 0.15 },
     "kimi-k2.5-free":   { "input": 0,    "output": 0,    "cache_read": 0 },
+    "kimi-k2.6":        { "input": 0.95, "output": 4,    "cache_read": 0.16 },
     "glm-5.1":          { "input": 1.4,  "output": 4.4,  "cache_read": 0.26 },
     "glm-5":            { "input": 1.0,  "output": 3.2,  "cache_read": 0.2 },
     "glm-5-turbo":      { "input": 1.2,  "output": 4.0,  "cache_read": 0.24 },

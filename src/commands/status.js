@@ -37,6 +37,7 @@ const {
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
 const {
   resolveKimiWireFiles,
+  resolveKimiCodeWireFiles,
   resolveKiroCliDbPath,
   resolveCodebuddyHome,
   resolveCodebuddyProjectFiles,
@@ -177,6 +178,10 @@ async function cmdStatus(argv = []) {
   const kimiHome = process.env.KIMI_HOME || path.join(home, ".kimi");
   const kimiInstalled = fssync.existsSync(path.join(kimiHome, "sessions"));
 
+  const kimiCodeWireFiles = resolveKimiCodeWireFiles(process.env);
+  const kimiCodeHome = process.env.KIMI_CODE_HOME || path.join(home, ".kimi-code");
+  const kimiCodeInstalled = fssync.existsSync(path.join(kimiCodeHome, "sessions"));
+
   // Kiro CLI — reads from SQLite at
   // ~/Library/Application Support/kiro-cli/data.sqlite3. End-user dashboards
   // show CLI and IDE merged under a single "Kiro" brand; this status line
@@ -300,8 +305,8 @@ async function cmdStatus(argv = []) {
         grok: grokInstalled ? Boolean(grokHookState?.configured) : null,
       },
       providers: {
-        kimi_code: kimiInstalled
-          ? { installed: true, files: kimiWireFiles.length }
+        kimi_code: kimiInstalled || kimiCodeInstalled
+          ? { installed: true, files: kimiWireFiles.length + kimiCodeWireFiles.length }
           : { installed: false },
         kiro_cli: kiroCliInstalled
           ? { installed: true, detail: kiroCliDbPath }
@@ -385,8 +390,8 @@ async function cmdStatus(argv = []) {
       `- Opencode plugin: ${opencodePluginConfigured ? "set" : "unset"}`,
       `- OpenClaw session plugin: ${openclawSessionPluginState?.configured ? "set" : "unset"}`,
       `- OpenClaw hook (legacy): ${openclawHookState?.configured ? "set" : "unset"}`,
-      kimiInstalled
-        ? `- Kimi Code: passive reader (${kimiWireFiles.length} wire.jsonl file${kimiWireFiles.length !== 1 ? "s" : ""} found)`
+      kimiInstalled || kimiCodeInstalled
+        ? `- Kimi Code: passive reader (${kimiWireFiles.length + kimiCodeWireFiles.length} wire.jsonl file${(kimiWireFiles.length + kimiCodeWireFiles.length) !== 1 ? "s" : ""} found)`
         : null,
       kiroCliInstalled
         ? `- Kiro CLI: SQLite data.sqlite3 found (tokens approximated from char lengths, merged under 'kiro' source)`

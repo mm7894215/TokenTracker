@@ -298,7 +298,21 @@ async function fetchCursorLimits({ home, fetchImpl = fetch } = {}) {
 
 function resolveKimiHome({ home, env } = {}) {
   const explicit = typeof env?.KIMI_HOME === "string" ? env.KIMI_HOME.trim() : "";
-  return explicit ? path.resolve(explicit) : path.join(home || os.homedir(), ".kimi");
+  if (explicit) return path.resolve(explicit);
+  const base = home || os.homedir();
+  // Prefer the official Kimi Code (@moonshot-ai/kimi-code, ~/.kimi-code) when it
+  // holds a login — its credential file shape (kimi-code.json) and the
+  // auth/usages endpoints are identical to the legacy kimi-cli (~/.kimi), so the
+  // existing fetch path works unchanged. Fall back to legacy when kimi-code has
+  // no credentials, keeping old kimi-cli users untouched.
+  const explicitCode = typeof env?.KIMI_CODE_HOME === "string" ? env.KIMI_CODE_HOME.trim() : "";
+  const codeHome = explicitCode ? path.resolve(explicitCode) : path.join(base, ".kimi-code");
+  const codeCredsPath = path.join(codeHome, "credentials", "kimi-code.json");
+  try {
+    const raw = fs.readFileSync(codeCredsPath, "utf8").trim();
+    if (raw && JSON.parse(raw)?.access_token) return codeHome;
+  } catch { /* missing / empty / corrupt — fall through to legacy */ }
+  return path.join(base, ".kimi");
 }
 
 function loadKimiCredentials({ home, env } = {}) {
