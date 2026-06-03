@@ -46,6 +46,7 @@ beforeEach(() => {
         directory: "sample-skill",
         description: "Keeps the installed list visible.",
         targets: ["claude", "grok", "antigravity"],
+        targetStates: { claude: "synced", grok: "synced", antigravity: "synced" },
         managed: true,
       },
     ],
@@ -69,8 +70,8 @@ describe("SkillsPage", () => {
 
     expect(await screen.findByText("Sample Skill")).toBeInTheDocument();
     expect(screen.getByText("Keeps the installed list visible.")).toBeInTheDocument();
-    expect(screen.getByText("Grok")).toBeInTheDocument();
-    expect(screen.getByText("Antigravity")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Grok: synced. Click to unsync." })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Antigravity: synced. Click to unsync." })).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.queryByText(copy("skills.empty.my"))).not.toBeInTheDocument();

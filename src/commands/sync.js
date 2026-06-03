@@ -1307,7 +1307,7 @@ async function scheduleAutoRetry({
   spawnAutoRetryProcess({
     retryPath,
     trackerBinPath: path.join(trackerDir, "app", "bin", "tracker.js"),
-    fallbackPkg: "tokentracker-cli",
+    fallbackPkg: "@ipv9/tokentracker-cli",
     delayMs,
   });
   return { scheduled: true, retryAtMs: retryMs };

@@ -4,7 +4,7 @@
   "landing.screenshot.alt": "TokenTracker 儀表板截圖",
   "landing.nav.login": "登入",
   "landing.nav.signup": "註冊",
-  "landing.install.command": "npx --yes tokentracker-cli",
+  "landing.install.command": "npx --yes @ipv9/tokentracker-cli",
   "landing.install.action.copy": "複製命令",
   "landing.install.action.copied": "已複製",
   "landing.meta.title": "Token Tracker —— AI Coding CLI 的 Token 用量追蹤器",

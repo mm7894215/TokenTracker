@@ -10,14 +10,12 @@ function read(relPath) {
 test("zh locale keeps CLI subcommands executable", () => {
   const dashboardCopy = read("dashboard/src/content/i18n/zh/dashboard.json");
 
-  assert.match(
-    dashboardCopy,
-    /"dashboard\.install\.cmd\.init":\s*"npx --yes tokentracker-cli init"/,
+  assert.ok(
+    dashboardCopy.includes('"dashboard.install.cmd.init": "npx --yes @ipv9/tokentracker-cli init"'),
     "expected zh install init command to keep the init subcommand",
   );
-  assert.match(
-    dashboardCopy,
-    /"dashboard\.install\.cmd\.sync":\s*"npx --yes tokentracker-cli sync"/,
+  assert.ok(
+    dashboardCopy.includes('"dashboard.install.cmd.sync": "npx --yes @ipv9/tokentracker-cli sync"'),
     "expected zh sync command to keep the sync subcommand",
   );
   assert.doesNotMatch(dashboardCopy, /tokentracker-cli (初始化|同步)/);

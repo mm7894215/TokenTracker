@@ -4,7 +4,7 @@
   "landing.screenshot.alt": "TokenTracker ダッシュボードのスクリーンショット",
   "landing.nav.login": "ログイン",
   "landing.nav.signup": "登録",
-  "landing.install.command": "npx --yes tokentracker-cli",
+  "landing.install.command": "npx --yes @ipv9/tokentracker-cli",
   "landing.install.action.copy": "コマンドをコピー",
   "landing.install.action.copied": "コピーしました",
   "landing.meta.title": "Token Tracker — AI Coding CLI のトークン使用状況トラッカー",

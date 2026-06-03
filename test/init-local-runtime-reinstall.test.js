@@ -82,7 +82,7 @@ test("installLocalTrackerApp replaces stale installed runtime and writes a packa
     const copiedParser = await fs.readFile(path.join(appDir, "src", "lib", "cursor-config.js"), "utf8");
     const marker = JSON.parse(await fs.readFile(path.join(appDir, "package.json"), "utf8"));
     assert.notEqual(copiedParser, "stale parser\n");
-    assert.equal(marker.name, "tokentracker-cli");
+    assert.equal(marker.name, "@ipv9/tokentracker-cli");
     assert.equal(typeof marker.version, "string");
     await fs.stat(path.join(appDir, "src", "lib", "codex-context-breakdown.js"));
     await fs.stat(path.join(appDir, "dashboard", "dist", "index.html"));

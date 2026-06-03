@@ -12,7 +12,7 @@ const { openInBrowser } = require("../lib/browser-auth");
 
 const DEFAULT_PORT = 7680;
 const DEFAULT_MAX_PORT_ATTEMPTS = 20;
-const NPM_PACKAGE_NAME = "tokentracker-cli";
+const NPM_PACKAGE_NAME = "@ipv9/tokentracker-cli";
 const LOCAL_BIND_HOST = "127.0.0.1";
 
 function buildPortInUseHint(port) {

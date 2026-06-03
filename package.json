@@ -1,5 +1,5 @@
 {
-  "name": "tokentracker-cli",
+  "name": "@ipv9/tokentracker-cli",
   "version": "0.39.0",
   "description": "Token usage tracker for AI agent CLIs (Claude Code, Codex, Cursor, Gemini, Kiro, OpenCode, OpenClaw, Every Code, Hermes, GitHub Copilot, Kimi Code, CodeBuddy, Grok Build, oh-my-pi, pi, Craft Agents, Kilo CLI, Kilo Code, Roo Code, Zed Agent, Goose)",
   "main": "src/cli.js",
@@ -13,6 +13,8 @@
     "bin/",
     "src/",
     "dashboard/dist/",
+    "scripts/install-local-service.sh",
+    "scripts/uninstall-local-service.sh",
     "LICENSE",
     "README.md"
   ],
@@ -50,11 +52,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mm7894215/TokenTracker.git"
+    "url": "git+https://github.com/pitimon/TokenTracker.git"
   },
-  "homepage": "https://www.tokentracker.cc",
+  "homepage": "https://github.com/pitimon/TokenTracker#readme",
   "bugs": {
-    "url": "https://github.com/mm7894215/TokenTracker/issues"
+    "url": "https://github.com/pitimon/TokenTracker/issues"
   },
   "keywords": [
     "token",
