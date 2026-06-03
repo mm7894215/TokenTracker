@@ -3373,12 +3373,15 @@ test("parseCopilotIncremental re-reads from start when file is rotated (inode ch
     const first = await parseCopilotIncremental({ otelPaths: [otelPath], cursors, queuePath });
     assert.equal(first.eventsAggregated, 1);
 
-    // Rotate: delete + recreate at same path with a new larger payload (different inode)
-    require("node:fs").unlinkSync(otelPath);
-    writeCopilotOtelFile(otelPath, [
+    // Rotate by writing a fresh file and renaming it over the original. A plain
+    // unlink+recreate can reuse the freed inode on Linux tmpfs, which wouldn't
+    // exercise rotation at all; rename guarantees a new inode on every filesystem.
+    const rotatedPath = otelPath + ".rotated";
+    writeCopilotOtelFile(rotatedPath, [
       makeCopilotChatSpan({ traceId: "t2", spanId: "s2", inputTokens: 5000 }),
       makeCopilotChatSpan({ traceId: "t3", spanId: "s3", inputTokens: 5000 }),
     ]);
+    require("node:fs").renameSync(rotatedPath, otelPath);
 
     const second = await parseCopilotIncremental({ otelPaths: [otelPath], cursors, queuePath });
     // Both new spans should be picked up despite the file being the "same" path

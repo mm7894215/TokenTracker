@@ -18,7 +18,10 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          # Node 24 to match CI and run the test gate below (the suite needs
+          # Node 22.18+ for native .ts import and undici 8). Does not change the
+          # published tarball — npm publish just packs files.
+          node-version: 24
           registry-url: https://registry.npmjs.org
 
       # Skip if this version is already published
@@ -41,12 +44,6 @@ jobs:
         if: steps.version-check.outputs.exists == 'false'
         run: npm ci --prefix dashboard
 
-      # Publish gate: never ship a broken version. A direct push to main bypasses
-      # PR-level CI, so re-run the test suite here before building/publishing.
-      - name: Run tests (publish gate)
-        if: steps.version-check.outputs.exists == 'false'
-        run: npm test
-
       # InsForge URL + anon key are public client-side values shipped in every
       # dashboard bundle. They MUST be present at build time or Vite inlines
       # empty strings — breaks leaderboard fetch and disables cloud OAuth.
@@ -57,6 +54,13 @@ jobs:
           VITE_INSFORGE_BASE_URL: https://srctyff5.us-east.insforge.app
           VITE_INSFORGE_ANON_KEY: ik_9f35735991b684f7cf57fa00bb4d0487
         run: npm run dashboard:build
+
+      # Publish gate: never ship a broken version. A direct push to main bypasses
+      # PR-level CI, so run the suite here — after the dashboard build, which some
+      # tests assert exists — before publishing.
+      - name: Run tests (publish gate)
+        if: steps.version-check.outputs.exists == 'false'
+        run: npm test
 
       - name: Publish to npm
         if: steps.version-check.outputs.exists == 'false'

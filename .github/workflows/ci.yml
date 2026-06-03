@@ -22,7 +22,11 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          # Node 24 matches the maintainer's local toolchain. The test suite
+          # imports dashboard .ts files directly (native type stripping, Node
+          # 22.18+) and exercises undici 8 (needs webidl.markAsUncloneable), so
+          # Node 20 cannot run the suite even though the published CLI targets it.
+          node-version: 24
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -34,12 +38,22 @@ jobs:
       - name: Install dashboard dependencies
         run: npm ci --prefix dashboard
 
-      # Mirrors `npm run ci:local` exactly so "green locally" == "green in CI".
+      # Build the dashboard up front: the local-runtime install test asserts the
+      # bundled dashboard/dist/index.html exists, and a fresh checkout has none.
       # VITE_* are public client-side values shipped in every dashboard bundle;
-      # they MUST be present at build time or Vite inlines empty strings and
-      # breaks leaderboard fetch + cloud OAuth. dashboard/.env.local is gitignored.
-      - name: Lint, test, validate, and build
+      # absent at build time Vite inlines empty strings and breaks leaderboard
+      # fetch + cloud OAuth. dashboard/.env.local is gitignored, hence inlined here.
+      - name: Build dashboard
         env:
           VITE_INSFORGE_BASE_URL: https://srctyff5.us-east.insforge.app
           VITE_INSFORGE_ANON_KEY: ik_9f35735991b684f7cf57fa00bb4d0487
-        run: npm run ci:local
+        run: npm run dashboard:build
+
+      # Same checks as `npm run ci:local`, with the dashboard build hoisted above.
+      - name: Test and validate
+        run: |
+          npm test
+          npm run validate:copy
+          npm run validate:ui-hardcode
+          npm run validate:guardrails
+          node --test test/architecture-guardrails.test.js
