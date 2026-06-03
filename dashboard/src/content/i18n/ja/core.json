@@ -222,6 +222,7 @@
   "skills.filter.agent_label": "Agent",
   "skills.filter.agent_all": "すべての agent",
   "skills.filter.clear": "フィルターをクリア",
+  "skills.my.placeholder": "インストール済みの skills を絞り込み…",
   "skills.filter.result_count": "{{filtered}} / {{total}} 個の skill",
   "skills.filter.result_count_browse": "{{count}} 件の結果",
   "skills.empty.no_match": "現在のフィルターに一致する skill はありません。",

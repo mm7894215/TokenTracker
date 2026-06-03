@@ -225,9 +225,13 @@ function FilterToolbar({
   totalCount,
   anyFilter,
   onClearFilters,
+  searchQuery,
+  onSearchQuery,
+  searchPlaceholder,
 }) {
   return (
-    <div className="mb-2 flex flex-wrap items-center gap-2 pt-1 text-xs text-oai-gray-600 dark:text-oai-gray-300">
+    <div className="mb-2 space-y-2 pt-1">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-oai-gray-600 dark:text-oai-gray-300">
       <Select.Root value={agentFilter} onValueChange={onAgentFilter}>
         <Select.Trigger
           aria-label={copy("skills.filter.agent_label")}
@@ -293,6 +297,18 @@ function FilterToolbar({
           {copy("skills.filter.clear")}
         </button>
       ) : null}
+      </div>
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-oai-gray-400" aria-hidden />
+        <Input
+          type="search"
+          value={searchQuery}
+          onChange={(event) => onSearchQuery(event.target.value)}
+          aria-label={copy("skills.action.search_aria")}
+          placeholder={searchPlaceholder}
+          className="pl-9 !border-oai-gray-200 dark:!border-oai-gray-800 focus:!border-oai-gray-400 focus:!ring-oai-gray-400/20 dark:focus:!border-oai-gray-500 dark:focus:!ring-oai-gray-500/20"
+        />
+      </div>
     </div>
   );
 }
@@ -366,6 +382,9 @@ function MySkillsView({
   onAgentFilter,
   anyFilter,
   onClearFilters,
+  searchQuery,
+  onSearchQuery,
+  searchPlaceholder,
   selectedId,
   onSelect,
   onToggleTarget,
@@ -398,6 +417,9 @@ function MySkillsView({
           totalCount={totalCount}
           anyFilter={anyFilter}
           onClearFilters={onClearFilters}
+          searchQuery={searchQuery}
+          onSearchQuery={onSearchQuery}
+          searchPlaceholder={searchPlaceholder}
         />
       )}
       {items.length === 0 ? (
@@ -664,6 +686,8 @@ export function SkillsPage() {
   const [source, setSource] = useState(SOURCE_ALL);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [myQuery, setMyQuery] = useState("");
+  const [myDebouncedQuery, setMyDebouncedQuery] = useState("");
   const [repoInput, setRepoInput] = useState("");
   const [manageOpen, setManageOpen] = useState(false);
   const [agentFilter, setAgentFilter] = useState("all");
@@ -842,6 +866,11 @@ export function SkillsPage() {
     const timer = setTimeout(() => setDebouncedQuery(query), 200);
     return () => clearTimeout(timer);
   }, [query]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setMyDebouncedQuery(myQuery), 200);
+    return () => clearTimeout(timer);
+  }, [myQuery]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1083,11 +1112,21 @@ export function SkillsPage() {
   const mySkills = installedData.skills || [];
 
   const filteredMySkills = useMemo(() => {
-    if (agentFilter === "all") return mySkills;
-    return mySkills.filter((skill) => (skill.targets || []).includes(agentFilter));
-  }, [mySkills, agentFilter]);
+    const byAgent =
+      agentFilter === "all"
+        ? mySkills
+        : mySkills.filter((skill) => (skill.targets || []).includes(agentFilter));
+    const q = myDebouncedQuery.trim().toLowerCase();
+    if (!q) return byAgent;
+    return byAgent.filter(
+      (skill) =>
+        (skill.name || "").toLowerCase().includes(q) ||
+        (skill.directory || "").toLowerCase().includes(q) ||
+        (skill.description || "").toLowerCase().includes(q),
+    );
+  }, [mySkills, agentFilter, myDebouncedQuery]);
 
-  const myAnyFilter = agentFilter !== "all";
+  const myAnyFilter = agentFilter !== "all" || myDebouncedQuery.trim() !== "";
 
   const selectedSkill = useMemo(() => {
     if (!selectedSkillId) return null;
@@ -1096,6 +1135,7 @@ export function SkillsPage() {
 
   const handleClearMyFilters = useCallback(() => {
     setAgentFilter("all");
+    setMyQuery("");
   }, []);
 
   const handleSelectSkill = useCallback((skill) => {
@@ -1190,6 +1230,9 @@ export function SkillsPage() {
         onAgentFilter={setAgentFilter}
         anyFilter={myAnyFilter}
         onClearFilters={handleClearMyFilters}
+        searchQuery={myQuery}
+        onSearchQuery={setMyQuery}
+        searchPlaceholder={copy("skills.my.placeholder")}
         selectedId={selectedSkillId}
         onSelect={handleSelectSkill}
         onToggleTarget={handleToggleTarget}

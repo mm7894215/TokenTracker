@@ -557,6 +557,7 @@ skills.detail.remove_confirm_hint,ui,SkillsPage,SkillDetailPanel,detail_remove_c
 skills.filter.agent_label,ui,SkillsPage,SkillsPage,filter_agent_label,"Agent",,active
 skills.filter.agent_all,ui,SkillsPage,SkillsPage,filter_agent_all,"All agents",,active
 skills.filter.clear,ui,SkillsPage,SkillsPage,filter_clear,"Clear filters",,active
+skills.my.placeholder,ui,SkillsPage,SkillsPage,my_placeholder,"Filter installed skills…",,active
 skills.filter.result_count,ui,SkillsPage,SkillsPage,filter_result_count,"{{filtered}} of {{total}} skills",,active
 skills.filter.result_count_browse,ui,SkillsPage,SkillsPage,filter_result_count_browse,"{{count}} results",,active
 skills.empty.no_match,ui,SkillsPage,SkillsPage,empty_no_match,"No skills match the current filters.",,active

@@ -222,6 +222,7 @@
   "skills.filter.agent_label": "Agent",
   "skills.filter.agent_all": "모든 agent",
   "skills.filter.clear": "필터 지우기",
+  "skills.my.placeholder": "설치된 skills 필터…",
   "skills.filter.result_count": "skill {{filtered}} / {{total}}개",
   "skills.filter.result_count_browse": "결과 {{count}}개",
   "skills.empty.no_match": "현재 필터에 일치하는 skill이 없습니다.",
