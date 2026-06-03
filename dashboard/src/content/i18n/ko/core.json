@@ -212,6 +212,7 @@
   "skills.action.remove": "제거",
   "skills.action.search": "검색",
   "skills.action.search_aria": "skills 검색",
+  "skills.action.search_clear": "검색 지우기",
   "skills.target.synced_summary": "{{targets}}에 동기화됨",
   "skills.target.synced_none": "어떤 agent에도 동기화되지 않음",
   "skills.row.open_details": "{{name}} 세부 정보 열기",

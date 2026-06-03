@@ -212,6 +212,7 @@
   "skills.action.remove": "削除",
   "skills.action.search": "検索",
   "skills.action.search_aria": "skills を検索",
+  "skills.action.search_clear": "検索をクリア",
   "skills.target.synced_summary": "{{targets}} に同期済み",
   "skills.target.synced_none": "まだどの agent にも同期されていません",
   "skills.row.open_details": "{{name}} の詳細を表示",

@@ -212,6 +212,7 @@
   "skills.action.remove": "移除",
   "skills.action.search": "搜尋",
   "skills.action.search_aria": "搜尋 skills",
+  "skills.action.search_clear": "清除搜尋",
   "skills.target.synced_summary": "已同步到 {{targets}}",
   "skills.target.synced_none": "尚未同步到任何 agent",
   "skills.row.open_details": "檢視 {{name}} 詳情",
