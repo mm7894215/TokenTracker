@@ -28,12 +28,32 @@ test("workflow triggers on push to main", () => {
   );
 });
 
-test("workflow uses Node.js 20", () => {
+test("publish job builds/publishes on Node.js 20 to match the engines floor", () => {
   const content = loadWorkflow();
+  const publishIdx = content.indexOf("\n  publish:");
+  assert.ok(publishIdx > 0, "should have a publish job");
+  const publishSection = content.slice(publishIdx);
   assert.ok(
-    content.includes("node-version: 20"),
-    "should use Node.js 20 to match engines field"
+    publishSection.includes("node-version: 20"),
+    "publish job should build/publish on Node 20 (engines: >=20)"
   );
+});
+
+test("tests gate the publish on a supported Node", () => {
+  const content = loadWorkflow();
+  // The suite imports dashboard .ts files directly and loads undici 8, which
+  // need Node >=22.18; it cannot run on the Node 20 publish runtime. So a
+  // separate test job (Node 24) must pass before the publish job runs.
+  assert.ok(content.includes("needs: test"), "publish job must depend on the test job");
+  const testIdx = content.indexOf("\n  test:");
+  const publishIdx = content.indexOf("\n  publish:");
+  assert.ok(testIdx > 0 && testIdx < publishIdx, "test job should precede the publish job");
+  const testSection = content.slice(testIdx, publishIdx);
+  assert.ok(
+    testSection.includes("node-version: 24"),
+    "test job should run on Node 24"
+  );
+  assert.ok(testSection.includes("npm test"), "test job should run the suite");
 });
 
 test("workflow sets npm registry URL", () => {
