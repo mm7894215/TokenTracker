@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.jsx";
 import {
   markDashboardMainContentVisible,
+  preloadDashboardPageResource,
   preloadDashboardPageResources,
   preloadLeaderboardDefaultState,
 } from "./lib/dashboard-preload.js";
@@ -50,6 +51,7 @@ vi.mock("./lib/dashboard-preload.js", () => ({
     ].join("|"),
   ),
   markDashboardMainContentVisible: vi.fn(),
+  preloadDashboardPageResource: vi.fn(() => Promise.resolve(null)),
   preloadDashboardPageResources: vi.fn(() => Promise.resolve([])),
   preloadLeaderboardDefaultState: vi.fn(() => Promise.resolve(null)),
 }));
@@ -193,15 +195,9 @@ describe("App deferred dashboard preload", () => {
 
     await waitFor(() => {
       expect(markDashboardMainContentVisible).toHaveBeenCalledTimes(1);
-      expect(preloadDashboardPageResources).toHaveBeenCalledTimes(1);
-      expect(preloadLeaderboardDefaultState).toHaveBeenCalledWith({
-        accessMode: "cloud",
-        baseUrl: "https://edge.example",
-        mockEnabled: false,
-        signedIn: true,
-        authLoading: false,
-        userId: "user-1",
-      });
+      expect(preloadDashboardPageResource).toHaveBeenCalledWith("limits");
+      expect(preloadDashboardPageResources).not.toHaveBeenCalled();
+      expect(preloadLeaderboardDefaultState).not.toHaveBeenCalled();
     });
   });
 
@@ -220,7 +216,7 @@ describe("App deferred dashboard preload", () => {
     });
   });
 
-  it("uses local dashboard access for leaderboard state preload eligibility", async () => {
+  it("skips leaderboard state preload in local dashboard mode", async () => {
     const user = userEvent.setup();
     insforgeMock.signedIn = false;
     insforgeMock.user = null;
@@ -231,19 +227,13 @@ describe("App deferred dashboard preload", () => {
     await user.click(screen.getByRole("button", { name: TEXT.reveal }));
 
     await waitFor(() => {
-      expect(preloadDashboardPageResources).toHaveBeenCalledTimes(1);
-      expect(preloadLeaderboardDefaultState).toHaveBeenCalledWith({
-        accessMode: "local",
-        baseUrl: "https://edge.example",
-        mockEnabled: false,
-        signedIn: true,
-        authLoading: false,
-        userId: null,
-      });
+      expect(preloadDashboardPageResource).toHaveBeenCalledWith("limits");
+      expect(preloadDashboardPageResources).not.toHaveBeenCalled();
+      expect(preloadLeaderboardDefaultState).not.toHaveBeenCalled();
     });
   });
 
-  it("preloads again when the leaderboard auth context changes", async () => {
+  it("keeps leaderboard preload disabled even when the local auth context changes", async () => {
     const user = userEvent.setup();
     insforgeMock.signedIn = false;
     insforgeMock.user = null;
@@ -253,15 +243,7 @@ describe("App deferred dashboard preload", () => {
     await user.click(screen.getByRole("button", { name: TEXT.reveal }));
 
     await waitFor(() => {
-      expect(preloadLeaderboardDefaultState).toHaveBeenCalledTimes(1);
-      expect(preloadLeaderboardDefaultState).toHaveBeenLastCalledWith({
-        accessMode: "local",
-        baseUrl: "https://edge.example",
-        mockEnabled: false,
-        signedIn: true,
-        authLoading: false,
-        userId: null,
-      });
+      expect(preloadLeaderboardDefaultState).not.toHaveBeenCalled();
     });
 
     insforgeMock.signedIn = true;
@@ -273,15 +255,7 @@ describe("App deferred dashboard preload", () => {
     );
 
     await waitFor(() => {
-      expect(preloadLeaderboardDefaultState).toHaveBeenCalledTimes(2);
-      expect(preloadLeaderboardDefaultState).toHaveBeenLastCalledWith({
-        accessMode: "cloud",
-        baseUrl: "https://edge.example",
-        mockEnabled: false,
-        signedIn: true,
-        authLoading: false,
-        userId: "user-cloud",
-      });
+      expect(preloadLeaderboardDefaultState).not.toHaveBeenCalled();
     });
   });
 
@@ -296,7 +270,8 @@ describe("App deferred dashboard preload", () => {
     await user.click(screen.getByRole("button", { name: TEXT.reveal }));
 
     await waitFor(() => {
-      expect(preloadDashboardPageResources).toHaveBeenCalledTimes(1);
+      expect(preloadDashboardPageResource).toHaveBeenCalledWith("limits");
+      expect(preloadDashboardPageResources).not.toHaveBeenCalled();
       expect(preloadLeaderboardDefaultState).not.toHaveBeenCalled();
     });
 
@@ -310,15 +285,7 @@ describe("App deferred dashboard preload", () => {
     );
 
     await waitFor(() => {
-      expect(preloadLeaderboardDefaultState).toHaveBeenCalledTimes(1);
-      expect(preloadLeaderboardDefaultState).toHaveBeenCalledWith({
-        accessMode: "cloud",
-        baseUrl: "https://edge.example",
-        mockEnabled: false,
-        signedIn: true,
-        authLoading: false,
-        userId: "user-late",
-      });
+      expect(preloadLeaderboardDefaultState).not.toHaveBeenCalled();
     });
   });
 });

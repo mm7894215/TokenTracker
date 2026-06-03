@@ -18,6 +18,7 @@ import { ToastProvider } from "./ui/components/Toast.jsx";
 import {
   getLeaderboardPreloadContextKey,
   markDashboardMainContentVisible,
+  preloadDashboardPageResource,
   preloadDashboardPageResources,
   preloadLeaderboardDefaultState,
 } from "./lib/dashboard-preload.js";
@@ -119,6 +120,7 @@ export default function App() {
           : "unavailable";
 
   const tryPreloadLeaderboardDefaultState = useCallback(() => {
+    if (isLocalMode) return;
     if (!dashboardMainContentVisibleRef.current) return;
     if (!mockEnabled && insforge.loading) return;
     if (!mockEnabled && !signedIn) return;
@@ -138,6 +140,7 @@ export default function App() {
     cloudAuthSignedIn,
     insforge.loading,
     insforge.user?.id,
+    isLocalMode,
     leaderboardAccessMode,
     mockEnabled,
     signedIn,
@@ -151,11 +154,16 @@ export default function App() {
     }
     if (!dashboardResourcePreloadStartedRef.current) {
       dashboardResourcePreloadStartedRef.current = true;
-      void preloadDashboardPageResources();
+      if (isLocalMode) {
+        void preloadDashboardPageResource("limits");
+      } else {
+        void preloadDashboardPageResources();
+      }
     }
     tryPreloadLeaderboardDefaultState();
   }, [
     isDashboardDefaultPath,
+    isLocalMode,
     tryPreloadLeaderboardDefaultState,
   ]);
 

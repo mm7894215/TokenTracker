@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.jsx";
 import {
+  preloadDashboardPageResource,
   preloadDashboardPageResources,
   preloadLeaderboardDefaultState,
 } from "./lib/dashboard-preload.js";
@@ -52,6 +53,7 @@ vi.mock("./lib/dashboard-preload.js", () => ({
     ].join("|"),
   ),
   markDashboardMainContentVisible: vi.fn(),
+  preloadDashboardPageResource: vi.fn(() => pending),
   preloadDashboardPageResources: vi.fn(() => pending),
   preloadLeaderboardDefaultState: vi.fn(() => pending),
 }));
@@ -171,8 +173,9 @@ async function startPendingPreload(user) {
   expect(await screen.findByText(TEXT.dashboard)).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: TEXT.reveal }));
   await waitFor(() => {
-    expect(preloadDashboardPageResources).toHaveBeenCalledTimes(1);
-    expect(preloadLeaderboardDefaultState).toHaveBeenCalledTimes(1);
+    expect(preloadDashboardPageResource).toHaveBeenCalledWith("limits");
+    expect(preloadDashboardPageResources).not.toHaveBeenCalled();
+    expect(preloadLeaderboardDefaultState).not.toHaveBeenCalled();
   });
 }
 
