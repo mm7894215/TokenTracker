@@ -9,49 +9,60 @@ const { cmdDeviceLogin } = require("./commands/device-login");
 const { cmdWrapped } = require("./commands/wrapped");
 
 async function run(argv) {
-  const [command, ...rest] = argv;
+  try {
+    const [command, ...rest] = argv;
 
-  // No args → launch dashboard
-  if (!command) {
-    await cmdServe(argv);
-    return;
-  }
+    // No args → launch dashboard
+    if (!command) {
+      await cmdServe(argv);
+      return;
+    }
 
-  if (command === "-h" || command === "--help") {
-    printHelp();
-    return;
-  }
+    if (command === "-h" || command === "--help") {
+      printHelp();
+      return;
+    }
 
-  switch (command) {
-    case "serve":
-      await cmdServe(rest);
-      return;
-    case "init":
-      await cmdInit(rest);
-      return;
-    case "sync":
-      await cmdSync(rest);
-      return;
-    case "status":
-      await cmdStatus(rest);
-      return;
-    case "diagnostics":
-      await cmdDiagnostics(rest);
-      return;
-    case "doctor":
-      await cmdDoctor(rest);
-      return;
-    case "uninstall":
-      await cmdUninstall(rest);
-      return;
-    case "device-login":
-      await cmdDeviceLogin(rest);
-      return;
-    case "wrapped":
-      await cmdWrapped(rest);
-      return;
-    default:
-      throw new Error(`Unknown command: ${command}`);
+    switch (command) {
+      case "serve":
+        await cmdServe(rest);
+        return;
+      case "init":
+        await cmdInit(rest);
+        return;
+      case "sync":
+        await cmdSync(rest);
+        return;
+      case "status":
+        await cmdStatus(rest);
+        return;
+      case "diagnostics":
+        await cmdDiagnostics(rest);
+        return;
+      case "doctor":
+        await cmdDoctor(rest);
+        return;
+      case "uninstall":
+        await cmdUninstall(rest);
+        return;
+      case "device-login":
+        await cmdDeviceLogin(rest);
+        return;
+      case "wrapped":
+        await cmdWrapped(rest);
+        return;
+      default:
+        process.stderr.write(`Error: Unknown command "${command}". Run "tokentracker --help" for usage.\n`);
+        process.exit(1);
+    }
+  } catch (err) {
+    // Log internal error for diagnostics, but show generic message to user
+    if (process.env.DEBUG === "1") {
+      console.error(err);
+    } else {
+      console.error("An internal error occurred during execution.");
+    }
+    process.exit(1);
   }
 }
 
@@ -72,7 +83,7 @@ function printHelp() {
       "  npx tokentracker [--debug] uninstall [--purge]",
       "  npx tokentracker [--debug] device-login [--json] [--base-url <url>]",
       "  npx tokentracker [--debug] wrapped [--year 2026] [--json]",
-      "",
+      ",
       "Notes:",
       "  - init: consent first, local setup next, browser sign-in last.",
       "  - --yes skips the consent menu (non-interactive safe).",
@@ -86,7 +97,7 @@ function printHelp() {
       "  - --from-openclaw marks sync runs triggered by OpenClaw hooks.",
       "  - --debug shows original backend errors.",
       "  - device-login pairs a headless CLI / SSH session with a browser sign-in (15-min code).",
-      "",
+      ",
     ].join("\n"),
   );
 }
