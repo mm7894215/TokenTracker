@@ -66,18 +66,14 @@ export function getRangeForPeriod(
 
   if (period === "week") {
     const fromDate = new Date(today);
-    const day = fromDate.getUTCDay();
-    const offset = (day + 6) % 7; // Monday start
-    fromDate.setUTCDate(fromDate.getUTCDate() - offset);
-    const toDate = new Date(fromDate);
-    toDate.setUTCDate(toDate.getUTCDate() + 6);
-    return { from: formatDateUTC(fromDate), to: formatDateUTC(toDate) };
+    fromDate.setUTCDate(fromDate.getUTCDate() - 6);
+    return { from: formatDateUTC(fromDate), to };
   }
 
   if (period === "month") {
-    const fromDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
-    const toDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0));
-    return { from: formatDateUTC(fromDate), to: formatDateUTC(toDate) };
+    const fromDate = new Date(today);
+    fromDate.setUTCDate(fromDate.getUTCDate() - 29);
+    return { from: formatDateUTC(fromDate), to };
   }
 
   // "total": last 24 months (local month window).

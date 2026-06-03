@@ -23,7 +23,7 @@ it("shows current-period conversations instead of fixed rolling 30-day conversat
   renderPanel({ period: "month", periodConversations: 42 });
 
   expect(screen.getByText("42")).toBeInTheDocument();
-  expect(screen.getByText("month")).toBeInTheDocument();
+  expect(screen.getByText("30d convs")).toBeInTheDocument();
   expect(screen.queryByText("999")).not.toBeInTheDocument();
 });
 
@@ -31,5 +31,5 @@ it("updates the conversations badge label for day period", () => {
   renderPanel({ period: "day", periodConversations: 7 });
 
   expect(screen.getByText("7")).toBeInTheDocument();
-  expect(screen.getByText("today")).toBeInTheDocument();
+  expect(screen.getByText("today convs")).toBeInTheDocument();
 });

@@ -389,10 +389,10 @@ auth.callback.success,ui,*,NativeAuthCallbackPage,success,"Signed in successfull
 auth.callback.redirecting,ui,*,NativeAuthCallbackPage,redirecting,"Returning to TokenTracker…",,active
 auth.callback.failed,ui,*,NativeAuthCallbackPage,failed,"Sign-in incomplete. Please try again.",,active
 auth.callback.close,ui,*,NativeAuthCallbackPage,close,"Close this page",,active
-stats.period.today,ui,DashboardPage,StatsPanel,period_today,"today",,active
-stats.period.week,ui,DashboardPage,StatsPanel,period_week,"week",,active
-stats.period.month,ui,DashboardPage,StatsPanel,period_month,"month",,active
-stats.period.all,ui,DashboardPage,StatsPanel,period_all,"all",,active
+stats.period.today,ui,DashboardPage,StatsPanel,period_today,"today convs",,active
+stats.period.week,ui,DashboardPage,StatsPanel,period_week,"7d convs",,active
+stats.period.month,ui,DashboardPage,StatsPanel,period_month,"30d convs",,active
+stats.period.all,ui,DashboardPage,StatsPanel,period_all,"all convs",,active
 stats.period.convs,ui,DashboardPage,StatsPanel,period_convs,"convs",,active
 leaderboard.column.est_cost,ui,LeaderboardPage,LeaderboardPage,column_est_cost,"Est. Cost",,active
 leaderboard.signin_prompt,ui,LeaderboardPage,LeaderboardPage,signin_prompt,"Sign in to join the leaderboard",,active
@@ -501,8 +501,8 @@ share.card.annual.longest_streak,share,DashboardPage,AnnualReportCard,longest_st
 share.card.annual.days_count,share,DashboardPage,AnnualReportCard,days_count,"{{days}} days",,active
 share.card.annual.top_model,share,DashboardPage,AnnualReportCard,top_model,"Top Model",,active
 usage.period.day,ui,DashboardPage,UsageOverview,period_day,"Day",,active
-usage.period.week,ui,DashboardPage,UsageOverview,period_week,"Week",,active
-usage.period.month,ui,DashboardPage,UsageOverview,period_month,"Month",,active
+usage.period.week,ui,DashboardPage,UsageOverview,period_week,"7d",,active
+usage.period.month,ui,DashboardPage,UsageOverview,period_month,"30d",,active
 usage.period.total,ui,DashboardPage,UsageOverview,period_total,"Total",,active
 usage.period.custom,ui,DashboardPage,UsageOverview,period_custom,"Custom",,active
 usage.overview.tablist_aria,ui,DashboardPage,UsageOverview,tablist_aria,"Time period",,active
