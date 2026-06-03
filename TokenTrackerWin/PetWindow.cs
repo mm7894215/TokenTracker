@@ -49,8 +49,7 @@ internal sealed class PetWindow : Window
     private decimal _curRate = 1m;
     private string _locale = "en";
     private bool _syncing;
-    private long _tokens;
-    private decimal _costUsd;
+    private UsagePoller.UsageStats _stats;
     private bool _connected = true;
 
     /// <summary>Raised (on the UI thread) when the user right-clicks the pet — the host shows a context menu.</summary>
@@ -59,6 +58,15 @@ internal sealed class PetWindow : Window
     public PetWindow(ServerManager server)
     {
         _server = server;
+
+        // Seed the currency from the native cache so the very first push (on page load)
+        // already carries the app's last-used unit — no USD flash before the tray's
+        // RefreshSummary lands, and correct even when the dashboard was never opened.
+        if (Currency.ReadPersisted() is { } cached)
+        {
+            _curSymbol = cached.Symbol;
+            _curRate = cached.Rate;
+        }
 
         Title = Constants.AppDisplayName + " Pet";
         var (w, h) = SizeDimensions(CurrentSize);
@@ -333,14 +341,15 @@ internal sealed class PetWindow : Window
     }
 
     /// <summary>
-    /// Push today's usage (the SAME numbers the tray's UsagePoller fetched) so the
-    /// pet's bubble + animation tier always match the tray exactly — no independent
-    /// polling, no drift.
+    /// Push the usage stats (the SAME numbers the tray's UsagePoller fetched) so the
+    /// pet's bubble + animation tier + data-rich quip pool always match the tray exactly
+    /// — no independent polling, no drift. Today's tokens/cost drive the hover bubble and
+    /// animation tier; the rolling / heatmap / top-model figures feed the quip pool
+    /// (mirroring the macOS companion).
     /// </summary>
-    public void ApplyUsage(long tokens, decimal costUsd)
+    public void ApplyStats(UsagePoller.UsageStats stats)
     {
-        _tokens = tokens;
-        _costUsd = costUsd;
+        _stats = stats;
         PushContext();
     }
 
@@ -354,20 +363,36 @@ internal sealed class PetWindow : Window
     private void PushContext()
     {
         if (!_coreReady) return;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
         var sym = System.Text.Json.JsonSerializer.Serialize(_curSymbol);
-        var rate = _curRate.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var rate = _curRate.ToString(inv);
         var loc = System.Text.Json.JsonSerializer.Serialize(_locale);
         var syncing = _syncing ? "true" : "false";
-        var cost = _costUsd.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var cost = _stats.TodayCostUsd.ToString(inv);
         var connected = _connected ? "true" : "false";
+        var statsJson = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            todayTokens = _stats.TodayTokens,
+            todayCostUsd = _stats.TodayCostUsd,
+            conversations = _stats.TodayConversations,
+            last7dTokens = _stats.Last7dTokens,
+            last7dActiveDays = _stats.Last7dActiveDays,
+            last30dTokens = _stats.Last30dTokens,
+            last30dAvgPerDay = _stats.Last30dAvgPerDay,
+            streakDays = _stats.StreakDays,
+            activeDaysAllTime = _stats.ActiveDaysAllTime,
+            topModels = (_stats.TopModels ?? Array.Empty<UsagePoller.TopModelStat>())
+                .Select(m => new { name = m.Name, percent = m.Percent, source = m.Source }),
+        });
         try
         {
             _ = _webView.CoreWebView2.ExecuteScriptAsync(
                 $"window.__ttPetCurrency={{symbol:{sym},rate:{rate}}};" +
                 $"window.__ttPetLocale={loc};" +
                 $"window.__ttPetSyncing={syncing};" +
-                $"window.__ttPetTokens={_tokens};" +
+                $"window.__ttPetTokens={_stats.TodayTokens};" +
                 $"window.__ttPetCostUsd={cost};" +
+                $"window.__ttPetStats={statsJson};" +
                 $"window.__ttPetConnected={connected};" +
                 "window.dispatchEvent(new Event('pet:currency'));" +
                 "window.dispatchEvent(new Event('pet:locale'));" +
@@ -466,13 +491,17 @@ internal sealed class PetWindow : Window
         };
     }
 
-    // Height includes a ~28px top band reserved for the hover/quip bubble (pet.jsx
-    // BUBBLE_BAND) so the bubble floats above Clawd instead of overlapping it.
+    // Height includes a ~46px top band reserved for the hover/quip bubble (pet.jsx
+    // BUBBLE_BAND) so the bubble floats above Clawd instead of overlapping it. The band
+    // is sized for a two-line bubble (the data-rich quips wrap), and the widths are a
+    // little roomier than the sprite needs so longer lines have horizontal space. The
+    // sprite tracks (height − band), so these heights keep it the same visual size as
+    // before the taller band.
     private static (double Width, double Height) SizeDimensions(string size) => size switch
     {
-        SizeSmall => (140, 120),
-        SizeLarge => (196, 176),
-        _ => (164, 144),
+        SizeSmall => (150, 138),
+        SizeLarge => (210, 194),
+        _ => (180, 162),
     };
 
     /// <summary>The persisted size choice (defaults to medium).</summary>

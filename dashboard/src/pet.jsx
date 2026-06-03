@@ -1,6 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { pickQuip, normalizePetLocale, petLabels } from "./lib/pet-quips.js";
+import {
+  buildQuipPool,
+  formatCompactTokens as formatTokens,
+  normalizePetLocale,
+  petLabels,
+} from "./lib/pet-quips.js";
 
 /**
  * Standalone floating-pet entry for the Windows tray app (PetWindow.cs loads
@@ -30,8 +35,12 @@ const TAP_HOLD_MS = 2500;
 // so too small a value makes every click nudge the pet's position.
 const DRAG_THRESHOLD = 10;
 // Top band reserved for the bubble so it never overlaps Clawd (the host sizes the
-// window height to include this — keep in sync with PetWindow.SizeDimensions).
-const BUBBLE_BAND = 28;
+// window height to include this — keep in sync with PetWindow.SizeDimensions). Tall
+// enough for a two-line bubble: the data-rich macOS-parity quips (top model, 30-day
+// total, etc.) are longer than today's single line, and this layered window clips
+// content at its edges (unlike macOS, where the bubble can overflow the frame), so the
+// bubble wraps to a second line here instead of being truncated.
+const BUBBLE_BAND = 46;
 
 // Hover lean (macOS parity): while the cursor is over the pet, Clawd leans toward it
 // (ClawdCompanionView shifts the body ±1.2px and the eyes a touch more, ≈7% of width).
@@ -69,6 +78,27 @@ function readPetUsage() {
   };
 }
 
+// The full stats object the host pushes (window.__ttPetStats) — today + rolling 7d/30d
+// + heatmap + top models + conversations. Read fresh at tap time so the quip pool always
+// reflects the latest poll. Falls back to today-only numbers if the host hasn't pushed yet.
+function readPetStats() {
+  const s = typeof window !== "undefined" ? window.__ttPetStats : null;
+  const today = readPetUsage();
+  const num = (v, fallback = 0) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
+  return {
+    todayTokens: num(s?.todayTokens, today.tokens),
+    todayCostUsd: num(s?.todayCostUsd, today.costUsd),
+    conversations: num(s?.conversations),
+    last7dTokens: num(s?.last7dTokens),
+    last7dActiveDays: num(s?.last7dActiveDays),
+    last30dTokens: num(s?.last30dTokens),
+    last30dAvgPerDay: num(s?.last30dAvgPerDay),
+    streakDays: num(s?.streakDays),
+    activeDaysAllTime: num(s?.activeDaysAllTime),
+    topModels: Array.isArray(s?.topModels) ? s.topModels : [],
+  };
+}
+
 function readPetConnected() {
   // Default to connected until the host says otherwise.
   return window.__ttPetConnected !== false;
@@ -85,15 +115,6 @@ function readPetCurrency() {
 
 function readPetLocale() {
   return normalizePetLocale(typeof window !== "undefined" ? window.__ttPetLocale : null);
-}
-
-// Matches the tray's UsagePoller.FormatTokens exactly (always 1 decimal) so the
-// pet bubble and the tray "今日" line read identically for the same number.
-function formatTokens(n) {
-  if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + "B";
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
-  return String(n);
 }
 
 function post(type) {
@@ -227,7 +248,9 @@ function PetClawd({ state, size, leanX }) {
   );
 }
 
-/** Compact translucent pill shown in the top band (usage on hover, or a tap quip). */
+/** Compact translucent pill shown in the top band (usage on hover, or a tap quip).
+    Wraps to at most two lines (clamped with an ellipsis) so the longer data-rich quips
+    show in full within this fixed, content-clipping window instead of truncating. */
 function Bubble({ text }) {
   return (
     <div
@@ -235,9 +258,12 @@ function Bubble({ text }) {
         maxWidth: "98%",
         padding: "3px 9px",
         borderRadius: 10,
-        whiteSpace: "nowrap",
+        display: "-webkit-box",
+        WebkitBoxOrient: "vertical",
+        WebkitLineClamp: 2,
         overflow: "hidden",
-        textOverflow: "ellipsis",
+        wordBreak: "break-word",
+        textAlign: "center",
         fontSize: 11,
         fontWeight: 600,
         lineHeight: 1.3,
@@ -269,6 +295,7 @@ function Pet() {
   const [size, setSize] = useState(sizeFor);
   const dragRef = useRef(null);
   const tapIndexRef = useRef(0);
+  const quipIndexRef = useRef(0); // rotates through the quip pool on each tap (macOS quipIndex)
   const tapTimer = useRef(0);
   const idleTimer = useRef(0);
 
@@ -383,22 +410,28 @@ function Pet() {
     const anim = TAP_ANIMATIONS[tapIndexRef.current % TAP_ANIMATIONS.length];
     tapIndexRef.current += 1;
     setTapState(anim);
-    // Feed the quip the SAME formatted figures the hover bubble shows, so a tap can
-    // bake in today's real token count + cost (macOS parity) instead of staying generic.
-    const costValue = today.costUsd * currency.rate;
-    setSpeech(pickQuip(locale, {
-      tokens: today.tokens,
-      tokensText: formatTokens(today.tokens),
+    // Build the full data-rich pool from the host's latest stats and rotate through it
+    // by index (macOS parity), so each tap surfaces a different real figure — today's
+    // tokens/cost, 7d/30d rolling, streak, top model, conversations — with personality
+    // lines as a natural minority.
+    const s = readPetStats();
+    const costValue = s.todayCostUsd * currency.rate;
+    const pool = buildQuipPool(locale, {
+      ...s,
+      tokens: s.todayTokens,
+      tokensText: formatTokens(s.todayTokens),
       costText: `${currency.symbol}${costValue.toFixed(2)}`,
       costValue,
       isSyncing,
-    }));
+    });
+    setSpeech(pool[quipIndexRef.current % pool.length] || null);
+    quipIndexRef.current += 1;
     clearTimeout(tapTimer.current);
     tapTimer.current = window.setTimeout(() => {
       setTapState(null);
       setSpeech(null);
     }, TAP_HOLD_MS);
-  }, [locale, today.tokens, today.costUsd, currency.symbol, currency.rate, isSyncing]);
+  }, [locale, currency.symbol, currency.rate, isSyncing]);
 
   // Distinguish a tap (→ cycle animation) from a drag (→ native window move):
   // only hand the move to the OS once the pointer travels past a small threshold.
