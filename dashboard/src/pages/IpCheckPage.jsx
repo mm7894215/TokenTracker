@@ -408,18 +408,10 @@ export default function IpCheckPage() {
       } catch { return null; }
     }
     async function fetchCNIP() {
-      try {
-        const r = await fetch("https://2026.ip138.com/", { signal: AbortSignal.timeout(5000) });
-        const html = await r.text();
-        const m = html.match(/(\d+\.\d+\.\d+\.\d+)/);
-        if (m) return { ip: m[1] };
-      } catch {}
-      try {
-        const r = await fetch("https://my.ip.cn/", { signal: AbortSignal.timeout(5000) });
-        const html = await r.text();
-        const m = html.match(/(\d+\.\d+\.\d+\.\d+)/);
-        if (m) return { ip: m[1] };
-      } catch {}
+      // The old direct browser probes to 2026.ip138.com / my.ip.cn are
+      // predictably blocked by CORS and produce console noise during normal
+      // dashboard use. Keep the card in an unavailable state unless a
+      // CORS-safe/proxied regional endpoint is added.
       return null;
     }
 

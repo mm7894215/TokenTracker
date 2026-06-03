@@ -44,7 +44,7 @@ import {
   publishLeaderboardPreloadState,
   readLeaderboardPreloadState,
 } from "../lib/dashboard-preload.js";
-import { getCloudSyncEnabled, setCloudSyncEnabled } from "../lib/cloud-sync-prefs";
+import { getCloudSyncEnabled, isLocalDashboardHost, setCloudSyncEnabled } from "../lib/cloud-sync-prefs";
 import { runCloudUsageSyncNow } from "../lib/cloud-sync";
 import { LeaderboardAvatar } from "../components/LeaderboardAvatar.jsx";
 import { LeaderboardProviderColumnHeader } from "../components/LeaderboardProviderColumnHeader.jsx";
@@ -324,14 +324,6 @@ export function LeaderboardPage({
   };
 
   useEffect(() => {
-    if (authLoading) return;
-    if (mockEnabled) return;
-    if (!cloudSignedIn) {
-      openLoginModal();
-    }
-  }, [cloudSignedIn, authLoading, mockEnabled, openLoginModal]);
-
-  useEffect(() => {
     setListPage(1);
   }, [period]);
 
@@ -342,11 +334,14 @@ export function LeaderboardPage({
   const leaderboardAccessMode = useMemo(() => {
     if (mockEnabled) return "mock";
     if (authLoading) return "unavailable";
+    const localHost = isLocalDashboardHost();
+    if (cloudSignedIn && (!localHost || cloudSyncOn)) return "cloud";
+    if (localHost) return "local";
     if (cloudSignedIn) return "cloud";
     if (signedIn) return "local";
     if (leaderboardBaseUrl) return "public";
     return "unavailable";
-  }, [authLoading, cloudSignedIn, leaderboardBaseUrl, mockEnabled, signedIn]);
+  }, [authLoading, cloudSignedIn, cloudSyncOn, leaderboardBaseUrl, mockEnabled, signedIn]);
 
   const leaderboardPreloadContextKey = useMemo(
     () =>
@@ -382,7 +377,10 @@ export function LeaderboardPage({
 
   useEffect(() => {
     // Mock leaderboard uses local getMockLeaderboard(); real data needs InsForge URL from getLeaderboardBaseUrl().
-    if ((!leaderboardBaseUrl && !mockEnabled) || (!mockEnabled && leaderboardAccessMode === "unavailable")) {
+    if (
+      (!leaderboardBaseUrl && !mockEnabled) ||
+      (!mockEnabled && (leaderboardAccessMode === "unavailable" || leaderboardAccessMode === "local"))
+    ) {
       setListState({ loading: false, error: null, data: null, contextKey: null });
       return;
     }
@@ -463,7 +461,10 @@ export function LeaderboardPage({
       };
     }
     return {
-      loading: Boolean(leaderboardBaseUrl || mockEnabled) && leaderboardAccessMode !== "unavailable",
+      loading:
+        Boolean(leaderboardBaseUrl || mockEnabled) &&
+        leaderboardAccessMode !== "unavailable" &&
+        leaderboardAccessMode !== "local",
       error: null,
       data: null,
       contextKey: leaderboardPreloadContextKey,

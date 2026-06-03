@@ -318,7 +318,7 @@ function parseArgs(argv, env = process.env) {
     port: envPort || DEFAULT_PORT,
     portExplicit: Boolean(envPort),
     open: true,
-    sync: true,
+    sync: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -330,6 +330,8 @@ function parseArgs(argv, env = process.env) {
       }
     } else if (arg === "--no-open") {
       opts.open = false;
+    } else if (arg === "--sync") {
+      opts.sync = true;
     } else if (arg === "--no-sync") {
       opts.sync = false;
     }
