@@ -4,7 +4,7 @@
   "landing.screenshot.alt": "TokenTracker 대시보드 스크린샷",
   "landing.nav.login": "로그인",
   "landing.nav.signup": "회원가입",
-  "landing.install.command": "npx --yes tokentracker-cli",
+  "landing.install.command": "npx --yes @ipv9/tokentracker-cli",
   "landing.install.action.copy": "명령 복사",
   "landing.install.action.copied": "복사됨",
   "landing.meta.title": "Token Tracker — AI Agent CLI를 위한 토큰 사용량 추적기",

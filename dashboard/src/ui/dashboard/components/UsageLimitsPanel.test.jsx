@@ -45,7 +45,11 @@ describe("UsageLimitsPanel", () => {
     expect(screen.getByText("5h")).toBeInTheDocument();
     expect(screen.getByText("Total")).toBeInTheDocument();
     expect(screen.getByText("Parallel: 20")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Usage Limits · Used" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", {
+        name: (name) => name.replace(/\s+/g, "") === "UsageLimits·Used",
+      }),
+    ).toBeInTheDocument();
     expect(screen.getByText("64%")).toBeInTheDocument();
     expect(screen.getByText("4%")).toBeInTheDocument();
     expect(screen.getByText("1%")).toBeInTheDocument();

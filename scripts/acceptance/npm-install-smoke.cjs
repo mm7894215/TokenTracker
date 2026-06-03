@@ -43,9 +43,9 @@ if (missing.length > 0) {
 process.stdout.write("npm pack --dry-run ok: required files present.\n");
 
 if (process.env.TOKENTRACKER_RUN_NPX === "1") {
-  const npx = run("npx", ["--yes", "tokentracker-cli", "--help"], { stdio: "inherit" });
+  const npx = run("npx", ["--yes", "@ipv9/tokentracker-cli", "--help"], { stdio: "inherit" });
   if (npx.status !== 0) {
-    fail("npx tokentracker-cli --help failed. Ensure the package is published publicly.");
+    fail("npx @ipv9/tokentracker-cli --help failed. Ensure the package is published publicly.");
   }
 } else {
   process.stdout.write(

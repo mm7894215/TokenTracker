@@ -47,7 +47,7 @@ test("workflow sets npm registry URL", () => {
 test("workflow checks version before publishing", () => {
   const content = loadWorkflow();
   assert.ok(
-    content.includes("npm view tokentracker-cli"),
+    content.includes("npm view @ipv9/tokentracker-cli"),
     "should check if version already exists on npm"
   );
 });
@@ -55,13 +55,21 @@ test("workflow checks version before publishing", () => {
 test("workflow builds dashboard before publish", () => {
   const content = loadWorkflow();
   const buildIndex = content.indexOf("dashboard:build");
-  const publishIndex = content.indexOf("run: npm publish");
+  const publishIndex = content.indexOf("run: npm publish --access public");
   assert.ok(buildIndex > 0, "should build dashboard");
   assert.ok(publishIndex > 0, "should run npm publish");
   assert.ok(
     buildIndex < publishIndex,
     "dashboard build must come before npm publish"
   );
+});
+
+test("package publishes under the ipv9 npm scope", () => {
+  const pkg = JSON.parse(
+    fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8")
+  );
+  assert.equal(pkg.name, "@ipv9/tokentracker-cli");
+  assert.equal(pkg.publishConfig.access, "public");
 });
 
 test("workflow uses NPM_TOKEN secret", () => {
@@ -110,5 +118,13 @@ test("package.json files array includes dashboard/dist", () => {
   assert.ok(
     pkg.files.includes("dashboard/dist/"),
     "published package must include dashboard/dist/"
+  );
+  assert.ok(
+    pkg.files.includes("scripts/install-local-service.sh"),
+    "published package must include macOS service installer"
+  );
+  assert.ok(
+    pkg.files.includes("scripts/uninstall-local-service.sh"),
+    "published package must include macOS service uninstaller"
   );
 });

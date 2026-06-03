@@ -11,10 +11,10 @@ const {
 } = require("../src/commands/serve");
 
 test("serve port collision hint references the published npm package name", () => {
-  assert.equal(NPM_PACKAGE_NAME, "tokentracker-cli");
+  assert.equal(NPM_PACKAGE_NAME, "@ipv9/tokentracker-cli");
   assert.equal(
     buildPortInUseHint(7681),
-    "Port 7681 is still in use after cleanup. Try: npx tokentracker-cli serve --port 7682\n",
+    "Port 7681 is still in use after cleanup. Try: npx @ipv9/tokentracker-cli serve --port 7682\n",
   );
 });
 

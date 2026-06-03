@@ -40,7 +40,7 @@ landing.handle.special,landing,LandingPage,LandingPage,handle_special,"VOLT",,ac
 landing.screenshot.alt,landing,LandingPage,LandingPage,screenshot_alt,"TokenTracker dashboard screenshot",,active
 landing.nav.login,landing,LandingPage,LandingPage,nav_login,"LOGIN",,active
 landing.nav.signup,landing,LandingPage,LandingPage,nav_signup,"SIGN UP",,active
-landing.install.command,landing,LandingPage,LandingPage,install_command,"npx --yes tokentracker-cli",,active
+landing.install.command,landing,LandingPage,LandingPage,install_command,"npx --yes @ipv9/tokentracker-cli",,active
 landing.install.action.copy,landing,LandingPage,LandingPage,install_copy,"COPY COMMAND",,active
 landing.install.action.copied,landing,LandingPage,LandingPage,install_copied,"COPIED",,active
 landing.meta.title,landing,LandingPage,Meta,title,"Token Tracker — Token Usage Tracker for AI Agent CLIs",,active
@@ -290,19 +290,19 @@ leaderboard.pagination.page_unknown,dashboard,LeaderboardPage,LeaderboardPage,pa
 
 
 
-dashboard.session_expired.copy_label,dashboard,DashboardPage,AsciiBox,body,"run npx --yes tokentracker-cli init",,active
+dashboard.session_expired.copy_label,dashboard,DashboardPage,AsciiBox,body,"run npx --yes @ipv9/tokentracker-cli init",,active
 dashboard.session_expired.copied,dashboard,DashboardPage,AsciiBox,body,"copied",,active
 
 
 dashboard.install.prompt,dashboard,DashboardPage,AsciiBox,install_prompt,"Install Node.js 18+ then run:",,active
-dashboard.install.cmd.init,dashboard,DashboardPage,AsciiBox,install_cmd,"npx --yes tokentracker-cli init",,active
-dashboard.install.cmd.init_link_code,dashboard,DashboardPage,AsciiBox,install_cmd,"npx --yes tokentracker-cli init --link-code {{link_code}}",,active
+dashboard.install.cmd.init,dashboard,DashboardPage,AsciiBox,install_cmd,"npx --yes @ipv9/tokentracker-cli init",,active
+dashboard.install.cmd.init_link_code,dashboard,DashboardPage,AsciiBox,install_cmd,"npx --yes @ipv9/tokentracker-cli init --link-code {{link_code}}",,active
 dashboard.install.copy,dashboard,DashboardPage,AsciiBox,install_copy,"Copy install command",,active
 dashboard.install.copy_base,dashboard,DashboardPage,AsciiBox,install_copy,"Copy init command",,active
 dashboard.install.copied,dashboard,DashboardPage,AsciiBox,install_copy,"Copied to clipboard",,active
 dashboard.install.link_code.loading,dashboard,DashboardPage,AsciiBox,install_status,"Generating private code...",,active
 dashboard.install.link_code.failed,dashboard,DashboardPage,AsciiBox,install_status,"Private code unavailable",,active
-dashboard.install.cmd.sync,dashboard,DashboardPage,AsciiBox,install_cmd,"npx --yes tokentracker-cli sync",,active
+dashboard.install.cmd.sync,dashboard,DashboardPage,AsciiBox,install_cmd,"npx --yes @ipv9/tokentracker-cli sync",,active
 
 
 

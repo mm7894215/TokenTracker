@@ -337,7 +337,7 @@ async function runSetup({
 
   await writeFileAtomic(
     notifyPath,
-    buildNotifyHandler({ trackerDir, trackerBinPath, packageName: "tokentracker-cli" }),
+    buildNotifyHandler({ trackerDir, trackerBinPath, packageName: "@ipv9/tokentracker-cli" }),
   );
   await fs.chmod(notifyPath, 0o755).catch(() => {});
 
@@ -586,7 +586,7 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
   const openclawInstall = await installOpenclawSessionPlugin({
     home,
     trackerDir,
-    packageName: "tokentracker-cli",
+    packageName: "@ipv9/tokentracker-cli",
     env: process.env,
   });
   if (openclawInstall?.skippedReason === "openclaw-cli-missing") {
@@ -849,7 +849,7 @@ function buildNotifyHandler({ trackerDir, packageName }) {
   // It must never block Codex; it spawns sync in the background and exits 0.
   const queueSignalPath = path.join(trackerDir, "notify.signal");
   const originalPath = path.join(trackerDir, "codex_notify_original.json");
-  const fallbackPkg = packageName || "tokentracker-cli";
+  const fallbackPkg = packageName || "@ipv9/tokentracker-cli";
   const trackerBinPath = path.join(trackerDir, "app", "bin", "tracker.js");
 
   return `#!/usr/bin/env node
@@ -1098,7 +1098,7 @@ async function safeRealpath(p) {
 const FIRST_SYNC_TIMEOUT_MS = 15_000;
 
 async function runFirstSyncAndRead({ trackerBinPath, trackerDir, packageName }) {
-  const fallbackPkg = packageName || "tokentracker-cli";
+  const fallbackPkg = packageName || "@ipv9/tokentracker-cli";
   const argv = ["sync", "--drain"];
   const hasLocalRuntime = typeof trackerBinPath === "string" && fssync.existsSync(trackerBinPath);
   const cmd = hasLocalRuntime

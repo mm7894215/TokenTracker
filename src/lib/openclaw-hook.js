@@ -33,7 +33,7 @@ function resolveOpenclawHookPaths({ home = os.homedir(), trackerDir, env = proce
 async function installOpenclawHook({
   home = os.homedir(),
   trackerDir,
-  packageName = "tokentracker-cli",
+  packageName = "@ipv9/tokentracker-cli",
   env = process.env,
 } = {}) {
   const paths = resolveOpenclawHookPaths({ home, trackerDir, env });
@@ -64,7 +64,7 @@ async function installOpenclawHook({
 async function ensureOpenclawHookFiles({
   hookDir,
   trackerDir,
-  packageName = "tokentracker-cli",
+  packageName = "@ipv9/tokentracker-cli",
   openclawHome,
 } = {}) {
   if (!hookDir || !trackerDir) throw new Error("hookDir and trackerDir are required");
@@ -282,9 +282,9 @@ Triggers non-blocking 'tokentracker sync --auto --from-openclaw' runs when OpenC
 `;
 }
 
-function buildHookHandler({ trackerDir, packageName = "tokentracker-cli", openclawHome }) {
+function buildHookHandler({ trackerDir, packageName = "@ipv9/tokentracker-cli", openclawHome }) {
   const trackerBinPath = path.join(trackerDir, "app", "bin", "tracker.js");
-  const fallbackPkg = packageName || "tokentracker-cli";
+  const fallbackPkg = packageName || "@ipv9/tokentracker-cli";
   const safeOpenclawHome = openclawHome || path.join(os.homedir(), ".openclaw");
 
   return (
