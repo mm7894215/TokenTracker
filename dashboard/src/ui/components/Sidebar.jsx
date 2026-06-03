@@ -26,18 +26,27 @@ import { isNativeApp, isNativeEmbed, isNativeWindowsApp } from "../../lib/native
 
 const STORAGE_KEY = "tt.sidebarCollapsed";
 
-export function getNavGroups() {
+function isLocalDashboardHost() {
+  if (typeof window === "undefined") return false;
+  const h = window.location.hostname;
+  return h === "localhost" || h === "127.0.0.1" || h === "::1";
+}
+
+export function getNavGroups({ includeLeaderboard = !isLocalDashboardHost() } = {}) {
   // copy() must be called at render time so locale switches apply.
   // Validator regex picks up these literal calls.
+  const generalItems = [
+    { id: "usage", to: "/dashboard", icon: BarChart3, label: copy("nav.usage") },
+    { id: "limits", to: "/limits", icon: Gauge, label: copy("nav.limits") },
+  ];
+  if (includeLeaderboard) {
+    generalItems.push({ id: "leaderboard", to: "/leaderboard", icon: Trophy, label: copy("nav.leaderboard") });
+  }
   return [
     {
       id: "general",
       label: copy("nav.group.general"),
-      items: [
-        { id: "usage", to: "/dashboard", icon: BarChart3, label: copy("nav.usage") },
-        { id: "limits", to: "/limits", icon: Gauge, label: copy("nav.limits") },
-        { id: "leaderboard", to: "/leaderboard", icon: Trophy, label: copy("nav.leaderboard") },
-      ],
+      items: generalItems,
     },
     {
       id: "tools",
