@@ -1,0 +1,36 @@
+name: Documentation issue
+description: Something is wrong, missing, or unclear in the docs
+title: "[docs]: "
+labels: ["documentation"]
+body:
+  - type: dropdown
+    id: location
+    attributes:
+      label: Where is the issue?
+      options:
+        - README (English)
+        - README translations (zh-CN / ja / ko)
+        - CONTRIBUTING.md
+        - SECURITY.md
+        - Website (tokentracker.cc)
+        - CLI help / output
+        - In-app text (macOS / Windows)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's wrong or missing?
+      description: Describe the documentation issue. Quote the exact text if you can.
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested improvement
+      description: How could it read better? Links or examples welcome.
+    validations:
+      required: false

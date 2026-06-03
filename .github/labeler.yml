@@ -1,0 +1,38 @@
+# Path-based PR auto-labeling (actions/labeler@v5).
+cli:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/**"
+          - "bin/**"
+
+dashboard:
+  - changed-files:
+      - any-glob-to-any-file: "dashboard/**"
+
+macos:
+  - changed-files:
+      - any-glob-to-any-file: "TokenTrackerBar/**"
+
+windows:
+  - changed-files:
+      - any-glob-to-any-file: "TokenTrackerWin/**"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file: ".github/**"
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "package-lock.json"
+          - "dashboard/package-lock.json"
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.md"
+          - "docs/**"
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file: "test/**"

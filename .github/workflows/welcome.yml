@@ -1,0 +1,29 @@
+name: Welcome
+
+on:
+  pull_request_target:
+    types: [opened]
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  welcome:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/first-interaction@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          issue-message: >
+            Thanks for opening your first issue on TokenTracker! 🎉
+            Please make sure you included your TokenTracker version
+            (`tokentracker --version`), your OS, and steps to reproduce — it
+            helps us triage faster. A maintainer will take a look soon.
+          pr-message: >
+            Thanks for your first pull request to TokenTracker! 🎉
+            A maintainer will review it shortly. Please make sure `npm test`
+            passes and your commits follow conventional style
+            (`feat:` / `fix:` / `refactor:` / `docs:` / `chore:`).

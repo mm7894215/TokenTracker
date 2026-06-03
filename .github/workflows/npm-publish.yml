@@ -41,6 +41,12 @@ jobs:
         if: steps.version-check.outputs.exists == 'false'
         run: npm ci --prefix dashboard
 
+      # Publish gate: never ship a broken version. A direct push to main bypasses
+      # PR-level CI, so re-run the test suite here before building/publishing.
+      - name: Run tests (publish gate)
+        if: steps.version-check.outputs.exists == 'false'
+        run: npm test
+
       # InsForge URL + anon key are public client-side values shipped in every
       # dashboard bundle. They MUST be present at build time or Vite inlines
       # empty strings — breaks leaderboard fetch and disables cloud OAuth.

@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: test + validate + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            dashboard/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install dashboard dependencies
+        run: npm ci --prefix dashboard
+
+      # Mirrors `npm run ci:local` exactly so "green locally" == "green in CI".
+      # VITE_* are public client-side values shipped in every dashboard bundle;
+      # they MUST be present at build time or Vite inlines empty strings and
+      # breaks leaderboard fetch + cloud OAuth. dashboard/.env.local is gitignored.
+      - name: Lint, test, validate, and build
+        env:
+          VITE_INSFORGE_BASE_URL: https://srctyff5.us-east.insforge.app
+          VITE_INSFORGE_ANON_KEY: ik_9f35735991b684f7cf57fa00bb4d0487
+        run: npm run ci:local

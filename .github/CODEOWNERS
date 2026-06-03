@@ -1,0 +1,24 @@
+# Code owners are auto-requested for review on matching paths.
+# NOTE: "Require review from Code Owners" is intentionally NOT enabled in branch
+# protection (single-maintainer repo — it would block self-merges). This file is
+# advisory until there are additional collaborators.
+
+# Default owner for everything not matched below.
+*                                         @mm7894215
+
+# Token parsing & dedup — correctness-critical (see CLAUDE.md "Parser correctness").
+/src/lib/rollout.js                       @mm7894215
+/src/commands/sync.js                     @mm7894215
+/src/lib/cursor-config.js                 @mm7894215
+
+# Pricing tables — must stay in sync across all locations or the cloud bills $0.
+/src/lib/pricing/                         @mm7894215
+
+# Local API surface (public-exposure risk layer).
+/src/lib/local-api.js                     @mm7894215
+
+# Release & CI plumbing.
+/.github/                                 @mm7894215
+/package.json                             @mm7894215
+/TokenTrackerBar/project.yml              @mm7894215
+/TokenTrackerWin/TokenTrackerWin.csproj   @mm7894215

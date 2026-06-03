@@ -1,0 +1,43 @@
+name: Lock closed issues
+
+on:
+  schedule:
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+            const cutoff = Date.now() - THIRTY_DAYS;
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "closed",
+              sort: "updated",
+              direction: "asc",
+              per_page: 100,
+            });
+            let locked = 0;
+            for (const issue of issues) {
+              if (issue.pull_request) continue; // skip PRs
+              if (issue.locked) continue;
+              if (new Date(issue.updated_at).getTime() < cutoff) {
+                await github.rest.issues.lock({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  lock_reason: "resolved",
+                });
+                console.log(`Locked #${issue.number}`);
+                locked++;
+              }
+            }
+            console.log(`Done. Locked ${locked} issue(s).`);

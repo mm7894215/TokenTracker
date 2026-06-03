@@ -1,0 +1,43 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+early_access: false
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+  # Don't waste review on generated / vendored / lockfile noise.
+  path_filters:
+    - "!**/package-lock.json"
+    - "!dashboard/dist/**"
+    - "!**/*.min.js"
+    - "!TokenTrackerBar/EmbeddedServer/**"
+    - "!TokenTrackerWin/EmbeddedServer/**"
+  # Project-specific review focus — the load-bearing conventions from CLAUDE.md.
+  path_instructions:
+    - path: "src/lib/rollout.js"
+      instructions: >
+        Provider parsers. Flag any dedup using a bare `if (msgId && reqId)`
+        instead of the shared `claudeMessageDedupKey()` helper — it over-counts
+        1.6-3.7x on providers without reqId (DeepSeek / Kimi / Mimo / MiniMax /
+        Claude sub-agents). Also verify input_tokens semantics: some providers
+        (Codex / every-code) fold cached tokens into `input`, which inflates
+        cost 6-7x if copied naively.
+    - path: "src/lib/pricing/**"
+      instructions: >
+        Pricing must stay in sync across ALL locations (curated-overrides.json,
+        every edge-patch, and the seed snapshot). Flag a price change that only
+        touches one location — the cloud silently bills $0 otherwise.
+    - path: "dashboard/src/**"
+      instructions: >
+        User-facing strings must come from dashboard/src/content/copy.csv — flag
+        hardcoded UI text. This is a Vite SPA (NOT Next.js): do not suggest
+        "use client" directives or Next.js-specific patterns.
+chat:
+  auto_reply: true
