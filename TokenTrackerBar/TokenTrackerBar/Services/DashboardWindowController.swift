@@ -5,9 +5,11 @@ import WebKit
 @MainActor
 final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
 
-    /// 与 `dashboard` 里 `AppLayout` 主内容区 `lg:pr-3 lg:pb-3`（12pt）一致，用于主卡圆角与窗口圆角同心近似。
+    /// Matches the `AppLayout` main content gutter `lg:pr-3 lg:pb-3` (12pt) in `dashboard`,
+    /// used to approximate concentric rounding between the main card and the window.
     private enum DashboardChromeMetrics {
-        /// 系统未公开窗口外圆角；取 28pt 使「28 − 12pt 留白 = 16px」与原先 `rounded-2xl` 一致（同心圆角近似）。
+        /// AppKit does not expose the outer window corner radius. Use 28pt so
+        /// `28 - 12pt gutter = 16px`, matching the previous `rounded-2xl` approximation.
         static let approxWindowOuterCornerRadius: CGFloat = 28
         static let mainGutterPoints: CGFloat = 12
         static var mainCardCornerRadiusPixels: Int {
@@ -17,17 +19,17 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
 
     static let shared = DashboardWindowController()
 
-    /// 供 `NSAlert` 等以 sheet 附着，避免 `runModal` 浮层被仪表盘或其它窗口压在下面。
+    /// Sheet parent for `NSAlert` and similar UI, so modal overlays do not appear behind the dashboard or other windows.
     var windowForSheet: NSWindow? { window }
 
     private var window: NSWindow?
-    /// `theme === "system"` 时为 true：窗口 `appearance` 置 nil，随系统切换；否则固定亮/暗。
+    /// True when `theme === "system"`: leave the window `appearance` nil to follow the system; otherwise pin light/dark.
     private var chromeFollowsSystem = false
     private var effectiveAppearanceObservation: NSKeyValueObservation?
     private var webView: WKWebView?
     private var loadingOverlay: NSView?
     private var loadingHostingController: NSHostingController<AnyView>?
-    /// 加载失败重试计数
+    /// Retry count for load failures.
     private var retryCount = 0
     private let maxRetries = 5
 
@@ -41,14 +43,15 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     // MARK: - Public
 
     func showWindow() {
-        // 关闭 menu bar popover
+        // Close the menu bar popover.
         for window in NSApp.windows where window.className.contains("Popover") {
             window.close()
         }
 
+        NSApp.setActivationPolicy(.regular)
+
         // Reuse existing window if possible
         if let window {
-            NSApp.setActivationPolicy(.regular)
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             syncChromeAppearanceFromWebView()
@@ -123,7 +126,8 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
             dragBar.topAnchor.constraint(equalTo: container.topAnchor),
             dragBar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             dragBar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            // 必须与 dashboard `AppLayout` 顶部 `h-7`（28pt）拖拽条对齐；设过高会盖住 sidebar 顶部的 Sign in 按钮，mouseDown 被 performDrag 吃掉。
+            // Must match dashboard `AppLayout` top `h-7` (28pt) drag strip. A taller bar covers the
+            // sidebar Sign in button, causing mouseDown to be consumed by performDrag.
             dragBar.heightAnchor.constraint(equalToConstant: 28),
             overlay.topAnchor.constraint(equalTo: container.topAnchor),
             overlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
@@ -154,13 +158,15 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         // Clear window so native glass / vibrancy + transparent WKWebView show material (not an opaque gray sheet).
         window.isOpaque = false
         window.backgroundColor = .clear
+        // Dashboard is a primary work window: it can enter full screen, but must not attach to another app's full-screen Space.
+        window.collectionBehavior = [.managed, .fullScreenPrimary]
         self.window = window
 
         // Wire bridge so SettingsPage can read/write menu-bar prefs
         NativeBridge.shared.webView = webView
 
-        // 始终注册 NSApp.effectiveAppearance 观察，前端模块级缓存即可一直保持最新，
-        // 避免「light → system」切换时还要等异步 round-trip 才知道当前系统亮暗。
+        // Always observe NSApp.effectiveAppearance so the frontend module-level cache stays current,
+        // avoiding an async round trip to know the current system light/dark value when switching light -> system.
         registerEffectiveAppearanceObserverIfNeeded()
 
         // Load dashboard
@@ -169,8 +175,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
             webView.load(URLRequest(url: url))
         }
 
-        // Switch to regular app (shows dock icon), then show window
-        NSApp.setActivationPolicy(.regular)
+        // Show window after switching to regular app (shows dock icon).
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -181,7 +186,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     }
 
     /// Match dashboard light/dark so native glass / `NSVisualEffectView` + window chrome follow the web theme.
-    /// - `theme`: `"system"` | `"light"` | `"dark"`（与 `localStorage` 中 `tokentracker-theme` 一致）。
+    /// - `theme`: `"system"` | `"light"` | `"dark"` (matches `tokentracker-theme` in `localStorage`).
     func applyChromeAppearance(theme: String, resolvedIsDark: Bool) {
         switch theme {
         case "system":
@@ -198,8 +203,8 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
             window?.appearance = NSAppearance(named: resolvedIsDark ? .darkAqua : .aqua)
         }
         registerEffectiveAppearanceObserverIfNeeded()
-        // 切到 system 时立即把当前系统外观推给前端（KVO 只在外观变化时触发，
-        // 用户从 light/dark 切回 system 但系统外观未变 → KVO 不会响应）。
+        // When switching to system, immediately push the current system appearance to the frontend.
+        // KVO only fires on appearance changes, so light/dark -> system does not fire if the system appearance is unchanged.
         if chromeFollowsSystem {
             DispatchQueue.main.async { [weak self] in
                 self?.pushCurrentSystemAppearanceToWeb()
@@ -207,20 +212,20 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         }
     }
 
-    /// 把当前系统外观推给前端。无论 chromeFollowsSystem 状态如何都推送，
-    /// 让前端模块级缓存（`getCachedNativeSystemDark`）始终保持最新。
+    /// Pushes the current system appearance to the frontend regardless of `chromeFollowsSystem`,
+    /// keeping the frontend module-level cache (`getCachedNativeSystemDark`) current.
     func pushCurrentSystemAppearanceToWeb() {
         let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         pushSystemAppearanceToWeb(isDark: isDark)
     }
 
-    /// 始终注册一次 KVO（不与 chromeFollowsSystem 绑定）：
-    /// - 用户在手动 light/dark 时改变系统外观，前端缓存仍然能更新；
-    /// - 切回 system 时前端立即拥有正确的系统外观值，无需等异步 round-trip。
+    /// Always registers one KVO observer, independent of `chromeFollowsSystem`:
+    /// - If the user changes system appearance while manually pinned to light/dark, the frontend cache still updates.
+    /// - When switching back to system, the frontend already has the correct value without an async round trip.
     private func registerEffectiveAppearanceObserverIfNeeded() {
         guard effectiveAppearanceObservation == nil else { return }
-        // `NSApp.effectiveAppearance` 在 NSApp.appearance 为 nil 时跟随系统；
-        // AppKit 文档建议对它做 KVO 监听亮暗变化。
+        // `NSApp.effectiveAppearance` follows the system when NSApp.appearance is nil.
+        // AppKit docs recommend observing it with KVO for light/dark changes.
         effectiveAppearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
             DispatchQueue.main.async {
                 self?.pushCurrentSystemAppearanceToWeb()
@@ -262,7 +267,8 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         }
     }
 
-    /// 主内容白卡圆角：与窗口可视圆角同心近似（外圆角 − 与窗口边的留白），写入 `--tt-main-card-radius`。
+    /// Main content white-card radius: approximates concentric rounding with the visible window corner
+    /// (outer radius minus gutter), then writes `--tt-main-card-radius`.
     private func injectMainCardCornerRadius() {
         let px = DashboardChromeMetrics.mainCardCornerRadiusPixels
         let js = "document.documentElement.style.setProperty('--tt-main-card-radius', '\(px)px');"
@@ -276,7 +282,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         overlay.wantsLayer = true
         overlay.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
 
-        // 基底约 60×64pt，1.2× 放大 ≈ 72×76.8
+        // Base size is about 60x64pt; scaling by 1.2x gives about 72x76.8.
         let hosting = NSHostingController(
             rootView: AnyView(
                 ClawdCompanionView.LoadingMascotView()
@@ -447,7 +453,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         retryCount = 0
-        // 禁用文本选中 + 为透明标题栏留出顶部间距
+        // Disable text selection and leave top spacing for the transparent titlebar.
         let css = """
             * { -webkit-user-select: none !important; } \
             input, textarea { -webkit-user-select: text !important; } \
@@ -466,8 +472,8 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         webView.evaluateJavaScript(waitForPaint) { [weak self] _, _ in
             DispatchQueue.main.async {
                 self?.syncChromeAppearanceFromWebView()
-                // 页面就绪后立即把当前系统外观推到模块级缓存，确保后续切到 system 时
-                // 前端无需等异步 round-trip 即可读取正确值。
+                // After the page is ready, immediately push the current system appearance into the
+                // module-level cache so switching to system later can read the correct value synchronously.
                 self?.pushCurrentSystemAppearanceToWeb()
                 self?.injectMainCardCornerRadius()
                 self?.dismissLoadingOverlay()
