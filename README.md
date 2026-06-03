@@ -10,14 +10,9 @@ Auto-collect token counts from **22 AI coding tools**, aggregate them locally, a
 
 [![npm version](https://img.shields.io/npm/v/@ipv9/tokentracker-cli.svg?color=blue)](https://www.npmjs.com/package/@ipv9/tokentracker-cli)
 [![npm downloads](https://img.shields.io/npm/dm/@ipv9/tokentracker-cli.svg?color=brightgreen)](https://www.npmjs.com/package/@ipv9/tokentracker-cli)
-[![Homebrew](https://img.shields.io/github/v/release/pitimon/TokenTracker?label=brew&color=F8B73E&logo=homebrew&logoColor=white)](https://github.com/mm7894215/homebrew-tokentracker)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![CLI](https://img.shields.io/badge/CLI-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-lightgrey.svg)](https://www.npmjs.com/package/@ipv9/tokentracker-cli)
-[![macOS app](https://img.shields.io/badge/macOS%20app-menu%20bar%20%2B%20widgets-lightgrey.svg?logo=apple&logoColor=white)](https://github.com/pitimon/TokenTracker/releases/latest)
-[![Windows app](https://img.shields.io/badge/Windows%20app-system%20tray-lightgrey.svg?logo=windows&logoColor=white)](https://github.com/pitimon/TokenTracker/releases/latest)
 [![GitHub stars](https://img.shields.io/github/stars/pitimon/TokenTracker?style=social)](https://github.com/pitimon/TokenTracker/stargazers)
-[![Featured in 阮一峰周刊 #393](https://img.shields.io/badge/Featured%20in-%E9%98%AE%E4%B8%80%E5%B3%B0%E5%91%A8%E5%88%8A%20%23393-FF6B35?logo=rss&logoColor=white)](https://github.com/ruanyf/weekly/blob/master/docs/issue-393.md)
-[![Author tokens](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=0652839f-d19f-4f67-af85-6b7675875443&metric=tokens&compact=1&label=author%20tokens)](https://github.com/pitimon/TokenTracker)
 
 <br/>
 
@@ -29,17 +24,13 @@ Auto-collect token counts from **22 AI coding tools**, aggregate them locally, a
 
 ⭐ **If TokenTracker saves you time, please [star it on GitHub](https://github.com/pitimon/TokenTracker) — it helps other developers find it.**
 
-<br/>
-
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/M4M11XSNWD)
-
 </div>
 
 ---
 
 ## ⚡ Quick Start
 
-> **Requirements**: Node.js **20+** (CLI runs on macOS / Linux / Windows; native desktop app ships for both macOS (menu bar) and Windows (system tray). Cursor token reading uses the system `sqlite3` CLI when available and falls back to `node:sqlite` on supported Node releases).
+> **Requirements**: Node.js **20+**. Cursor token reading uses the system `sqlite3` CLI when available and falls back to `node:sqlite` on supported Node releases.
 
 ```bash
 npx --yes @ipv9/tokentracker-cli
@@ -52,10 +43,6 @@ That's it. First run installs hooks, syncs your data, and opens the dashboard at
 - 🔌 Auto-detected hooks for every supported AI tool you have installed
 - 🏠 100% local — no account, no API keys, no network calls (except optional leaderboard)
 - 🧩 *Optional:* a Skills tab that browses 250+ public skills and syncs them across Claude · Codex · Grok · Antigravity · Gemini · OpenCode · Hermes
-
-> **Want a native desktop app?**
-> - **macOS** — [Download `TokenTrackerBar.dmg`](https://github.com/pitimon/TokenTracker/releases/latest/download/TokenTrackerBar.dmg) → drag to Applications. Menu bar status icon, desktop widgets, and the dashboard in a WKWebView.
-> - **Windows** — [Download `TokenTracker-Setup.exe`](https://github.com/pitimon/TokenTracker/releases/latest/download/TokenTracker-Setup.exe) → run the per-user installer (no admin needed). System-tray app with the dashboard in WebView2. Portable zip also on the [releases page](https://github.com/pitimon/TokenTracker/releases/latest).
 
 Install globally for shorter commands:
 
@@ -70,31 +57,12 @@ tokentracker status --light    # Plain ASCII table (CI / SSH, no spinner)
 tokentracker doctor       # Health check
 ```
 
-### 🍺 Homebrew (macOS)
-
-Prefer `brew`? Install directly — no extra tap step needed:
-
-```bash
-# macOS menu bar app (DMG)
-brew install --cask mm7894215/tokentracker/tokentracker
-
-# CLI only
-brew install mm7894215/tokentracker/tokentracker
-```
-
-Upgrade with `brew upgrade --cask mm7894215/tokentracker/tokentracker`. The tap auto-bumps within an hour of every new release.
-
----
-
-
 ## ✨ Features
 
 - 🔌 **22 AI tools out of the box** — Claude Code, Codex CLI, Cursor, Gemini CLI, Antigravity, Kiro, OpenCode, OpenClaw, Every Code, Hermes Agent, GitHub Copilot, Kimi Code, CodeBuddy, Grok Build, oh-my-pi, pi, Craft Agents, Kilo CLI, Kilo Code, Roo Code, Zed Agent, Goose
 - 🏠 **100% local** — Token data never leaves your machine. No account, no API keys.
 - 🚀 **Zero config** — Hooks auto-install on first run. From zero to dashboard in 30 seconds.
 - 📊 **Beautiful dashboard** — Usage trends, cost breakdowns by model, GitHub-style activity heatmap, project attribution
-- 🖥️ **Native desktop app** — macOS menu bar (+ widgets) and Windows system tray, each with an embedded server and the dashboard in a native webview
-- 🎨 **4 desktop widgets** — Pin Usage / Activity Heatmap / Top Models / Usage Limits to your desktop
 - 📈 **Real-time rate limit tracking** — Claude / Codex / Cursor / Gemini / Kiro / Copilot / Antigravity quota windows with reset countdowns
 - 💰 **Cost engine** — 2,200+ models priced via [LiteLLM](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json) (auto-refreshed daily) + curated overrides for niche tools (Kiro, Cursor Composer, Kimi, CodeBuddy hy3); 24h disk cache + bundled offline snapshot mean accurate USD without an internet connection. Models without published vendor pricing (e.g. Tencent hy3-preview) are tracked by tokens but show $0 cost until the vendor publishes a rate.
 - 🌐 **Optional leaderboard** — Compare with developers worldwide; drag-to-reorder columns to focus on the providers you care about (opt-in, sign in to participate)
@@ -112,22 +80,6 @@ Upgrade with `brew upgrade --cask mm7894215/tokentracker/tokentracker`. The tap 
 **Dashboard** — usage trends, model breakdown, cost analysis
 
 <img src="https://raw.githubusercontent.com/pitimon/TokenTracker/main/docs/screenshots/dashboard-light.png" alt="Dashboard" />
-
-</td>
-<td width="50%">
-
-**Desktop Widgets** — pin usage to your desktop
-
-<img src="https://raw.githubusercontent.com/pitimon/TokenTracker/main/docs/screenshots/widgets-overview.png" alt="Desktop Widgets" />
-
-</td>
-</tr>
-<tr>
-<td width="50%">
-
-**Menu Bar App** — animated Clawd companion + native panels
-
-<img src="https://raw.githubusercontent.com/pitimon/TokenTracker/main/docs/screenshots/menubar.gif" alt="Menu Bar App" />
 
 </td>
 <td width="50%">
@@ -194,14 +146,12 @@ Missing your tool? [Open an issue](https://github.com/pitimon/TokenTracker/issue
 
 ## 🆚 Why TokenTracker? <a id="ccusage-alternative"></a>
 
-> **Looking for a ccusage alternative with a GUI?** TokenTracker covers 22 tools (not just Claude Code), adds a native macOS menu bar app + desktop widgets, and de-duplicates token records correctly across providers — so your numbers match the providers' own billing.
+> **Looking for a ccusage alternative with a GUI?** TokenTracker covers 22 tools (not just Claude Code), adds a local dashboard, and de-duplicates token records correctly across providers — so your numbers match the providers' own billing.
 
 |                          | **TokenTracker** | ccusage     | Cursor stats |
 |--------------------------|:---:|:---:|:---:|
 | **AI tools supported**   | **22**           | 1 (Claude)  | 1 (Cursor)   |
 | **Local-first, no account** | ✅            | ✅           | ❌            |
-| **Native desktop app**   | ✅ macOS + Windows | ❌           | ❌            |
-| **Desktop widgets**      | ✅ 4 widgets      | ❌           | ❌            |
 | **Rate-limit tracking**  | ✅ 7 providers    | ❌           | Cursor only  |
 | **Accurate multi-provider dedup** | ✅      | ❌ ¹         | —            |
 
@@ -217,16 +167,14 @@ flowchart LR
     A -->|hooks trigger| B[Token Tracker]
     B -->|parse logs<br/>30-min UTC buckets| C[(Local SQLite)]
     C --> D[Web Dashboard]
-    C --> E[Menu Bar App]
-    C --> F[Desktop Widgets]
-    C -.->|opt-in| G[(Cloud Leaderboard)]
+    C -.->|opt-in| E[(Cloud Leaderboard)]
 ```
 
 1. AI CLI tools generate logs during normal use
 2. Lightweight hooks detect changes and trigger sync (Cursor uses API instead of hooks)
 3. Token counts parsed locally — never any prompt or response content
 4. Aggregated into 30-minute UTC buckets
-5. Dashboard, menu bar app, and widgets all read from the same local snapshot
+5. Dashboard reads from the local snapshot
 
 ---
 
@@ -271,22 +219,6 @@ node bin/tracker.js
 # Tests
 npm test
 ```
-
-### Building the macOS App
-
-```bash
-cd TokenTrackerBar
-npm run dashboard:build              # Build the dashboard bundle
-./scripts/bundle-node.sh             # Bundle Node.js + tokentracker source
-xcodegen generate                    # Generate the Xcode project
-ruby scripts/patch-pbxproj-icon.rb   # Patch in the Icon Composer asset
-xcodebuild -scheme TokenTrackerBar -configuration Release clean build
-./scripts/create-dmg.sh              # Package the .app into a DMG
-```
-
-Requires **Xcode 16+** and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
-
----
 
 ## 🔧 Troubleshooting
 
@@ -360,55 +292,6 @@ This removes every hook TokenTracker installed across all detected AI tools, plu
 
 </details>
 
-### macOS App
-
-<details>
-<summary><b>"TokenTrackerBar can't be opened" — unidentified developer</b></summary>
-
-<br/>
-
-TokenTrackerBar is **ad-hoc signed** (not notarized with an Apple Developer ID — that requires a paid developer account). Gatekeeper blocks it on first launch.
-
-1. Open **System Settings → Privacy & Security**
-2. Scroll to the **Security** section — you'll see *"TokenTrackerBar was blocked to protect your Mac."*
-3. Click **Open Anyway**
-4. Confirm with **Open** in the follow-up dialog (you'll need to authenticate)
-
-You only need to do this once. Older macOS alternative: right-click the app in Finder → **Open** → **Open** in the confirmation dialog.
-
-</details>
-
-<details>
-<summary><b>"TokenTrackerBar is damaged and can't be opened"</b></summary>
-
-<br/>
-
-This is Gatekeeper reacting to the `com.apple.quarantine` attribute macOS attaches to every downloaded file — not an actual problem. Clear it once with:
-
-```bash
-xattr -cr /Applications/TokenTrackerBar.app
-```
-
-After that the app opens normally.
-
-</details>
-
-<details>
-<summary><b>"TokenTrackerBar wants to access data from other apps"</b></summary>
-
-<br/>
-
-This is required for the **Cursor** and **Kiro** integrations. They store auth tokens / usage data inside their own `~/Library/Application Support/` folders, which macOS protects with the App Management permission.
-
-- ✅ Click **Allow** if you use Cursor or Kiro
-- ❌ Click **Don't Allow** if you don't — those providers will be silently skipped, everything else keeps working
-
-Once granted, the permission is remembered. Note that ad-hoc signed builds re-prompt after each upgrade because each build has a new signing identity.
-
-</details>
-
----
-
 ## 🪪 README Badges
 
 Show off your token usage on your GitHub profile or project README.
@@ -426,7 +309,7 @@ Then drop one of these in:
 [![rank](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=YOUR_USER_ID&metric=rank)](https://github.com/pitimon/TokenTracker)
 ```
 
-> The link target defaults to the TokenTracker repo so every click helps other developers discover the tool. Swap it for your leaderboard profile, personal site, or `https://www.tokentracker.cc` if you'd rather route clicks elsewhere.
+> The link target defaults to the TokenTracker repo so every click helps other developers discover the tool. Swap it for your leaderboard profile or personal site if you'd rather route clicks elsewhere.
 
 Renders shields.io-compatible badges with your current totals (60s cache):
 
@@ -471,6 +354,6 @@ The Clawd character design belongs to Anthropic. This is a community project wit
 
 **Token Tracker** — Quantify your AI output.
 
-<a href="https://www.tokentracker.cc">tokentracker.cc</a>  ·  <a href="https://www.npmjs.com/package/@ipv9/tokentracker-cli">npm</a>  ·  <a href="https://github.com/pitimon/TokenTracker">GitHub</a>
+<a href="https://www.npmjs.com/package/@ipv9/tokentracker-cli">npm</a>  ·  <a href="https://github.com/pitimon/TokenTracker">GitHub</a>
 
 </div>
