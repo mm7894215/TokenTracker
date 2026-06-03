@@ -16,13 +16,15 @@ jobs:
     steps:
       - uses: actions/first-interaction@v3
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          issue-message: >
+          # first-interaction v3 renamed inputs from hyphen to underscore
+          # (repo-token -> repo_token, issue-message -> issue_message, etc.).
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          issue_message: >
             Thanks for opening your first issue on TokenTracker! 🎉
             Please make sure you included your TokenTracker version
             (`tokentracker --version`), your OS, and steps to reproduce — it
             helps us triage faster. A maintainer will take a look soon.
-          pr-message: >
+          pr_message: >
             Thanks for your first pull request to TokenTracker! 🎉
             A maintainer will review it shortly. Please make sure `npm test`
             passes and your commits follow conventional style
