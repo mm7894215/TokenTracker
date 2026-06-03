@@ -14,6 +14,7 @@ import { runCloudUsageSyncNow } from "../lib/cloud-sync";
 import { LeaderboardPage } from "./LeaderboardPage.jsx";
 
 const openLoginModalMock = vi.hoisted(() => vi.fn());
+const isLocalDashboardHostMock = vi.hoisted(() => vi.fn(() => false));
 const insforgeAuthMock = vi.hoisted(() => ({
   signedIn: true,
   loading: false,
@@ -27,6 +28,24 @@ vi.mock("../lib/api", () => ({
 
 vi.mock("../lib/cloud-sync", () => ({
   runCloudUsageSyncNow: vi.fn(),
+}));
+
+vi.mock("../lib/cloud-sync-prefs", () => ({
+  getCloudSyncEnabled: () => {
+    try {
+      return window.localStorage.getItem("tokentracker_cloud_sync_enabled") === "1";
+    } catch {
+      return false;
+    }
+  },
+  isLocalDashboardHost: () => isLocalDashboardHostMock(),
+  setCloudSyncEnabled: (enabled) => {
+    try {
+      window.localStorage.setItem("tokentracker_cloud_sync_enabled", enabled ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  },
 }));
 
 vi.mock("../lib/config", () => ({
@@ -89,13 +108,29 @@ function renderLeaderboard(initialEntry = "/leaderboard", props = {}) {
   return render(props.strict ? <React.StrictMode>{tree}</React.StrictMode> : tree);
 }
 
+function ensureLocalStorage() {
+  if (window.localStorage) return;
+  const values = new Map();
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: {
+      clear: () => values.clear(),
+      getItem: (key) => (values.has(String(key)) ? values.get(String(key)) : null),
+      removeItem: (key) => values.delete(String(key)),
+      setItem: (key, value) => values.set(String(key), String(value)),
+    },
+  });
+}
+
 describe("LeaderboardPage window-session cache reuse", () => {
   beforeEach(() => {
+    ensureLocalStorage();
     resetDashboardPreload();
     getLeaderboard.mockReset();
     runCloudUsageSyncNow.mockReset();
     runCloudUsageSyncNow.mockResolvedValue(undefined);
     openLoginModalMock.mockReset();
+    isLocalDashboardHostMock.mockReturnValue(false);
     insforgeAuthMock.signedIn = true;
     insforgeAuthMock.loading = false;
     insforgeAuthMock.user = { id: "user-1" };
@@ -312,6 +347,55 @@ describe("LeaderboardPage window-session cache reuse", () => {
         }),
       ),
     ).toMatchObject({ data: publicData });
+  });
+
+  it("keeps loopback signed-out leaderboard local-only without opening login or fetching cloud data", () => {
+    isLocalDashboardHostMock.mockReturnValue(true);
+    insforgeAuthMock.loading = false;
+    insforgeAuthMock.signedIn = false;
+    insforgeAuthMock.user = null;
+    getLeaderboard.mockResolvedValue(preloadedData);
+
+    renderLeaderboard("/leaderboard", { signedIn: false });
+
+    expect(openLoginModalMock).not.toHaveBeenCalled();
+    expect(getLeaderboard).not.toHaveBeenCalled();
+    expect(screen.getByText("No data")).toBeInTheDocument();
+  });
+
+  it("keeps loopback signed-in leaderboard local-only until cloud sync is enabled", () => {
+    isLocalDashboardHostMock.mockReturnValue(true);
+    insforgeAuthMock.loading = false;
+    insforgeAuthMock.signedIn = true;
+    insforgeAuthMock.user = { id: "user-1" };
+    getLeaderboard.mockResolvedValue(preloadedData);
+
+    renderLeaderboard("/leaderboard", { signedIn: true });
+
+    expect(openLoginModalMock).not.toHaveBeenCalled();
+    expect(getLeaderboard).not.toHaveBeenCalled();
+    expect(screen.getByText("No data")).toBeInTheDocument();
+  });
+
+  it("allows loopback cloud leaderboard reads after cloud sync is enabled", async () => {
+    isLocalDashboardHostMock.mockReturnValue(true);
+    window.localStorage.setItem("tokentracker_cloud_sync_enabled", "1");
+    insforgeAuthMock.loading = false;
+    insforgeAuthMock.signedIn = true;
+    insforgeAuthMock.user = { id: "user-1" };
+    getLeaderboard.mockResolvedValue(preloadedData);
+
+    renderLeaderboard("/leaderboard", { signedIn: true });
+
+    await waitFor(() => {
+      expect(getLeaderboard).toHaveBeenCalledWith({
+        baseUrl: "https://edge.example",
+        userId: "user-1",
+        period: "total",
+        limit: 20,
+        offset: 0,
+      });
+    });
   });
 
   it("reuses matching cache again after remounting in the same window session", () => {
