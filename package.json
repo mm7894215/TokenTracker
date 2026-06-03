@@ -45,8 +45,8 @@
     "undici": "^8.2.0"
   },
   "devDependencies": {
-    "@sourcegraph/scip-typescript": "^0.3.6",
-    "esbuild": "0.27.2"
+    "@sourcegraph/scip-typescript": "^0.4.0",
+    "esbuild": "0.28.0"
   },
   "repository": {
     "type": "git",
