@@ -40,6 +40,9 @@ const IpCheckPage = lazy(() => import("./pages/IpCheckPage.jsx"));
 const LandingPage = lazy(() =>
   import("./pages/LandingPage.jsx").then((m) => ({ default: m.LandingPage })),
 );
+const LinearLandingPage = lazy(() =>
+  import("./pages/LinearLandingPage.jsx").then((m) => ({ default: m.LinearLandingPage })),
+);
 const LeaderboardPage = lazy(() =>
   import("./pages/LeaderboardPage.jsx").then((m) => ({ default: m.LeaderboardPage })),
 );
@@ -174,6 +177,7 @@ export default function App() {
 
   let gate = isLocalMode || mockEnabled || screenshotMode ? "dashboard" : "landing";
   if (normalizedPath === "/landing") gate = "landing";
+  if (normalizedPath === "/landing-legacy") gate = "legacyLanding";
   if (normalizedPath === "/dashboard") gate = "dashboard";
   if (isLeaderboardPath) gate = "dashboard";
   if (profileUserId) gate = "dashboard";
@@ -228,8 +232,10 @@ export default function App() {
     // Year-end Wrapped page. Reads from /functions/tokentracker-wrapped
     // (provided by the local CLI server) — no auth required.
     content = <WrappedPage />;
-  } else if (gate === "landing") {
+  } else if (gate === "legacyLanding") {
     content = <LandingPage signInUrl="/login" signUpUrl="/login" />;
+  } else if (gate === "landing") {
+    content = <LinearLandingPage signInUrl="/login" signUpUrl="/login" />;
   } else {
     const pageNode = (
       <PageComponent
