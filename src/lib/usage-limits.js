@@ -21,6 +21,7 @@ const {
   extractCursorSessionToken,
   fetchCursorUsageSummary,
 } = require("./cursor-config");
+const { fetchGrokLimits } = require("./grok-limits");
 
 // 2-minute in-memory cache
 let cache = { data: null, fetchedAt: 0 };
@@ -1698,7 +1699,7 @@ async function getUsageLimits({
   const codexPlanType = codexAuthRefreshed?.planType || null;
 
   const providerFetch = withFetchTimeout(fetchImpl, providerTimeoutMs);
-  const [claudeResult, codexResult, cursor, kimi, gemini, kiro, antigravity, copilot] = await Promise.all([
+  const [claudeResult, codexResult, cursor, kimi, gemini, kiro, antigravity, copilot, grok] = await Promise.all([
     claudeToken
       ? withProviderTimeout(fetchClaudeUsageLimits(claudeToken, { fetchImpl: providerFetch, maxAttempts: 1 }), "Claude", providerTimeoutMs).then(
           (value) => ({ status: "fulfilled", value }),
@@ -1724,6 +1725,8 @@ async function getUsageLimits({
     Promise.resolve().then(() => fetchKiroLimits({ commandRunner, now })),
     fetchAntigravityLimits({ home, commandRunner, requestFn, nowMs }),
     withProviderTimeout(fetchCopilotLimits({ home, env, fetchImpl: providerFetch }), "GitHub Copilot", providerTimeoutMs)
+      .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
+    withProviderTimeout(fetchGrokLimits({ home, env, fetchImpl: providerFetch }), "Grok Build", providerTimeoutMs)
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
   ]);
 
@@ -1776,6 +1779,7 @@ async function getUsageLimits({
     kiro: withPlanLabel(kiro, kiro.plan_name, "Kiro"),
     antigravity: withPlanLabel(antigravity, antigravity.account_plan, "Antigravity"),
     copilot: withPlanLabel(copilot, copilot.plan_name, "Copilot"),
+    grok: withPlanLabel(grok, null, "Grok"),
   };
 
   cache = { data, fetchedAt: nowMs };
@@ -1803,4 +1807,5 @@ module.exports = {
   fetchCopilotLimits,
   readCopilotOauthToken,
   describeCopilotOtelStatus,
+  fetchGrokLimits,
 };

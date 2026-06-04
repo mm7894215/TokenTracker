@@ -73,6 +73,7 @@ export function LimitsPage() {
                 gemini={usageLimits?.gemini}
                 kimi={usageLimits?.kimi}
                 kiro={usageLimits?.kiro}
+                grok={usageLimits?.grok}
                 antigravity={usageLimits?.antigravity}
                 copilot={usageLimits?.copilot}
                 order={prefs.order}

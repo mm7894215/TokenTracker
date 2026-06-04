@@ -529,6 +529,8 @@ limits.label.kimi_total,ui,LimitsPage,UsageLimitsPanel,kimi_total,"Total",,activ
 limits.label.kimi_parallel,ui,LimitsPage,UsageLimitsPanel,kimi_parallel,"Parallel: {{count}}",,active
 limits.label.copilot_premium,ui,LimitsPage,UsageLimitsPanel,copilot_premium,"Premium",,active
 limits.label.copilot_chat,ui,LimitsPage,UsageLimitsPanel,copilot_chat,"Chat",,active
+limits.label.grok_month,ui,LimitsPage,UsageLimitsPanel,grok_month,"Month",,active
+limits.label.grok_ondemand,ui,LimitsPage,UsageLimitsPanel,grok_ondemand,"On-demand",,active
 limits.status.not_connected,ui,LimitsPage,UsageLimitsPanel,status_not_connected,"Not connected",,active
 limits.status.no_data,ui,LimitsPage,UsageLimitsPanel,status_no_data,"No live limit data returned",,active
 limits.status.all_hidden,ui,LimitsPage,UsageLimitsPanel,status_all_hidden,"All limit providers are hidden. Open display settings to show them.",,active

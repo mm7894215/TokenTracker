@@ -23,6 +23,7 @@ const existingLimits = {
     primary_window: { used_percent: 42, reset_at: "2026-05-30T12:00:00.000Z" },
   },
   kiro: { configured: false },
+  grok: { configured: false },
   antigravity: { configured: false },
 };
 

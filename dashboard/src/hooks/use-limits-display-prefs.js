@@ -21,6 +21,7 @@ const ALL_LIMIT_PROVIDERS = [
   "gemini",
   "kimi",
   "kiro",
+  "grok",
   "copilot",
   "antigravity",
 ];
@@ -32,6 +33,7 @@ export const LIMIT_PROVIDER_NAMES = {
   gemini: "Gemini",
   kimi: "Kimi",
   kiro: "Kiro",
+  grok: "Grok Build",
   copilot: "GitHub Copilot",
   antigravity: "Antigravity",
 };
@@ -43,6 +45,7 @@ export const LIMIT_PROVIDER_ICONS = {
   gemini: "/brand-logos/gemini.svg",
   kimi: "/brand-logos/kimi.svg",
   kiro: "/brand-logos/kiro.svg",
+  grok: "/brand-logos/grok.svg",
   copilot: "/brand-logos/copilot.svg",
   antigravity: "/brand-logos/antigravity.svg",
 };
