@@ -6955,6 +6955,52 @@ test("parseKimiCodeIncremental handles OpenAI-compat usage (cached folded into i
   }
 });
 
+test("parseKimiCodeIncremental reads step.end events with camelCase usage (kimi-code 0.6.0+)", async () => {
+  // Real wire shape on @moonshot-ai/kimi-code 0.6.0/0.7.0/0.9.0: response.usage
+  // is { inputOther, inputCacheRead, inputCacheCreation, output } where
+  // inputOther is fresh (non-cached) input. Issue #135 — the old parser only
+  // recognized Anthropic-style keys, so every camelCase step.end read as $0/0t.
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-kimi-code-camel-"));
+  try {
+    const sessDir = path.join(tmp, "sessions", "wd_proj_xyz", "session_003", "agents", "main");
+    await fs.mkdir(sessDir, { recursive: true });
+    const wireFile = path.join(sessDir, "wire.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const now = 1780000000000;
+    const lines = [
+      JSON.stringify({ type: "metadata", protocol_version: "1.0", created_at: now }),
+      JSON.stringify({ type: "config.update", modelAlias: "kimi-code/kimi-k2.6", time: now }),
+      JSON.stringify({ type: "context.append_loop_event", event: { type: "step.begin", uuid: "sb1", turnId: "0", step: 1 }, time: now }),
+      JSON.stringify({ type: "context.append_loop_event", event: { type: "step.end", uuid: "ce1", turnId: "0", step: 1, usage: { inputOther: 1500, inputCacheRead: 8000, inputCacheCreation: 100, output: 250 } }, time: now + 1000 }),
+      // usage.record carries the SAME per-step usage — must NOT be double-counted.
+      JSON.stringify({ type: "usage.record", model: "kimi-code/kimi-k2.6", usage: { inputOther: 1500, inputCacheRead: 8000, inputCacheCreation: 100, output: 250 }, usageScope: "session", time: now + 1000 }),
+      JSON.stringify({ type: "context.append_loop_event", event: { type: "step.end", uuid: "ce2", turnId: "0", step: 2, usage: { inputOther: 2000, inputCacheRead: 0, inputCacheCreation: 0, output: 80 } }, time: now + 2000 }),
+    ];
+    await fs.writeFile(wireFile, lines.join("\n") + "\n");
+
+    const cursors = {};
+    const result = await parseKimiCodeIncremental({ wireFiles: [wireFile], cursors, queuePath });
+    assert.equal(result.recordsProcessed, 2);
+    assert.equal(result.eventsAggregated, 2);
+
+    const queued = (await fs.readFile(queuePath, "utf8")).trim().split("\n").map(JSON.parse);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].source, "kimi");
+    assert.equal(queued[0].model, "kimi-k2.6");
+    assert.equal(queued[0].input_tokens, 3500); // 1500 + 2000, no cache subtraction
+    assert.equal(queued[0].output_tokens, 330);
+    assert.equal(queued[0].cached_input_tokens, 8000);
+    assert.equal(queued[0].cache_creation_input_tokens, 100);
+    assert.equal(queued[0].total_tokens, 3500 + 330 + 8000 + 100);
+
+    // idempotent re-parse
+    const result2 = await parseKimiCodeIncremental({ wireFiles: [wireFile], cursors, queuePath });
+    assert.equal(result2.eventsAggregated, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseKimiCodeIncremental returns zero when no wire files exist", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-kimi-code-empty-"));
   try {

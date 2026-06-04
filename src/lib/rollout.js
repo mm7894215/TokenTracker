@@ -4420,26 +4420,42 @@ async function parseKimiCodeIncremental({ wireFiles, cursors, queuePath, onProgr
 
       recordsProcessed++;
 
-      // Anthropic-style usage: input_tokens already excludes cache. OpenAI-compat
-      // models instead fold cached reads into input_tokens and expose them via
-      // input_tokens_details.cached_tokens — mirror kimi-code's own extractUsage
-      // so we never double-count cache as fresh input.
-      const cacheCreation = toNonNegativeInt(usage.cache_creation_input_tokens);
+      // kimi-code's wire usage comes in two shapes across versions:
+      //  - camelCase (proto 0.6.0+, current): { inputOther, inputCacheRead,
+      //    inputCacheCreation, output } where inputOther is already fresh
+      //    (non-cached) input — this is `response.usage` straight from the LLM
+      //    adapter (verified in @moonshot-ai/kimi-code 0.6.0/0.7.0/0.9.0).
+      //  - Anthropic-style (older): { input_tokens, output_tokens,
+      //    cache_read_input_tokens, cache_creation_input_tokens }. OpenAI-compat
+      //    models fold cached reads into input_tokens and expose them via
+      //    input_tokens_details.cached_tokens — subtract so we never double-count.
+      // step.end and usage.record carry the SAME per-step usage object, so we
+      // read only step.end here (reading both would double-count ~2x).
+      let cacheCreation;
       let cacheRead;
       let input;
-      if (usage.cache_read_input_tokens != null) {
-        cacheRead = toNonNegativeInt(usage.cache_read_input_tokens);
-        input = toNonNegativeInt(usage.input_tokens);
+      let output;
+      if (usage.inputOther != null) {
+        input = toNonNegativeInt(usage.inputOther);
+        cacheRead = toNonNegativeInt(usage.inputCacheRead);
+        cacheCreation = toNonNegativeInt(usage.inputCacheCreation);
+        output = toNonNegativeInt(usage.output);
       } else {
-        const details =
-          usage.input_tokens_details && typeof usage.input_tokens_details === "object"
-            ? usage.input_tokens_details
-            : null;
-        const cached = toNonNegativeInt(details ? details.cached_tokens : 0);
-        cacheRead = cached;
-        input = Math.max(0, toNonNegativeInt(usage.input_tokens) - cached);
+        cacheCreation = toNonNegativeInt(usage.cache_creation_input_tokens);
+        if (usage.cache_read_input_tokens != null) {
+          cacheRead = toNonNegativeInt(usage.cache_read_input_tokens);
+          input = toNonNegativeInt(usage.input_tokens);
+        } else {
+          const details =
+            usage.input_tokens_details && typeof usage.input_tokens_details === "object"
+              ? usage.input_tokens_details
+              : null;
+          const cached = toNonNegativeInt(details ? details.cached_tokens : 0);
+          cacheRead = cached;
+          input = Math.max(0, toNonNegativeInt(usage.input_tokens) - cached);
+        }
+        output = toNonNegativeInt(usage.output_tokens);
       }
-      const output = toNonNegativeInt(usage.output_tokens);
       if (input === 0 && output === 0 && cacheRead === 0 && cacheCreation === 0) {
         seenIds.add(id);
         continue;
