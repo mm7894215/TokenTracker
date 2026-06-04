@@ -42,7 +42,12 @@ internal sealed class ServerManager : IDisposable
     private readonly object _syncLock = new();
     private readonly JobObject _job = new();
     private CancellationTokenSource? _healthCts;
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(3) };
+    // The local server is always on 127.0.0.1, so this client must NEVER honour a system /
+    // env (HTTP_PROXY) proxy: a VPN/proxy user with no loopback bypass would otherwise have
+    // the health check routed through the proxy, which can't reach the local server — the
+    // app then thinks startup failed even though the server is up. UseProxy=false = direct.
+    private static readonly HttpClient Http =
+        new(new HttpClientHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(3) };
     private static readonly string LogPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "TokenTracker",
