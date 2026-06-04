@@ -3,6 +3,15 @@ import { Card } from "../../components";
 import { FadeIn } from "../../foundation/FadeIn.jsx";
 import { copy } from "../../../lib/copy";
 import { LIMIT_DISPLAY_MODES } from "../../../hooks/use-limits-display-prefs.js";
+import {
+  LIMIT_PROVIDER_IDS,
+  limitProviderIconKey,
+  limitProviderName,
+} from "../../../lib/limits-providers.js";
+import { ProviderIcon } from "./ProviderIcon.jsx";
+import { PROVIDER_LIMIT_SPECS } from "./usage-limits-provider-specs.js";
+
+const LIMITS_PROVIDER_ICON_CLASS = "shrink-0 text-oai-black dark:text-oai-white";
 
 function formatReset(isoOrUnix) {
   if (!isoOrUnix) return null;
@@ -35,8 +44,10 @@ function LimitBar({ label, pct, reset, mode = LIMIT_DISPLAY_MODES.USED }) {
   const rounded = Math.round(displayPct);
   // Sub-1% still matters (e.g. team pool); keep bar/text from collapsing to 0%.
   const widthPct = displayPct > 0 && rounded === 0 ? Math.max(displayPct, 0.35) : displayPct;
-  const labelPct =
-    displayPct > 0 && rounded === 0 ? "<1" : String(rounded);
+  let labelPct = String(rounded);
+  if (displayPct > 0 && rounded === 0) {
+    labelPct = copy("limits.bar.sub_one_percent");
+  }
   return (
     <div className="flex items-center gap-2">
       <span className="text-[11px] text-oai-gray-500 dark:text-oai-gray-400 w-12 shrink-0">{label}</span>
@@ -49,27 +60,22 @@ function LimitBar({ label, pct, reset, mode = LIMIT_DISPLAY_MODES.USED }) {
       <span className="text-[11px] tabular-nums text-oai-gray-500 dark:text-oai-gray-400 w-9 text-right shrink-0 whitespace-nowrap">
         {labelPct}%
       </span>
-      {reset ? (
-        <span className="text-[10px] text-oai-gray-400 dark:text-oai-gray-500 w-6 text-right shrink-0">
-          {reset}
-        </span>
-      ) : null}
+      {reset && (
+        <span className="text-[10px] text-oai-gray-400 dark:text-oai-gray-500 w-6 text-right shrink-0">{reset}</span>
+      )}
     </div>
   );
 }
 
-function ToolGroup({ name, icon, children }) {
-  const needsInvert =
-    icon === "/brand-logos/cursor.svg" ||
-    icon === "/brand-logos/kiro.svg" ||
-    icon === "/brand-logos/copilot.svg" ||
-    icon === "/brand-logos/kimi.svg";
-  const iconClass = needsInvert ? "w-[14px] h-[14px] dark:invert" : "w-[14px] h-[14px]";
+function ToolGroup({ name, providerId, children }) {
+  const providerKey = limitProviderIconKey(providerId);
 
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-1.5">
-        {icon ? <img src={icon} alt="" className={iconClass} /> : null}
+        {providerKey ? (
+          <ProviderIcon provider={providerKey} size={14} className={LIMITS_PROVIDER_ICON_CLASS} />
+        ) : null}
         <span className="text-sm font-medium text-oai-black dark:text-oai-white">{name}</span>
       </div>
       {children}
@@ -77,19 +83,7 @@ function ToolGroup({ name, icon, children }) {
   );
 }
 
-const DEFAULT_ORDER = ["claude", "codex", "cursor", "gemini", "kimi", "kiro", "grok", "copilot", "antigravity"];
-
-const PROVIDER_META = {
-  claude: { name: "Claude", icon: "/brand-logos/claude-code.svg" },
-  codex: { name: "Codex", icon: "/brand-logos/codex.svg" },
-  cursor: { name: "Cursor", icon: "/brand-logos/cursor.svg" },
-  gemini: { name: "Gemini", icon: "/brand-logos/gemini.svg" },
-  kimi: { name: "Kimi", icon: "/brand-logos/kimi.svg" },
-  kiro: { name: "Kiro", icon: "/brand-logos/kiro.svg" },
-  grok: { name: "Grok Build", icon: "/brand-logos/grok.svg" },
-  copilot: { name: "GitHub Copilot", icon: "/brand-logos/copilot.svg" },
-  antigravity: { name: "Antigravity", icon: "/brand-logos/antigravity.svg" },
-};
+const DEFAULT_ORDER = LIMIT_PROVIDER_IDS;
 
 function StatusLine({ children, tone = "neutral" }) {
   const color =
@@ -99,109 +93,94 @@ function StatusLine({ children, tone = "neutral" }) {
   return <div className={`text-[11px] leading-snug ${color}`}>{children}</div>;
 }
 
+function readWindowPct(window, field = "used_percent") {
+  if (!window) return null;
+  if (field === "utilization") return window.utilization;
+  return window.used_percent;
+}
+
+function readWindowReset(window, field = "reset_at") {
+  if (!window) return null;
+  if (field === "resets_at") return window.resets_at;
+  return window.reset_at;
+}
+
+function buildLimitBars(specs, mode) {
+  return specs
+    .filter((spec) => spec.window)
+    .map((spec) => (
+      <LimitBar
+        key={spec.key}
+        label={copy(spec.labelKey)}
+        pct={readWindowPct(spec.window, spec.pctField)}
+        reset={formatReset(readWindowReset(spec.window, spec.resetField))}
+        mode={mode}
+      />
+    ));
+}
+
+function LimitWindowSection({ specs, mode, extra = null }) {
+  const bars = buildLimitBars(specs, mode);
+  const showEmpty = bars.length === 0 && !extra;
+  return (
+    <>
+      {bars}
+      {showEmpty ? <StatusLine>{copy("limits.status.no_data")}</StatusLine> : null}
+      {extra}
+    </>
+  );
+}
+
+function providerWindowGroup(id, title, mode, specs, extra = null) {
+  return (
+    <ToolGroup key={id} name={title} providerId={id}>
+      <LimitWindowSection mode={mode} specs={specs} extra={extra} />
+    </ToolGroup>
+  );
+}
+
+function renderProviderExtra(kind, data) {
+  if (kind === "kimi_parallel" && data.parallel_limit) {
+    return <StatusLine>{copy("limits.label.kimi_parallel", { count: data.parallel_limit })}</StatusLine>;
+  }
+  if (kind === "copilot_otel" && !data.otel_has_files && !data.otel_enabled) {
+    return <CopilotOtelHint defaultDir={data.otel_default_dir} />;
+  }
+  return null;
+}
+
+function renderConfiguredProvider(id, data, title, mode) {
+  const spec = PROVIDER_LIMIT_SPECS[id];
+  if (!spec) return null;
+  return providerWindowGroup(
+    id,
+    title,
+    mode,
+    spec.windows(data),
+    renderProviderExtra(spec.extra, data),
+  );
+}
+
 function renderProviderGroup(id, data, mode) {
-  const meta = PROVIDER_META[id];
-  if (!meta) return null;
+  if (!PROVIDER_LIMIT_SPECS[id]) return null;
   if (!data?.configured) {
     return (
-      <ToolGroup key={id} name={meta.name} icon={meta.icon}>
+      <ToolGroup key={id} name={limitProviderName(id)} providerId={id}>
         <StatusLine>{copy("limits.status.not_connected")}</StatusLine>
       </ToolGroup>
     );
   }
   if (data.error) {
     return (
-      <ToolGroup key={id} name={meta.name} icon={meta.icon}>
+      <ToolGroup key={id} name={limitProviderName(id)} providerId={id}>
         <StatusLine tone="error">{copy("shared.error.prefix", { error: data.error })}</StatusLine>
       </ToolGroup>
     );
   }
 
-  const title = data.plan_label ? `${meta.name} ${data.plan_label}` : meta.name;
-
-  switch (id) {
-    case "claude":
-      return (
-        <ToolGroup key="claude" name={title} icon={meta.icon}>
-          {data.five_hour ? <LimitBar label="5h" pct={data.five_hour.utilization} reset={formatReset(data.five_hour.resets_at)} mode={mode} /> : null}
-          {data.seven_day ? <LimitBar label="7d" pct={data.seven_day.utilization} reset={formatReset(data.seven_day.resets_at)} mode={mode} /> : null}
-          {data.seven_day_opus ? <LimitBar label="Opus" pct={data.seven_day_opus.utilization} reset={formatReset(data.seven_day_opus.resets_at)} mode={mode} /> : null}
-          {!data.five_hour && !data.seven_day && !data.seven_day_opus ? <StatusLine>{copy("limits.status.no_data")}</StatusLine> : null}
-        </ToolGroup>
-      );
-    case "codex":
-      return (
-        <ToolGroup key="codex" name={title} icon={meta.icon}>
-          {data.primary_window ? <LimitBar label="5h" pct={data.primary_window.used_percent} reset={formatReset(data.primary_window.reset_at)} mode={mode} /> : null}
-          {data.secondary_window ? <LimitBar label="7d" pct={data.secondary_window.used_percent} reset={formatReset(data.secondary_window.reset_at)} mode={mode} /> : null}
-          {!data.primary_window && !data.secondary_window ? <StatusLine>{copy("limits.status.no_data")}</StatusLine> : null}
-        </ToolGroup>
-      );
-    case "cursor":
-      return (
-        <ToolGroup key="cursor" name={title} icon={meta.icon}>
-          {data.primary_window ? <LimitBar label={copy("limits.label.cursor_plan")} pct={data.primary_window.used_percent} reset={formatReset(data.primary_window.reset_at)} mode={mode} /> : null}
-          {data.secondary_window ? <LimitBar label={copy("limits.label.cursor_auto")} pct={data.secondary_window.used_percent} reset={formatReset(data.secondary_window.reset_at)} mode={mode} /> : null}
-          {data.tertiary_window ? <LimitBar label={copy("limits.label.cursor_api")} pct={data.tertiary_window.used_percent} reset={formatReset(data.tertiary_window.reset_at)} mode={mode} /> : null}
-          {!data.primary_window && !data.secondary_window && !data.tertiary_window ? <StatusLine>{copy("limits.status.no_data")}</StatusLine> : null}
-        </ToolGroup>
-      );
-    case "gemini":
-      return (
-        <ToolGroup key="gemini" name={title} icon={meta.icon}>
-          {data.primary_window ? <LimitBar label="Pro" pct={data.primary_window.used_percent} reset={formatReset(data.primary_window.reset_at)} mode={mode} /> : null}
-          {data.secondary_window ? <LimitBar label="Flash" pct={data.secondary_window.used_percent} reset={formatReset(data.secondary_window.reset_at)} mode={mode} /> : null}
-          {data.tertiary_window ? <LimitBar label="Lite" pct={data.tertiary_window.used_percent} reset={formatReset(data.tertiary_window.reset_at)} mode={mode} /> : null}
-          {!data.primary_window && !data.secondary_window && !data.tertiary_window ? <StatusLine>{copy("limits.status.no_data")}</StatusLine> : null}
-        </ToolGroup>
-      );
-    case "kimi":
-      return (
-        <ToolGroup key="kimi" name={title} icon={meta.icon}>
-          {data.primary_window ? <LimitBar label={copy("limits.label.kimi_weekly")} pct={data.primary_window.used_percent} reset={formatReset(data.primary_window.reset_at)} mode={mode} /> : null}
-          {data.secondary_window ? <LimitBar label={copy("limits.label.kimi_5h")} pct={data.secondary_window.used_percent} reset={formatReset(data.secondary_window.reset_at)} mode={mode} /> : null}
-          {data.tertiary_window ? <LimitBar label={copy("limits.label.kimi_total")} pct={data.tertiary_window.used_percent} reset={formatReset(data.tertiary_window.reset_at)} mode={mode} /> : null}
-          {data.parallel_limit ? <StatusLine>{copy("limits.label.kimi_parallel", { count: data.parallel_limit })}</StatusLine> : null}
-          {!data.primary_window && !data.secondary_window && !data.tertiary_window ? <StatusLine>{copy("limits.status.no_data")}</StatusLine> : null}
-        </ToolGroup>
-      );
-    case "kiro":
-      return (
-        <ToolGroup key="kiro" name={title} icon={meta.icon}>
-          {data.primary_window ? <LimitBar label={copy("limits.label.kiro_month")} pct={data.primary_window.used_percent} reset={formatReset(data.primary_window.reset_at)} mode={mode} /> : null}
-          {data.secondary_window ? <LimitBar label={copy("limits.label.kiro_bonus")} pct={data.secondary_window.used_percent} reset={formatReset(data.secondary_window.reset_at)} mode={mode} /> : null}
-          {!data.primary_window && !data.secondary_window ? <StatusLine>{copy("limits.status.no_data")}</StatusLine> : null}
-        </ToolGroup>
-      );
-    case "grok":
-      return (
-        <ToolGroup key="grok" name={title} icon={meta.icon}>
-          {data.primary_window ? <LimitBar label={copy("limits.label.grok_month")} pct={data.primary_window.used_percent} reset={formatReset(data.primary_window.reset_at)} mode={mode} /> : null}
-          {data.secondary_window ? <LimitBar label={copy("limits.label.grok_ondemand")} pct={data.secondary_window.used_percent} reset={formatReset(data.secondary_window.reset_at)} mode={mode} /> : null}
-          {!data.primary_window && !data.secondary_window ? <StatusLine>{copy("limits.status.no_data")}</StatusLine> : null}
-        </ToolGroup>
-      );
-    case "antigravity":
-      return (
-        <ToolGroup key="antigravity" name={title} icon={meta.icon}>
-          {data.primary_window ? <LimitBar label="Claude" pct={data.primary_window.used_percent} reset={formatReset(data.primary_window.reset_at)} mode={mode} /> : null}
-          {data.secondary_window ? <LimitBar label="G Pro" pct={data.secondary_window.used_percent} reset={formatReset(data.secondary_window.reset_at)} mode={mode} /> : null}
-          {data.tertiary_window ? <LimitBar label="Flash" pct={data.tertiary_window.used_percent} reset={formatReset(data.tertiary_window.reset_at)} mode={mode} /> : null}
-          {!data.primary_window && !data.secondary_window && !data.tertiary_window ? <StatusLine>{copy("limits.status.no_data")}</StatusLine> : null}
-        </ToolGroup>
-      );
-    case "copilot":
-      return (
-        <ToolGroup key="copilot" name={title} icon={meta.icon}>
-          {data.primary_window ? <LimitBar label={copy("limits.label.copilot_premium")} pct={data.primary_window.used_percent} reset={formatReset(data.primary_window.reset_at)} mode={mode} /> : null}
-          {data.secondary_window ? <LimitBar label={copy("limits.label.copilot_chat")} pct={data.secondary_window.used_percent} reset={formatReset(data.secondary_window.reset_at)} mode={mode} /> : null}
-          {!data.primary_window && !data.secondary_window ? <StatusLine>{copy("limits.status.no_data")}</StatusLine> : null}
-          {data.otel_has_files || data.otel_enabled ? null : <CopilotOtelHint defaultDir={data.otel_default_dir} />}
-        </ToolGroup>
-      );
-    default:
-      return null;
-  }
+  const baseName = limitProviderName(id);
+  const title = data.plan_label ? `${baseName} ${data.plan_label}` : baseName;
+  return renderConfiguredProvider(id, data, title, mode);
 }
 
 function CopilotOtelHint({ defaultDir }) {

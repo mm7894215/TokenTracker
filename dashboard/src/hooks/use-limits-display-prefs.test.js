@@ -1,8 +1,8 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { LIMIT_PROVIDER_IDS } from "../lib/limits-providers.js";
 import {
   LIMIT_DISPLAY_MODES,
-  LIMIT_PROVIDER_NAMES,
   useLimitsDisplayPrefs,
 } from "./use-limits-display-prefs.js";
 
@@ -44,7 +44,7 @@ describe("useLimitsDisplayPrefs", () => {
   });
 
   it("matches the provider list used for visibility/order keys", () => {
-    expect(Object.keys(LIMIT_PROVIDER_NAMES).sort()).toEqual(
+    expect([...LIMIT_PROVIDER_IDS].sort()).toEqual(
       [
         "antigravity",
         "claude",
@@ -52,6 +52,7 @@ describe("useLimitsDisplayPrefs", () => {
         "copilot",
         "cursor",
         "gemini",
+        "grok",
         "kimi",
         "kiro",
       ].sort(),

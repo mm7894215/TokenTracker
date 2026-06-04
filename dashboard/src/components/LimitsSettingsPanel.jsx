@@ -1,17 +1,12 @@
 import React, { useState } from "react";
 import { LayoutGroup, motion } from "motion/react";
 import { GripVertical } from "lucide-react";
-import {
-  LIMIT_PROVIDER_NAMES,
-  LIMIT_PROVIDER_ICONS,
-} from "../hooks/use-limits-display-prefs.js";
+import { limitProviderIconKey, limitProviderName } from "../hooks/use-limits-display-prefs.js";
 import { copy } from "../lib/copy";
 import { cn } from "../lib/cn";
+import { ProviderIcon } from "../ui/dashboard/components/ProviderIcon.jsx";
 
-// Providers whose brand logo is a pure mono glyph (fill="currentColor")
-// — these render black in <img> and must be inverted under dark mode.
-// Colored logos (claude, codex, gemini, antigravity) are left as-is.
-const MONO_LOGO_PROVIDERS = new Set(["cursor", "kiro", "copilot", "kimi"]);
+const LIMITS_SETTINGS_ICON_CLASS = "shrink-0 text-oai-gray-900 dark:text-oai-gray-200";
 
 function ToggleSwitch({ checked, onChange, ariaLabel }) {
   return (
@@ -103,20 +98,16 @@ export function LimitsSettingsPanel({ prefs }) {
                 aria-hidden
               />
 
-              <img
-                src={LIMIT_PROVIDER_ICONS[id]}
-                alt=""
-                width={18}
-                height={18}
-                className={cn(
-                  "h-[18px] w-[18px] shrink-0 pointer-events-none",
-                  MONO_LOGO_PROVIDERS.has(id) && "dark:invert",
-                )}
-                draggable={false}
-              />
+              {limitProviderIconKey(id) ? (
+                <ProviderIcon
+                  provider={limitProviderIconKey(id)}
+                  size={18}
+                  className={cn("pointer-events-none", LIMITS_SETTINGS_ICON_CLASS)}
+                />
+              ) : null}
 
               <span className="flex-1 text-sm text-oai-gray-900 dark:text-oai-gray-200 select-none">
-                {LIMIT_PROVIDER_NAMES[id]}
+                {limitProviderName(id)}
               </span>
 
               <div
@@ -126,7 +117,7 @@ export function LimitsSettingsPanel({ prefs }) {
                 <ToggleSwitch
                   checked={visible}
                   onChange={() => toggle(id)}
-                  ariaLabel={`${copy("limits.settings.toggle_visible")}: ${LIMIT_PROVIDER_NAMES[id]}`}
+                  ariaLabel={`${copy("limits.settings.toggle_visible")}: ${limitProviderName(id)}`}
                 />
               </div>
             </motion.div>
