@@ -1,7 +1,9 @@
 {
   "usage.overview.antigravity_notice_title": "トークンは推定値です",
   "usage.overview.antigravity_notice_body": "Antigravity のローカルログには実際の使用量フィールドがないため、ここの数値は文字数（約 4 文字／トークン）から推定したもので、Gemini の prompt cache 割引も差し引かれていません。上限の推定値として扱い、請求書との照合には使わないでください。",
+  "usage.period.last24h": "24h",
   "stats.period.today": "今日",
+  "stats.period.last24h": "24h",
   "stats.period.week": "今週",
   "stats.period.month": "今月",
   "stats.period.all": "全期間",

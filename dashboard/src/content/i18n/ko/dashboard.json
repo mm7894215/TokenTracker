@@ -1,7 +1,9 @@
 {
   "usage.overview.antigravity_notice_title": "추정 토큰",
   "usage.overview.antigravity_notice_body": "Antigravity 기록에는 실제 사용량 수치가 저장되지 않습니다. 여기 표시된 수치는 텍스트 길이(약 4자/토큰)로 추정한 값이며 Gemini의 프롬프트 캐시 할인은 반영되지 않으므로, 청구 금액이 아니라 상한 추정치로 참고하세요.",
+  "usage.period.last24h": "24h",
   "stats.period.today": "오늘",
+  "stats.period.last24h": "24h",
   "stats.period.week": "이번 주",
   "stats.period.month": "이번 달",
   "stats.period.all": "전체",

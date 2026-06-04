@@ -102,8 +102,7 @@ export default function DevicePage() {
           Approve your CLI
         </h1>
         <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400 mb-6">
-          Type the code your CLI showed you. We'll link it to your account so token usage from that
-          machine flows into your leaderboard profile.
+          {"Type the code your CLI showed you. We'll link it to your account so token usage from that machine flows into your leaderboard profile."}
         </p>
 
         {!auth?.signedIn ? (

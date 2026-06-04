@@ -118,6 +118,7 @@ dashboard.core_index.expand_label,dashboard,DashboardPage,UsagePanel,toggle,"▸
 dashboard.core_index.collapse_aria,dashboard,DashboardPage,UsagePanel,toggle_aria,"Collapse model breakdown",,active
 dashboard.core_index.expand_aria,dashboard,DashboardPage,UsagePanel,toggle_aria,"Expand model breakdown",,active
 usage.summary.total,ui,UsagePanel,UsagePanel,summary_label_total,"Total tokens",,active
+usage.summary.updated_at,ui,UsagePanel,UsagePanel,summary_updated_at,"Updated {{timestamp}}",,active
 usage.metric.total,ui,UsagePanel,UsagePanel,metric_total,"Total",,active
 usage.metric.input,ui,UsagePanel,UsagePanel,metric_input,"Input",,active
 usage.metric.output,ui,UsagePanel,UsagePanel,metric_output,"Output",,active
@@ -331,6 +332,7 @@ nav.menu,shared,*,Sidebar,nav_menu,"Open navigation menu",,active
 nav.close_menu,shared,*,Sidebar,nav_close_menu,"Close navigation menu",,active
 nav.aside_label,shared,*,Sidebar,aside_label,"Main navigation",,active
 nav.nav_label,shared,*,Sidebar,nav_label,"Primary",,active
+nav.version,shared,*,Sidebar,version,"Token Tracker version {{version}}",,active
 limits.page.subtitle,ui,LimitsPage,LimitsPage,subtitle,"Rate limits and quota usage across your AI tools.",,active
 limits.settings.toggle_visible,ui,LimitsPage,LimitsSettingsPanel,toggle_visible,"Toggle visibility",,active
 limits.settings.display_mode_label,ui,LimitsPage,LimitsSettingsPanel,display_mode_label,"Usage",,active
@@ -390,6 +392,7 @@ auth.callback.redirecting,ui,*,NativeAuthCallbackPage,redirecting,"Returning to 
 auth.callback.failed,ui,*,NativeAuthCallbackPage,failed,"Sign-in incomplete. Please try again.",,active
 auth.callback.close,ui,*,NativeAuthCallbackPage,close,"Close this page",,active
 stats.period.today,ui,DashboardPage,StatsPanel,period_today,"today convs",,active
+stats.period.last24h,ui,DashboardPage,StatsPanel,period_last24h,"24h convs",,active
 stats.period.week,ui,DashboardPage,StatsPanel,period_week,"7d convs",,active
 stats.period.month,ui,DashboardPage,StatsPanel,period_month,"30d convs",,active
 stats.period.all,ui,DashboardPage,StatsPanel,period_all,"all convs",,active
@@ -501,11 +504,17 @@ share.card.annual.longest_streak,share,DashboardPage,AnnualReportCard,longest_st
 share.card.annual.days_count,share,DashboardPage,AnnualReportCard,days_count,"{{days}} days",,active
 share.card.annual.top_model,share,DashboardPage,AnnualReportCard,top_model,"Top Model",,active
 usage.period.day,ui,DashboardPage,UsageOverview,period_day,"Day",,active
+usage.period.last24h,ui,DashboardPage,UsageOverview,period_last24h,"24h",,active
 usage.period.week,ui,DashboardPage,UsageOverview,period_week,"7d",,active
 usage.period.month,ui,DashboardPage,UsageOverview,period_month,"30d",,active
 usage.period.total,ui,DashboardPage,UsageOverview,period_total,"Total",,active
 usage.period.custom,ui,DashboardPage,UsageOverview,period_custom,"Custom",,active
 usage.overview.tablist_aria,ui,DashboardPage,UsageOverview,tablist_aria,"Time period",,active
+usage.auto_refresh.aria,ui,DashboardPage,UsageOverview,auto_refresh_aria,"Auto refresh interval",,active
+usage.auto_refresh.off,ui,DashboardPage,UsageOverview,auto_refresh_off,"Off",,active
+usage.auto_refresh.30s,ui,DashboardPage,UsageOverview,auto_refresh_30s,"30s",,active
+usage.auto_refresh.60s,ui,DashboardPage,UsageOverview,auto_refresh_60s,"60s",,active
+usage.auto_refresh.120s,ui,DashboardPage,UsageOverview,auto_refresh_120s,"120s",,active
 usage.overview.cost_breakdown_aria,ui,DashboardPage,UsageOverview,cost_breakdown_aria,"View cost breakdown",,active
 usage.overview.distribution_aria,ui,DashboardPage,UsageOverview,distribution_aria,"Provider distribution: {{items}}",,active
 usage.overview.distribution_item,ui,DashboardPage,UsageOverview,distribution_item,"{{label}} {{percent}}%",,active

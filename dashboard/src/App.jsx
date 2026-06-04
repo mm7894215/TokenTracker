@@ -65,6 +65,12 @@ const WidgetsPage = lazy(() =>
   import("./pages/WidgetsPage.jsx").then((m) => ({ default: m.WidgetsPage })),
 );
 
+function shouldEnableVercelInsights() {
+  if (typeof window === "undefined") return false;
+  const host = window.location.hostname;
+  return host !== "localhost" && host !== "127.0.0.1" && host !== "::1";
+}
+
 export default function App() {
   // Subscribing to locale here makes App rerender on language switch, which
   // rebuilds every child element reference and triggers copy() re-evaluation
@@ -77,6 +83,7 @@ export default function App() {
   const dashboardResourcePreloadStartedRef = useRef(false);
   const leaderboardStatePreloadContextKeysRef = useRef(new Set());
   const mockEnabled = isMockEnabled();
+  const enableVercelInsights = shouldEnableVercelInsights();
   const screenshotMode = useMemo(() => {
     if (typeof window === "undefined") return false;
     return isScreenshotModeEnabled(window.location.search);
@@ -270,8 +277,8 @@ export default function App() {
             <Suspense fallback={null}>{content}</Suspense>
             {showSidebar ? <CommandPalette /> : null}
             <LoginModal />
-            <Analytics />
-            <SpeedInsights />
+            {enableVercelInsights ? <Analytics /> : null}
+            {enableVercelInsights ? <SpeedInsights /> : null}
           </LoginModalProvider>
         </ToastProvider>
       </ThemeProvider>

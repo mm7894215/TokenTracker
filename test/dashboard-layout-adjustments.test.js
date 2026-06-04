@@ -25,15 +25,6 @@ const projectUsagePath = path.join(
   "components",
   "ProjectUsagePanel.jsx",
 );
-const installStatusPath = path.join(
-  __dirname,
-  "..",
-  "dashboard",
-  "src",
-  "lib",
-  "install-status.js",
-);
-
 function readFile(filePath) {
   return fs.readFileSync(filePath, "utf8");
 }
@@ -96,42 +87,15 @@ test("ProjectUsagePanel constrains identity text width", () => {
   assert.ok(src.includes("min-w-0"), "expected min width constraint for identity text");
 });
 
-test("DashboardPage wires install panel gating through helper", () => {
+test("DashboardPage omits auth and install/download panels", () => {
   const containerSrc = readFile(containerPath);
-  const installStatusSrc = readFile(installStatusPath);
   const viewSrc = readFile(viewPath);
-  assert.ok(containerSrc.includes("shouldShowInstallCard"), "expected install status helper usage");
-  assert.ok(
-    containerSrc.includes("has_active_device_token"),
-    "expected snake_case install token field usage",
-  );
-  assert.ok(containerSrc.includes("hasActiveDeviceToken"), "expected camelCase fallback usage");
-  assert.ok(
-    containerSrc.includes("const shouldShowInstall = shouldShowInstallCard({"),
-    "expected helper-based install gate assignment",
-  );
-  assert.ok(
-    installStatusSrc.includes("publicMode || screenshotMode"),
-    "expected helper to hide in public/screenshot mode",
-  );
-  assert.ok(
-    installStatusSrc.includes("if (forceInstall) return true"),
-    "expected helper to honor forceInstall",
-  );
-  assert.ok(installStatusSrc.includes("accessEnabled"), "expected helper to check accessEnabled");
-  assert.ok(
-    installStatusSrc.includes("!heatmapLoading"),
-    "expected helper to check heatmapLoading",
-  );
-  assert.ok(installStatusSrc.includes("activeDays === 0"), "expected helper to gate on activeDays");
-  assert.ok(
-    installStatusSrc.includes("!hasActiveDeviceToken"),
-    "expected helper to hide card for active device token",
-  );
-  assert.ok(
-    viewSrc.includes("shouldShowInstall ? ("),
-    "expected install panel to use shouldShowInstall",
-  );
+  assert.ok(!containerSrc.includes("shouldShowInstallCard"), "expected install helper removed from dashboard");
+  assert.ok(!containerSrc.includes("force_install"), "expected force install query handling removed");
+  assert.ok(!containerSrc.includes("showAuthGate"), "expected auth gate removed from dashboard container");
+  assert.ok(!viewSrc.includes("LoginCard"), "expected sign-in panel removed from dashboard view");
+  assert.ok(!viewSrc.includes("MacAppBanner"), "expected download banner removed from dashboard view");
+  assert.ok(!viewSrc.includes("shouldShowInstall ? ("), "expected install panel removed from dashboard view");
 });
 
 test("DashboardPage removes heatmap range label", () => {
@@ -177,17 +141,4 @@ test("TrendMonitor root does not force full height", () => {
   const rootLine = lines.find((line) => line.includes('"rounded-xl border border-oai-gray-200'));
   assert.ok(rootLine, "expected TrendMonitor root className line");
   assert.ok(!rootLine.includes("h-full"), "expected TrendMonitor root to avoid h-full");
-});
-
-test("DashboardPage supports force_install preview", () => {
-  const src = readFile(containerPath);
-  assert.ok(src.includes("force_install"), "expected force_install query param support");
-  assert.ok(
-    src.includes("isProductionHost"),
-    "expected force_install gated by production host check",
-  );
-  assert.ok(
-    src.includes("forceInstall"),
-    "expected forceInstall flag to influence install visibility",
-  );
 });

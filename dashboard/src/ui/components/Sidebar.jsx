@@ -20,11 +20,10 @@ import { copy } from "../../lib/copy";
 import { cn } from "../../lib/cn";
 import { useTheme } from "../../hooks/useTheme.js";
 import { useLocale } from "../../hooks/useLocale.js";
-import { shouldFetchGithubStars } from "../dashboard/util/should-fetch-github-stars.js";
-import { InsforgeUserHeaderControls } from "../../components/InsforgeUserHeaderControls.jsx";
 import { isNativeApp, isNativeEmbed, isNativeWindowsApp } from "../../lib/native-bridge.js";
 
 const STORAGE_KEY = "tt.sidebarCollapsed";
+const APP_VERSION = String(import.meta.env.VITE_APP_VERSION || "0.0.0").trim();
 
 function isLocalDashboardHost() {
   if (typeof window === "undefined") return false;
@@ -68,11 +67,14 @@ export function getNavGroups({ includeLeaderboard = !isLocalDashboardHost() } = 
 }
 
 function readCollapsed() {
-  if (typeof window === "undefined") return false;
+  if (typeof window === "undefined") return true;
   try {
-    return window.localStorage.getItem(STORAGE_KEY) === "1";
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    if (stored === "0") return false;
+    if (stored === "1") return true;
+    return true;
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -96,7 +98,7 @@ function useSidebarCollapsed() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const onStorage = (e) => {
-      if (e.key === STORAGE_KEY) setCollapsed(e.newValue === "1");
+      if (e.key === STORAGE_KEY) setCollapsed(e.newValue !== "0");
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
@@ -158,6 +160,23 @@ function NavItem({ item, collapsed, active, onClick }) {
   );
 }
 
+function VersionBadge({ collapsed }) {
+  if (!APP_VERSION) return null;
+  const label = copy("nav.version", { version: APP_VERSION });
+  return (
+    <div
+      className={cn(
+        "px-2 text-[10px] font-medium tabular-nums text-oai-gray-400 dark:text-oai-gray-600",
+        collapsed ? "text-center" : "truncate",
+      )}
+      title={label}
+      aria-label={label}
+    >
+      {`v${APP_VERSION}`}
+    </div>
+  );
+}
+
 /**
  * Tertiary icon button — uniform 40×40 (meets WCAG 2.5.5 close enough; AAA prefers 44).
  */
@@ -181,54 +200,8 @@ function IconButton({ as = "button", title, onClick, href, children, className: 
 }
 
 /**
- * Refined GitHub Star pill — Linear "Free plan" style: bordered, tight, with text + count.
- * `glassChrome`: Mac 侧栏毛玻璃上：gray-500 描边 — 亮色 /20 更淡，暗色 dark:/30 保持可见。
- */
-function StarPill({ repo = "mm7894215/TokenTracker", glassChrome = false }) {
-  const [stars, setStars] = useState(null);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const prefersReducedMotion =
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (!shouldFetchGithubStars({ prefersReducedMotion, screenshotCapture: false })) return;
-    fetch(`https://api.github.com/repos/${repo}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data && typeof data.stargazers_count === "number") setStars(data.stargazers_count);
-      })
-      .catch(() => {});
-  }, [repo]);
-
-  return (
-    <a
-      href={`https://github.com/${repo}`}
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label={stars !== null ? `Star on GitHub (${stars})` : "Star on GitHub"}
-      className={cn(
-        "inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500",
-        glassChrome
-          ? "border border-gray-500/20 dark:border-gray-500/30 bg-gray-500/[0.04] dark:bg-gray-500/[0.06] backdrop-blur-[2px] text-oai-gray-700 dark:text-oai-gray-300 hover:bg-gray-500/10 dark:hover:bg-gray-500/12 hover:border-gray-500/30 dark:hover:border-gray-500/40 hover:text-oai-black dark:hover:text-white"
-          : "border border-oai-gray-200 dark:border-oai-gray-700 text-oai-gray-600 dark:text-oai-gray-400 hover:bg-oai-gray-200/60 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white hover:border-oai-gray-300 dark:hover:border-oai-gray-600",
-      )}
-    >
-      <svg height="12" viewBox="0 0 16 16" width="12" className="shrink-0 fill-current">
-        <path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z" />
-      </svg>
-      <span>Star</span>
-      {stars !== null && (
-        <span className="text-[10px] text-oai-gray-500 dark:text-oai-gray-500 tabular-nums">
-          {stars}
-        </span>
-      )}
-    </a>
-  );
-}
-
-/**
  * Compact theme pill — opens a popover with Light / Dark / System options.
- * Matches StarPill's h-7 height; popover opens upward (bottom-left anchored).
+ * Uses the same compact h-7 sizing as the sidebar collapse button.
  */
 const THEME_OPTIONS = [
   { value: "light", label: "Light", Icon: Sun },
@@ -324,35 +297,19 @@ function SidebarBody({ collapsed, onToggleCollapsed, onItemClick, showCloseButto
 
   return (
     <>
-      {/* Top: identity only — full-width, aligned with nav items (px-2) */}
-      <div className={cn("px-2 pt-2 pb-2", collapsed && "flex justify-center")}>
-        {showCloseButton ? (
-          <div className="flex items-center gap-2">
-            <div className="flex-1 min-w-0">
-              <InsforgeUserHeaderControls
-                variant="sidebar"
-                collapsed={collapsed}
-                onAfterAction={onItemClick}
-              />
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label={copy("nav.close_menu")}
-              title={copy("nav.close_menu")}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-oai-gray-500 dark:text-oai-gray-500 hover:bg-oai-gray-200/60 dark:hover:bg-oai-gray-800 hover:text-oai-gray-900 dark:hover:text-oai-gray-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500"
-            >
-              <X className="h-4 w-4" strokeWidth={1.75} aria-hidden />
-            </button>
-          </div>
-        ) : (
-          <InsforgeUserHeaderControls
-            variant="sidebar"
-            collapsed={collapsed}
-            onAfterAction={onItemClick}
-          />
-        )}
-      </div>
+      {showCloseButton ? (
+        <div className="flex justify-end px-2 pt-2 pb-2">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={copy("nav.close_menu")}
+            title={copy("nav.close_menu")}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-oai-gray-500 dark:text-oai-gray-500 hover:bg-oai-gray-200/60 dark:hover:bg-oai-gray-800 hover:text-oai-gray-900 dark:hover:text-oai-gray-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500"
+          >
+            <X className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+          </button>
+        </div>
+      ) : null}
 
       {/* Nav */}
       <nav
@@ -381,33 +338,34 @@ function SidebarBody({ collapsed, onToggleCollapsed, onItemClick, showCloseButto
         ))}
       </nav>
 
-      {/* Bottom: tiny utility row — theme (left) + star & collapse (right), aligned with nav px-2 */}
-      <div
-        className={cn(
-          "flex items-center px-2 py-3",
-          collapsed ? "flex-col justify-center gap-2" : "justify-between gap-2",
-        )}
-      >
-        <ThemePill theme={theme} resolvedTheme={resolvedTheme} onSetTheme={setTheme} glassChrome={glassChrome} />
-        <div className="flex items-center gap-1.5">
-          {!collapsed && <StarPill glassChrome={glassChrome} />}
-          {/* TEMP: collapse button hidden — restore when ready
-          {!showCloseButton && (
-            <button
-              type="button"
-              onClick={onToggleCollapsed}
-              aria-label={collapsed ? copy("nav.expand") : copy("nav.collapse")}
-              title={collapsed ? copy("nav.expand") : copy("nav.collapse")}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-oai-gray-500 dark:text-oai-gray-500 hover:bg-oai-gray-200/60 dark:hover:bg-oai-gray-800 hover:text-oai-gray-900 dark:hover:text-oai-gray-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500"
-            >
-              {collapsed ? (
-                <ChevronRight className="h-4 w-4" strokeWidth={1.75} aria-hidden />
-              ) : (
-                <ChevronLeft className="h-4 w-4" strokeWidth={1.75} aria-hidden />
-              )}
-            </button>
+      <div className="px-2 py-3 space-y-2">
+        <VersionBadge collapsed={collapsed} />
+
+        {/* Bottom: tiny utility row — theme (left) + collapse (right), aligned with nav px-2 */}
+        <div
+          className={cn(
+            "flex items-center",
+            collapsed ? "flex-col justify-center gap-2" : "justify-between gap-2",
           )}
-          */}
+        >
+          <ThemePill theme={theme} resolvedTheme={resolvedTheme} onSetTheme={setTheme} glassChrome={glassChrome} />
+          <div className="flex items-center gap-1.5">
+            {!showCloseButton && (
+              <button
+                type="button"
+                onClick={onToggleCollapsed}
+                aria-label={collapsed ? copy("nav.expand") : copy("nav.collapse")}
+                title={collapsed ? copy("nav.expand") : copy("nav.collapse")}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-oai-gray-500 dark:text-oai-gray-500 hover:bg-oai-gray-200/60 dark:hover:bg-oai-gray-800 hover:text-oai-gray-900 dark:hover:text-oai-gray-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500"
+              >
+                {collapsed ? (
+                  <ChevronRight className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+                ) : (
+                  <ChevronLeft className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+                )}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </>

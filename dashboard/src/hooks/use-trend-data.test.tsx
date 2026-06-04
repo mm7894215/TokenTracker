@@ -255,4 +255,91 @@ describe("useTrendData", () => {
 
     expect(findHour(result.current.rows, "2026-03-08T02:00:00")).toBeUndefined();
   });
+
+  it("fetches both covered days and filters 24h rows to the rolling local window", async () => {
+    vi.mocked(getUsageHourly).mockImplementation(async ({ day }: any) => ({
+      day,
+      data:
+        day === "2026-05-29"
+          ? [
+              {
+                hour: "2026-05-29T11:00:00",
+                total_tokens: 11,
+                billable_total_tokens: 11,
+              },
+              {
+                hour: "2026-05-29T13:00:00",
+                total_tokens: 13,
+                billable_total_tokens: 13,
+              },
+            ]
+          : [
+              {
+                hour: "2026-05-30T12:00:00",
+                total_tokens: 120,
+                billable_total_tokens: 120,
+              },
+              {
+                hour: "2026-05-30T13:00:00",
+                total_tokens: 130,
+                billable_total_tokens: 130,
+              },
+            ],
+    }));
+
+    const now = new Date("2026-05-30T12:15:00Z");
+    const { result } = renderHook(() =>
+      useTrendData({
+        baseUrl: "http://localhost:7680",
+        accessToken: "test-token",
+        period: "24h",
+        from: "2026-05-29",
+        to: "2026-05-30",
+        timeZone: "UTC",
+        now,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.rows).toHaveLength(24));
+
+    expect(getUsageHourly).toHaveBeenCalledTimes(2);
+    const calledDays = vi.mocked(getUsageHourly).mock.calls.map(([args]) => args?.day);
+    expect(calledDays).toEqual([
+      "2026-05-29",
+      "2026-05-30",
+    ]);
+    expect(findHour(result.current.rows, "2026-05-29T11:00:00")).toBeUndefined();
+    expect(findHour(result.current.rows, "2026-05-29T13:00:00")).toMatchObject({
+      total_tokens: 13,
+      future: false,
+    });
+    expect(findHour(result.current.rows, "2026-05-30T12:00:00")).toMatchObject({
+      total_tokens: 120,
+      future: false,
+    });
+    expect(findHour(result.current.rows, "2026-05-30T13:00:00")).toBeUndefined();
+  });
+
+  it("does not duplicate hourly fetches when a 24h range covers one day", async () => {
+    vi.mocked(getUsageHourly).mockResolvedValue({
+      day: "2026-05-30",
+      data: [],
+    });
+
+    const now = new Date("2026-05-30T12:15:00Z");
+    renderHook(() =>
+      useTrendData({
+        baseUrl: "http://localhost:7680",
+        accessToken: "test-token",
+        period: "24h",
+        from: "2026-05-30",
+        to: "2026-05-30",
+        timeZone: "UTC",
+        now,
+      }),
+    );
+
+    await waitFor(() => expect(getUsageHourly).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(getUsageHourly).mock.calls[0]?.[0]?.day).toBe("2026-05-30");
+  });
 });

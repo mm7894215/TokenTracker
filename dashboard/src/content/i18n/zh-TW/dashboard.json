@@ -1,7 +1,9 @@
 {
   "usage.overview.antigravity_notice_title": "Token 為估算值",
   "usage.overview.antigravity_notice_body": "Antigravity 的本地日誌沒有真實用量欄位，這裡的數字是按字元長度（約 4 字元/Token）估算出來的，也沒有扣除 Gemini 的 prompt cache 折扣。請把它當作上限估算，不要直接對賬賬單。",
+  "usage.period.last24h": "24h",
   "stats.period.today": "今日",
+  "stats.period.last24h": "24h",
   "stats.period.week": "本週",
   "stats.period.month": "本月",
   "stats.period.all": "全部",

@@ -22,11 +22,10 @@ import {
   toDisplayNumber,
   toFiniteNumber,
 } from "../lib/format";
-import { shouldShowInstallCard } from "../lib/install-status";
 import { getMockNow, isMockEnabled } from "../lib/mock-data";
 import { publishUsageLimitsPreloadState } from "../lib/dashboard-preload.js";
 import { buildFleetData, buildTopModels, resolveDisplayTokens } from "../lib/model-breakdown";
-import { safeWriteClipboard, safeWriteClipboardImage } from "../lib/safe-browser";
+import { safeWriteClipboardImage } from "../lib/safe-browser";
 import { isScreenshotModeEnabled } from "../lib/screenshot-mode";
 import {
   formatTimeZoneLabel,
@@ -40,14 +39,46 @@ import {
   triggerLocalSync,
 } from "../lib/api";
 import { ActivityHeatmap } from "../ui/dashboard/components/ActivityHeatmap.jsx";
-import { ProjectUsagePanel } from "../ui/dashboard/components/ProjectUsagePanel.jsx";
 import { DashboardView } from "../ui/dashboard/views/DashboardView.jsx";
 import { ShareModal } from "../ui/share/ShareModal";
 import { useShareCardData } from "../ui/share/use-share-card-data";
 
-const PERIODS = ["day", "week", "month", "total", "custom"];
+const PERIODS = ["day", "24h", "week", "month", "total", "custom"];
+const AUTO_REFRESH_STORAGE_KEY = "tt:dashboard-auto-refresh-ms";
+const DEFAULT_AUTO_REFRESH_INTERVAL_MS = 30000;
+const AUTO_REFRESH_OPTIONS = [
+  { value: 0, labelKey: "usage.auto_refresh.off" },
+  { value: 30000, labelKey: "usage.auto_refresh.30s" },
+  { value: 60000, labelKey: "usage.auto_refresh.60s" },
+  { value: 120000, labelKey: "usage.auto_refresh.120s" },
+];
+const AUTO_REFRESH_FOCUS_THROTTLE_MS = 30000;
 const DETAILS_DATE_KEYS = new Set(["day", "hour", "month"]);
-const DETAILS_PAGED_PERIODS = new Set(["day", "total", "custom"]);
+const DETAILS_PAGED_PERIODS = new Set(["day", "24h", "total", "custom"]);
+const AUTO_REFRESH_VALUES = new Set(AUTO_REFRESH_OPTIONS.map((option) => option.value));
+
+function normalizeAutoRefreshInterval(value) {
+  if (value == null || value === "") return DEFAULT_AUTO_REFRESH_INTERVAL_MS;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return DEFAULT_AUTO_REFRESH_INTERVAL_MS;
+  return AUTO_REFRESH_VALUES.has(numeric) ? numeric : DEFAULT_AUTO_REFRESH_INTERVAL_MS;
+}
+
+function readAutoRefreshInterval() {
+  if (typeof window === "undefined") return DEFAULT_AUTO_REFRESH_INTERVAL_MS;
+  try {
+    return normalizeAutoRefreshInterval(window.localStorage?.getItem(AUTO_REFRESH_STORAGE_KEY));
+  } catch (_err) {
+    return DEFAULT_AUTO_REFRESH_INTERVAL_MS;
+  }
+}
+
+function didLocalSyncQueueBuckets(result) {
+  const stdout = typeof result?.stdout === "string" ? result.stdout : "";
+  const match = stdout.match(/New 30-min buckets queued:\s*(\d+)/i);
+  if (!match) return true;
+  return Number(match[1]) > 0;
+}
 
 function hasUsageValue(value, level) {
   if (typeof level === "number" && level > 0) return true;
@@ -95,40 +126,18 @@ function addUtcDays(date, days) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + days));
 }
 
-function isProductionHost(hostname) {
-  if (!hostname) return false;
-  return hostname === "www.tokentracker.cc" || hostname === "tokentracker.cc";
-}
-
-function isForceInstallEnabled() {
-  if (typeof window === "undefined") return false;
-  const params = new URLSearchParams(window.location.search);
-  const raw = String(params.get("force_install") || "").toLowerCase();
-  if (raw !== "1" && raw !== "true") return false;
-  return !isProductionHost(window.location.hostname);
-}
-
 export function DashboardPage({
   baseUrl,
   auth,
   signedIn,
   sessionSoftExpired,
-  signOut,
   publicMode = false,
   publicToken = null,
-  signInUrl = "/sign-in",
-  signUpUrl = "/sign-up",
   onMainContentVisible,
 }) {
   const { resolvedLocale } = useLocale();
   const { currency, rate } = useCurrency();
   const [costModalOpen, setCostModalOpen] = useState(false);
-  const [linkCode, setLinkCode] = useState(null);
-  const [linkCodeExpiresAt, setLinkCodeExpiresAt] = useState(null);
-  const [linkCodeLoading, setLinkCodeLoading] = useState(false);
-  const [linkCodeError, setLinkCodeError] = useState(null);
-  const [linkCodeExpiryTick, setLinkCodeExpiryTick] = useState(0);
-  const [linkCodeRefreshToken, setLinkCodeRefreshToken] = useState(0);
   const [userStatus, setUserStatus] = useState(null);
   const [compactSummary, setCompactSummary] = useState(() => {
     if (typeof window === "undefined" || !window.matchMedia) return false;
@@ -138,14 +147,16 @@ export function DashboardPage({
     if (typeof window === "undefined") return false;
     return isScreenshotModeEnabled(window.location.search);
   }, []);
-  const forceInstall = useMemo(() => isForceInstallEnabled(), []);
   const [isCapturing, setIsCapturing] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const identityScrambleDurationMs = 2200;
   const [coreIndexCollapsed, setCoreIndexCollapsed] = useState(true);
-  const [installCopied, setInstallCopied] = useState(false);
-  const [sessionExpiredCopied, setSessionExpiredCopied] = useState(false);
   const [manualSyncLoading, setManualSyncLoading] = useState(false);
+  const [autoRefreshIntervalMs, setAutoRefreshIntervalMs] = useState(readAutoRefreshInterval);
+  const [lastUpdatedAtMs, setLastUpdatedAtMs] = useState(() => Date.now());
+  const autoRefreshInFlightRef = useRef(false);
+  const autoSyncInFlightRef = useRef(false);
+  const lastAutoRefreshAtRef = useRef(0);
   const mainContentVisibleNotifiedRef = useRef(false);
   const mockEnabled = isMockEnabled();
   const authTokenAllowed = signedIn && !sessionSoftExpired;
@@ -158,75 +169,8 @@ export function DashboardPage({
   }, [auth, authTokenAllowed]);
   const effectiveAuthToken = authTokenAllowed ? authAccessToken : null;
   const accessToken = publicMode ? normalizeAccessToken(publicToken) : effectiveAuthToken;
-  const accessEnabled = signedIn || mockEnabled || publicMode;
   const authTokenReady = authTokenAllowed && isAccessTokenReady(effectiveAuthToken);
   const guestAllowed = signedIn && sessionSoftExpired && !publicMode;
-
-
-  useEffect(() => {
-    if (!signedIn || mockEnabled) {
-      setLinkCode(null);
-      setLinkCodeExpiresAt(null);
-      setLinkCodeLoading(false);
-      setLinkCodeError(null);
-      return;
-    }
-    if (publicMode) return;
-    if (!authTokenReady) {
-      setLinkCode(null);
-      setLinkCodeExpiresAt(null);
-      setLinkCodeLoading(false);
-      setLinkCodeError(null);
-      return;
-    }
-    let active = true;
-    const resetLinkCode = () => {
-      setLinkCode(null);
-      setLinkCodeExpiresAt(null);
-      setLinkCodeLoading(false);
-      setLinkCodeError(null);
-    };
-    setLinkCodeLoading(true);
-    setLinkCodeError(null);
-    (async () => {
-      let resolvedToken = null;
-      try {
-        resolvedToken = await resolveAuthAccessToken(effectiveAuthToken);
-      } catch (_err) {
-        resolvedToken = null;
-      }
-      if (!active) return;
-      if (!resolvedToken) {
-        resetLinkCode();
-        return;
-      }
-      try {
-        const data = { link_code: null, expires_at: null };
-        if (!active) return;
-        setLinkCode(typeof data?.link_code === "string" ? data.link_code : null);
-        setLinkCodeExpiresAt(typeof data?.expires_at === "string" ? data.expires_at : null);
-      } catch (err) {
-        if (!active) return;
-        setLinkCode(null);
-        setLinkCodeExpiresAt(null);
-        setLinkCodeError(err?.message || "Failed to load link code");
-      } finally {
-        if (!active) return;
-        setLinkCodeLoading(false);
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [
-    baseUrl,
-    mockEnabled,
-    signedIn,
-    publicMode,
-    authTokenReady,
-    effectiveAuthToken,
-    linkCodeRefreshToken,
-  ]);
 
   // 本地模式判断
   const isLocalMode = typeof window !== "undefined" &&
@@ -273,50 +217,6 @@ export function DashboardPage({
     };
   }, [authTokenReady, baseUrl, effectiveAuthToken, mockEnabled, publicMode, signedIn]);
 
-  const linkCodeExpired = useMemo(() => {
-    if (!linkCodeExpiresAt) return false;
-    const ts = Date.parse(linkCodeExpiresAt);
-    if (!Number.isFinite(ts)) return false;
-    const now = linkCodeExpiryTick || Date.now();
-    return ts <= now;
-  }, [linkCodeExpiresAt, linkCodeExpiryTick]);
-
-  useEffect(() => {
-    if (!signedIn || mockEnabled || publicMode) return;
-    if (!linkCodeExpiresAt || !linkCodeExpired) return;
-    if (linkCodeLoading) return;
-    setLinkCode(null);
-    setLinkCodeExpiresAt(null);
-    setLinkCodeError(null);
-    setLinkCodeRefreshToken((value) => value + 1);
-  }, [linkCodeExpired, linkCodeExpiresAt, linkCodeLoading, mockEnabled, signedIn]);
-
-  useEffect(() => {
-    if (!linkCodeExpiresAt || publicMode) return;
-    const ts = Date.parse(linkCodeExpiresAt);
-    if (!Number.isFinite(ts)) return;
-    const now = Date.now();
-    setLinkCodeExpiryTick(now);
-    if (ts <= now) return;
-    const timeoutId = window.setTimeout(() => setLinkCodeExpiryTick(Date.now()), ts - now);
-    const handleVisibilityChange = () => {
-      if (typeof document === "undefined") return;
-      if (document.visibilityState !== "visible") return;
-      setLinkCodeExpiryTick(Date.now());
-    };
-    if (typeof document !== "undefined") {
-      document.addEventListener("visibilitychange", handleVisibilityChange);
-    }
-    window.addEventListener("focus", handleVisibilityChange);
-    return () => {
-      window.clearTimeout(timeoutId);
-      if (typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", handleVisibilityChange);
-      }
-      window.removeEventListener("focus", handleVisibilityChange);
-    };
-  }, [linkCodeExpiresAt]);
-
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
     const media = window.matchMedia("(max-width: 640px)");
@@ -334,7 +234,7 @@ export function DashboardPage({
   const tzOffsetMinutes = useMemo(() => getBrowserTimeZoneOffsetMinutes(), []);
   const mockNow = useMemo(() => getMockNow(), []);
   const cacheKey = publicMode ? null : auth?.userId || auth?.email || "default";
-  const [selectedPeriod, setSelectedPeriod] = useState("month");
+  const [selectedPeriod, setSelectedPeriod] = useState("day");
   const [customFrom, setCustomFrom] = useState(null);
   const [customTo, setCustomTo] = useState(null);
   const [customRangeOpen, setCustomRangeOpen] = useState(false);
@@ -526,7 +426,7 @@ export function DashboardPage({
   }, [usageLimits]);
 
   const detailsDateKey = useMemo(() => {
-    if (period === "day") return "hour";
+    if (period === "day" || period === "24h") return "hour";
     if (period === "total") return "month";
     return "day";
   }, [period]);
@@ -548,7 +448,7 @@ export function DashboardPage({
     return sort;
   }, [detailsDateKey, sort]);
   const detailsRows = useMemo(() => {
-    if (period === "day") {
+    if (period === "day" || period === "24h") {
       return Array.isArray(trendRows) ? trendRows.filter((row) => row?.hour && !row?.future) : [];
     }
     if (period === "total") {
@@ -618,7 +518,7 @@ export function DashboardPage({
   );
   const trendRowsForDisplay = useMemo(() => {
     if (useDailyTrend) return daily;
-    if (period === "day") {
+    if (period === "day" || period === "24h") {
       return Array.isArray(trendRows) ? trendRows.filter((row) => row?.hour) : [];
     }
     return trendRows;
@@ -755,6 +655,7 @@ export function DashboardPage({
       refreshDailyBreakdown(),
       refreshUsageLimits(),
     ]);
+    setLastUpdatedAtMs(Date.now());
   }, [
     refreshDailyBreakdown,
     refreshHeatmap,
@@ -765,7 +666,7 @@ export function DashboardPage({
     refreshUsageLimits,
   ]);
 
-  const handleUsageRefresh = useCallback(async () => {
+  const handleManualRefresh = useCallback(async () => {
     setManualSyncLoading(true);
     try {
       if (isLocalMode) {
@@ -778,6 +679,90 @@ export function DashboardPage({
       setManualSyncLoading(false);
     }
   }, [isLocalMode, refreshAll]);
+
+  const startAutoSync = useCallback(() => {
+    if (!isLocalMode) return null;
+    if (autoSyncInFlightRef.current) return null;
+    autoSyncInFlightRef.current = true;
+    return triggerLocalSync()
+      .then(didLocalSyncQueueBuckets)
+      .catch((error) => {
+        console.error("[DashboardPage] Auto sync failed:", error);
+        return false;
+      })
+      .finally(() => {
+        autoSyncInFlightRef.current = false;
+      });
+  }, [isLocalMode]);
+
+  const handleAutoRefresh = useCallback(async () => {
+    const syncPromise = startAutoSync();
+    try {
+      await refreshAll();
+      if (syncPromise) {
+        void syncPromise.then((queuedBuckets) => {
+          if (!queuedBuckets) return undefined;
+          return refreshAll();
+        });
+      }
+    } catch (error) {
+      console.error("[DashboardPage] Auto refresh failed:", error);
+    }
+  }, [refreshAll, startAutoSync]);
+
+  const handleAutoRefreshIntervalChange = useCallback((nextValue) => {
+    const nextInterval = normalizeAutoRefreshInterval(nextValue);
+    setAutoRefreshIntervalMs(nextInterval);
+    try {
+      window.localStorage?.setItem(AUTO_REFRESH_STORAGE_KEY, String(nextInterval));
+    } catch (_err) {
+      // Ignore storage failures; the in-memory choice still applies.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (screenshotMode || typeof window === "undefined") return undefined;
+    if (autoRefreshIntervalMs <= 0) return undefined;
+
+    const isVisible = () =>
+      typeof document === "undefined" || document.visibilityState === "visible";
+
+    const runAutoRefresh = async ({ throttle = false } = {}) => {
+      if (!isVisible()) return;
+      const now = Date.now();
+      if (throttle && now - lastAutoRefreshAtRef.current < AUTO_REFRESH_FOCUS_THROTTLE_MS) {
+        return;
+      }
+      if (autoRefreshInFlightRef.current) return;
+      autoRefreshInFlightRef.current = true;
+      lastAutoRefreshAtRef.current = now;
+      try {
+        await handleAutoRefresh();
+      } finally {
+        autoRefreshInFlightRef.current = false;
+      }
+    };
+
+    const intervalId = window.setInterval(() => {
+      void runAutoRefresh();
+    }, autoRefreshIntervalMs);
+    const handleWake = () => {
+      void runAutoRefresh({ throttle: true });
+    };
+
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleWake);
+    }
+    window.addEventListener("focus", handleWake);
+
+    return () => {
+      window.clearInterval(intervalId);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", handleWake);
+      }
+      window.removeEventListener("focus", handleWake);
+    };
+  }, [autoRefreshIntervalMs, handleAutoRefresh, screenshotMode]);
 
   const usageLoadingState =
     manualSyncLoading ||
@@ -917,6 +902,19 @@ export function DashboardPage({
     thousandSuffix,
     useCompactSummary,
   ]);
+  const summaryUpdatedAtLabel = useMemo(() => {
+    const formatted = new Intl.DateTimeFormat(resolvedLocale || undefined, {
+      timeZone,
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      timeZoneName: "short",
+    }).format(new Date(lastUpdatedAtMs));
+    return copy("usage.summary.updated_at", { timestamp: formatted });
+  }, [lastUpdatedAtMs, resolvedLocale, timeZone]);
 
   const coreIndexCollapseLabel = copy("dashboard.core_index.collapse_label");
   const coreIndexExpandLabel = copy("dashboard.core_index.expand_label");
@@ -1151,50 +1149,7 @@ export function DashboardPage({
   const closeCostModal = useCallback(() => setCostModalOpen(false), []);
   const costInfoEnabled = summaryCostValue && summaryCostValue !== "-" && fleetData.length > 0;
 
-  const installInitCmdBase = copy("dashboard.install.cmd.init");
-  const resolvedLinkCode = !linkCodeExpired ? linkCode : null;
-  const installInitCmdCopy = resolvedLinkCode
-    ? copy("dashboard.install.cmd.init_link_code", {
-        link_code: resolvedLinkCode,
-      })
-    : installInitCmdBase;
-  const installInitCmdDisplay = installInitCmdBase;
   const installSyncCmd = copy("dashboard.install.cmd.sync");
-  const installCopyLabel = resolvedLinkCode
-    ? copy("dashboard.install.copy")
-    : copy("dashboard.install.copy_base");
-  const installCopiedLabel = copy("dashboard.install.copied");
-  const sessionExpiredCopyLabel = copy("dashboard.session_expired.copy_label");
-  const sessionExpiredCopiedLabel = copy("dashboard.session_expired.copied");
-  const hasActiveDeviceToken = Boolean(
-    userStatus?.install?.has_active_device_token ?? userStatus?.install?.hasActiveDeviceToken,
-  );
-  const shouldShowInstall = shouldShowInstallCard({
-    publicMode,
-    screenshotMode,
-    forceInstall,
-    accessEnabled,
-    heatmapLoading,
-    activeDays,
-    hasActiveDeviceToken,
-  });
-  const installPrompt = copy("dashboard.install.prompt");
-
-  const handleCopyInstall = useCallback(async () => {
-    if (!installInitCmdCopy) return;
-    const didCopy = await safeWriteClipboard(installInitCmdCopy);
-    if (!didCopy) return;
-    setInstallCopied(true);
-    window.setTimeout(() => setInstallCopied(false), 2000);
-  }, [installInitCmdCopy]);
-
-  const handleCopySessionExpired = useCallback(async () => {
-    if (!installInitCmdBase) return;
-    const didCopy = await safeWriteClipboard(installInitCmdBase);
-    if (!didCopy) return;
-    setSessionExpiredCopied(true);
-    window.setTimeout(() => setSessionExpiredCopied(false), 2000);
-  }, [installInitCmdBase]);
 
   const dailyEmptyTemplate = useMemo(
     () => copy("dashboard.daily.empty", { cmd: "{{cmd}}" }),
@@ -1211,18 +1166,12 @@ export function DashboardPage({
   const headerRight = null;
   const footerLeftContent = null;
 
-  const showExpiredGate = sessionSoftExpired && !publicMode;
-  // 使用上面定义的 isLocalMode
-  const requireAuthGate = !signedIn && !mockEnabled && !sessionSoftExpired && !isLocalMode;
-  const showAuthGate = requireAuthGate && !publicMode;
-
   useEffect(() => {
     if (mainContentVisibleNotifiedRef.current) return;
-    if (showExpiredGate || showAuthGate) return;
     if (usageLoadingState) return;
     mainContentVisibleNotifiedRef.current = true;
     onMainContentVisible?.();
-  }, [onMainContentVisible, showAuthGate, showExpiredGate, usageLoadingState]);
+  }, [onMainContentVisible, usageLoadingState]);
 
   return (
     <>
@@ -1230,8 +1179,6 @@ export function DashboardPage({
       copy={copy}
       onOpenShare={openShareModal}
       screenshotMode={screenshotMode}
-      showExpiredGate={showExpiredGate}
-      showAuthGate={showAuthGate}
       screenshotTitleLine1={screenshotTitleLine1}
       screenshotTitleLine2={screenshotTitleLine2}
       identityDisplayName={identityDisplayName}
@@ -1243,18 +1190,7 @@ export function DashboardPage({
       projectUsageLimit={projectUsageLimit}
       setProjectUsageLimit={setProjectUsageLimit}
       topModels={topModels}
-      signedIn={signedIn}
-      publicMode={publicMode}
       isLocalMode={isLocalMode}
-      shouldShowInstall={shouldShowInstall}
-      installPrompt={installPrompt}
-      handleCopyInstall={handleCopyInstall}
-      installCopied={installCopied}
-      installCopiedLabel={installCopiedLabel}
-      installCopyLabel={installCopyLabel}
-      installInitCmdDisplay={installInitCmdDisplay}
-      linkCodeLoading={linkCodeLoading}
-      linkCodeError={linkCodeError}
       trendRowsForDisplay={trendRowsForDisplay}
       trendFromForDisplay={trendFromForDisplay}
       trendToForDisplay={trendToForDisplay}
@@ -1271,6 +1207,9 @@ export function DashboardPage({
       screenshotTwitterHint={screenshotTwitterHint}
       periodsForDisplay={periodsForDisplay}
       setSelectedPeriod={handlePeriodChange}
+      autoRefreshOptions={AUTO_REFRESH_OPTIONS}
+      autoRefreshIntervalMs={autoRefreshIntervalMs}
+      onAutoRefreshIntervalChange={handleAutoRefreshIntervalChange}
       customFrom={customFrom}
       customTo={customTo}
       onCustomRangeApply={handleCustomRangeApply}
@@ -1279,7 +1218,7 @@ export function DashboardPage({
       metricsRows={metricsRows}
       summaryLabel={summaryLabel}
       summaryValue={summaryValue}
-      summaryTotalTokensRaw={toFiniteNumber(summaryTotalTokens) || 0}
+      summaryUpdatedAtLabel={summaryUpdatedAtLabel}
       summaryCostValue={summaryCostValue}
       summaryConversationsValue={summaryConversationsValue}
       rollingUsage={rolling}
@@ -1292,7 +1231,7 @@ export function DashboardPage({
       coreIndexExpandLabel={coreIndexExpandLabel}
       coreIndexCollapseAria={coreIndexCollapseAria}
       coreIndexExpandAria={coreIndexExpandAria}
-      refreshAll={handleUsageRefresh}
+      refreshAll={handleManualRefresh}
       usageLoadingState={usageLoadingState}
       usageError={usageError}
       rangeLabel={rangeLabel}

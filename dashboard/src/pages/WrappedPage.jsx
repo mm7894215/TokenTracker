@@ -72,7 +72,7 @@ export default function WrappedPage() {
     return (
       <div className="min-h-screen bg-white dark:bg-oai-gray-950 flex items-center justify-center px-6">
         <Card>
-          <p className="text-red-600 dark:text-red-300">Couldn't load Wrapped: {error}</p>
+          <p className="text-red-600 dark:text-red-300">{"Couldn't load Wrapped: "}{error}</p>
         </Card>
       </div>
     );

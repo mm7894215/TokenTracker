@@ -39,7 +39,7 @@ npx --yes @ipv9/tokentracker-cli
 That's it. First run installs hooks, syncs your data, and opens the dashboard at `http://localhost:7680`.
 
 **What you get in 30 seconds:**
-- 📊 A local dashboard at `localhost:7680` with usage trends, model breakdown, cost analysis
+- 📊 A local dashboard at `localhost:7680` with usage trends, model breakdown, cost analysis, 24h/day/week/month views, and visible-only auto-refresh
 - 🔌 Auto-detected hooks for every supported AI tool you have installed
 - 🏠 100% local — no account, no API keys, no network calls (except optional leaderboard)
 - 🧩 *Optional:* a Skills tab that browses 250+ public skills and syncs them across Claude · Codex · Grok · Antigravity · Gemini · OpenCode · Hermes
@@ -62,7 +62,7 @@ tokentracker doctor       # Health check
 - 🔌 **22 AI tools out of the box** — Claude Code, Codex CLI, Cursor, Gemini CLI, Antigravity, Kiro, OpenCode, OpenClaw, Every Code, Hermes Agent, GitHub Copilot, Kimi Code, CodeBuddy, Grok Build, oh-my-pi, pi, Craft Agents, Kilo CLI, Kilo Code, Roo Code, Zed Agent, Goose
 - 🏠 **100% local** — Token data never leaves your machine. No account, no API keys.
 - 🚀 **Zero config** — Hooks auto-install on first run. From zero to dashboard in 30 seconds.
-- 📊 **Beautiful dashboard** — Usage trends, cost breakdowns by model, GitHub-style activity heatmap, project attribution
+- 📊 **Beautiful dashboard** — Usage trends, cost breakdowns by model, GitHub-style activity heatmap, project attribution, 24h detail view, browser-timezone "Updated" timestamp, and configurable visible-only auto-refresh (`Off`, `30s`, `60s`, `120s`; default `30s`)
 - 📈 **Real-time rate limit tracking** — Claude / Codex / Cursor / Gemini / Kiro / Copilot / Antigravity quota windows with reset countdowns
 - 💰 **Cost engine** — 2,200+ models priced via [LiteLLM](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json) (auto-refreshed daily) + curated overrides for niche tools (Kiro, Cursor Composer, Kimi, CodeBuddy hy3); 24h disk cache + bundled offline snapshot mean accurate USD without an internet connection. Models without published vendor pricing (e.g. Tencent hy3-preview) are tracked by tokens but show $0 cost until the vendor publishes a rate.
 - 🌐 **Optional leaderboard** — Compare with developers worldwide; drag-to-reorder columns to focus on the providers you care about (opt-in, sign in to participate)
@@ -174,7 +174,8 @@ flowchart LR
 2. Lightweight hooks detect changes and trigger sync (Cursor uses API instead of hooks)
 3. Token counts parsed locally — never any prompt or response content
 4. Aggregated into 30-minute UTC buckets
-5. Dashboard reads from the local snapshot
+5. Dashboard reads from the local snapshot, displays timestamps in your browser timezone, and auto-refreshes visible tabs every 30 seconds by default
+6. In local mode, dashboard auto-refresh also starts a background local sync and refreshes again only when new 30-minute buckets were queued
 
 ---
 
@@ -202,6 +203,17 @@ Most users never need this — defaults are sensible. For advanced setups:
 | `TOKENTRACKER_GROK_HOME` | Override Grok Build directory for the Grok integration and Skills Manager | `~/.grok` |
 | `GROK_HOME` | Legacy Grok Build directory override, used when `TOKENTRACKER_GROK_HOME` is unset | `~/.grok` |
 | `TOKENTRACKER_ANTIGRAVITY_HOME` | Force a single Antigravity Skills directory (auto-detects `~/.gemini/antigravity` + `~/.gemini/antigravity-ide` otherwise) | auto |
+
+### Dashboard refresh behavior
+
+The local dashboard is designed to stay current without hammering the local sync path:
+
+- Auto-refresh runs only while the dashboard tab is visible.
+- The default interval is `30s`; the selector supports `Off`, `30s`, `60s`, and `120s`.
+- If an older browser session has a removed `10s` preference saved, TokenTracker falls back to `30s`.
+- Manual refresh runs local sync first in local mode, then reloads dashboard data.
+- Auto-refresh starts local sync in the background, keeps the UI responsive, and only performs a second data reload when sync reports new 30-minute buckets.
+- The Total tokens panel shows an `Updated ...` timestamp formatted in the browser's timezone, so you can tell when the displayed snapshot last refreshed.
 
 ---
 
@@ -255,6 +267,34 @@ To find what's holding `7680`:
 ```bash
 lsof -i :7680
 ```
+
+</details>
+
+<details>
+<summary><b>macOS local-sync LaunchAgent exits with a stale checkout path</b></summary>
+
+<br/>
+
+If `~/Library/LaunchAgents/com.pitimon.tokentracker.local-sync.plist` was installed by an older development checkout, its wrapper may still point at a deleted repo path. The symptom in `~/.tokentracker/tracker/logs/local-sync.err.log` looks like:
+
+```text
+cd: /Users/you/src/TokenTracker: No such file or directory
+```
+
+Regenerate the local services from the current checkout:
+
+```bash
+bash scripts/install-local-service.sh
+```
+
+Then verify:
+
+```bash
+launchctl print gui/$(id -u)/com.pitimon.tokentracker.local-sync
+tail -n 50 ~/.tokentracker/tracker/logs/local-sync.err.log
+```
+
+The current service wrapper uses `npx --yes @ipv9/tokentracker-cli sync --auto` instead of a hardcoded repo path, and skips automatic cloud-capable sync when a device token is configured.
 
 </details>
 

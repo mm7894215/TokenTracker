@@ -397,7 +397,9 @@ export default function IpCheckPage() {
         const txt = await r.text();
         const m = txt.match(/ip=([^\n]+)/);
         if (m) state.ip = m[1].trim();
-      } catch {}
+      } catch {
+        // Best-effort external IP probe.
+      }
     }
     async function fetchClaudeIP() {
       try {
@@ -435,7 +437,9 @@ export default function IpCheckPage() {
           ipEl.innerHTML = `${flagImg(cc)} ${linkIP(ip)}`;
           setGeoText(geoId, geo);
         }
-      } catch {}
+      } catch {
+        // Best-effort geo enrichment.
+      }
     }
 
     // ─── Render bound to data state ───────────────────────────────────────
@@ -597,7 +601,9 @@ export default function IpCheckPage() {
             dnsServers = data.dns_servers || [];
             if (dnsServers.length > 0) break;
           }
-        } catch {}
+        } catch {
+          // DNS result polling is best-effort.
+        }
         if (attempt === 0) await new Promise((r) => setTimeout(r, 1500));
       }
 
@@ -614,7 +620,9 @@ export default function IpCheckPage() {
         try {
           const r = await fetch(`${PROXY}/api/geoip/${ip}`, { signal: AbortSignal.timeout(3000) });
           if (r.ok) geo = await r.json();
-        } catch {}
+        } catch {
+          // DNS server geo enrichment is best-effort.
+        }
         const cc = geo?.country_code || "";
         const isp = geo?.isp || "";
         const isCN = cc === "cn";
@@ -658,7 +666,9 @@ export default function IpCheckPage() {
             if (m6) udpIPs.add(m6[0]);
           };
         });
-      } catch {}
+      } catch {
+        // WebRTC probing can be blocked by browser policy.
+      }
 
       const claudeIp = state.claudeRisk?.ip || "";
       const allUdp = [...udpIPs];
@@ -686,7 +696,9 @@ export default function IpCheckPage() {
       try {
         const r = await fetch(`${PROXY}/api/geoip/${showIP}`, { signal: AbortSignal.timeout(5000) });
         if (r.ok) { const g = await r.json(); showFlag = g.country_code || ""; showCountry = g.country || ""; }
-      } catch {}
+      } catch {
+        // UDP geo enrichment is best-effort.
+      }
       const ipValue = `${flagImg(showFlag)} <span class="font-mono tabular-nums">${displayIP(showIP)}</span>${matchesClaude ? "" : isLeaked ? " " + tag(t.udpAnomaly, "warn") : ""}`;
       html += row(t.udpOutlet, ipValue);
       if (showCountry) html += row(t.udpOrigin, `<span class="text-xs text-oai-gray-500 dark:text-oai-gray-400 font-normal">${esc(showCountry)}</span>`);
@@ -734,7 +746,9 @@ export default function IpCheckPage() {
           const indVar = { none: "safe", minor: "warn", major: "danger", critical: "danger", maintenance: "warn" };
           html += row(t.availSvc, tag(indText, indVar[ind] || "warn"));
         }
-      } catch {}
+      } catch {
+        // Claude status availability is best-effort.
+      }
       el.innerHTML = html;
     }
     root.__detectClaudeAvail = detectClaudeAvail;
@@ -803,7 +817,9 @@ export default function IpCheckPage() {
           const ext = gl.getExtension("WEBGL_debug_renderer_info");
           if (ext) webglRenderer = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL);
         }
-      } catch {}
+      } catch {
+        // WebGL renderer access can be blocked.
+      }
       let webglHash = t.devUnsupported;
       try {
         const canvas = document.createElement("canvas");
@@ -817,7 +833,9 @@ export default function IpCheckPage() {
           for (let i = 0; i < str.length; i++) h = ((h << 5) - h + str.charCodeAt(i)) | 0;
           webglHash = (h >>> 0).toString(16).toUpperCase();
         }
-      } catch {}
+      } catch {
+        // WebGL fingerprinting can be blocked.
+      }
       let canvasHash = t.devUnsupported;
       try {
         const canvas = document.createElement("canvas");
@@ -832,7 +850,9 @@ export default function IpCheckPage() {
         let hash = 0;
         for (let i = 0; i < data.length; i++) hash = ((hash << 5) - hash + data.charCodeAt(i)) | 0;
         canvasHash = (hash >>> 0).toString(16).toUpperCase();
-      } catch {}
+      } catch {
+        // Canvas fingerprinting can be blocked.
+      }
       const isTouch = navigator.maxTouchPoints > 0;
       const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
       const netType = conn ? (conn.effectiveType || conn.type || t.unknown) : t.devNetUnsupported;
@@ -941,7 +961,9 @@ export default function IpCheckPage() {
             if (ipAddrEl) ipAddrEl.innerHTML = `${flagImg(cc)} ${linkIP(state.ip)}`;
             setGeoText("ipGeo", state.cfGeo);
           }
-        } catch {}
+        } catch {
+          // Primary IP geo enrichment is best-effort.
+        }
       })());
 
       tasks.push((async () => {
@@ -970,7 +992,9 @@ export default function IpCheckPage() {
               setGeoText("ipGeoClaude", geo);
               geoOk = true;
             }
-          } catch {}
+          } catch {
+            // Claude IP geo enrichment is best-effort.
+          }
         }
         if (!geoOk && claude.loc) {
           if (ipAddrEl) ipAddrEl.innerHTML = `${flagImg(claude.loc)} ${linkIP(claudeIp)}`;

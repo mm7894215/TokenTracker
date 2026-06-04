@@ -64,6 +64,12 @@ export function getRangeForPeriod(
     return { from: to, to };
   }
 
+  if (period === "24h") {
+    const fromDate = new Date(today);
+    fromDate.setUTCDate(fromDate.getUTCDate() - 1);
+    return { from: formatDateUTC(fromDate), to };
+  }
+
   if (period === "week") {
     const fromDate = new Date(today);
     fromDate.setUTCDate(fromDate.getUTCDate() - 6);

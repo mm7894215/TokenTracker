@@ -17,6 +17,37 @@ vi.mock("../../../../hooks/useTheme.js", () => ({
 }));
 
 describe("UsageOverview", () => {
+  it("renders configurable auto-refresh intervals and reports the selected value", async () => {
+    const user = userEvent.setup();
+    const onAutoRefreshIntervalChange = vi.fn();
+
+    render(
+      <UsageOverview
+        period="day"
+        periods={["day"]}
+        summaryLabel="Total"
+        summaryValue="123"
+        summaryUpdatedAtLabel="Updated Jun 5, 2026, 03:55:00 GMT+7"
+        autoRefreshOptions={[
+          { value: 0, labelKey: "usage.auto_refresh.off" },
+          { value: 30000, labelKey: "usage.auto_refresh.30s" },
+          { value: 60000, labelKey: "usage.auto_refresh.60s" },
+          { value: 120000, labelKey: "usage.auto_refresh.120s" },
+        ]}
+        autoRefreshIntervalMs={30000}
+        onAutoRefreshIntervalChange={onAutoRefreshIntervalChange}
+      />,
+    );
+
+    const select = screen.getByRole("combobox", { name: "Auto refresh interval" });
+    expect(select).toHaveValue("30000");
+    expect(screen.getByText("Updated Jun 5, 2026, 03:55:00 GMT+7")).toBeInTheDocument();
+
+    await user.selectOptions(select, "120000");
+
+    expect(onAutoRefreshIntervalChange).toHaveBeenCalledWith("120000");
+  });
+
   it("passes the overview usage range to Codex context breakdown", async () => {
     breakdownProps.length = 0;
     const user = userEvent.setup();

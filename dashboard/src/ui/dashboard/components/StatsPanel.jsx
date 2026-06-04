@@ -67,6 +67,8 @@ export function StatsPanel({
     switch (period) {
       case "day":
         return copy("stats.period.today");
+      case "24h":
+        return copy("stats.period.last24h");
       case "week":
         return copy("stats.period.week");
       case "month":

@@ -10,32 +10,15 @@ function readFile(filePath) {
   return fs.readFileSync(filePath, "utf8");
 }
 
-test("copy registry includes link code install keys", () => {
+test("copy registry keeps only sync install command needed by daily empty state", () => {
   const csv = readFile(copyPath);
-  const required = [
-    "dashboard.install.prompt",
-    "dashboard.install.cmd.init_link_code",
-    "dashboard.install.copy",
-    "dashboard.install.copy_base",
-    "dashboard.install.copied",
-    "dashboard.install.link_code.loading",
-    "dashboard.install.link_code.failed",
-  ];
-  for (const key of required) {
-    assert.ok(csv.includes(key), `missing copy key: ${key}`);
-  }
+  assert.ok(csv.includes("dashboard.install.cmd.sync"), "missing sync command copy key");
 });
 
-test("DashboardPage wires link code install copy flow", () => {
+test("DashboardPage does not wire link code install copy flow", () => {
   const src = readFile(pagePath);
-  assert.ok(src.includes("dashboard.install.cmd.init"), "expected base install command usage");
-  assert.ok(
-    src.includes("dashboard.install.cmd.init_link_code"),
-    "expected link code install command usage for copy",
-  );
-  assert.ok(
-    src.includes("const installInitCmdDisplay = installInitCmdBase;"),
-    "expected install display to use base command",
-  );
-  assert.ok(src.includes("safeWriteClipboard"), "expected clipboard helper usage");
+  assert.ok(!src.includes("dashboard.install.cmd.init"), "expected base install command removed");
+  assert.ok(!src.includes("dashboard.install.cmd.init_link_code"), "expected link code install command removed");
+  assert.ok(!src.includes("installInitCmdDisplay"), "expected install display removed");
+  assert.ok(!src.includes("safeWriteClipboard,"), "expected text clipboard helper import removed");
 });

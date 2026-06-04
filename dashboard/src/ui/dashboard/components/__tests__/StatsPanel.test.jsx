@@ -33,3 +33,10 @@ it("updates the conversations badge label for day period", () => {
   expect(screen.getByText("7")).toBeInTheDocument();
   expect(screen.getByText("today convs")).toBeInTheDocument();
 });
+
+it("updates the conversations badge label for 24h period", () => {
+  renderPanel({ period: "24h", periodConversations: 13 });
+
+  expect(screen.getByText("13")).toBeInTheDocument();
+  expect(screen.getByText("24h convs")).toBeInTheDocument();
+});

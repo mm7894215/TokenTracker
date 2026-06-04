@@ -37,7 +37,7 @@ export function useTrendData({
   const sharedTo = sharedRange?.to || to;
 
   const mode = useMemo(() => {
-    if (period === "day") return "hourly";
+    if (period === "day" || period === "24h") return "hourly";
     if (period === "total") return "monthly";
     return "daily";
   }, [period]);
@@ -47,7 +47,7 @@ export function useTrendData({
     const host = safeHost(baseUrl) || "default";
     const tzKey = getTimeZoneCacheKey({ timeZone, offsetMinutes: tzOffsetMinutes });
     if (mode === "hourly") {
-      const dayKey = to || from || "day";
+      const dayKey = period === "24h" ? `${from || ""}.${to || ""}` : to || from || "day";
       return `tokentracker.trend.${cacheKey}.${host}.hourly.${dayKey}.${tzKey}`;
     }
     if (mode === "monthly") {
@@ -112,13 +112,15 @@ export function useTrendData({
     try {
       let response;
       if (mode === "hourly") {
-        const day = to || from;
-        response = await getUsageHourly({
+        response = await fetchHourlyTrend({
           baseUrl,
           accessToken: resolvedToken,
-          day,
+          from,
+          to,
+          period,
           timeZone,
           tzOffsetMinutes,
+          now,
         });
       } else if (mode === "monthly") {
         response = await getUsageMonthly({
@@ -150,12 +152,8 @@ export function useTrendData({
           now,
         });
       } else if (mode === "hourly") {
-        nextRows = fillHourlyGaps(nextRows, nextFrom || from || response?.day, {
-          timeZone,
-          offsetMinutes: tzOffsetMinutes,
-          now,
-        });
-        nextRows = markHourlyFuture(nextRows, {
+        nextRows = normalizeHourlyTrendRows(nextRows, nextFrom || from || response?.day, nextTo || to, {
+          period,
           timeZone,
           offsetMinutes: tzOffsetMinutes,
           now,
@@ -197,21 +195,21 @@ export function useTrendData({
                   now,
                 })
               : mode === "hourly"
-                ? fillHourlyGaps(cached.rows || [], cached.from || from || cached.day || to, {
-                    timeZone,
-                    offsetMinutes: tzOffsetMinutes,
-                    now,
-                  })
+                ? normalizeHourlyTrendRows(
+                    cached.rows || [],
+                    cached.from || from || cached.day || to,
+                    cached.to || to,
+                    {
+                      period,
+                      timeZone,
+                      offsetMinutes: tzOffsetMinutes,
+                      now,
+                    },
+                  )
                 : Array.isArray(cached.rows)
                   ? cached.rows
                   : [];
-          if (mode === "hourly") {
-            filledRows = markHourlyFuture(filledRows, {
-              timeZone,
-              offsetMinutes: tzOffsetMinutes,
-              now,
-            });
-          } else if (mode === "monthly") {
+          if (mode === "monthly") {
             filledRows = markMonthlyFuture(filledRows, {
               timeZone,
               offsetMinutes: tzOffsetMinutes,
@@ -251,6 +249,7 @@ export function useTrendData({
     cacheAllowed,
     mode,
     months,
+    period,
     readCache,
     tokenReady,
     sharedEnabled,
@@ -303,21 +302,21 @@ export function useTrendData({
                 now,
               })
             : mode === "hourly"
-              ? fillHourlyGaps(cached.rows || [], cached.from || from || cached.day || to, {
-                  timeZone,
-                  offsetMinutes: tzOffsetMinutes,
-                  now,
-                })
+              ? normalizeHourlyTrendRows(
+                  cached.rows || [],
+                  cached.from || from || cached.day || to,
+                  cached.to || to,
+                  {
+                    period,
+                    timeZone,
+                    offsetMinutes: tzOffsetMinutes,
+                    now,
+                  },
+                )
               : Array.isArray(cached.rows)
                 ? cached.rows
                 : [];
-        if (mode === "hourly") {
-          filledRows = markHourlyFuture(filledRows, {
-            timeZone,
-            offsetMinutes: tzOffsetMinutes,
-            now,
-          });
-        } else if (mode === "monthly") {
+        if (mode === "monthly") {
           filledRows = markMonthlyFuture(filledRows, {
             timeZone,
             offsetMinutes: tzOffsetMinutes,
@@ -345,6 +344,13 @@ export function useTrendData({
     cacheAllowed,
     clearCache,
     isLocalMode,
+    mode,
+    from,
+    to,
+    timeZone,
+    tzOffsetMinutes,
+    now,
+    period,
   ]);
 
   const normalizedSource = mockEnabled ? "mock" : source;
@@ -370,6 +376,47 @@ function safeHost(baseUrl: any) {
   }
 }
 
+async function fetchHourlyTrend({
+  baseUrl,
+  accessToken,
+  from,
+  to,
+  period,
+  timeZone,
+  tzOffsetMinutes,
+  now,
+}: any) {
+  const days = period === "24h" ? coveredDayKeys(from, to) : [to || from].filter(Boolean);
+  const uniqueDays = Array.from(new Set(days));
+  const responses = await Promise.all(
+    uniqueDays.map((day) =>
+      getUsageHourly({
+        baseUrl,
+        accessToken,
+        day,
+        timeZone,
+        tzOffsetMinutes,
+      }),
+    ),
+  );
+  const data = responses.flatMap((response) => (Array.isArray(response?.data) ? response.data : []));
+  const responseFrom = period === "24h" ? uniqueDays[0] || from || to : responses[0]?.day || from || to;
+  const responseTo =
+    period === "24h" ? uniqueDays[uniqueDays.length - 1] || to || from : responses[0]?.day || to || from;
+
+  return {
+    day: responseTo,
+    from: responseFrom,
+    to: responseTo,
+    data: normalizeHourlyTrendRows(data, responseFrom, responseTo, {
+      period,
+      timeZone,
+      offsetMinutes: tzOffsetMinutes,
+      now,
+    }),
+  };
+}
+
 function parseUtcDate(yyyyMmDd: any) {
   if (!yyyyMmDd) return null;
   const raw = String(yyyyMmDd).trim();
@@ -388,6 +435,18 @@ function parseUtcDate(yyyyMmDd: any) {
 
 function addUtcDays(date: Date, days: number) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + days));
+}
+
+function coveredDayKeys(from: any, to: any) {
+  const start = parseUtcDate(from || to);
+  const end = parseUtcDate(to || from);
+  if (!start || !end) return [from || to].filter(Boolean).map(String);
+  if (end < start) return [formatDateUTC(end), formatDateUTC(start)];
+  const days = [];
+  for (let cursor = start; cursor <= end; cursor = addUtcDays(cursor, 1)) {
+    days.push(formatDateUTC(cursor));
+  }
+  return days;
 }
 
 const HOURLY_ZERO_FIELDS = [
@@ -592,6 +651,39 @@ function fillHourlyGaps(
   return filled;
 }
 
+function normalizeHourlyTrendRows(
+  rows: any[],
+  from: any,
+  to: any,
+  { period, timeZone, offsetMinutes, now }: any = {},
+) {
+  const days = period === "24h" ? coveredDayKeys(from, to) : [to || from].filter(Boolean).map(String);
+  const uniqueDays = Array.from(new Set(days));
+  const filledRows = uniqueDays.flatMap((day) =>
+    fillHourlyGaps(filterHourlyRowsForDay(rows || [], day), day, {
+      timeZone,
+      offsetMinutes,
+      now,
+    }),
+  );
+  const marked = markHourlyFuture(filledRows, {
+    timeZone,
+    offsetMinutes,
+    now,
+  });
+  if (period !== "24h") return marked;
+  return filterRolling24hRows(marked, { timeZone, offsetMinutes, now });
+}
+
+function filterHourlyRowsForDay(rows: any[], day: string) {
+  return rows.filter((row) => {
+    const label = row?.hour || row?.label || "";
+    const raw = String(label).trim();
+    if (!raw.includes("T")) return true;
+    return raw.slice(0, 10) === day;
+  });
+}
+
 function markHourlyFuture(rows: any[], { timeZone, offsetMinutes, now }: any = {}) {
   if (!Array.isArray(rows)) return [];
   const nowParts = getNowParts({ timeZone, offsetMinutes, now });
@@ -607,6 +699,25 @@ function markHourlyFuture(rows: any[], { timeZone, offsetMinutes, now }: any = {
       (parsed.dayNum !== null && parsed.dayNum > nowParts.dayNum) ||
       ((parsed.dayNum === null || parsed.dayNum === nowParts.dayNum) && parsed.slot > nowParts.slot);
     return { ...row, future: !!isFuture };
+  });
+}
+
+function filterRolling24hRows(rows: any[], { timeZone, offsetMinutes, now }: any = {}) {
+  if (!Array.isArray(rows)) return [];
+  const nowParts = getNowParts({ timeZone, offsetMinutes, now });
+  if (!nowParts) return rows.filter((row) => !row?.future);
+  const nowSerial = localPartsSerialMs({
+    year: nowParts.year,
+    month: nowParts.month,
+    day: nowParts.day,
+    hour: nowParts.hour,
+    minute: nowParts.minute,
+  });
+  const startSerial = nowSerial - 24 * 60 * 60 * 1000;
+  return rows.filter((row) => {
+    if (row?.future) return false;
+    const serial = localHourLabelSerialMs(row?.hour || row?.label);
+    return serial != null && serial >= startSerial && serial <= nowSerial;
   });
 }
 
@@ -753,6 +864,33 @@ function parseHourLabel(label: any, defaultDayNum?: number) {
       slot,
     };
   }
+}
+
+function localPartsSerialMs({ year, month, day, hour = 0, minute = 0 }: any) {
+  return Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), 0, 0);
+}
+
+function localHourLabelSerialMs(label: any) {
+  if (!label) return null;
+  const raw = String(label).trim();
+  if (!raw.includes("T")) return null;
+  const [datePart, timePart] = raw.split("T");
+  if (!datePart || !timePart) return null;
+  const dateParts = datePart.split("-");
+  const timeParts = timePart.split(":");
+  if (dateParts.length !== 3 || timeParts.length < 2) return null;
+  const [year, month, day] = dateParts.map(Number);
+  const [hour, minute] = timeParts.map(Number);
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    !Number.isFinite(day) ||
+    !Number.isFinite(hour) ||
+    !Number.isFinite(minute)
+  ) {
+    return null;
+  }
+  return localPartsSerialMs({ year, month, day, hour, minute });
 }
 
 function parseMonthLabel(label: any) {

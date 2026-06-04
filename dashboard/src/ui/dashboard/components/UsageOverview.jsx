@@ -73,6 +73,7 @@ function resolveContextBreakdownSource(provider) {
 
 const PERIOD_COPY_KEYS = {
   day: "usage.period.day",
+  "24h": "usage.period.last24h",
   week: "usage.period.week",
   month: "usage.period.month",
   total: "usage.period.total",
@@ -117,8 +118,12 @@ export function UsageOverview({
   period,
   periods,
   onPeriodChange,
+  autoRefreshOptions = [],
+  autoRefreshIntervalMs,
+  onAutoRefreshIntervalChange,
   summaryValue,
   summaryLabel,
+  summaryUpdatedAtLabel,
   summaryCostValue,
   onCostInfo,
   fleetData = [],
@@ -135,6 +140,10 @@ export function UsageOverview({
   to,
 }) {
   const tabs = normalizePeriods(periods);
+  const showAutoRefreshSelect =
+    Array.isArray(autoRefreshOptions) &&
+    autoRefreshOptions.length > 0 &&
+    typeof onAutoRefreshIntervalChange === "function";
   const dateLocale = getDateFnsLocale(getCopyLocale());
   const summaryCounterValue = parseAnimatedCounterValue(String(summaryValue ?? ""));
   // The digit-by-digit Counter renders at a fixed 72px and would clip on
@@ -244,7 +253,21 @@ export function UsageOverview({
             })}
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
-{onOpenShare ? (
+            {showAutoRefreshSelect ? (
+              <select
+                aria-label={copy("usage.auto_refresh.aria")}
+                value={String(autoRefreshIntervalMs)}
+                onChange={(event) => onAutoRefreshIntervalChange(event.target.value)}
+                className="h-8 rounded-md border border-oai-gray-300 dark:border-oai-gray-700 bg-oai-white dark:bg-oai-gray-900 px-2 text-xs font-medium text-oai-gray-700 dark:text-oai-gray-200 transition-colors hover:border-oai-gray-400 dark:hover:border-oai-gray-600 focus:outline-none focus:ring-2 focus:ring-oai-brand/25"
+              >
+                {autoRefreshOptions.map((option) => (
+                  <option key={option.value} value={String(option.value)}>
+                    {copy(option.labelKey)}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+            {onOpenShare ? (
               <button
                 type="button"
                 onClick={onOpenShare}
@@ -284,8 +307,13 @@ export function UsageOverview({
               summaryValue
             )}
           </div>
+          {summaryUpdatedAtLabel ? (
+            <div className="mt-3 text-[11px] font-medium text-oai-gray-400 dark:text-oai-gray-500 tabular-nums">
+              {summaryUpdatedAtLabel}
+            </div>
+          ) : null}
           {summaryCostValue && (
-            <div className="flex items-center justify-center gap-2 mt-4">
+            <div className="flex items-center justify-center gap-2 mt-3">
               {onCostInfo ? (
                 <button
                   type="button"

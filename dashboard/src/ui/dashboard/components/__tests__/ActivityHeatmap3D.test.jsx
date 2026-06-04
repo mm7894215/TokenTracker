@@ -42,7 +42,7 @@ describe("ActivityHeatmap3D", () => {
     const svg = container.querySelector("svg");
     expect(svg).toBeTruthy();
     const vb = svg.getAttribute("viewBox");
-    expect(vb).toMatch(/^[\-\d.]+ [\-\d.]+ [\d.]+ [\d.]+$/);
+    expect(vb).toMatch(/^[-\d.]+ [-\d.]+ [\d.]+ [\d.]+$/);
   });
 
   test("cells are emitted back-to-front by (col + row) ascending", () => {

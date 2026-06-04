@@ -1,7 +1,7 @@
 {
   "name": "@ipv9/tokentracker-cli",
-  "version": "0.39.0",
-  "description": "Token usage tracker for AI agent CLIs (Claude Code, Codex, Cursor, Gemini, Kiro, OpenCode, OpenClaw, Every Code, Hermes, GitHub Copilot, Kimi Code, CodeBuddy, Grok Build, oh-my-pi, pi, Craft Agents, Kilo CLI, Kilo Code, Roo Code, Zed Agent, Goose)",
+  "version": "0.39.3",
+  "description": "Local-first token and cost dashboard for 22 AI coding tools, including Claude Code, Codex, Cursor, Gemini, Kiro, OpenCode, OpenClaw, Copilot, Antigravity, Zed, and Goose.",
   "main": "src/cli.js",
   "bin": {
     "tokentracker-cli": "bin/tracker.js",
@@ -59,17 +59,25 @@
     "url": "https://github.com/pitimon/TokenTracker/issues"
   },
   "keywords": [
-    "token",
-    "tracker",
-    "ai",
+    "token-usage",
+    "cost-tracking",
+    "ai-cli",
+    "ai-dashboard",
     "claude",
+    "claude-code",
     "codex",
     "cursor",
     "gemini",
     "kiro",
     "opencode",
-    "usage",
-    "cost"
+    "openclaw",
+    "copilot",
+    "antigravity",
+    "zed",
+    "goose",
+    "local-first",
+    "rate-limits",
+    "leaderboard"
   ],
   "license": "MIT",
   "engines": {

@@ -35,7 +35,7 @@
     "react": "^18.2.0",
     "react-day-picker": "^9.14.0",
     "react-dom": "^18.2.0",
-    "react-router-dom": "^7.12.0",
+    "react-router-dom": "^7.17.0",
     "tailwind-merge": "^3.5.0",
     "three": "^0.183.2"
   },
@@ -60,6 +60,10 @@
     "tailwindcss": "^3.4.17",
     "typescript": "^5.9.3",
     "vite": "^7.3.0",
-    "vitest": "^2.1.0"
+    "vitest": "^4.1.8"
+  },
+  "overrides": {
+    "engine.io-client": "6.6.5",
+    "ws": "8.21.0"
   }
 }
