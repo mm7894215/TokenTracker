@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { Trophy, Download } from "lucide-react";
+import { MetalFx } from "metal-fx";
 import { copy } from "../lib/copy";
 import { isNativeApp } from "../lib/native-bridge.js";
 import { useCurrency } from "../hooks/useCurrency.js";
@@ -66,7 +67,7 @@ export function LeaderboardProfilePage({ auth, signedIn, sessionSoftExpired, use
           <div className="flex items-center gap-1.5 sm:gap-2">
             <Link
               to="/leaderboard"
-              className="group no-underline inline-flex items-center gap-1.5 h-8 px-3 text-xs font-bold rounded-lg border border-oai-gray-200 dark:border-white/10 bg-transparent text-oai-gray-700 dark:text-oai-gray-300 hover:bg-oai-gray-100 dark:hover:bg-white/5 hover:text-oai-black dark:hover:text-white transition-all duration-200 active:scale-95 shadow-sm"
+              className="group no-underline inline-flex items-center gap-1.5 h-8 px-3 text-xs font-bold rounded-full border border-oai-gray-200 dark:border-white/10 bg-transparent text-oai-gray-700 dark:text-oai-gray-300 hover:bg-oai-gray-100 dark:hover:bg-white/5 hover:text-oai-black dark:hover:text-white transition-all duration-200 active:scale-95 shadow-sm"
             >
               <Trophy
                 size={13}
@@ -78,32 +79,41 @@ export function LeaderboardProfilePage({ auth, signedIn, sessionSoftExpired, use
             </Link>
 
             {showDownload && (
-              <a
-                href={RELEASE_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="group no-underline inline-flex h-8 items-center gap-1.5 px-3 text-xs font-bold rounded-lg bg-oai-gray-900 dark:bg-white text-white dark:text-oai-gray-950 hover:bg-oai-gray-800 dark:hover:bg-oai-gray-100 transition-all duration-200 active:scale-[0.98] shadow-sm"
+              <MetalFx
+                variant="button"
+                preset="chromatic"
+                theme="dark"
+                borderRadius={9999}
+                disableGlow
+                className="!bg-black"
               >
-                <Download
-                  size={13}
-                  strokeWidth={2.5}
-                  aria-hidden
-                  className="transition-transform duration-150 ease-out group-hover:translate-y-0.5"
-                />
-                <span className="hidden sm:inline">{copy("leaderboard.profile.nav.download")}</span>
-              </a>
+                <a
+                  href={RELEASE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group no-underline inline-flex h-8 items-center gap-1.5 px-3 text-xs font-bold rounded-full bg-black text-white transition-transform duration-200 active:scale-[0.98]"
+                >
+                  <Download
+                    size={13}
+                    strokeWidth={2.5}
+                    aria-hidden
+                    className="transition-transform duration-150 ease-out group-hover:translate-y-0.5"
+                  />
+                  <span className="hidden sm:inline">{copy("leaderboard.profile.nav.download")}</span>
+                </a>
+              </MetalFx>
             )}
 
             {/* 已登录时优雅渲染头像，未登录时渲染高精齐平的圆角矩形幽灵 Sign In */}
             {authLoading ? (
-              <div className="h-8 w-16 animate-pulse rounded-lg bg-oai-gray-200 dark:bg-white/10" aria-hidden />
+              <div className="h-8 w-16 animate-pulse rounded-full bg-oai-gray-200 dark:bg-white/10" aria-hidden />
             ) : realSignedIn ? (
               <InsforgeUserHeaderControls />
             ) : (
               <button
                 type="button"
                 onClick={openLoginModal}
-                className="inline-flex h-8 min-w-[76px] items-center justify-center rounded-lg bg-oai-gray-900 dark:bg-white text-white dark:text-oai-gray-950 hover:bg-oai-gray-800 dark:hover:bg-oai-gray-100 transition-all duration-200 active:scale-[0.98] select-none text-xs font-bold shadow-sm"
+                className="inline-flex h-8 min-w-[76px] items-center justify-center px-3 text-xs font-bold rounded-full border border-oai-gray-200 dark:border-white/10 bg-transparent text-oai-gray-700 dark:text-oai-gray-300 hover:bg-oai-gray-100 dark:hover:bg-white/5 hover:text-oai-black dark:hover:text-white transition-all duration-200 active:scale-95 shadow-sm select-none"
               >
                 {copy("header.auth.sign_in_aria")}
               </button>
