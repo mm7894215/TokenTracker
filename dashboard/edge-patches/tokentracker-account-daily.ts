@@ -303,7 +303,51 @@ interface HourlyRow {
   conversations: number | null;
 }
 
-function computeRowCost(row: HourlyRow): number {
+interface GroupedRow {
+  bucket: string;
+  source: string;
+  model: string;
+  total_tokens: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cached_input_tokens: number | null;
+  cache_creation_input_tokens: number | null;
+  reasoning_output_tokens: number | null;
+  conversations: number | null;
+}
+
+/**
+ * Server-side aggregation. One RPC replaces the old N paginated 1000-row raw
+ * fetches: account_usage_grouped() GROUPs BY (tz-local bucket, source, model)
+ * in Postgres and returns a single JSONB array. SUM across the user's active
+ * devices is byte-identical to the old in-edge aggregation; tz-local bucketing
+ * uses `AT TIME ZONE` (same IANA database as the old JS Intl path, incl. DST).
+ */
+async function fetchGroupedRows(
+  client: ReturnType<typeof createClient>,
+  userId: string,
+  activeDeviceIds: string[],
+  fromIso: string,
+  toIso: string,
+  trunc: "hour" | "day" | "month" | "none",
+  tz: string | null,
+  tzOffsetMinutes: number | null,
+): Promise<GroupedRow[]> {
+  if (activeDeviceIds.length === 0) return [];
+  const { data, error } = await client.database.rpc("account_usage_grouped", {
+    p_user_id: userId,
+    p_device_ids: activeDeviceIds,
+    p_from: fromIso,
+    p_to: toIso,
+    p_trunc: trunc,
+    p_tz: tz,
+    p_offset_min: tzOffsetMinutes,
+  });
+  if (error) throw new Error(error.message);
+  return (Array.isArray(data) ? data : []) as GroupedRow[];
+}
+
+function computeRowCost(row: GroupedRow): number {
   const p = getModelPricing(row.model);
   // Codex / every-code fold reasoning into output_tokens (OpenAI convention),
   // so charging reasoning_output_tokens again at the output rate double-counts.
@@ -370,33 +414,12 @@ export default async function (req: Request): Promise<Response> {
   const rangeStart = startDate.toISOString();
   const rangeEnd = endDate.toISOString();
 
-  const rawRows: HourlyRow[] = [];
-  const PAGE_SIZE = 1000;
-  const DEVICE_CHUNK = 25;
-  for (let i = 0; i < activeDeviceIds.length; i += DEVICE_CHUNK) {
-    const chunk = activeDeviceIds.slice(i, i + DEVICE_CHUNK);
-    let offset = 0;
-    while (true) {
-      const { data, error } = await client.database
-        .from("tokentracker_hourly")
-        .select(
-          "hour_start, source, model, total_tokens, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, conversations",
-        )
-        .eq("user_id", userId)
-        .in("device_id", chunk)
-        .gte("hour_start", rangeStart)
-        .lt("hour_start", rangeEnd)
-        .order("hour_start", { ascending: true })
-        .range(offset, offset + PAGE_SIZE - 1);
-      if (error) return json({ error: error.message }, 500);
-      if (!data || data.length === 0) break;
-      rawRows.push(...(data as unknown as HourlyRow[]));
-      if (data.length < PAGE_SIZE) break;
-      offset += PAGE_SIZE;
-    }
+  let rows: GroupedRow[];
+  try {
+    rows = await fetchGroupedRows(client, userId, activeDeviceIds, rangeStart, rangeEnd, "day", tz, tzOffsetMinutes);
+  } catch (e) {
+    return json({ error: (e as Error).message }, 500);
   }
-
-  const rows = rawRows;
 
   const byDay = new Map<string, {
     day: string;
@@ -415,8 +438,7 @@ export default async function (req: Request): Promise<Response> {
     models: Record<string, number>;
   }>();
   for (const row of rows) {
-    if (!row.hour_start) continue;
-    const day = zonedDayKey(String(row.hour_start), tz, tzOffsetMinutes);
+    const day = row.bucket;
     if (day < from || day > to) continue;
     let a = byDay.get(day);
     if (!a) {

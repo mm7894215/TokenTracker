@@ -311,6 +311,51 @@ interface Totals {
   total_cost_usd: string;
 }
 
+interface GroupedRow {
+  bucket: string;
+  source: string;
+  model: string;
+  total_tokens: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cached_input_tokens: number | null;
+  cache_creation_input_tokens: number | null;
+  reasoning_output_tokens: number | null;
+  conversations: number | null;
+}
+
+/**
+ * Server-side aggregation. One RPC replaces the old N paginated 1000-row raw
+ * fetches: account_usage_grouped() GROUPs BY (tz-local day, source, model) in
+ * Postgres and returns a single JSONB array. We still filter to local days in
+ * [from, to] and collapse to (source, model) in-edge — SUM across the user's
+ * active devices is byte-identical; tz-local day bucketing uses `AT TIME ZONE`
+ * (same IANA database as the old JS Intl path, incl. DST).
+ */
+async function fetchGroupedRows(
+  client: ReturnType<typeof createClient>,
+  userId: string,
+  activeDeviceIds: string[],
+  fromIso: string,
+  toIso: string,
+  trunc: "hour" | "day" | "month" | "none",
+  tz: string | null,
+  tzOffsetMinutes: number | null,
+): Promise<GroupedRow[]> {
+  if (activeDeviceIds.length === 0) return [];
+  const { data, error } = await client.database.rpc("account_usage_grouped", {
+    p_user_id: userId,
+    p_device_ids: activeDeviceIds,
+    p_from: fromIso,
+    p_to: toIso,
+    p_trunc: trunc,
+    p_tz: tz,
+    p_offset_min: tzOffsetMinutes,
+  });
+  if (error) throw new Error(error.message);
+  return (Array.isArray(data) ? data : []) as GroupedRow[];
+}
+
 export default async function (req: Request): Promise<Response> {
   if (req.method === "OPTIONS")
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -360,44 +405,17 @@ export default async function (req: Request): Promise<Response> {
   const rangeStart = startDate.toISOString();
   const rangeEnd = endDate.toISOString();
 
-  const rawRows: HourlyRow[] = [];
-  const PAGE_SIZE = 1000;
-  const DEVICE_CHUNK = 25;
-  for (let i = 0; i < activeDeviceIds.length; i += DEVICE_CHUNK) {
-    const chunk = activeDeviceIds.slice(i, i + DEVICE_CHUNK);
-    let offset = 0;
-    while (true) {
-      const { data, error } = await client.database
-        .from("tokentracker_hourly")
-        .select(
-          "hour_start, source, model, total_tokens, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens",
-        )
-        .eq("user_id", userId)
-        .in("device_id", chunk)
-        .gte("hour_start", rangeStart)
-        .lt("hour_start", rangeEnd)
-        .order("hour_start", { ascending: true })
-        .range(offset, offset + PAGE_SIZE - 1);
-      if (error) return json({ error: error.message }, 500);
-      if (!data || data.length === 0) break;
-      rawRows.push(...(data as unknown as HourlyRow[]));
-      if (data.length < PAGE_SIZE) break;
-      offset += PAGE_SIZE;
-    }
+  let rows: GroupedRow[];
+  try {
+    rows = await fetchGroupedRows(client, userId, activeDeviceIds, rangeStart, rangeEnd, "day", tz, tzOffsetMinutes);
+  } catch (e) {
+    return json({ error: (e as Error).message }, 500);
   }
 
-  const rows = rawRows;
-
-  // Filter on inclusive [from, to] by *local* day (honoring tz / tz_offset_minutes),
-  // not raw UTC. Without this, Day=2026-05-18 in Asia/Shanghai (which maps to
-  // UTC 2026-05-17T16:00–2026-05-18T16:00) returns an empty source list because
-  // every relevant row's UTC YYYY-MM-DD lands on 2026-05-17 or 2026-05-18 in a
-  // mix that the strict d>=from && d<=to UTC compare partially drops.
-  const filtered = rows.filter((r) => {
-    if (!r.hour_start) return false;
-    const d = zonedDayKey(String(r.hour_start), tz, tzOffsetMinutes);
-    return d >= from && d <= to;
-  });
+  // Keep only the tz-local days in [from, to]. The RPC already bucketed each
+  // row to its local day (honoring tz / tz_offset_minutes), so this compares
+  // the bucket directly — same inclusive [from, to] semantics as before.
+  const filtered = rows.filter((r) => r.bucket >= from && r.bucket <= to);
 
   interface ModelAgg {
     model: string;

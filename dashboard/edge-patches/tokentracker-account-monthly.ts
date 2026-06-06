@@ -77,8 +77,8 @@ async function fetchActiveDeviceIds(
   return rows.map((r) => r.id).filter((id): id is string => typeof id === "string" && id.length > 0);
 }
 
-interface HourlyRow {
-  hour_start: string;
+interface GroupedRow {
+  bucket: string;
   source: string | null;
   model: string | null;
   total_tokens: number | null;
@@ -88,6 +88,36 @@ interface HourlyRow {
   cache_creation_input_tokens: number | null;
   reasoning_output_tokens: number | null;
   conversations: number | null;
+}
+
+/**
+ * Server-side aggregation. One RPC replaces the old N paginated 1000-row raw
+ * fetches: account_usage_grouped() GROUPs BY (bucket, source, model) in
+ * Postgres and returns a single JSONB array. Monthly buckets stay UTC-based
+ * (tz=null) to match the old `hour_start.slice(0,7)` behavior exactly.
+ */
+async function fetchGroupedRows(
+  client: ReturnType<typeof createClient>,
+  userId: string,
+  activeDeviceIds: string[],
+  fromIso: string,
+  toIso: string,
+  trunc: "hour" | "day" | "month" | "none",
+  tz: string | null,
+  tzOffsetMinutes: number | null,
+): Promise<GroupedRow[]> {
+  if (activeDeviceIds.length === 0) return [];
+  const { data, error } = await client.database.rpc("account_usage_grouped", {
+    p_user_id: userId,
+    p_device_ids: activeDeviceIds,
+    p_from: fromIso,
+    p_to: toIso,
+    p_trunc: trunc,
+    p_tz: tz,
+    p_offset_min: tzOffsetMinutes,
+  });
+  if (error) throw new Error(error.message);
+  return (Array.isArray(data) ? data : []) as GroupedRow[];
 }
 
 export default async function (req: Request): Promise<Response> {
@@ -139,33 +169,12 @@ export default async function (req: Request): Promise<Response> {
   nextDay.setUTCDate(nextDay.getUTCDate() + 1);
   const rangeEnd = nextDay.toISOString();
 
-  const rawRows: HourlyRow[] = [];
-  const PAGE_SIZE = 1000;
-  const DEVICE_CHUNK = 25;
-  for (let i = 0; i < activeDeviceIds.length; i += DEVICE_CHUNK) {
-    const chunk = activeDeviceIds.slice(i, i + DEVICE_CHUNK);
-    let offset = 0;
-    while (true) {
-      const { data, error } = await client.database
-        .from("tokentracker_hourly")
-        .select(
-          "hour_start, source, model, total_tokens, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, conversations",
-        )
-        .eq("user_id", userId)
-        .in("device_id", chunk)
-        .gte("hour_start", rangeStart)
-        .lt("hour_start", rangeEnd)
-        .order("hour_start", { ascending: true })
-        .range(offset, offset + PAGE_SIZE - 1);
-      if (error) return json({ error: error.message }, 500);
-      if (!data || data.length === 0) break;
-      rawRows.push(...(data as unknown as HourlyRow[]));
-      if (data.length < PAGE_SIZE) break;
-      offset += PAGE_SIZE;
-    }
+  let rows: GroupedRow[];
+  try {
+    rows = await fetchGroupedRows(client, userId, activeDeviceIds, rangeStart, rangeEnd, "month", null, null);
+  } catch (e) {
+    return json({ error: (e as Error).message }, 500);
   }
-
-  const rows = rawRows;
 
   const byMonth = new Map<string, {
     month: string;
@@ -183,10 +192,7 @@ export default async function (req: Request): Promise<Response> {
   }>();
 
   for (const row of rows) {
-    if (!row.hour_start) continue;
-    const day = String(row.hour_start).slice(0, 10);
-    if (day < from || day > to) continue;
-    const month = day.slice(0, 7);
+    const month = row.bucket;
     let a = byMonth.get(month);
     if (!a) {
       a = {

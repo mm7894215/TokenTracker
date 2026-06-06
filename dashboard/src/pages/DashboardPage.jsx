@@ -833,6 +833,13 @@ export function DashboardPage({
     trendLoading ||
     modelBreakdownLoading ||
     projectUsageLoading;
+  // Show the dashboard skeleton only on the *initial* cloud (account-view)
+  // load — while auth/cloud is resolving, or while the first account fetch is
+  // in flight and no detail rows exist yet. A later refresh keeps the rendered
+  // data (no skeleton, no flash); local mode loads fast and is left untouched.
+  const initialDashboardLoading =
+    accountViewResolving ||
+    (accountView && usageLoadingState && !hasDetailsActual);
   const usageSourceLabel = useMemo(
     () =>
       copy("shared.data_source", {
@@ -1340,6 +1347,7 @@ export function DashboardPage({
       coreIndexExpandAria={coreIndexExpandAria}
       refreshAll={handleUsageRefresh}
       usageLoadingState={usageLoadingState}
+      initialDashboardLoading={initialDashboardLoading}
       usageError={usageError}
       rangeLabel={rangeLabel}
       timeZoneRangeLabel={timeZoneRangeLabel}
