@@ -12,6 +12,8 @@ enum MenuBarDisplayMetric: String, CaseIterable {
     case claude7d
     case codex5h
     case codex7d
+    case codexSpark5h
+    case codexSpark7d
     case cursorPlan
     case cursorAuto
     case cursorAPI
@@ -42,6 +44,8 @@ enum MenuBarDisplayMetric: String, CaseIterable {
         case .claude7d: return "Cl 7d"
         case .codex5h: return "Cx 5h"
         case .codex7d: return "Cx 7d"
+        case .codexSpark5h: return "Cx Sp 5h"
+        case .codexSpark7d: return "Cx Sp 7d"
         case .cursorPlan: return "Cu Plan"
         case .cursorAuto: return "Cu Auto"
         case .cursorAPI: return "Cu API"
@@ -74,6 +78,8 @@ enum MenuBarDisplayMetric: String, CaseIterable {
         case .claude7d: return "Claude 7d Limit"
         case .codex5h: return "Codex 5h Limit"
         case .codex7d: return "Codex 7d Limit"
+        case .codexSpark5h: return "Codex Spark 5h Limit"
+        case .codexSpark7d: return "Codex Spark 7d Limit"
         case .cursorPlan: return "Cursor Plan Limit"
         case .cursorAuto: return "Cursor Auto Limit"
         case .cursorAPI: return "Cursor API Limit"
@@ -101,7 +107,7 @@ enum MenuBarDisplayMetric: String, CaseIterable {
             return "tokens"
         case .todayCost, .totalCost:
             return "cost"
-        case .claude5h, .claude7d, .codex5h, .codex7d,
+        case .claude5h, .claude7d, .codex5h, .codex7d, .codexSpark5h, .codexSpark7d,
              .cursorPlan, .cursorAuto, .cursorAPI,
              .geminiPro, .geminiFlash, .geminiLite,
              .kimiWeekly, .kimi5h, .kimiTotal,
@@ -121,7 +127,7 @@ enum MenuBarDisplayMetric: String, CaseIterable {
         case .todayTokens, .todayCost, .last7dTokens, .totalTokens, .totalCost:
             return nil
         case .claude5h, .claude7d: return "claude"
-        case .codex5h, .codex7d: return "codex"
+        case .codex5h, .codex7d, .codexSpark5h, .codexSpark7d: return "codex"
         case .cursorPlan, .cursorAuto, .cursorAPI: return "cursor"
         case .geminiPro, .geminiFlash, .geminiLite: return "gemini"
         case .kimiWeekly, .kimi5h, .kimiTotal: return "kimi"
@@ -481,6 +487,16 @@ final class StatusBarController: NSObject {
                 return MenuBarDisplayValue(id: id, label: metric.menuLabel, value: formatIntPercentWithReset(window.usedPercent, resetEpoch: window.resetAt))
             case .codex7d:
                 guard let window = viewModel.usageLimits?.codex.secondaryWindow,
+                      viewModel.usageLimits?.codex.configured == true,
+                      viewModel.usageLimits?.codex.error == nil else { return nil }
+                return MenuBarDisplayValue(id: id, label: metric.menuLabel, value: formatIntPercentWithReset(window.usedPercent, resetEpoch: window.resetAt))
+            case .codexSpark5h:
+                guard let window = viewModel.usageLimits?.codex.sparkPrimaryWindow,
+                      viewModel.usageLimits?.codex.configured == true,
+                      viewModel.usageLimits?.codex.error == nil else { return nil }
+                return MenuBarDisplayValue(id: id, label: metric.menuLabel, value: formatIntPercentWithReset(window.usedPercent, resetEpoch: window.resetAt))
+            case .codexSpark7d:
+                guard let window = viewModel.usageLimits?.codex.sparkSecondaryWindow,
                       viewModel.usageLimits?.codex.configured == true,
                       viewModel.usageLimits?.codex.error == nil else { return nil }
                 return MenuBarDisplayValue(id: id, label: metric.menuLabel, value: formatIntPercentWithReset(window.usedPercent, resetEpoch: window.resetAt))

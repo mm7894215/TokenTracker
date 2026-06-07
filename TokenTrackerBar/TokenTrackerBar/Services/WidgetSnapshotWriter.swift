@@ -246,6 +246,16 @@ enum WidgetSnapshotWriter {
                                          fraction: Double(w.usedPercent) / 100.0,
                                          resetsAt: parseEpoch(w.resetAt)))
             }
+            if let w = limits.codex.sparkPrimaryWindow {
+                out.append(LimitProvider(source: "codex", label: "Codex · 5h (Spark)",
+                                         fraction: Double(w.usedPercent) / 100.0,
+                                         resetsAt: parseEpoch(w.resetAt)))
+            }
+            if let w = limits.codex.sparkSecondaryWindow {
+                out.append(LimitProvider(source: "codex", label: "Codex · weekly (Spark)",
+                                         fraction: Double(w.usedPercent) / 100.0,
+                                         resetsAt: parseEpoch(w.resetAt)))
+            }
         }
 
         // Cursor

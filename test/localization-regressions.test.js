@@ -99,6 +99,37 @@ test("native macOS strings are wired through the Swift localization helpers", ()
   assert.ok(sharedWidgetViews.includes("WidgetStrings.updated(WidgetFormat.relativeUpdated(updated))"));
 });
 
+test("Codex Spark usage limits are wired through macOS consumers", () => {
+  const model = read("TokenTrackerBar/TokenTrackerBar/Models/UsageLimits.swift");
+  const usageLimitsView = read("TokenTrackerBar/TokenTrackerBar/Views/UsageLimitsView.swift");
+  const widgetSnapshotWriter = read("TokenTrackerBar/TokenTrackerBar/Services/WidgetSnapshotWriter.swift");
+  const statusBarController = read("TokenTrackerBar/TokenTrackerBar/Services/StatusBarController.swift");
+  const nativeBridge = read("TokenTrackerBar/TokenTrackerBar/Services/NativeBridge.swift");
+
+  assert.ok(model.includes("let sparkPrimaryWindow: CodexWindow?"));
+  assert.ok(model.includes("let sparkSecondaryWindow: CodexWindow?"));
+  assert.ok(model.includes('case sparkPrimaryWindow = "spark_primary_window"'));
+  assert.ok(model.includes('case sparkSecondaryWindow = "spark_secondary_window"'));
+
+  assert.match(usageLimitsView, /if let w = codex\.sparkPrimaryWindow \{\s*limitRow\(label: "5h \(Spark\)"/);
+  assert.match(usageLimitsView, /if let w = codex\.sparkSecondaryWindow \{\s*limitRow\(label: "7d \(Spark\)"/);
+
+  assert.match(widgetSnapshotWriter, /if let w = limits\.codex\.sparkPrimaryWindow \{\s*out\.append\(LimitProvider\([^)]*label: "Codex · 5h \(Spark\)"/);
+  assert.match(widgetSnapshotWriter, /if let w = limits\.codex\.sparkSecondaryWindow \{\s*out\.append\(LimitProvider\([^)]*label: "Codex · weekly \(Spark\)"/);
+
+  assert.ok(statusBarController.includes("case codexSpark5h"));
+  assert.ok(statusBarController.includes("case codexSpark7d"));
+  assert.ok(statusBarController.includes('case .codexSpark5h: return "Cx Sp 5h"'));
+  assert.ok(statusBarController.includes('case .codexSpark7d: return "Cx Sp 7d"'));
+  assert.ok(statusBarController.includes('case .codexSpark5h: return "Codex Spark 5h Limit"'));
+  assert.ok(statusBarController.includes('case .codexSpark7d: return "Codex Spark 7d Limit"'));
+  assert.match(statusBarController, /case \.codex5h,\s*\.codex7d,\s*\.codexSpark5h,\s*\.codexSpark7d:\s*return "codex"/);
+  assert.match(statusBarController, /case \.codexSpark5h:\s*guard let window = viewModel\.usageLimits\?\.codex\.sparkPrimaryWindow,/);
+  assert.match(statusBarController, /case \.codexSpark7d:\s*guard let window = viewModel\.usageLimits\?\.codex\.sparkSecondaryWindow,/);
+
+  assert.doesNotMatch(nativeBridge, /sparkPrimaryWindow|sparkSecondaryWindow|codexSpark/i);
+});
+
 test("locale PR stays scoped away from silent auto update flags", () => {
   const app = read("TokenTrackerBar/TokenTrackerBar/TokenTrackerBarApp.swift");
   const plist = read("TokenTrackerBar/TokenTrackerBar/Info.plist");
