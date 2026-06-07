@@ -247,12 +247,12 @@ enum WidgetSnapshotWriter {
                                          resetsAt: parseEpoch(w.resetAt)))
             }
             if let w = limits.codex.sparkPrimaryWindow {
-                out.append(LimitProvider(source: "codex", label: "Codex · 5h (Spark)",
+                out.append(LimitProvider(source: "codex", label: "Codex · Spark 5h",
                                          fraction: Double(w.usedPercent) / 100.0,
                                          resetsAt: parseEpoch(w.resetAt)))
             }
             if let w = limits.codex.sparkSecondaryWindow {
-                out.append(LimitProvider(source: "codex", label: "Codex · weekly (Spark)",
+                out.append(LimitProvider(source: "codex", label: "Codex · Spark 7d",
                                          fraction: Double(w.usedPercent) / 100.0,
                                          resetsAt: parseEpoch(w.resetAt)))
             }

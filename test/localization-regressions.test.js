@@ -112,19 +112,20 @@ test("Codex Spark usage limits are wired through macOS consumers", () => {
   assert.ok(model.includes('case sparkPrimaryWindow = "spark_primary_window"'));
   assert.ok(model.includes('case sparkSecondaryWindow = "spark_secondary_window"'));
 
-  assert.match(usageLimitsView, /if let w = codex\.sparkPrimaryWindow \{\s*limitRow\(label: "5h \(Spark\)"/);
-  assert.match(usageLimitsView, /if let w = codex\.sparkSecondaryWindow \{\s*limitRow\(label: "7d \(Spark\)"/);
+  assert.match(usageLimitsView, /if let w = codex\.sparkPrimaryWindow \{\s*limitRow\(label: "Spark 5h"/);
+  assert.match(usageLimitsView, /if let w = codex\.sparkSecondaryWindow \{\s*limitRow\(label: "Spark 7d"/);
 
-  assert.match(widgetSnapshotWriter, /if let w = limits\.codex\.sparkPrimaryWindow \{\s*out\.append\(LimitProvider\([^)]*label: "Codex · 5h \(Spark\)"/);
-  assert.match(widgetSnapshotWriter, /if let w = limits\.codex\.sparkSecondaryWindow \{\s*out\.append\(LimitProvider\([^)]*label: "Codex · weekly \(Spark\)"/);
-  assert.ok(widgetStrings.includes('let sparkSuffix = label.contains("Spark") ? " (Spark)" : ""'));
+  assert.match(widgetSnapshotWriter, /if let w = limits\.codex\.sparkPrimaryWindow \{\s*out\.append\(LimitProvider\([^)]*label: "Codex · Spark 5h"/);
+  assert.match(widgetSnapshotWriter, /if let w = limits\.codex\.sparkSecondaryWindow \{\s*out\.append\(LimitProvider\([^)]*label: "Codex · Spark 7d"/);
+  assert.ok(widgetStrings.includes("if label.contains(\"Spark 5h\")"));
+  assert.ok(widgetStrings.includes("if label.contains(\"Spark 7d\")"));
   for (const localizedSparkLabel of [
-    String.raw`\(source) · 5小时\(sparkSuffix)`,
-    String.raw`\(source) · 7天\(sparkSuffix)`,
-    String.raw`\(source) · 5小時\(sparkSuffix)`,
-    String.raw`\(source) · 5時間\(sparkSuffix)`,
-    String.raw`\(source) · 5시간\(sparkSuffix)`,
-    String.raw`\(source) · 7일\(sparkSuffix)`,
+    String.raw`\(source) · Spark 5小时`,
+    String.raw`\(source) · Spark 7天`,
+    String.raw`\(source) · Spark 5小時`,
+    String.raw`\(source) · Spark 5時間`,
+    String.raw`\(source) · Spark 5시간`,
+    String.raw`\(source) · Spark 7일`,
   ]) {
     assert.ok(widgetStrings.includes(localizedSparkLabel));
   }

@@ -126,7 +126,7 @@ describe("UsageLimitsPanel", () => {
     expect(screen.getByText("Codex")).toBeInTheDocument();
     expectLimitRow("5h", "12%");
     expectLimitRow("7d", "30%");
-    expectLimitRow("5h (Spark)", "4%");
-    expectLimitRow("7d (Spark)", "18%");
+    expectLimitRow("Spark 5h", "4%");
+    expectLimitRow("Spark 7d", "18%");
   });
 });

@@ -148,10 +148,10 @@ struct UsageLimitsView: View {
                 limitRow(label: "7d", pct: Double(w.usedPercent), reset: relativeReset(epoch: w.resetAt), toolName: "Codex")
             }
             if let w = codex.sparkPrimaryWindow {
-                limitRow(label: "5h (Spark)", pct: Double(w.usedPercent), reset: relativeReset(epoch: w.resetAt), toolName: "Codex")
+                limitRow(label: "Spark 5h", pct: Double(w.usedPercent), reset: relativeReset(epoch: w.resetAt), toolName: "Codex")
             }
             if let w = codex.sparkSecondaryWindow {
-                limitRow(label: "7d (Spark)", pct: Double(w.usedPercent), reset: relativeReset(epoch: w.resetAt), toolName: "Codex")
+                limitRow(label: "Spark 7d", pct: Double(w.usedPercent), reset: relativeReset(epoch: w.resetAt), toolName: "Codex")
             }
         }
     }
