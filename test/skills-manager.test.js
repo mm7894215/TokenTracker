@@ -158,6 +158,41 @@ describe("skills-manager nested local skill folders", () => {
     assert.equal(installed.some((s) => s.directory === "too/deep/for/scan/nested"), false);
   });
 
+  it("does not delete through symlinked parent directories", (t) => {
+    const root = path.join(sandboxHome, ".hermes/skills");
+    const outside = path.join(sandboxHome, "outside-skill-delete");
+    const victim = path.join(outside, "victim");
+    fs.mkdirSync(victim, { recursive: true });
+    fs.writeFileSync(path.join(victim, "keep.txt"), "important");
+    fs.mkdirSync(root, { recursive: true });
+    try {
+      fs.symlinkSync(outside, path.join(root, "linked-delete"), "dir");
+    } catch (_e) {
+      t.skip("directory symlinks are not available on this platform");
+      return;
+    }
+
+    skills.deleteLocalSkill("linked-delete/victim", ["hermes"]);
+
+    assert.ok(fs.existsSync(path.join(victim, "keep.txt")));
+  });
+
+  it("does not import through symlinked parent directories", (t) => {
+    const root = path.join(sandboxHome, ".hermes/skills");
+    const outside = path.join(sandboxHome, "outside-skill-import");
+    writeLocalSkill("outside-skill-import", "external-skill", "---\nname: External Skill\n---\n");
+    fs.mkdirSync(root, { recursive: true });
+    try {
+      fs.symlinkSync(outside, path.join(root, "linked-import"), "dir");
+    } catch (_e) {
+      t.skip("directory symlinks are not available on this platform");
+      return;
+    }
+
+    assert.throws(() => skills.importLocalSkill("linked-import/external-skill", ["hermes"]), /Local skill not found/);
+    assert.ok(!fs.existsSync(path.join(sandboxHome, ".tokentracker/skills/managed/linked-import/external-skill")));
+  });
+
   it("keeps undo restore available for nested skills whose flattened names collide", () => {
     writeLocalSkill(".hermes/skills", "collision/a-b", "---\nname: Collision Nested\ndescription: Nested\n---\n");
     writeLocalSkill(".hermes/skills", "collision__a-b", "---\nname: Collision Flat\ndescription: Flat\n---\n");

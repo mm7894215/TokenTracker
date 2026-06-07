@@ -238,6 +238,22 @@ describe("/functions/tokentracker-skills auth + input", () => {
     assert.deepEqual(unused, ["alpha/shared-note", "beta/shared-note"]);
   });
 
+  it("GET mode=skill_usage still joins a unique skill name when leaf names are ambiguous", async () => {
+    writeLocalSkill(".hermes/skills", "alpha/name-leaf-collision", "---\nname: name-leaf-collision\n---\n");
+    writeLocalSkill(".codex/skills", "beta/name-leaf-collision", "---\nname: Different Name\n---\n");
+    writeSkillUsageTranscript("name-leaf-collision");
+
+    const { status, body } = await call({ method: "GET", search: "?mode=skill_usage&force=1" });
+
+    assert.equal(status, 200);
+    const usage = body.skills.find((entry) => entry.skill === "name-leaf-collision");
+    assert.ok(usage);
+    assert.equal(usage.installed, true);
+    assert.equal(usage.directory, "alpha/name-leaf-collision");
+    assert.equal(body.unusedInstalled.some((entry) => entry.directory === "alpha/name-leaf-collision"), false);
+    assert.equal(body.unusedInstalled.some((entry) => entry.directory === "beta/name-leaf-collision"), true);
+  });
+
   it("GET mode=popular returns install-sorted skills (stubbed fetch)", async () => {
     const realFetch = global.fetch;
     global.fetch = async () => ({

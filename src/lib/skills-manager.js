@@ -570,6 +570,28 @@ function isSymlink(targetPath) {
   }
 }
 
+function targetSkillPath(baseDir, directory) {
+  const safe = sanitizeRelativePath(directory);
+  if (!safe) return null;
+  const root = path.resolve(baseDir);
+  const targetPath = path.resolve(root, safe);
+  if (!pathStrictlyWithin(root, targetPath)) return null;
+  const parts = safe.split("/");
+  let current = root;
+  for (let i = 0; i < parts.length - 1; i += 1) {
+    current = path.join(current, parts[i]);
+    let stat;
+    try {
+      stat = fs.lstatSync(current);
+    } catch (e) {
+      if (e?.code === "ENOENT") continue;
+      return null;
+    }
+    if (stat.isSymbolicLink() || !stat.isDirectory()) return null;
+  }
+  return targetPath;
+}
+
 function copyDir(source, dest) {
   assertNotNested(source, dest);
   removePath(dest);
@@ -595,7 +617,8 @@ function syncSkillToTarget(directory, targetId) {
   const source = path.join(ssotDir(), directory);
   if (!fs.existsSync(source)) throw new Error(`Managed skill not found: ${directory}`);
   for (const baseDir of targetDirs(target)) {
-    const dest = path.join(baseDir, directory);
+    const dest = targetSkillPath(baseDir, directory);
+    if (!dest) throw new Error(`Invalid skill directory: ${directory}`);
     assertNotNested(source, dest);
     ensureDir(path.dirname(dest));
     removePath(dest);
@@ -611,7 +634,8 @@ function removeSkillFromTarget(directory, targetId) {
   const target = TARGETS[targetId];
   if (!target) return;
   for (const baseDir of targetDirs(target)) {
-    const targetPath = path.join(baseDir, directory);
+    const targetPath = targetSkillPath(baseDir, directory);
+    if (!targetPath) continue;
     removePath(targetPath);
     removeEmptyAncestors(path.dirname(targetPath), baseDir);
   }
@@ -621,7 +645,8 @@ function scanTargetSkill(directory, targetId) {
   const target = TARGETS[targetId];
   if (!target) return false;
   for (const baseDir of targetDirs(target)) {
-    const candidate = path.join(baseDir, directory);
+    const candidate = targetSkillPath(baseDir, directory);
+    if (!candidate) continue;
     if (fs.existsSync(candidate) || isSymlink(candidate)) return true;
   }
   return false;
@@ -636,7 +661,8 @@ function classifyTargetSkill(directory, targetId) {
   if (!target) return "off";
   let state = "off";
   for (const baseDir of targetDirs(target)) {
-    const candidate = path.join(baseDir, directory);
+    const candidate = targetSkillPath(baseDir, directory);
+    if (!candidate) continue;
     if (fs.existsSync(candidate)) return "synced";
     if (isSymlink(candidate)) state = "orphan";
   }
@@ -895,7 +921,8 @@ function findLocalSkillSource(directory) {
   if (!sourceDir) return null;
   for (const target of Object.values(TARGETS)) {
     for (const baseDir of targetDirs(target)) {
-      const skillPath = path.join(baseDir, sourceDir);
+      const skillPath = targetSkillPath(baseDir, sourceDir);
+      if (!skillPath) continue;
       if (findSkillMarker(skillPath)) {
         return { path: skillPath, targetId: target.id };
       }

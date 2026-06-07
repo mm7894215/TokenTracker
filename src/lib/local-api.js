@@ -1818,8 +1818,8 @@ function createLocalApiHandler({ queuePath }) {
               if (!norm) return null;
               if (installedByDirectory.has(norm)) return installedByDirectory.get(norm);
               if (installedByLeaf.has(norm)) return installedByLeaf.get(norm);
-              if (leafCounts.get(norm) > 1) return null;
               if (nameCounts.get(norm) === 1) return installedByName.get(norm);
+              if (leafCounts.get(norm) > 1) return null;
               return null;
             };
             const usedSkillIds = new Set();
