@@ -34,7 +34,10 @@ internal sealed class UsagePoller : IDisposable
         int ActiveDaysAllTime,
         IReadOnlyList<TopModelStat> TopModels);
 
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(6) };
+    // Local server only (127.0.0.1) — never route through a system/env proxy, or a
+    // VPN/proxy user without a loopback bypass can't reach it (see ServerManager.Http).
+    private static readonly HttpClient Http =
+        new(new HttpClientHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(6) };
     private static readonly IReadOnlyList<TopModelStat> NoModels = Array.Empty<TopModelStat>();
     private readonly Func<string> _baseUrl;
     private CancellationTokenSource? _cts;

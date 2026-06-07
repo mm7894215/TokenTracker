@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAccountView } from "../contexts/AccountViewContext.jsx";
 import { useActivityHeatmap } from "../hooks/use-activity-heatmap.js";
 import { useProjectUsageSummary } from "../hooks/use-project-usage-summary";
 import { useTrendData } from "../hooks/use-trend-data.js";
@@ -161,6 +162,21 @@ export function DashboardPage({
   const accessEnabled = signedIn || mockEnabled || publicMode;
   const authTokenReady = authTokenAllowed && isAccessTokenReady(effectiveAuthToken);
   const guestAllowed = signedIn && sessionSoftExpired && !publicMode;
+
+  // Cloud (cross-device account view) — driven by Settings → Cloud sync toggle
+  // on localhost, mandatory on public hosts (www.tokentracker.cc et al.).
+  // publicMode (shared link) opts out of account view entirely.
+  const {
+    accountView: accountViewBase,
+    revision: accountRevision,
+    resolving: accountResolvingBase,
+  } = useAccountView();
+  const accountView = accountViewBase && !publicMode;
+  const accountAccessToken = accountView ? effectiveAuthToken : null;
+  // While the resolved scope is still unknown (auth loading + cloud likely),
+  // hooks hold a loading state instead of painting local data that would be
+  // wiped on the flip to cloud (the local→cloud "double flash").
+  const accountViewResolving = accountResolvingBase && !publicMode;
 
 
   useEffect(() => {
@@ -403,6 +419,10 @@ export function DashboardPage({
     timeZone,
     tzOffsetMinutes,
     now: mockNow,
+    accountView,
+    accountAccessToken,
+    accountRevision,
+    accountViewResolving,
   });
   const {
     daily: dailyBreakdownDaily,
@@ -419,6 +439,10 @@ export function DashboardPage({
     timeZone,
     tzOffsetMinutes,
     now: mockNow,
+    accountView,
+    accountAccessToken,
+    accountRevision,
+    accountViewResolving,
   });
 
   const {
@@ -434,6 +458,10 @@ export function DashboardPage({
     cacheKey,
     timeZone,
     tzOffsetMinutes,
+    accountView,
+    accountAccessToken,
+    accountRevision,
+    accountViewResolving,
   });
 
   const [projectUsageLimit, setProjectUsageLimit] = useState(3);
@@ -480,6 +508,10 @@ export function DashboardPage({
     now: mockNow,
     sharedRows: shareDailyToTrend ? daily : null,
     sharedRange: shareDailyToTrend ? { from, to } : null,
+    accountView,
+    accountAccessToken,
+    accountRevision,
+    accountViewResolving,
   });
 
   // Stable useTrendData config handed to the zoom modal so it can hold its OWN
@@ -494,8 +526,18 @@ export function DashboardPage({
       timeZone: trendTimeZone,
       tzOffsetMinutes: trendTzOffsetMinutes,
       now: mockNow,
+      // Carry the account (cross-device cloud) scope into the zoom modal so its
+      // granularity drill-down reads the SAME source as the main trend chart —
+      // otherwise the zoom silently shows local/default-scope data in account view.
+      accountView,
+      accountAccessToken,
+      accountRevision,
+      accountViewResolving,
     }),
-    [baseUrl, accessToken, guestAllowed, cacheKey, trendTimeZone, trendTzOffsetMinutes, mockNow],
+    [
+      baseUrl, accessToken, guestAllowed, cacheKey, trendTimeZone, trendTzOffsetMinutes, mockNow,
+      accountView, accountAccessToken, accountRevision, accountViewResolving,
+    ],
   );
 
   const {
@@ -512,6 +554,10 @@ export function DashboardPage({
     timeZone,
     tzOffsetMinutes,
     now: mockNow,
+    accountView,
+    accountAccessToken,
+    accountRevision,
+    accountViewResolving,
   });
 
   const {
@@ -787,6 +833,13 @@ export function DashboardPage({
     trendLoading ||
     modelBreakdownLoading ||
     projectUsageLoading;
+  // Show the dashboard skeleton only on the *initial* cloud (account-view)
+  // load — while auth/cloud is resolving, or while the first account fetch is
+  // in flight and no detail rows exist yet. A later refresh keeps the rendered
+  // data (no skeleton, no flash); local mode loads fast and is left untouched.
+  const initialDashboardLoading =
+    accountViewResolving ||
+    (accountView && usageLoadingState && !hasDetailsActual);
   const usageSourceLabel = useMemo(
     () =>
       copy("shared.data_source", {
@@ -1294,6 +1347,7 @@ export function DashboardPage({
       coreIndexExpandAria={coreIndexExpandAria}
       refreshAll={handleUsageRefresh}
       usageLoadingState={usageLoadingState}
+      initialDashboardLoading={initialDashboardLoading}
       usageError={usageError}
       rangeLabel={rangeLabel}
       timeZoneRangeLabel={timeZoneRangeLabel}

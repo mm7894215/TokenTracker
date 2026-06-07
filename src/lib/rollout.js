@@ -679,21 +679,23 @@ async function parseOpenclawSessionFile({
 
     const model = normalizeModelInput(msg.model) || DEFAULT_MODEL;
 
-    // Per CLAUDE.md: cached_input_tokens = cache reads,
-    // cache_creation_input_tokens = cache writes. Also re-derive total_tokens
-    // as input + output + cache_creation + cache_read so cost math works
-    // even when the source's own totalTokens is stale or rounded.
-    const inputTok = Number(usage.input || 0);
-    const cacheReadTok = Number(usage.cacheRead || 0);
-    const cacheWriteTok = Number(usage.cacheWrite || 0);
-    const outputTok = Number(usage.output || 0);
+    // OpenClaw wraps Codex, so it follows the same OpenAI convention where
+    // `input` INCLUDES cached reads. Normalize by subtracting cached from
+    // input so `input_tokens` is pure non-cached (matches CLAUDE.md spec
+    // and prevents downstream double-counting at the cache_read rate on top
+    // of the full input rate — ~6–7x cost inflation on cache-heavy sessions).
+    const openclawRawInput = Number(usage.input || 0);
+    const openclawCached = Number(usage.cacheRead || 0);
+    const openclawCacheWrite = Number(usage.cacheWrite || 0);
+    const openclawOutput = Number(usage.output || 0);
+    const openclawInput = Math.max(0, openclawRawInput - openclawCached);
     const delta = {
-      input_tokens: inputTok,
-      cached_input_tokens: cacheReadTok,
-      cache_creation_input_tokens: cacheWriteTok,
-      output_tokens: outputTok,
+      input_tokens: openclawInput,
+      cached_input_tokens: openclawCached,
+      cache_creation_input_tokens: openclawCacheWrite,
+      output_tokens: openclawOutput,
       reasoning_output_tokens: 0,
-      total_tokens: inputTok + outputTok + cacheReadTok + cacheWriteTok,
+      total_tokens: openclawInput + openclawCached + openclawCacheWrite + openclawOutput,
       conversation_count: 1,
     };
 
@@ -4420,26 +4422,42 @@ async function parseKimiCodeIncremental({ wireFiles, cursors, queuePath, onProgr
 
       recordsProcessed++;
 
-      // Anthropic-style usage: input_tokens already excludes cache. OpenAI-compat
-      // models instead fold cached reads into input_tokens and expose them via
-      // input_tokens_details.cached_tokens — mirror kimi-code's own extractUsage
-      // so we never double-count cache as fresh input.
-      const cacheCreation = toNonNegativeInt(usage.cache_creation_input_tokens);
+      // kimi-code's wire usage comes in two shapes across versions:
+      //  - camelCase (proto 0.6.0+, current): { inputOther, inputCacheRead,
+      //    inputCacheCreation, output } where inputOther is already fresh
+      //    (non-cached) input — this is `response.usage` straight from the LLM
+      //    adapter (verified in @moonshot-ai/kimi-code 0.6.0/0.7.0/0.9.0).
+      //  - Anthropic-style (older): { input_tokens, output_tokens,
+      //    cache_read_input_tokens, cache_creation_input_tokens }. OpenAI-compat
+      //    models fold cached reads into input_tokens and expose them via
+      //    input_tokens_details.cached_tokens — subtract so we never double-count.
+      // step.end and usage.record carry the SAME per-step usage object, so we
+      // read only step.end here (reading both would double-count ~2x).
+      let cacheCreation;
       let cacheRead;
       let input;
-      if (usage.cache_read_input_tokens != null) {
-        cacheRead = toNonNegativeInt(usage.cache_read_input_tokens);
-        input = toNonNegativeInt(usage.input_tokens);
+      let output;
+      if (usage.inputOther != null) {
+        input = toNonNegativeInt(usage.inputOther);
+        cacheRead = toNonNegativeInt(usage.inputCacheRead);
+        cacheCreation = toNonNegativeInt(usage.inputCacheCreation);
+        output = toNonNegativeInt(usage.output);
       } else {
-        const details =
-          usage.input_tokens_details && typeof usage.input_tokens_details === "object"
-            ? usage.input_tokens_details
-            : null;
-        const cached = toNonNegativeInt(details ? details.cached_tokens : 0);
-        cacheRead = cached;
-        input = Math.max(0, toNonNegativeInt(usage.input_tokens) - cached);
+        cacheCreation = toNonNegativeInt(usage.cache_creation_input_tokens);
+        if (usage.cache_read_input_tokens != null) {
+          cacheRead = toNonNegativeInt(usage.cache_read_input_tokens);
+          input = toNonNegativeInt(usage.input_tokens);
+        } else {
+          const details =
+            usage.input_tokens_details && typeof usage.input_tokens_details === "object"
+              ? usage.input_tokens_details
+              : null;
+          const cached = toNonNegativeInt(details ? details.cached_tokens : 0);
+          cacheRead = cached;
+          input = Math.max(0, toNonNegativeInt(usage.input_tokens) - cached);
+        }
+        output = toNonNegativeInt(usage.output_tokens);
       }
-      const output = toNonNegativeInt(usage.output_tokens);
       if (input === 0 && output === 0 && cacheRead === 0 && cacheCreation === 0) {
         seenIds.add(id);
         continue;

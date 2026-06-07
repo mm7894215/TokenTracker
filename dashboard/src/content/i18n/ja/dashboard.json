@@ -102,7 +102,7 @@
   "dashboard.screenshot.twitter_button": "X にシェア",
   "dashboard.screenshot.twitter_label": "X にシェア",
   "dashboard.screenshot.twitter_hint": "画像を自動的にクリップボードにコピーします",
-  "dashboard.screenshot.twitter_text": "記録された {{total_tokens}} トークン。\\n{{model_name}} が {{model_percent}}% でリード。\\n\\n私の AI 使用状況、未監査 →\\ntokentracker.cc",
+  "dashboard.screenshot.twitter_text": "記録された {{total_tokens}} トークン。\\n{{model_name}} が {{model_percent}}% でリード。\\n\\n私の AI 使用状況、未監査 →",
   "heatmap.3d.hover_tip": "クリックして 3D 全画面回転分析モードに入る",
   "heatmap.3d.modal.title": "トークンの 3D ビュー",
   "heatmap.3d.modal.desc": "左ボタンを押しながらドラッグで自由に回転し、ホバーで日々のアクティビティと多次元の統計を確認できます。",

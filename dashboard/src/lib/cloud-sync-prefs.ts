@@ -40,6 +40,19 @@ export function setCloudSyncEnabled(enabled: boolean): void {
   } catch {
     /* ignore */
   }
+  // Notify the SAME tab. AccountViewContext listens for this event (and the
+  // cross-tab `storage` event) to recompute accountView. Without it, toggling
+  // cloud sync on localhost would not switch the dashboard to the cross-device
+  // cloud view until a manual reload — the multi-machine view stayed invisible
+  // on the most common path. (Event name mirrors CLOUD_SYNC_CHANGE_EVENT in
+  // AccountViewContext.jsx; dispatched here to avoid an import cycle.)
+  try {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("tt.cloudSyncChanged"));
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 export function getStoredDeviceSession(): CloudDeviceSession | null {

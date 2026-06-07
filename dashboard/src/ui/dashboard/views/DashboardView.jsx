@@ -10,6 +10,7 @@ import { FadeIn } from "../../foundation/FadeIn.jsx";
 import { MacAppBanner } from "../components/MacAppBanner.jsx";
 import { WidgetOnboardingCard } from "../components/WidgetOnboardingCard.jsx";
 import { LoginCard } from "../../../components/LoginCard.jsx";
+import { DashboardSkeleton } from "../../../components/DashboardSkeleton.jsx";
 import { cn } from "../../../lib/cn";
 import { LogoCarousel } from "../../marketing/LogoCarousel.jsx";
 import { AGENT_LOGOS } from "../../marketing/agent-logos.js";
@@ -141,6 +142,7 @@ export function DashboardView(props) {
     allowBreakdownToggle,
     refreshAll,
     usageLoadingState,
+    initialDashboardLoading,
     fleetData,
     hasDetailsActual,
     dailyEmptyPrefix,
@@ -217,7 +219,10 @@ export function DashboardView(props) {
             }
           />
         )}
-        {!showAuthGate && !showExpiredGate && (
+        {!showAuthGate && !showExpiredGate && initialDashboardLoading && (
+          <DashboardSkeleton />
+        )}
+        {!showAuthGate && !showExpiredGate && !initialDashboardLoading && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
               <div className="lg:col-span-4 flex flex-col gap-4 min-w-0 order-2 lg:order-1">
                 {screenshotMode ? (

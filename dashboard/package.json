@@ -30,6 +30,7 @@
     "date-fns": "^4.4.0",
     "html-to-image": "^1.11.13",
     "lucide-react": "^1.17.0",
+    "metal-fx": "^1.0.4",
     "motion": "^12.40.0",
     "ogl": "^1.0.11",
     "react": "^18.2.0",

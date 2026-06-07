@@ -66,6 +66,7 @@
   "landing.v2.cta.primary": "Dashboard",
   "landing.v2.hero.subtagline": "Claude Code、Cursor、Codex などのツールのトークン使用量を自動的に監視。ローカルファースト、プライバシー重視、設定不要。",
   "leaderboard.profile.nav.back": "リーダーボード",
+  "leaderboard.profile.nav.download": "ダウンロード",
   "leaderboard.title": "リーダーボード",
   "leaderboard.range": "UTC {{period}} · {{from}} – {{to}}",
   "leaderboard.range_loading": "UTC {{period}} · …",

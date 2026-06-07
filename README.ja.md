@@ -94,6 +94,7 @@ brew install mm7894215/tokentracker/tokentracker
 - 📈 **リアルタイムのレート制限トラッキング** — Claude / Codex / Cursor / Gemini / Kiro / Copilot / Antigravity のクォータウィンドウとリセットまでのカウントダウン
 - 💰 **コストエンジン** — [LiteLLM](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json) 経由で 2,200+ モデルの価格設定（毎日自動更新）に加え、ニッチなツール（Kiro、Cursor Composer、Kimi、CodeBuddy hy3）向けに厳選された上書き設定。24 時間のディスクキャッシュ + 同梱のオフラインスナップショットにより、ネット接続なしでも正確な USD 表示が可能です。ベンダーが公式価格を公開していないモデル（例: Tencent hy3-preview）はトークン数のみ追跡され、ベンダーが料金を公開するまでコストは $0 と表示されます。
 - 🌐 **オプションのリーダーボード** — 世界中の開発者と比較。ドラッグで列を並び替えて、気になるプロバイダーに絞り込めます（オプトイン制、参加にはサインインが必要）
+- 🔄 **デバイス横断アカウントビュー** — クラウド同期をオンにすると、利用しているすべてのマシン（ノート + デスクトップ + サーバー）の使用量を 1 つのビューに統合 — 合計・トレンド・ヒートマップ・モデル内訳をすべてデバイス横断で集計（オプトイン制、サインインが必要。デフォルトのローカルのみの体験は高速かつオフラインのまま）
 - 🧩 **オプションの Skills タブ** — `anthropics/skills`、`ComposioHQ/awesome-claude-skills`、`skills.sh`、そして自分で追加した任意の GitHub リポジトリから 250+ の公開 Skill をブラウズ。Claude / Codex / Gemini / OpenCode / Hermes にターゲット名を付けて同期し、ワンクリックで Undo
 - 🔒 **プライバシー最優先** — トークン数とタイムスタンプのみ。プロンプト、レスポンス、ファイル内容を扱うことは一切ありません。
 

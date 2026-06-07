@@ -1,5 +1,5 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef } from "react";
-import { useLocation } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import { ErrorBoundary } from "./components/ErrorBoundary.jsx";
@@ -213,6 +213,30 @@ export default function App() {
       isSkillsPath ||
       isWidgetsPath ||
       isIpCheckPath);
+
+  // Public-host gating: on www.tokentracker.cc et al. there is no local
+  // CLI :7680 to fall back to, so dashboard / settings / etc. require a
+  // signed-in user. publicMode (shared link) and the loading state are
+  // exceptions that handle themselves.
+  const publicHostNeedsLogin =
+    !isLocalMode &&
+    !cloudAuthSignedIn &&
+    !publicMode &&
+    !insforge.loading &&
+    gate === "dashboard" &&
+    // Public-readable routes must stay reachable for signed-out visitors:
+    // /leaderboard and /u/:userId profiles are deliberate no-auth reads
+    // (see api.ts getLeaderboard + LeaderboardProfilePage). Without these
+    // exclusions the gate would bounce anonymous share-link traffic to /login.
+    !isLeaderboardPath &&
+    !profileUserId &&
+    normalizedPath !== "/login" &&
+    normalizedPath !== "/landing" &&
+    normalizedPath !== "/auth/callback" &&
+    normalizedPath !== "/auth/native-callback";
+  if (publicHostNeedsLogin) {
+    return <Navigate to="/login" replace />;
+  }
 
   let content = null;
   if (normalizedPath === "/auth/callback" || normalizedPath === "/auth/native-callback") {

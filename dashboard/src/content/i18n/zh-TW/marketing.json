@@ -66,6 +66,7 @@
   "landing.v2.cta.primary": "Dashboard",
   "landing.v2.hero.subtagline": "自動監控 Claude Code、Cursor、Codex 等工具的 Token 用量。本地優先、注重隱私、零配置。",
   "leaderboard.profile.nav.back": "排行榜",
+  "leaderboard.profile.nav.download": "下載",
   "leaderboard.title": "排行榜",
   "leaderboard.range": "UTC {{period}} · {{from}} – {{to}}",
   "leaderboard.range_loading": "UTC {{period}} · …",

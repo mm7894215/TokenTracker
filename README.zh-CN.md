@@ -96,6 +96,7 @@ brew install mm7894215/tokentracker/tokentracker
 - 📈 **实时限额追踪** —— Claude / Codex / Cursor / Gemini / Kiro / Copilot / Antigravity 的配额窗口与重置倒计时
 - 💰 **成本引擎** —— 内置 70+ 模型定价表，精确到 USD
 - 🌐 **可选排行榜** —— 与全球开发者对比；列可拖拽排序，聚焦你关心的 provider（需登录参与）
+- 🔄 **跨设备账户视图** —— 开启云同步后，Dashboard 会把你在每台机器（笔记本 + 台式机 + 服务器）上的用量合并成一个视图——总量、趋势、热力图、模型明细全部跨设备聚合（可选，需登录；默认的纯本地体验依然即时、离线）
 - 🧩 **可选 Skills 面板** —— 浏览 250+ 公开 skill（来自 `anthropics/skills`、`ComposioHQ/awesome-claude-skills`、`skills.sh` 以及你自己添加的任何 GitHub 仓库），在 Claude / Codex / Grok / Antigravity / Gemini / OpenCode / Hermes 之间同步，目标 Agent 文字可见、可单独管理、一键撤销
 - 🔒 **隐私优先** —— 只记录 token 数量与时间戳。**绝不**收集 prompt、回复、文件内容
 

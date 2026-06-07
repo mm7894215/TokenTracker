@@ -13,6 +13,30 @@
  *      considered. tokentracker_devices_active_unique enforces one active
  *      device per (user, platform, device_name), so this filter drops the
  *      historic device_id churn from before partial-unique was enforced.
+ *
+ * Cross-device semantic = SUM (intentional; see GitHub Discussion #101).
+ *   The account view aggregates a user's usage ACROSS devices, so two real
+ *   machines MUST add up. SUM is correct ONLY when one physical machine maps
+ *   to ONE device_id. That invariant is provided by the MACHINE-stable device
+ *   identity: the dashboard derives device_name from a per-machine id served by
+ *   the local CLI (`/functions/tokentracker-machine-id`, see
+ *   dashboard/src/lib/cloud-sync.ts → resolveDeviceNameSuffix) instead of a
+ *   per-browser localStorage id. Without that, one machine opened in multiple
+ *   browsers split a bucket's cumulative emissions across device_ids and SUM
+ *   inflated the total.
+ *
+ *   PRODUCTION CHECK (30d, real data): SUM exceeds the leaderboard's
+ *   cross-device MAX by ~3.8% of the active-device total — but 99.3% of that
+ *   gap is GENUINE multi-machine usage (e.g. one user on MacIntel + Win32, or a
+ *   Linux server + a Mac laptop) that SUM correctly adds and MAX would wrongly
+ *   drop. That is exactly why this view uses SUM. True same-machine duplication
+ *   is only ~0.03% of the active total (1 user, same-platform device churn).
+ *   F1 (machine-stable device_name, see cloud-sync.ts) prevents NEW same-machine
+ *   spray; the tiny legacy churn ages out of rolling windows. Optional
+ *   fast-follow: a NON-destructive device-consolidation cleanup (back up first;
+ *   NEVER an offset-reset migration — that caused the 2.17B-token loss in
+ *   CLAUDE.md). The dashboard total intentionally differs from the leaderboard
+ *   rank because the leaderboard's MAX under-counts true multi-machine users.
  */
 import { createClient } from "npm:@insforge/sdk";
 
@@ -317,14 +341,66 @@ interface HourlyRow {
   conversations: number | null;
 }
 
-function computeRowCost(row: HourlyRow): number {
+interface GroupedRow {
+  bucket: string;
+  source: string;
+  model: string;
+  total_tokens: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cached_input_tokens: number | null;
+  cache_creation_input_tokens: number | null;
+  reasoning_output_tokens: number | null;
+  conversations: number | null;
+}
+
+/**
+ * Server-side aggregation. One RPC replaces the old N paginated 1000-row raw
+ * fetches: account_usage_grouped() GROUPs BY (tz-local bucket, source, model)
+ * in Postgres and returns a single JSONB array. SUM across the user's active
+ * devices is byte-identical to the old in-edge aggregation; tz-local bucketing
+ * uses `AT TIME ZONE` (same IANA database as the old JS Intl path, incl. DST).
+ */
+async function fetchGroupedRows(
+  client: ReturnType<typeof createClient>,
+  userId: string,
+  activeDeviceIds: string[],
+  fromIso: string,
+  toIso: string,
+  trunc: "hour" | "day" | "month" | "none",
+  tz: string | null,
+  tzOffsetMinutes: number | null,
+): Promise<GroupedRow[]> {
+  if (activeDeviceIds.length === 0) return [];
+  const { data, error } = await client.database.rpc("account_usage_grouped", {
+    p_user_id: userId,
+    p_device_ids: activeDeviceIds,
+    p_from: fromIso,
+    p_to: toIso,
+    p_trunc: trunc,
+    p_tz: tz,
+    p_offset_min: tzOffsetMinutes,
+  });
+  if (error) throw new Error(error.message);
+  return (Array.isArray(data) ? data : []) as GroupedRow[];
+}
+
+function computeRowCost(row: GroupedRow): number {
   const p = getModelPricing(row.model);
+  // Codex / every-code fold reasoning into output_tokens (OpenAI convention),
+  // so charging reasoning_output_tokens again at the output rate double-counts.
+  // Must stay in lockstep with src/lib/pricing/index.js:computeRowCost and
+  // tokentracker-leaderboard-refresh.ts (both guard on source).
+  const reasoningCost =
+    row.source === "codex" || row.source === "every-code"
+      ? 0
+      : (Number(row.reasoning_output_tokens) || 0) * (p.output || 0);
   return (
     ((Number(row.input_tokens) || 0) * (p.input || 0) +
       (Number(row.output_tokens) || 0) * (p.output || 0) +
       (Number(row.cached_input_tokens) || 0) * (p.cache_read || 0) +
       (Number(row.cache_creation_input_tokens) || 0) * ((p.cache_write ?? 0)) +
-      (Number(row.reasoning_output_tokens) || 0) * (p.output || 0)) /
+      reasoningCost) /
     1_000_000
   );
 }
@@ -342,15 +418,10 @@ interface DayAgg {
   conversation_count: number;
 }
 
-function aggregateByDay(
-  rows: HourlyRow[],
-  tz: string | null,
-  tzOffsetMinutes: number | null,
-): DayAgg[] {
+function aggregateByDay(rows: GroupedRow[]): DayAgg[] {
   const byDay = new Map<string, DayAgg>();
   for (const row of rows) {
-    if (!row.hour_start) continue;
-    const day = zonedDayKey(String(row.hour_start), tz, tzOffsetMinutes);
+    const day = row.bucket;
     let a = byDay.get(day);
     if (!a) {
       a = {
@@ -379,42 +450,6 @@ function aggregateByDay(
     a.conversation_count += Number(row.conversations) || 0;
   }
   return Array.from(byDay.values()).sort((a, b) => a.day.localeCompare(b.day));
-}
-
-async function fetchAllRows(
-  client: ReturnType<typeof createClient>,
-  userId: string,
-  activeDeviceIds: string[],
-  rangeStart: string,
-  rangeEnd: string,
-  columns = "hour_start, source, model, total_tokens, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, conversations",
-): Promise<HourlyRow[]> {
-  if (activeDeviceIds.length === 0) return [];
-  const out: HourlyRow[] = [];
-  const PAGE_SIZE = 1000;
-  // PostgREST `.in()` URL gets too large past ~25 IDs; chunk to be safe.
-  const DEVICE_CHUNK = 25;
-  for (let i = 0; i < activeDeviceIds.length; i += DEVICE_CHUNK) {
-    const chunk = activeDeviceIds.slice(i, i + DEVICE_CHUNK);
-    let offset = 0;
-    while (true) {
-      const { data, error } = await client.database
-        .from("tokentracker_hourly")
-        .select(columns)
-        .eq("user_id", userId)
-        .in("device_id", chunk)
-        .gte("hour_start", rangeStart)
-        .lt("hour_start", rangeEnd)
-        .order("hour_start", { ascending: true })
-        .range(offset, offset + PAGE_SIZE - 1);
-      if (error) throw new Error(error.message);
-      if (!data || data.length === 0) break;
-      out.push(...(data as unknown as HourlyRow[]));
-      if (data.length < PAGE_SIZE) break;
-      offset += PAGE_SIZE;
-    }
-  }
-  return out;
 }
 
 export default async function (req: Request): Promise<Response> {
@@ -479,14 +514,14 @@ export default async function (req: Request): Promise<Response> {
   const rollingStart = rollingStartDate.toISOString();
   const rollingEndNext = rollingEndDate;
 
-  let allRows: HourlyRow[];
+  let allRows: GroupedRow[];
   try {
-    allRows = await fetchAllRows(client, userId, activeDeviceIds, rollingStart, rollingEndNext.toISOString());
+    allRows = await fetchGroupedRows(client, userId, activeDeviceIds, rollingStart, rollingEndNext.toISOString(), "day", tz, tzOffsetMinutes);
   } catch (e) {
     return json({ error: (e as Error).message }, 500);
   }
 
-  const allDaily = aggregateByDay(allRows, tz, tzOffsetMinutes);
+  const allDaily = aggregateByDay(allRows);
   const daily = allDaily.filter((d) => d.day >= from && d.day <= to);
 
   const totals = daily.reduce(

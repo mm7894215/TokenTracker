@@ -66,6 +66,7 @@
   "landing.v2.cta.primary": "Dashboard",
   "landing.v2.hero.subtagline": "Claude Code, Cursor, Codex 등의 토큰 사용량을 자동으로 모니터링하세요. 로컬 우선, 개인정보 보호 중심, 수동 설정 불필요.",
   "leaderboard.profile.nav.back": "리더보드",
+  "leaderboard.profile.nav.download": "다운로드",
   "leaderboard.title": "리더보드",
   "leaderboard.range": "UTC {{period}} · {{from}} – {{to}}",
   "leaderboard.range_loading": "UTC {{period}} · …",

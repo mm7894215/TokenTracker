@@ -53,6 +53,68 @@ async function triggerLeaderboardRefresh(
   } catch { /* best effort */ }
 }
 
+const CLIENT_ID_KEY = "tokentracker_client_id_v1";
+
+/**
+ * Stable per-browser client identifier. Persisted in localStorage so the
+ * same browser on the same machine gets the same device_id across token
+ * rotations, but different browsers / different machines see different IDs.
+ *
+ * Needed because the cloud `tokentracker_devices_active_unique` index is
+ * keyed by (user_id, platform, device_name). Without a per-client suffix,
+ * every browser session for the same user on Mac+Chrome collapses to a
+ * single device_id, so two laptops would overwrite each other's hourly
+ * rows (ingest is upsert by (user, device, hour, source, model)).
+ */
+function getOrCreateClientId(): string {
+  if (typeof window === "undefined") return "ssr";
+  try {
+    const existing = window.localStorage.getItem(CLIENT_ID_KEY);
+    if (existing && existing.length >= 8) return existing;
+    const generated =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    window.localStorage.setItem(CLIENT_ID_KEY, generated);
+    return generated;
+  } catch {
+    // localStorage unavailable (private mode, quota) — fall back to a
+    // session-scoped id so at least different tabs in the same session
+    // don't all collide with the global "Token Tracker (dashboard)".
+    return `eph-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+}
+
+/**
+ * Resolve the device_name suffix used when minting a cloud device token.
+ *
+ * Prefers a stable per-MACHINE id served by the local CLI
+ * (/functions/tokentracker-machine-id, persisted in ~/.tokentracker/.../config.json).
+ * That makes every browser / WKWebView / cleared-cache session on the SAME
+ * machine resolve to ONE cloud device_id, so cross-device SUM aggregation is
+ * correct (one physical machine = one device whose cumulative queue upserts
+ * onto a single row; genuinely distinct machines stay distinct and sum).
+ *
+ * Falls back to the per-browser client id only when the local server is
+ * unreachable — exactly the public-host case, where no local sync runs anyway.
+ */
+async function resolveDeviceNameSuffix(): Promise<string> {
+  try {
+    const res = await fetch("/functions/tokentracker-machine-id", {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (res.ok) {
+      const data = (await res.json().catch(() => null)) as { machineId?: string } | null;
+      const machineId = typeof data?.machineId === "string" ? data.machineId : null;
+      if (machineId && machineId.length >= 8) return machineId.slice(0, 8);
+    }
+  } catch {
+    /* local server unreachable — fall back to the per-browser id below */
+  }
+  return getOrCreateClientId().slice(0, 8);
+}
+
 /**
  * 用当前登录 JWT 向 InsForge 签发 device token，供本地 `tokentracker sync` 上传到云端。
  */
@@ -71,12 +133,14 @@ async function issueDeviceTokenForCloud(accessToken: string): Promise<CloudDevic
     typeof navigator !== "undefined" && typeof navigator.platform === "string"
       ? navigator.platform
       : "web";
-  // 云端 slug 为 tokentracker-device-token-issue（历史文档里的 tokentracker-* 在本项目未部署）
+  const deviceNameSuffix = await resolveDeviceNameSuffix();
+  const deviceName = `Token Tracker (dashboard) #${deviceNameSuffix}`;
+  // 云端 slug 为 tokentracker-device-token-issue（历史文档里的 vibeusage-* 在本项目未部署）
   const res = await fetch(`${root}/functions/tokentracker-device-token-issue`, {
     method: "POST",
     headers,
     body: JSON.stringify({
-      device_name: "Token Tracker (dashboard)",
+      device_name: deviceName,
       platform,
     }),
   });

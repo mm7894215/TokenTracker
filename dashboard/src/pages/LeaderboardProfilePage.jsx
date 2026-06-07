@@ -1,7 +1,9 @@
 import React, { useMemo } from "react";
 import { Link } from "react-router-dom";
-import { Trophy } from "lucide-react";
+import { Trophy, Download } from "lucide-react";
+import { MetalFx } from "metal-fx";
 import { copy } from "../lib/copy";
+import { isNativeApp } from "../lib/native-bridge.js";
 import { useCurrency } from "../hooks/useCurrency.js";
 import { useTheme } from "../hooks/useTheme.js";
 import { ThemeToggle } from "../ui/foundation/ThemeToggle.jsx";
@@ -15,6 +17,8 @@ import {
   useLeaderboardProfileData,
 } from "../components/leaderboard/LeaderboardProfileModal.jsx";
 
+const RELEASE_URL = "https://github.com/mm7894215/TokenTracker/releases/latest";
+
 /**
  * Standalone, shareable per-user profile page at /u/:userId. Reuses the same
  * content + data hook as the leaderboard modal; renders inside a centered
@@ -27,6 +31,9 @@ export function LeaderboardProfilePage({ auth, signedIn, sessionSoftExpired, use
   const { openLoginModal } = useLoginModal();
   const { signedIn: realSignedIn, loading: authLoading } = useInsforgeAuth();
 
+  // Browser visitors landing on a shared profile are prime download targets;
+  // hide the CTA when already running inside the native app.
+  const showDownload = !isNativeApp();
 
   const authTokenAllowed = signedIn && !sessionSoftExpired;
   const accessToken = useMemo(() => {
@@ -60,7 +67,7 @@ export function LeaderboardProfilePage({ auth, signedIn, sessionSoftExpired, use
           <div className="flex items-center gap-1.5 sm:gap-2">
             <Link
               to="/leaderboard"
-              className="group no-underline inline-flex items-center gap-1.5 h-8 px-3 text-xs font-bold rounded-lg border border-oai-gray-200 dark:border-white/10 bg-transparent text-oai-gray-700 dark:text-oai-gray-300 hover:bg-oai-gray-100 dark:hover:bg-white/5 hover:text-oai-black dark:hover:text-white transition-all duration-200 active:scale-95 shadow-sm"
+              className="group no-underline inline-flex items-center gap-1.5 h-8 px-3 text-xs font-bold rounded-full border border-oai-gray-200 dark:border-white/10 bg-transparent text-oai-gray-700 dark:text-oai-gray-300 hover:bg-oai-gray-100 dark:hover:bg-white/5 hover:text-oai-black dark:hover:text-white transition-all duration-200 active:scale-95 shadow-sm"
             >
               <Trophy
                 size={13}
@@ -71,16 +78,42 @@ export function LeaderboardProfilePage({ auth, signedIn, sessionSoftExpired, use
               <span>{copy("leaderboard.profile.nav.back")}</span>
             </Link>
 
+            {showDownload && (
+              <MetalFx
+                variant="button"
+                preset="chromatic"
+                theme="dark"
+                borderRadius={9999}
+                disableGlow
+                className="!bg-black"
+              >
+                <a
+                  href={RELEASE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group no-underline inline-flex h-8 items-center gap-1.5 px-3 text-xs font-bold rounded-full bg-black text-white transition-transform duration-200 active:scale-[0.98]"
+                >
+                  <Download
+                    size={13}
+                    strokeWidth={2.5}
+                    aria-hidden
+                    className="transition-transform duration-150 ease-out group-hover:translate-y-0.5"
+                  />
+                  <span className="hidden sm:inline">{copy("leaderboard.profile.nav.download")}</span>
+                </a>
+              </MetalFx>
+            )}
+
             {/* 已登录时优雅渲染头像，未登录时渲染高精齐平的圆角矩形幽灵 Sign In */}
             {authLoading ? (
-              <div className="h-8 w-16 animate-pulse rounded-lg bg-oai-gray-200 dark:bg-white/10" aria-hidden />
+              <div className="h-8 w-16 animate-pulse rounded-full bg-oai-gray-200 dark:bg-white/10" aria-hidden />
             ) : realSignedIn ? (
               <InsforgeUserHeaderControls />
             ) : (
               <button
                 type="button"
                 onClick={openLoginModal}
-                className="inline-flex h-8 min-w-[76px] items-center justify-center rounded-lg bg-oai-gray-900 dark:bg-white text-white dark:text-oai-gray-950 hover:bg-oai-gray-800 dark:hover:bg-oai-gray-100 transition-all duration-200 active:scale-[0.98] select-none text-xs font-bold shadow-sm"
+                className="inline-flex h-8 min-w-[76px] items-center justify-center px-3 text-xs font-bold rounded-full border border-oai-gray-200 dark:border-white/10 bg-transparent text-oai-gray-700 dark:text-oai-gray-300 hover:bg-oai-gray-100 dark:hover:bg-white/5 hover:text-oai-black dark:hover:text-white transition-all duration-200 active:scale-95 shadow-sm select-none"
               >
                 {copy("header.auth.sign_in_aria")}
               </button>
@@ -89,8 +122,8 @@ export function LeaderboardProfilePage({ auth, signedIn, sessionSoftExpired, use
         </div>
       </header>
 
-      <main className="flex-1 pt-4 pb-10 sm:pt-6 sm:pb-16">
-        <div className="mx-auto max-w-2xl px-4 sm:px-6">
+      <main className="flex-1 px-4 pt-4 pb-10 sm:pt-6 sm:pb-16">
+        <div className="mx-auto max-w-3xl">
           <div className="rounded-2xl bg-white dark:bg-oai-gray-950 ring-1 ring-oai-gray-200 dark:ring-oai-gray-800 overflow-hidden shadow-sm dark:shadow-none">
             {state.loading && <ProfileSkeleton variant="page" />}
             {!state.loading && state.error && (
@@ -114,18 +147,10 @@ export function LeaderboardProfilePage({ auth, signedIn, sessionSoftExpired, use
         </div>
       </main>
 
-      <footer className="border-t border-oai-gray-200 dark:border-oai-gray-900 py-8 transition-colors duration-200">
-        <div className="mx-auto flex max-w-2xl items-center justify-between px-4 sm:px-6 text-sm text-oai-gray-400 dark:text-oai-gray-500">
+      <footer className="border-t border-oai-gray-200 dark:border-oai-gray-900 py-8 px-4 transition-colors duration-200">
+        <div className="mx-auto flex max-w-3xl items-center justify-between text-sm text-oai-gray-400 dark:text-oai-gray-500">
           <p>{copy("landing.v2.footer.line")}</p>
-          <div className="flex items-center gap-3">
-            <ThemeToggle theme={theme} resolvedTheme={resolvedTheme} onSetTheme={setTheme} direction="up" align="right" />
-            <Link
-              to="/leaderboard"
-              className="text-oai-gray-400 dark:text-oai-gray-500 hover:text-oai-black dark:hover:text-white transition-colors"
-            >
-              {copy("leaderboard.profile.nav.back")}
-            </Link>
-          </div>
+          <ThemeToggle theme={theme} resolvedTheme={resolvedTheme} onSetTheme={setTheme} direction="up" align="right" />
         </div>
       </footer>
     </div>

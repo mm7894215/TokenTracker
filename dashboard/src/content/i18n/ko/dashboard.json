@@ -102,7 +102,7 @@
   "dashboard.screenshot.twitter_button": "X에 공유",
   "dashboard.screenshot.twitter_label": "X에 공유",
   "dashboard.screenshot.twitter_hint": "이미지를 클립보드에 자동 복사합니다",
-  "dashboard.screenshot.twitter_text": "기록된 {{total_tokens}} 토큰.\\n{{model_name}}이(가) {{model_percent}}%로 1위.\\n\\n검증되지 않은 나의 AI 사용량 →\\ntokentracker.cc",
+  "dashboard.screenshot.twitter_text": "기록된 {{total_tokens}} 토큰.\\n{{model_name}}이(가) {{model_percent}}%로 1위.\\n\\n검증되지 않은 나의 AI 사용량 →",
   "heatmap.3d.hover_tip": "클릭하여 3D 전체 화면 회전 분석 모드로 진입",
   "heatmap.3d.modal.title": "토큰 3D 투시",
   "heatmap.3d.modal.desc": "마우스 왼쪽 버튼으로 드래그하여 회전하세요. 마우스를 올리면 일별 활동과 다차원 지표를 확인할 수 있습니다.",
