@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { UsageLimitsPanel } from "./UsageLimitsPanel.jsx";
 
@@ -103,6 +103,12 @@ describe("UsageLimitsPanel", () => {
   });
 
   it("renders Codex Spark quota windows", () => {
+    function expectLimitRow(label, value) {
+      const row = screen.getByText(label).closest("div");
+      expect(row).not.toBeNull();
+      expect(within(row).getByText(value)).toBeInTheDocument();
+    }
+
     render(
       <UsageLimitsPanel
         codex={{
@@ -118,13 +124,9 @@ describe("UsageLimitsPanel", () => {
     );
 
     expect(screen.getByText("Codex")).toBeInTheDocument();
-    expect(screen.getByText("5h")).toBeInTheDocument();
-    expect(screen.getByText("7d")).toBeInTheDocument();
-    expect(screen.getByText("5h (Spark)")).toBeInTheDocument();
-    expect(screen.getByText("7d (Spark)")).toBeInTheDocument();
-    expect(screen.getByText("12%")).toBeInTheDocument();
-    expect(screen.getByText("30%")).toBeInTheDocument();
-    expect(screen.getByText("4%")).toBeInTheDocument();
-    expect(screen.getByText("18%")).toBeInTheDocument();
+    expectLimitRow("5h", "12%");
+    expectLimitRow("7d", "30%");
+    expectLimitRow("5h (Spark)", "4%");
+    expectLimitRow("7d (Spark)", "18%");
   });
 });
