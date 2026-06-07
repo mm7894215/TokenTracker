@@ -127,6 +127,7 @@ test("Codex Spark usage limits are wired through macOS consumers", () => {
   assert.match(statusBarController, /case \.codexSpark5h:\s*return codex\.sparkPrimaryWindow != nil/);
   assert.match(statusBarController, /case \.codexSpark7d:\s*return codex\.sparkSecondaryWindow != nil/);
   assert.ok(statusBarController.includes("limits.isProviderAvailable(provider) && limits.hasData(for: metric)"));
+  assert.match(statusBarController, /guard let limits else \{\s*return false\s*\}/);
   assert.match(statusBarController, /case \.codexSpark5h:\s*guard let window = viewModel\.usageLimits\?\.codex\.sparkPrimaryWindow,/);
   assert.match(statusBarController, /case \.codexSpark7d:\s*guard let window = viewModel\.usageLimits\?\.codex\.sparkSecondaryWindow,/);
 

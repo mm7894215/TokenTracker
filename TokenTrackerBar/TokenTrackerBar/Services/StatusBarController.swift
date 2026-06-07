@@ -200,7 +200,8 @@ enum MenuBarDisplayPreferences {
     /// Token/cost metrics are always included. Currently-selected ids are kept
     /// regardless so users don't lose their selection during a transient error
     /// (the rendered menu bar already hides those slots via compactMap).
-    /// When `limits` is nil (loading state), all metrics are returned.
+    /// When `limits` is nil (loading state), only token/cost metrics and the
+    /// currently-selected slots are returned.
     static func availableItemsPayload(
         for limits: UsageLimitsResponse? = nil,
         keepingSelected selected: [String] = []
@@ -210,7 +211,7 @@ enum MenuBarDisplayPreferences {
             .filter { metric in
                 guard let provider = metric.providerKey else { return true }
                 if selectedSet.contains(metric.rawValue) { return true }
-                guard let limits else { return true }
+                guard let limits else { return false }
                 return limits.isProviderAvailable(provider) && limits.hasData(for: metric)
             }
             .map {
