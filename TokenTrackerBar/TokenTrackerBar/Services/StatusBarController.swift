@@ -156,6 +156,37 @@ private extension UsageLimitsResponse {
         default: return false
         }
     }
+
+    func hasData(for metric: MenuBarDisplayMetric) -> Bool {
+        switch metric {
+        case .todayTokens, .todayCost, .last7dTokens, .totalTokens, .totalCost:
+            return true
+        case .claude5h: return claude.fiveHour != nil
+        case .claude7d: return claude.sevenDay != nil
+        case .codex5h: return codex.primaryWindow != nil
+        case .codex7d: return codex.secondaryWindow != nil
+        case .codexSpark5h: return codex.sparkPrimaryWindow != nil
+        case .codexSpark7d: return codex.sparkSecondaryWindow != nil
+        case .cursorPlan: return cursor.primaryWindow != nil
+        case .cursorAuto: return cursor.secondaryWindow != nil
+        case .cursorAPI: return cursor.tertiaryWindow != nil
+        case .geminiPro: return gemini.primaryWindow != nil
+        case .geminiFlash: return gemini.secondaryWindow != nil
+        case .geminiLite: return gemini.tertiaryWindow != nil
+        case .kimiWeekly: return kimi?.primaryWindow != nil
+        case .kimi5h: return kimi?.secondaryWindow != nil
+        case .kimiTotal: return kimi?.tertiaryWindow != nil
+        case .kiroMonth: return kiro.primaryWindow != nil
+        case .kiroBonus: return kiro.secondaryWindow != nil
+        case .grokMonth: return grok?.primaryWindow != nil
+        case .grokOndemand: return grok?.secondaryWindow != nil
+        case .copilotPremium: return copilot?.primaryWindow != nil
+        case .copilotChat: return copilot?.secondaryWindow != nil
+        case .antigravityClaude: return antigravity.primaryWindow != nil
+        case .antigravityGPro: return antigravity.secondaryWindow != nil
+        case .antigravityFlash: return antigravity.tertiaryWindow != nil
+        }
+    }
 }
 
 enum MenuBarDisplayPreferences {
@@ -164,11 +195,11 @@ enum MenuBarDisplayPreferences {
     static let maxVisibleItems = 2
 
     /// Payload of selectable metrics for the dashboard dropdown.
-    /// When `limits` is provided, limit slots whose provider is unconfigured or
-    /// reporting an error are filtered out so users only see options that have
-    /// data. Token/cost metrics are always included. Currently-selected ids are
-    /// kept regardless so users don't lose their selection during a transient
-    /// error (the rendered menu bar already hides those slots via compactMap).
+    /// When `limits` is provided, limit slots whose provider is unconfigured,
+    /// reporting an error, or missing that specific window are filtered out.
+    /// Token/cost metrics are always included. Currently-selected ids are kept
+    /// regardless so users don't lose their selection during a transient error
+    /// (the rendered menu bar already hides those slots via compactMap).
     /// When `limits` is nil (loading state), all metrics are returned.
     static func availableItemsPayload(
         for limits: UsageLimitsResponse? = nil,
@@ -180,7 +211,7 @@ enum MenuBarDisplayPreferences {
                 guard let provider = metric.providerKey else { return true }
                 if selectedSet.contains(metric.rawValue) { return true }
                 guard let limits else { return true }
-                return limits.isProviderAvailable(provider)
+                return limits.isProviderAvailable(provider) && limits.hasData(for: metric)
             }
             .map {
                 [
