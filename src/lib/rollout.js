@@ -5229,7 +5229,7 @@ async function parseRoocodeIncremental({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Zed Agent (hosted models only, provider == "zed.dev")
+// Zed Agent (all model providers — hosted "zed.dev" and bring-your-own alike)
 //
 // Data: SQLite at
 //   macOS:    ~/Library/Application Support/Zed/threads/threads.db
@@ -5249,11 +5249,21 @@ async function parseRoocodeIncremental({
 // antigravity cumulative-delta pattern: keep last-seen totals per thread in
 // `cursors.zed.threadTotals`, emit (current - previous) on each sync.
 //
-// External ACP agents are skipped (their CLIs already report to us through
-// their own parsers — counting them via the Zed UI would double-count).
+// Providers already reported by a dedicated parser are skipped to avoid
+// double-counting (see ZED_DOUBLE_COUNTED_PROVIDERS — empty today). Model names
+// are normalized for pricing in the matcher (normalizeZedModel), not here, so
+// the real Zed model name is preserved for display.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const ZED_HOSTED_PROVIDER = "zed.dev";
+// Providers whose usage is ALSO captured by a dedicated TokenTracker parser, so
+// counting them via the Zed thread store would double-count. Zed's native model
+// providers (zed.dev, copilot_chat, openai*, anthropic, google, ollama,
+// lmstudio, …) do NOT overlap: e.g. Zed's copilot_chat talks to the Copilot API
+// directly and never writes ~/.copilot/otel, which is what the Copilot parser
+// reads. The set is therefore empty today; it's the extension point if Zed ever
+// persists external-ACP-agent usage (Claude Code / Codex run inside Zed) into
+// threads.db with a recognizable provider id.
+const ZED_DOUBLE_COUNTED_PROVIDERS = new Set();
 const MAX_ZED_THREAD_JSON_BYTES = 32 * 1024 * 1024;
 
 function resolveZedDbPath(env = process.env) {
@@ -5347,7 +5357,11 @@ function extractZedTotals(thread) {
   const model = thread.model;
   if (!model || typeof model !== "object") return null;
   const provider = typeof model.provider === "string" ? model.provider.trim() : "";
-  if (provider.toLowerCase() !== ZED_HOSTED_PROVIDER) return null;
+  // Count usage for ALL providers — Zed-hosted (zed.dev) and bring-your-own
+  // (copilot_chat, openai-subscribed, anthropic, lmstudio, …) alike. Only skip
+  // providers whose usage a dedicated parser already reports (see
+  // ZED_DOUBLE_COUNTED_PROVIDERS).
+  if (provider && ZED_DOUBLE_COUNTED_PROVIDERS.has(provider.toLowerCase())) return null;
   const modelId = typeof model.model === "string" ? model.model.trim() : "";
   if (!modelId) return null;
 

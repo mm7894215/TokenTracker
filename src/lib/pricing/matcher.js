@@ -56,9 +56,36 @@ function normalizeAntigravityModel(model) {
   return lower;
 }
 
-function shouldNormalizeAntigravity(source) {
-  return typeof source === "string" && source.toLowerCase() === "antigravity";
+// Zed stores model names inconsistently across versions and providers: a mix
+// of canonical ids (`gpt-5.5`, `claude-opus-4.8`) and human display names
+// (`Claude Sonnet 4`, `GPT-5 (Preview)`, `Gemini 3 Pro (Preview)`). Map both to
+// the pricing engine's keys for cost lookup ONLY — the raw name is still what
+// gets stored/displayed. Unlike normalizeAntigravityModel we must NOT strip the
+// word "fast" (it is part of `grok-code-fast-1`) and we keep dotted GPT minors
+// (`gpt-5.2`) while hyphenating Claude minors (`claude-opus-4.8` ->
+// `claude-opus-4-8`) to match each family's LiteLLM/curated key style.
+function normalizeZedModel(model) {
+  if (!model || typeof model !== "string") return model;
+  let m = model
+    .trim()
+    .replace(/\([^)]*\)/g, " ") // drop "(Preview)" and similar qualifiers
+    .toLowerCase()
+    .replace(/[^a-z0-9./]+/g, "-") // spaces/underscores -> hyphen; keep . and /
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+  if (/^claude-(sonnet|opus|haiku)-\d+\.\d+/.test(m)) {
+    m = m.replace(/^(claude-(?:sonnet|opus|haiku)-\d+)\.(\d+)/, "$1-$2");
+  }
+  return m;
 }
+
+// Per-source model-name normalizers, applied at pricing-lookup time only (the
+// raw model name is preserved for storage/display). Add a source here when its
+// model strings don't match the LiteLLM/curated keys verbatim.
+const SOURCE_MODEL_NORMALIZERS = {
+  antigravity: normalizeAntigravityModel,
+  zed: normalizeZedModel,
+};
 
 // Memoise the sorted-by-length LiteLLM key list. Reverse-substring scan walks
 // this once per uncached model; ~2k keys × negligible per-iteration cost, but
@@ -104,9 +131,9 @@ function lookupPricing(model, { curated, litellm, source } = {}) {
   if (!model || typeof model !== "string") {
     return { hit: false, source: "empty", value: null };
   }
-  const lookupModel = shouldNormalizeAntigravity(source)
-    ? normalizeAntigravityModel(model)
-    : model;
+  const normalize =
+    typeof source === "string" ? SOURCE_MODEL_NORMALIZERS[source.toLowerCase()] : null;
+  const lookupModel = normalize ? normalize(model) : model;
   const lower = lookupModel.toLowerCase();
   const dotForm = buildDotRestoredModel(lookupModel);
 
@@ -250,6 +277,7 @@ module.exports = {
   lookupPricing,
   stripReasoningSuffix,
   normalizeAntigravityModel,
+  normalizeZedModel,
   convertLitellmEntry,
   buildLitellmPerMillionMap,
 };
