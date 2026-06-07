@@ -1791,19 +1791,45 @@ function createLocalApiHandler({ queuePath }) {
             // Claude Code built-in tools (bash/agent/…), which dominate the logs
             // and are NOT uninstallable. Cost is priced per-model (source=claude).
             const installed = skills.listInstalledSkills();
+            const skillDirectoryLeaf = (value) =>
+              String(value || "").replace(/\\/g, "/").split("/").filter(Boolean).pop()?.trim().toLowerCase() || "";
+            const leafCounts = new Map();
+            for (const s of installed) {
+              const leaf = skillDirectoryLeaf(s.directory);
+              if (leaf) leafCounts.set(leaf, (leafCounts.get(leaf) || 0) + 1);
+            }
+            const installedByDirectory = new Map();
+            const installedByLeaf = new Map();
+            const nameCounts = new Map();
             const installedByName = new Map();
             for (const s of installed) {
-              for (const key of [s.directory, s.name]) {
-                const norm = String(key || "").trim().toLowerCase();
-                if (norm) installedByName.set(norm, s);
+              const dir = String(s.directory || "").trim().toLowerCase();
+              if (dir) installedByDirectory.set(dir, s);
+              const leaf = skillDirectoryLeaf(s.directory);
+              if (leaf && leafCounts.get(leaf) === 1) installedByLeaf.set(leaf, s);
+              const name = String(s.name || "").trim().toLowerCase();
+              if (name) {
+                nameCounts.set(name, (nameCounts.get(name) || 0) + 1);
+                if (!installedByName.has(name)) installedByName.set(name, s);
               }
             }
+            const findInstalledSkill = (value) => {
+              const norm = String(value || "").trim().toLowerCase();
+              if (!norm) return null;
+              if (installedByDirectory.has(norm)) return installedByDirectory.get(norm);
+              if (installedByLeaf.has(norm)) return installedByLeaf.get(norm);
+              if (nameCounts.get(norm) === 1) return installedByName.get(norm);
+              if (leafCounts.get(norm) > 1) return null;
+              return null;
+            };
+            const usedSkillIds = new Set();
             const priced = usage.skills.map((entry) => {
               let cost = 0;
               for (const [model, tokens] of Object.entries(entry.models || {})) {
                 cost += computeRowCost({ ...tokens, model, source: "claude" });
               }
-              const match = installedByName.get(String(entry.skill || "").trim().toLowerCase());
+              const match = findInstalledSkill(entry.skill);
+              if (match?.id) usedSkillIds.add(match.id);
               return {
                 skill: entry.skill,
                 invocations: entry.invocations,
@@ -1816,13 +1842,8 @@ function createLocalApiHandler({ queuePath }) {
               };
             });
             // Installed skills with zero invocations = dead-weight candidates.
-            const usedNames = new Set(usage.skills.map((s) => String(s.skill || "").trim().toLowerCase()));
             const unusedInstalled = installed
-              .filter((s) => {
-                const dir = String(s.directory || "").trim().toLowerCase();
-                const name = String(s.name || "").trim().toLowerCase();
-                return !usedNames.has(dir) && !usedNames.has(name);
-              })
+              .filter((s) => !usedSkillIds.has(s.id))
               .map((s) => ({ skillId: s.id, directory: s.directory, name: s.name }));
             json(res, {
               generatedAt: usage.generatedAt,
