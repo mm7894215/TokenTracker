@@ -107,7 +107,7 @@ describe("SkillsPage", () => {
     expect(searchSkills).not.toHaveBeenCalled();
   });
 
-  it("clears My tab search when clear filters is clicked", async () => {
+  it("clears My tab search when clear search is clicked", async () => {
     const user = userEvent.setup();
     render(<SkillsPage />);
 
@@ -122,11 +122,56 @@ describe("SkillsPage", () => {
       expect(screen.queryByText("Beta Skill")).not.toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: copy("skills.filter.clear") }));
+    await user.click(screen.getByRole("button", { name: copy("skills.action.search_clear") }));
 
     await waitFor(() => {
       expect(screen.getByText("Beta Skill")).toBeInTheDocument();
       expect(searchInput).toHaveValue("");
     });
+  });
+
+  it("does not mark an unrelated browse skill installed when only the nested local leaf matches", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getInstalledSkills).mockResolvedValue({
+      targets: [
+        { id: "claude", label: "Claude" },
+        { id: "codex", label: "Codex" },
+      ],
+      skills: [
+        {
+          id: "local:apple/apple-notes",
+          name: "Local Apple Notes",
+          directory: "apple/apple-notes",
+          description: "Nested local skill.",
+          targets: ["claude"],
+          managed: true,
+        },
+      ],
+    });
+    vi.mocked(getSkillRepos).mockResolvedValue({
+      repos: [{ owner: "someone", name: "unrelated-skills", branch: "main", enabled: true }],
+    });
+    vi.mocked(discoverSkills).mockResolvedValue({
+      skills: [
+        {
+          key: "someone/unrelated-skills:apple-notes",
+          name: "Remote Apple Notes",
+          directory: "apple-notes",
+          description: "Different remote skill with the same leaf name.",
+          repoOwner: "someone",
+          repoName: "unrelated-skills",
+          repoBranch: "main",
+        },
+      ],
+    });
+
+    render(<SkillsPage />);
+
+    expect(await screen.findByText("Local Apple Notes")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: copy("skills.tab.browse") }));
+
+    expect(await screen.findByText("Remote Apple Notes")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: copy("skills.action.install") })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: copy("skills.card.manage") })).not.toBeInTheDocument();
   });
 });

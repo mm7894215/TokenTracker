@@ -174,11 +174,20 @@ function sanitizePathSegment(value) {
 }
 
 function sanitizeRelativePath(value) {
-  const raw = String(value || "").replace(/\\/g, "/").trim();
-  if (!raw || raw.startsWith("/") || raw.includes("\0")) return null;
+  const input = String(value || "").trim();
+  const raw = input.replace(/\\/g, "/");
+  if (!raw || raw.includes("\0")) return null;
+  if (path.posix.isAbsolute(raw) || path.win32.isAbsolute(input) || path.win32.isAbsolute(raw)) return null;
   const parts = raw.split("/").filter(Boolean);
-  if (!parts.length || parts.some((part) => part === "." || part === "..")) return null;
+  if (!parts.length || parts.some((part) => part === "." || part === ".." || part.includes(":"))) return null;
   return parts.join("/");
+}
+
+function sanitizeLocalSkillPath(value) {
+  const safe = sanitizeRelativePath(value);
+  if (!safe) return null;
+  if (safe.split("/").some((part) => part.startsWith("."))) return null;
+  return safe;
 }
 
 function installNameFromDirectory(directory) {
@@ -254,6 +263,36 @@ function findSkillMarker(dir) {
     }
   }
   return null;
+}
+
+const MAX_LOCAL_SKILL_SCAN_DEPTH = 3;
+
+function scanSkillDirectories(rootDir) {
+  const found = [];
+  const walk = (dir, relDir = "", depth = 0) => {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (_e) {
+      return;
+    }
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+      if (!entry.name || entry.name.startsWith(".")) continue;
+      const rel = relDir ? `${relDir}/${entry.name}` : entry.name;
+      const full = path.join(dir, entry.name);
+      if (findSkillMarker(full)) {
+        found.push(rel);
+        continue;
+      }
+      // Direct symlinked skills are accepted above, but symlinked group folders
+      // are not traversed so the scan stays within the target skills tree.
+      if (entry.isDirectory() && depth + 1 < MAX_LOCAL_SKILL_SCAN_DEPTH) walk(full, rel, depth + 1);
+    }
+  };
+  walk(rootDir);
+  return found;
 }
 
 const HASH_IGNORE = new Set([".git", ".DS_Store", "Thumbs.db", ".gitignore"]);
@@ -537,6 +576,19 @@ function copyDir(source, dest) {
   fs.cpSync(source, dest, { recursive: true, force: true });
 }
 
+function removeEmptyAncestors(startDir, stopDir) {
+  let current = path.resolve(startDir);
+  const stop = path.resolve(stopDir);
+  while (pathStrictlyWithin(stop, current)) {
+    try {
+      fs.rmdirSync(current);
+    } catch (_e) {
+      return;
+    }
+    current = path.dirname(current);
+  }
+}
+
 function syncSkillToTarget(directory, targetId) {
   const target = TARGETS[targetId];
   if (!target) throw new Error(`Unsupported target: ${targetId}`);
@@ -559,7 +611,9 @@ function removeSkillFromTarget(directory, targetId) {
   const target = TARGETS[targetId];
   if (!target) return;
   for (const baseDir of targetDirs(target)) {
-    removePath(path.join(baseDir, directory));
+    const targetPath = path.join(baseDir, directory);
+    removePath(targetPath);
+    removeEmptyAncestors(path.dirname(targetPath), baseDir);
   }
 }
 
@@ -612,19 +666,11 @@ function listInstalledSkills() {
   const unmanaged = new Map();
   for (const target of Object.values(TARGETS)) {
     for (const dir of targetDirs(target)) {
-      let entries = [];
-      try {
-        entries = fs.readdirSync(dir, { withFileTypes: true });
-      } catch (_e) {
-        continue;
-      }
-      for (const entry of entries) {
-        if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
-        const directory = entry.name;
-        if (!directory || directory.startsWith(".") || managedDirs.has(directory.toLowerCase())) continue;
+      for (const directory of scanSkillDirectories(dir)) {
+        if (!directory || managedDirs.has(directory.toLowerCase())) continue;
         const skillPath = findSkillMarker(path.join(dir, directory));
         if (!skillPath) continue;
-        const metadata = readSkillMetadata(fs.readFileSync(skillPath, "utf8"), directory);
+        const metadata = readSkillMetadata(fs.readFileSync(skillPath, "utf8"), installNameFromDirectory(directory) || directory);
         const key = directory.toLowerCase();
         if (!unmanaged.has(key)) {
           unmanaged.set(key, {
@@ -670,6 +716,8 @@ async function installSkill(skillInput, targetIds = ["claude", "codex"]) {
   };
   if (!skill.repoOwner || !skill.repoName) throw new Error("Missing GitHub repository information");
   const sourceDir = sanitizeRelativePath(skill.directory);
+  // GitHub-sourced skills keep the historical flat install name even when
+  // sourceDirectory is nested; local nested-skill support uses importLocalSkill().
   const installName = installNameFromDirectory(sourceDir);
   if (!sourceDir || !installName) throw new Error("Invalid skill directory");
 
@@ -758,9 +806,11 @@ function uninstallSkill(id) {
   if (fs.existsSync(ssotPath)) {
     ensureDir(trashDir());
     const stamp = Date.now();
-    const trashPath = path.join(trashDir(), `${skill.directory}-${stamp}`);
+    const trashName = `${Buffer.from(String(skill.directory || ""), "utf8").toString("base64url")}-${stamp}`;
+    const trashPath = path.join(trashDir(), trashName);
     try {
       fs.renameSync(ssotPath, trashPath);
+      removeEmptyAncestors(path.dirname(ssotPath), ssotDir());
       skill.trashedAt = stamp;
       skill.trashedDirectory = path.basename(trashPath);
       skill.previousTargets = skill.targets || [];
@@ -773,6 +823,7 @@ function uninstallSkill(id) {
       return { ok: true, trashed: true, restoreId: skill.id, ttlMs: TRASH_TTL_MS };
     } catch (_e) {
       removePath(ssotPath);
+      removeEmptyAncestors(path.dirname(ssotPath), ssotDir());
     }
   }
   registry.skills = registry.skills.filter((entry) => entry.id !== skill.id);
@@ -840,11 +891,11 @@ function setSkillTargets(id, targetIds) {
 }
 
 function findLocalSkillSource(directory) {
-  const installName = sanitizePathSegment(directory);
-  if (!installName) return null;
+  const sourceDir = sanitizeLocalSkillPath(directory);
+  if (!sourceDir) return null;
   for (const target of Object.values(TARGETS)) {
     for (const baseDir of targetDirs(target)) {
-      const skillPath = path.join(baseDir, installName);
+      const skillPath = path.join(baseDir, sourceDir);
       if (findSkillMarker(skillPath)) {
         return { path: skillPath, targetId: target.id };
       }
@@ -854,10 +905,10 @@ function findLocalSkillSource(directory) {
 }
 
 function importLocalSkill(directory, targetIds = []) {
-  const installName = sanitizePathSegment(directory);
-  if (!installName) throw new Error("Invalid skill directory");
+  const sourceDir = sanitizeLocalSkillPath(directory);
+  if (!sourceDir) throw new Error("Invalid skill directory");
   const registry = readRegistry();
-  const existing = registry.skills.find((entry) => entry.directory.toLowerCase() === installName.toLowerCase());
+  const existing = registry.skills.find((entry) => entry.directory.toLowerCase() === sourceDir.toLowerCase());
   if (existing) {
     if (!targetIds || !targetIds.length) {
       return { ...existing, managed: true, targets: existing.targets || [] };
@@ -865,22 +916,22 @@ function importLocalSkill(directory, targetIds = []) {
     return setSkillTargets(existing.id, targetIds);
   }
 
-  const source = findLocalSkillSource(installName);
+  const source = findLocalSkillSource(sourceDir);
   if (!source) throw new Error("Local skill not found");
 
-  const dest = path.join(ssotDir(), installName);
+  const dest = path.join(ssotDir(), sourceDir);
   copyDir(source.path, dest);
   const skillMarker = findSkillMarker(dest);
-  const metadata = readSkillMetadata(skillMarker ? fs.readFileSync(skillMarker, "utf8") : "", installName);
-  const discoveredTargets = Object.keys(TARGETS).filter((targetId) => scanTargetSkill(installName, targetId));
+  const metadata = readSkillMetadata(skillMarker ? fs.readFileSync(skillMarker, "utf8") : "", installNameFromDirectory(sourceDir));
+  const discoveredTargets = Object.keys(TARGETS).filter((targetId) => scanTargetSkill(sourceDir, targetId));
   const selectedTargets = (targetIds.length ? targetIds : discoveredTargets).filter((targetId) => TARGETS[targetId]);
   const skill = {
-    id: `local:${installName}`,
-    key: `local:${installName}`,
+    id: `local:${sourceDir}`,
+    key: `local:${sourceDir}`,
     name: metadata.name,
     description: metadata.description,
-    directory: installName,
-    sourceDirectory: installName,
+    directory: sourceDir,
+    sourceDirectory: sourceDir,
     readmeUrl: null,
     repoOwner: null,
     repoName: null,
@@ -893,15 +944,15 @@ function importLocalSkill(directory, targetIds = []) {
   registry.skills.push(skill);
   saveRegistry(registry);
   for (const targetId of Object.keys(TARGETS)) {
-    if (selectedTargets.includes(targetId)) syncSkillToTarget(installName, targetId);
-    else removeSkillFromTarget(installName, targetId);
+    if (selectedTargets.includes(targetId)) syncSkillToTarget(sourceDir, targetId);
+    else removeSkillFromTarget(sourceDir, targetId);
   }
-  appendActivity({ action: "import", name: skill.name, directory: installName, targets: selectedTargets });
+  appendActivity({ action: "import", name: skill.name, directory: sourceDir, targets: selectedTargets });
   return { ...skill, managed: true, targets: selectedTargets };
 }
 
 function deleteLocalSkill(directory, targetIds = []) {
-  const installName = sanitizePathSegment(directory);
+  const installName = sanitizeLocalSkillPath(directory);
   if (!installName) throw new Error("Invalid skill directory");
   const selectedTargets = targetIds.length ? targetIds : Object.keys(TARGETS);
   for (const targetId of selectedTargets) removeSkillFromTarget(installName, targetId);

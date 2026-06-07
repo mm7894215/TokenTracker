@@ -71,12 +71,120 @@ describe("skills-manager addRepo validation", () => {
 describe("skills-manager importLocalSkill sanitization", () => {
   it("rejects invalid directory names", () => {
     assert.throws(() => skills.importLocalSkill("..", []), /Invalid skill directory/);
-    assert.throws(() => skills.importLocalSkill("foo/bar", []), /Invalid skill directory/);
+    assert.throws(() => skills.importLocalSkill("../foo", []), /Invalid skill directory/);
+    assert.throws(() => skills.importLocalSkill("foo/../bar", []), /Invalid skill directory/);
+    assert.throws(() => skills.importLocalSkill("/tmp/foo", []), /Invalid skill directory/);
+    assert.throws(() => skills.importLocalSkill("C:/foo", []), /Invalid skill directory/);
+    assert.throws(() => skills.importLocalSkill("C:\\foo", []), /Invalid skill directory/);
+    assert.throws(() => skills.importLocalSkill("\\\\server\\share\\foo", []), /Invalid skill directory/);
+    assert.throws(() => skills.importLocalSkill("foo:bar", []), /Invalid skill directory/);
     assert.throws(() => skills.importLocalSkill("", []), /Invalid skill directory/);
+    assert.throws(() => skills.deleteLocalSkill("C:/foo", ["hermes"]), /Invalid skill directory/);
+    assert.throws(() => skills.deleteLocalSkill("\\\\server\\share\\foo", ["hermes"]), /Invalid skill directory/);
   });
 
   it("throws when skill is not present in any target folder", () => {
     assert.throws(() => skills.importLocalSkill("not-there", ["claude"]), /Local skill not found/);
+  });
+});
+
+describe("skills-manager nested local skill folders", () => {
+  const nestedSkill = "apple/apple-notes";
+  const archivedSkill = ".archive/old-skill";
+
+  before(() => {
+    writeLocalSkill(".hermes/skills", nestedSkill, "---\nname: Apple Notes\ndescription: Nested Hermes skill\n---\n");
+    writeLocalSkill(".hermes/skills", archivedSkill, "---\nname: Archived Skill\ndescription: Should stay hidden\n---\n");
+  });
+
+  it("lists nested skills below target skill folders while skipping hidden groups", () => {
+    const installed = skills.listInstalledSkills();
+    const nested = installed.find((s) => s.directory === nestedSkill);
+    assert.ok(nested, "nested Hermes skill should be discovered");
+    assert.equal(nested.name, "Apple Notes");
+    assert.deepEqual(nested.targets, ["hermes"]);
+    assert.equal(nested.targetStates.hermes, "synced");
+    assert.equal(installed.some((s) => s.directory === archivedSkill), false);
+  });
+
+  it("rejects direct local imports and deletes from hidden skill groups", () => {
+    assert.throws(() => skills.importLocalSkill(archivedSkill, ["hermes"]), /Invalid skill directory/);
+    assert.throws(() => skills.deleteLocalSkill(archivedSkill, ["hermes"]), /Invalid skill directory/);
+  });
+
+  it("can promote a nested unmanaged skill without flattening its target path", () => {
+    const imported = skills.importLocalSkill(nestedSkill, ["hermes", "codex"]);
+    assert.equal(imported.managed, true);
+    assert.equal(imported.directory, nestedSkill);
+    assert.deepEqual(new Set(imported.targets), new Set(["hermes", "codex"]));
+    assert.ok(fs.existsSync(path.join(sandboxHome, ".hermes/skills", nestedSkill, "SKILL.md")));
+    assert.ok(fs.existsSync(path.join(sandboxHome, ".codex/skills", nestedSkill, "SKILL.md")));
+
+    skills.uninstallSkill(imported.id);
+    assert.ok(!fs.existsSync(path.join(sandboxHome, ".hermes/skills", nestedSkill)));
+    assert.ok(!fs.existsSync(path.join(sandboxHome, ".codex/skills", nestedSkill)));
+    assert.ok(!fs.existsSync(path.join(sandboxHome, ".hermes/skills/apple")));
+    assert.ok(!fs.existsSync(path.join(sandboxHome, ".codex/skills/apple")));
+    assert.ok(!fs.existsSync(path.join(sandboxHome, ".tokentracker/skills/managed/apple")));
+  });
+
+  it("keeps non-empty parent folders when removing one nested managed skill", () => {
+    writeLocalSkill(".hermes/skills", "shared-parent/remove-one", "---\nname: Remove One\n---\n");
+    writeLocalSkill(".hermes/skills", "shared-parent/keep-one", "---\nname: Keep One\n---\n");
+    const removed = skills.importLocalSkill("shared-parent/remove-one", ["hermes"]);
+    const kept = skills.importLocalSkill("shared-parent/keep-one", ["hermes"]);
+
+    skills.uninstallSkill(removed.id);
+
+    assert.ok(!fs.existsSync(path.join(sandboxHome, ".tokentracker/skills/managed/shared-parent/remove-one")));
+    assert.ok(fs.existsSync(path.join(sandboxHome, ".tokentracker/skills/managed/shared-parent/keep-one/SKILL.md")));
+    assert.ok(fs.existsSync(path.join(sandboxHome, ".hermes/skills/shared-parent/keep-one/SKILL.md")));
+    assert.ok(fs.existsSync(path.join(sandboxHome, ".tokentracker/skills/managed/shared-parent")));
+    assert.ok(fs.existsSync(path.join(sandboxHome, ".hermes/skills/shared-parent")));
+
+    skills.uninstallSkill(kept.id);
+  });
+
+  it("uses the leaf folder name as fallback display name for nested unmanaged skills", () => {
+    writeLocalSkill(".hermes/skills", "fallback/no-name", "---\ndescription: Missing explicit name\n---\n");
+    const entry = skills.listInstalledSkills().find((s) => s.directory === "fallback/no-name");
+    assert.ok(entry);
+    assert.equal(entry.name, "no-name");
+  });
+
+  it("does not scan arbitrarily deep local skill directory trees", () => {
+    writeLocalSkill(".hermes/skills", "too/deep/for/scan/nested", "---\nname: Too Deep\n---\n");
+    const installed = skills.listInstalledSkills();
+    assert.equal(installed.some((s) => s.directory === "too/deep/for/scan/nested"), false);
+  });
+
+  it("keeps undo restore available for nested skills whose flattened names collide", () => {
+    writeLocalSkill(".hermes/skills", "collision/a-b", "---\nname: Collision Nested\ndescription: Nested\n---\n");
+    writeLocalSkill(".hermes/skills", "collision__a-b", "---\nname: Collision Flat\ndescription: Flat\n---\n");
+    const nested = skills.importLocalSkill("collision/a-b", ["hermes"]);
+    const flat = skills.importLocalSkill("collision__a-b", ["hermes"]);
+    const originalNow = Date.now;
+    Date.now = () => 1234567890;
+    try {
+      const nestedRemoved = skills.uninstallSkill(nested.id);
+      const flatRemoved = skills.uninstallSkill(flat.id);
+      assert.equal(nestedRemoved.trashed, true);
+      assert.equal(flatRemoved.trashed, true);
+      assert.notEqual(nestedRemoved.restoreId, flatRemoved.restoreId);
+      skills.restoreSkill(nested.id);
+      skills.restoreSkill(flat.id);
+      assert.ok(fs.existsSync(path.join(sandboxHome, ".hermes/skills/collision/a-b/SKILL.md")));
+      assert.ok(fs.existsSync(path.join(sandboxHome, ".hermes/skills/collision__a-b/SKILL.md")));
+    } finally {
+      Date.now = originalNow;
+      for (const id of [nested.id, flat.id]) {
+        try {
+          skills.uninstallSkill(id);
+        } catch (_e) {
+          // already cleaned up
+        }
+      }
+    }
   });
 });
 

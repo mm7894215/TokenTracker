@@ -18,6 +18,41 @@ const queuePath = path.join(sandboxHome, "queue.jsonl");
 fs.writeFileSync(queuePath, "");
 const handler = createLocalApiHandler({ queuePath });
 
+function writeLocalSkill(targetDir, directory, body = "---\nname: Local Skill\ndescription: Test skill\n---\n") {
+  const dir = path.join(sandboxHome, targetDir, directory);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "SKILL.md"), body);
+  return dir;
+}
+
+function writeSkillUsageTranscript(skillName) {
+  const projDir = path.join(sandboxHome, ".claude", "projects", "proj");
+  fs.mkdirSync(projDir, { recursive: true });
+  const line = JSON.stringify({
+    type: "assistant",
+    timestamp: "2026-05-01T00:00:00.000Z",
+    message: {
+      id: `msg-${skillName}`,
+      model: "claude-opus-4-6",
+      usage: {
+        input_tokens: 100,
+        output_tokens: 50,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+      },
+      content: [
+        {
+          type: "tool_use",
+          id: `block-${skillName}`,
+          name: "Skill",
+          input: { skill: skillName },
+        },
+      ],
+    },
+  });
+  fs.writeFileSync(path.join(projDir, `${skillName}.jsonl`), `${line}\n`);
+}
+
 function makeReq({ method = "GET", pathname = "/functions/tokentracker-skills", search = "", headers = {}, body }) {
   const url = new URL(`http://localhost${pathname}${search}`);
   let listeners = {};
@@ -168,6 +203,39 @@ describe("/functions/tokentracker-skills auth + input", () => {
     assert.ok(Array.isArray(body.skills));
     assert.ok(Array.isArray(body.unusedInstalled));
     assert.ok(Number.isFinite(body.totalInvocations));
+  });
+
+  it("GET mode=skill_usage joins nested installed skills by leaf name", async () => {
+    writeLocalSkill(".hermes/skills", "apple/apple-notes", "---\nname: Apple Notes\ndescription: Nested\n---\n");
+    writeSkillUsageTranscript("apple-notes");
+
+    const { status, body } = await call({ method: "GET", search: "?mode=skill_usage&force=1" });
+
+    assert.equal(status, 200);
+    const usage = body.skills.find((entry) => entry.skill === "apple-notes");
+    assert.ok(usage);
+    assert.equal(usage.installed, true);
+    assert.equal(usage.directory, "apple/apple-notes");
+    assert.equal(body.unusedInstalled.some((entry) => entry.directory === "apple/apple-notes"), false);
+  });
+
+  it("GET mode=skill_usage does not join ambiguous nested leaf names", async () => {
+    writeLocalSkill(".hermes/skills", "alpha/shared-note", "---\ndescription: first\n---\n");
+    writeLocalSkill(".codex/skills", "beta/shared-note", "---\ndescription: second\n---\n");
+    writeSkillUsageTranscript("shared-note");
+
+    const { status, body } = await call({ method: "GET", search: "?mode=skill_usage&force=1" });
+
+    assert.equal(status, 200);
+    const usage = body.skills.find((entry) => entry.skill === "shared-note");
+    assert.ok(usage);
+    assert.equal(usage.installed, false);
+    assert.equal(usage.directory, null);
+    const unused = body.unusedInstalled
+      .filter((entry) => entry.directory.endsWith("/shared-note"))
+      .map((entry) => entry.directory)
+      .sort();
+    assert.deepEqual(unused, ["alpha/shared-note", "beta/shared-note"]);
   });
 
   it("GET mode=popular returns install-sorted skills (stubbed fetch)", async () => {
