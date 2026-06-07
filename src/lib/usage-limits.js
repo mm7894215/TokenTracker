@@ -174,6 +174,43 @@ function normalizeCodexRateWindows(rateLimit) {
   return { primary_window: session, secondary_window: weekly };
 }
 
+function isCodexSparkLimit(entry) {
+  if (!entry || typeof entry !== "object") return false;
+  return [entry.limit_name, entry.metered_feature].some((value) => (
+    typeof value === "string" && value.trim().toLowerCase().includes("spark")
+  ));
+}
+
+function normalizeCodexSparkRateWindows(additionalRateLimits) {
+  let session = null;
+  let weekly = null;
+  if (!Array.isArray(additionalRateLimits)) {
+    return { spark_primary_window: null, spark_secondary_window: null };
+  }
+
+  for (const entry of additionalRateLimits) {
+    if (!isCodexSparkLimit(entry)) continue;
+    const rateLimit = entry.rate_limit;
+    if (!rateLimit || typeof rateLimit !== "object") continue;
+
+    const candidates = [
+      { window: rateLimit.primary_window, fallback: "session" },
+      { window: rateLimit.secondary_window, fallback: "weekly" },
+    ];
+    for (const { window, fallback } of candidates) {
+      if (!window || typeof window !== "object") continue;
+      const kind = classifyCodexWindow(window) || fallback;
+      if (kind === "session" && !session) session = window;
+      else if (kind === "weekly" && !weekly) weekly = window;
+    }
+  }
+
+  return {
+    spark_primary_window: session,
+    spark_secondary_window: weekly,
+  };
+}
+
 async function fetchCodexUsageLimits(
   accessToken,
   { fetchImpl = fetch, accountId = null } = {},
@@ -195,13 +232,21 @@ async function fetchCodexUsageLimits(
   // 401/403/404 from wham means "no usage data available for this auth state" — render
   // a neutral empty state instead of a red "Fetch failed" error.
   if (res.status === 401 || res.status === 403 || res.status === 404) {
-    return { primary_window: null, secondary_window: null };
+    return {
+      primary_window: null,
+      secondary_window: null,
+      spark_primary_window: null,
+      spark_secondary_window: null,
+    };
   }
   if (!res.ok) {
     throw new Error(`Codex API returned ${res.status}`);
   }
   const body = await res.json();
-  return normalizeCodexRateWindows(body.rate_limit || {});
+  return {
+    ...normalizeCodexRateWindows(body.rate_limit || {}),
+    ...normalizeCodexSparkRateWindows(body.additional_rate_limits),
+  };
 }
 
 function cursorPercentFromCentsUsedLimit(usedRaw, limitRaw) {
@@ -1766,6 +1811,8 @@ async function getUsageLimits({
       plan_type: codexPlanType || null,
       primary_window: codexResult.value.primary_window,
       secondary_window: codexResult.value.secondary_window,
+      spark_primary_window: codexResult.value.spark_primary_window,
+      spark_secondary_window: codexResult.value.spark_secondary_window,
     };
   }
 

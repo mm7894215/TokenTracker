@@ -104,6 +104,25 @@ function makeFakeCodexJwt(planType) {
   return `${header}.${payload}.`;
 }
 
+function writeCodexAuth(tmp, planType = "plus", extraTokens = {}) {
+  const codexHome = path.join(tmp, ".codex");
+  fs.mkdirSync(codexHome, { recursive: true });
+  fs.writeFileSync(
+    path.join(codexHome, "auth.json"),
+    JSON.stringify({
+      tokens: {
+        access_token: makeFakeCodexJwt(planType),
+        id_token: makeFakeCodexJwt(planType),
+        ...extraTokens,
+      },
+    }),
+  );
+}
+
+function inactiveRunner() {
+  return { status: 1, stdout: "" };
+}
+
 describe("getUsageLimits", () => {
   it("classifies a 5h session window into primary regardless of slot position", async () => {
     resetUsageLimitsCache();
@@ -226,6 +245,189 @@ describe("getUsageLimits", () => {
         limit_window_seconds: 604800,
         reset_at: 42,
       });
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("maps Codex Spark windows by duration when their slots are reversed", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-codex-spark-reversed-"));
+    try {
+      writeCodexAuth(tmp, "plus", { account_id: "acc-spark-reversed" });
+
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 1000,
+        securityRunner: inactiveRunner,
+        commandRunner: inactiveRunner,
+        fetchImpl(url) {
+          if (typeof url === "string" && url.includes("chatgpt.com/backend-api/wham/usage")) {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                rate_limit: {
+                  primary_window: { used_percent: 12, limit_window_seconds: 18000, reset_at: 11111 },
+                  secondary_window: { used_percent: 30, limit_window_seconds: 604800, reset_at: 99999 },
+                },
+                additional_rate_limits: [
+                  {
+                    limit_name: "codex spark model",
+                    rate_limit: {
+                      primary_window: { used_percent: 18, limit_window_seconds: 604800, reset_at: 33333 },
+                      secondary_window: { used_percent: 4, limit_window_seconds: 18000, reset_at: 22222 },
+                    },
+                  },
+                ],
+              }),
+            });
+          }
+          return new Promise(() => {});
+        },
+      });
+
+      assert.deepEqual(result.codex.primary_window, {
+        used_percent: 12,
+        limit_window_seconds: 18000,
+        reset_at: 11111,
+      });
+      assert.deepEqual(result.codex.secondary_window, {
+        used_percent: 30,
+        limit_window_seconds: 604800,
+        reset_at: 99999,
+      });
+      assert.deepEqual(result.codex.spark_primary_window, {
+        used_percent: 4,
+        limit_window_seconds: 18000,
+        reset_at: 22222,
+      });
+      assert.deepEqual(result.codex.spark_secondary_window, {
+        used_percent: 18,
+        limit_window_seconds: 604800,
+        reset_at: 33333,
+      });
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to Spark slot position only inside each Spark entry when durations are unknown", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-codex-spark-fallback-"));
+    try {
+      writeCodexAuth(tmp, "plus");
+
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 1000,
+        securityRunner: inactiveRunner,
+        commandRunner: inactiveRunner,
+        fetchImpl(url) {
+          if (typeof url === "string" && url.includes("chatgpt.com/backend-api/wham/usage")) {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                rate_limit: {
+                  primary_window: { used_percent: 1, limit_window_seconds: 18000, reset_at: 100 },
+                  secondary_window: { used_percent: 2, limit_window_seconds: 604800, reset_at: 200 },
+                },
+                additional_rate_limits: [
+                  {
+                    metered_feature: "  Codex Spark Requests  ",
+                    rate_limit: {
+                      primary_window: { used_percent: 7, limit_window_seconds: 12345, reset_at: 300 },
+                      secondary_window: { used_percent: 19, reset_at: 400 },
+                    },
+                  },
+                  {
+                    limit_name: "spark duplicate",
+                    rate_limit: {
+                      primary_window: { used_percent: 99, limit_window_seconds: 18000, reset_at: 500 },
+                      secondary_window: { used_percent: 88, limit_window_seconds: 604800, reset_at: 600 },
+                    },
+                  },
+                ],
+              }),
+            });
+          }
+          return new Promise(() => {});
+        },
+      });
+
+      assert.deepEqual(result.codex.spark_primary_window, {
+        used_percent: 7,
+        limit_window_seconds: 12345,
+        reset_at: 300,
+      });
+      assert.deepEqual(result.codex.spark_secondary_window, {
+        used_percent: 19,
+        reset_at: 400,
+      });
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores non-Spark additional rate limits and keeps Spark windows null", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-codex-non-spark-"));
+    try {
+      writeCodexAuth(tmp, "plus");
+
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 1000,
+        securityRunner: inactiveRunner,
+        commandRunner: inactiveRunner,
+        fetchImpl(url) {
+          if (typeof url === "string" && url.includes("chatgpt.com/backend-api/wham/usage")) {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                rate_limit: {
+                  primary_window: { used_percent: 11, limit_window_seconds: 18000, reset_at: 700 },
+                  secondary_window: { used_percent: 22, limit_window_seconds: 604800, reset_at: 800 },
+                },
+                additional_rate_limits: [
+                  null,
+                  "bad-entry",
+                  {
+                    limit_name: "codex regular model",
+                    metered_feature: "codex_model",
+                    rate_limit: {
+                      primary_window: { used_percent: 77, limit_window_seconds: 18000, reset_at: 900 },
+                      secondary_window: { used_percent: 66, limit_window_seconds: 604800, reset_at: 1000 },
+                    },
+                  },
+                ],
+              }),
+            });
+          }
+          return new Promise(() => {});
+        },
+      });
+
+      assert.deepEqual(result.codex.primary_window, {
+        used_percent: 11,
+        limit_window_seconds: 18000,
+        reset_at: 700,
+      });
+      assert.deepEqual(result.codex.secondary_window, {
+        used_percent: 22,
+        limit_window_seconds: 604800,
+        reset_at: 800,
+      });
+      assert.equal(result.codex.spark_primary_window, null);
+      assert.equal(result.codex.spark_secondary_window, null);
     } finally {
       resetUsageLimitsCache();
       fs.rmSync(tmp, { recursive: true, force: true });
@@ -394,6 +596,8 @@ describe("getUsageLimits", () => {
       assert.equal(result.codex.error, null);
       assert.equal(result.codex.primary_window, null);
       assert.equal(result.codex.secondary_window, null);
+      assert.equal(result.codex.spark_primary_window, null);
+      assert.equal(result.codex.spark_secondary_window, null);
     } finally {
       resetUsageLimitsCache();
       fs.rmSync(tmp, { recursive: true, force: true });
