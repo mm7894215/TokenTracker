@@ -45,7 +45,7 @@ describe("UsageLimitsPanel", () => {
     expect(screen.getByText("5h")).toBeInTheDocument();
     expect(screen.getByText("Total")).toBeInTheDocument();
     expect(screen.getByText("Parallel: 20")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Usage Limits · Used" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Usage Limits\s*·\s*Used/ })).toBeInTheDocument();
     expect(screen.getByText("64%")).toBeInTheDocument();
     expect(screen.getByText("4%")).toBeInTheDocument();
     expect(screen.getByText("1%")).toBeInTheDocument();
@@ -100,5 +100,31 @@ describe("UsageLimitsPanel", () => {
     );
 
     expect(screen.getByText("Cursor")).toBeInTheDocument();
+  });
+
+  it("renders Codex Spark quota windows", () => {
+    render(
+      <UsageLimitsPanel
+        codex={{
+          configured: true,
+          error: null,
+          primary_window: { used_percent: 12, reset_at: 1_800_000_000, limit_window_seconds: 18000 },
+          secondary_window: { used_percent: 30, reset_at: 1_800_604_800, limit_window_seconds: 604800 },
+          spark_primary_window: { used_percent: 4, reset_at: 1_800_000_001, limit_window_seconds: 18000 },
+          spark_secondary_window: { used_percent: 18, reset_at: 1_800_604_801, limit_window_seconds: 604800 },
+        }}
+        order={["codex"]}
+      />,
+    );
+
+    expect(screen.getByText("Codex")).toBeInTheDocument();
+    expect(screen.getByText("5h")).toBeInTheDocument();
+    expect(screen.getByText("7d")).toBeInTheDocument();
+    expect(screen.getByText("5h (Spark)")).toBeInTheDocument();
+    expect(screen.getByText("7d (Spark)")).toBeInTheDocument();
+    expect(screen.getByText("12%")).toBeInTheDocument();
+    expect(screen.getByText("30%")).toBeInTheDocument();
+    expect(screen.getByText("4%")).toBeInTheDocument();
+    expect(screen.getByText("18%")).toBeInTheDocument();
   });
 });
