@@ -103,6 +103,7 @@ test("Codex Spark usage limits are wired through macOS consumers", () => {
   const model = read("TokenTrackerBar/TokenTrackerBar/Models/UsageLimits.swift");
   const usageLimitsView = read("TokenTrackerBar/TokenTrackerBar/Views/UsageLimitsView.swift");
   const widgetSnapshotWriter = read("TokenTrackerBar/TokenTrackerBar/Services/WidgetSnapshotWriter.swift");
+  const widgetStrings = read("TokenTrackerBar/TokenTrackerWidget/Views/WidgetStrings.swift");
   const statusBarController = read("TokenTrackerBar/TokenTrackerBar/Services/StatusBarController.swift");
   const nativeBridge = read("TokenTrackerBar/TokenTrackerBar/Services/NativeBridge.swift");
 
@@ -116,6 +117,17 @@ test("Codex Spark usage limits are wired through macOS consumers", () => {
 
   assert.match(widgetSnapshotWriter, /if let w = limits\.codex\.sparkPrimaryWindow \{\s*out\.append\(LimitProvider\([^)]*label: "Codex · 5h \(Spark\)"/);
   assert.match(widgetSnapshotWriter, /if let w = limits\.codex\.sparkSecondaryWindow \{\s*out\.append\(LimitProvider\([^)]*label: "Codex · weekly \(Spark\)"/);
+  assert.ok(widgetStrings.includes('let sparkSuffix = label.contains("Spark") ? " (Spark)" : ""'));
+  for (const localizedSparkLabel of [
+    String.raw`\(source) · 5小时\(sparkSuffix)`,
+    String.raw`\(source) · 7天\(sparkSuffix)`,
+    String.raw`\(source) · 5小時\(sparkSuffix)`,
+    String.raw`\(source) · 5時間\(sparkSuffix)`,
+    String.raw`\(source) · 5시간\(sparkSuffix)`,
+    String.raw`\(source) · 7일\(sparkSuffix)`,
+  ]) {
+    assert.ok(widgetStrings.includes(localizedSparkLabel));
+  }
 
   assert.ok(statusBarController.includes("case codexSpark5h"));
   assert.ok(statusBarController.includes("case codexSpark7d"));
