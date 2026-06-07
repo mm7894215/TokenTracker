@@ -23,6 +23,8 @@ enum MenuBarDisplayMetric: String, CaseIterable {
     case kimiTotal
     case kiroMonth
     case kiroBonus
+    case grokMonth
+    case grokOndemand
     case copilotPremium
     case copilotChat
     case antigravityClaude
@@ -51,6 +53,8 @@ enum MenuBarDisplayMetric: String, CaseIterable {
         case .kimiTotal: return "Km Tot"
         case .kiroMonth: return "Kr Mo"
         case .kiroBonus: return "Kr Bn"
+        case .grokMonth: return "Gk Mo"
+        case .grokOndemand: return "Gk OD"
         case .copilotPremium: return "Co Prem"
         case .copilotChat: return "Co Chat"
         case .antigravityClaude: return "Ag Cl"
@@ -81,6 +85,8 @@ enum MenuBarDisplayMetric: String, CaseIterable {
         case .kimiTotal: return "Kimi Total Limit"
         case .kiroMonth: return "Kiro Monthly Limit"
         case .kiroBonus: return "Kiro Bonus Limit"
+        case .grokMonth: return "Grok Build Monthly Limit"
+        case .grokOndemand: return "Grok Build On-demand Limit"
         case .copilotPremium: return "Copilot Premium Limit"
         case .copilotChat: return "Copilot Chat Limit"
         case .antigravityClaude: return "Antigravity Claude Limit"
@@ -100,6 +106,7 @@ enum MenuBarDisplayMetric: String, CaseIterable {
              .geminiPro, .geminiFlash, .geminiLite,
              .kimiWeekly, .kimi5h, .kimiTotal,
              .kiroMonth, .kiroBonus,
+             .grokMonth, .grokOndemand,
              .copilotPremium, .copilotChat,
              .antigravityClaude, .antigravityGPro, .antigravityFlash:
             return "limits"
@@ -119,6 +126,7 @@ enum MenuBarDisplayMetric: String, CaseIterable {
         case .geminiPro, .geminiFlash, .geminiLite: return "gemini"
         case .kimiWeekly, .kimi5h, .kimiTotal: return "kimi"
         case .kiroMonth, .kiroBonus: return "kiro"
+        case .grokMonth, .grokOndemand: return "grok"
         case .copilotPremium, .copilotChat: return "copilot"
         case .antigravityClaude, .antigravityGPro, .antigravityFlash: return "antigravity"
         }
@@ -136,6 +144,7 @@ private extension UsageLimitsResponse {
         case "gemini": return gemini.configured && gemini.error == nil
         case "kimi": return (kimi?.configured == true) && (kimi?.error == nil)
         case "kiro": return kiro.configured && kiro.error == nil
+        case "grok": return (grok?.configured == true) && (grok?.error == nil)
         case "copilot": return (copilot?.configured == true) && (copilot?.error == nil)
         case "antigravity": return antigravity.configured && antigravity.error == nil
         default: return false
@@ -497,6 +506,10 @@ final class StatusBarController: NSObject {
                 return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.kiro.configured, error: viewModel.usageLimits?.kiro.error, window: viewModel.usageLimits?.kiro.primaryWindow)
             case .kiroBonus:
                 return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.kiro.configured, error: viewModel.usageLimits?.kiro.error, window: viewModel.usageLimits?.kiro.secondaryWindow)
+            case .grokMonth:
+                return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.grok?.configured, error: viewModel.usageLimits?.grok?.error, window: viewModel.usageLimits?.grok?.primaryWindow)
+            case .grokOndemand:
+                return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.grok?.configured, error: viewModel.usageLimits?.grok?.error, window: viewModel.usageLimits?.grok?.secondaryWindow)
             case .copilotPremium:
                 return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.copilot?.configured, error: viewModel.usageLimits?.copilot?.error, window: viewModel.usageLimits?.copilot?.primaryWindow)
             case .copilotChat:

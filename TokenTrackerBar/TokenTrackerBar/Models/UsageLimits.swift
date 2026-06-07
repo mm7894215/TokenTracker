@@ -8,12 +8,13 @@ struct UsageLimitsResponse: Codable, Equatable {
     let gemini: GeminiLimits
     let kimi: KimiLimits?
     let kiro: KiroLimits
+    let grok: GrokLimits?
     let antigravity: AntigravityLimits
     let copilot: CopilotLimits?
 
     enum CodingKeys: String, CodingKey {
         case fetchedAt = "fetched_at"
-        case claude, codex, cursor, gemini, kimi, kiro, antigravity, copilot
+        case claude, codex, cursor, gemini, kimi, kiro, grok, antigravity, copilot
     }
 }
 
@@ -174,6 +175,21 @@ struct GeminiLimits: Codable, Equatable {
         case primaryWindow = "primary_window"
         case secondaryWindow = "secondary_window"
         case tertiaryWindow = "tertiary_window"
+    }
+}
+
+struct GrokLimits: Codable, Equatable {
+    let configured: Bool
+    let error: String?
+    let planLabel: String?
+    let primaryWindow: GenericLimitWindow?
+    let secondaryWindow: GenericLimitWindow?
+
+    enum CodingKeys: String, CodingKey {
+        case configured, error
+        case planLabel = "plan_label"
+        case primaryWindow = "primary_window"
+        case secondaryWindow = "secondary_window"
     }
 }
 

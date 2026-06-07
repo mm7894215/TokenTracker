@@ -294,6 +294,20 @@ enum WidgetSnapshotWriter {
             }
         }
 
+        // Grok Build
+        if let grok = limits.grok, grok.configured {
+            if let w = grok.primaryWindow {
+                out.append(LimitProvider(source: "grok", label: "Grok Build · Month",
+                                         fraction: w.usedPercent / 100.0,
+                                         resetsAt: parseISO(w.resetAt)))
+            }
+            if let w = grok.secondaryWindow {
+                out.append(LimitProvider(source: "grok", label: "Grok Build · On-demand",
+                                         fraction: w.usedPercent / 100.0,
+                                         resetsAt: parseISO(w.resetAt)))
+            }
+        }
+
         // Antigravity
         if limits.antigravity.configured {
             if let w = limits.antigravity.primaryWindow {

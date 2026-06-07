@@ -16,6 +16,7 @@ struct UsageLimitsView: View {
             (limits.gemini.configured, limits.gemini.error),
             (limits.kimi?.configured ?? false, limits.kimi?.error),
             (limits.kiro.configured, limits.kiro.error),
+            (limits.grok?.configured ?? false, limits.grok?.error),
             (limits.antigravity.configured, limits.antigravity.error),
             (limits.copilot?.configured ?? false, limits.copilot?.error),
         ]
@@ -82,6 +83,10 @@ struct UsageLimitsView: View {
                 }
             case "kiro" where limits.kiro.configured && limits.kiro.error == nil:
                 groups.append(AnyView(toolSection(title: planTitle("Kiro", limits.kiro.planLabel), assetName: "KiroLogo") { kiroContent(limits.kiro) }))
+            case "grok":
+                if let grok = limits.grok, grok.configured, grok.error == nil {
+                    groups.append(AnyView(toolSection(title: planTitle("Grok Build", grok.planLabel), assetName: "GrokLogo") { grokContent(grok) }))
+                }
             case "antigravity" where limits.antigravity.configured && limits.antigravity.error == nil:
                 groups.append(AnyView(toolSection(title: planTitle("Antigravity", limits.antigravity.planLabel), assetName: "AntigravityLogo") { antigravityContent(limits.antigravity) }))
             case "copilot":
@@ -211,6 +216,19 @@ struct UsageLimitsView: View {
         }
     }
 
+    // MARK: - Grok
+
+    private func grokContent(_ grok: GrokLimits) -> some View {
+        VStack(spacing: 4) {
+            if let w = grok.primaryWindow {
+                limitRow(label: Strings.grokMonthLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Grok Build")
+            }
+            if let w = grok.secondaryWindow {
+                limitRow(label: Strings.grokOndemandLabel, pct: w.usedPercent, reset: relativeReset(iso: w.resetAt), toolName: "Grok Build")
+            }
+        }
+    }
+
     // MARK: - Copilot
 
     private func copilotContent(_ copilot: CopilotLimits) -> some View {
@@ -331,12 +349,13 @@ struct UsageLimitsView: View {
     @ViewBuilder
     private func brandIcon(_ name: String) -> some View {
         switch name {
-        case "CursorLogo", "KimiLogo", "KiroLogo", "CopilotLogo":
+        case "CursorLogo", "KimiLogo", "KiroLogo", "GrokLogo", "CopilotLogo":
             let filename: String = {
                 switch name {
                 case "CursorLogo": return "cursor.svg"
                 case "KimiLogo": return "kimi.svg"
                 case "KiroLogo": return "kiro.svg"
+                case "GrokLogo": return "grok.svg"
                 default: return "copilot.svg"
                 }
             }()
