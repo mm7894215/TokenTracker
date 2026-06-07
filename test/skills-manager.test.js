@@ -23,6 +23,19 @@ function writeLocalSkill(targetDir, directory, body = "---\nname: Local Skill\nd
   return dir;
 }
 
+function writeRegistry(registry) {
+  const file = path.join(sandboxHome, ".tokentracker", "skills", "registry.json");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(registry, null, 2)}\n`);
+}
+
+function writeManagedSkill(directory, body = "---\nname: Managed Skill\n---\n") {
+  const dir = path.join(sandboxHome, ".tokentracker", "skills", "managed", directory);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "SKILL.md"), body);
+  return dir;
+}
+
 function restoreEnv(name, value) {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
@@ -326,5 +339,129 @@ describe("skills-manager antigravity target", () => {
       if (prev === undefined) delete process.env.TOKENTRACKER_ANTIGRAVITY_HOME;
       else process.env.TOKENTRACKER_ANTIGRAVITY_HOME = prev;
     }
+  });
+});
+
+describe("skills-manager path hardening", () => {
+  it("does not delete through a symlinked target root", (t) => {
+    const targetParent = path.join(sandboxHome, ".agents");
+    const targetRoot = path.join(targetParent, "skills");
+    const outside = path.join(sandboxHome, "outside-target-root");
+    const victim = path.join(outside, "root-linked-victim");
+    fs.mkdirSync(targetParent, { recursive: true });
+    fs.mkdirSync(victim, { recursive: true });
+    fs.writeFileSync(path.join(victim, "keep.txt"), "important");
+    try {
+      fs.symlinkSync(outside, targetRoot, "dir");
+    } catch (_e) {
+      t.skip("directory symlinks are not available on this platform");
+      return;
+    }
+
+    skills.deleteLocalSkill("root-linked-victim", ["agents"]);
+
+    assert.ok(fs.existsSync(path.join(victim, "keep.txt")));
+  });
+
+  it("does not import through a symlinked SSOT parent", (t) => {
+    const sourceDir = "ssot-linked/imported-skill";
+    const managedRoot = path.join(sandboxHome, ".tokentracker", "skills", "managed");
+    const outside = path.join(sandboxHome, "outside-ssot-import");
+    writeLocalSkill(".config/opencode/skills", sourceDir, "---\nname: Imported Skill\n---\n");
+    fs.mkdirSync(managedRoot, { recursive: true });
+    fs.mkdirSync(outside, { recursive: true });
+    try {
+      fs.symlinkSync(outside, path.join(managedRoot, "ssot-linked"), "dir");
+    } catch (_e) {
+      t.skip("directory symlinks are not available on this platform");
+      return;
+    }
+
+    assert.throws(() => skills.importLocalSkill(sourceDir, []), /Invalid skill directory/);
+    assert.ok(!fs.existsSync(path.join(outside, "imported-skill")));
+  });
+
+  it("does not uninstall through a symlinked SSOT parent", (t) => {
+    const directory = "ssot-uninstall/victim";
+    const managedRoot = path.join(sandboxHome, ".tokentracker", "skills", "managed");
+    const outside = path.join(sandboxHome, "outside-ssot-uninstall");
+    fs.mkdirSync(managedRoot, { recursive: true });
+    fs.mkdirSync(path.join(outside, "victim"), { recursive: true });
+    fs.writeFileSync(path.join(outside, "victim", "keep.txt"), "important");
+    try {
+      fs.symlinkSync(outside, path.join(managedRoot, "ssot-uninstall"), "dir");
+    } catch (_e) {
+      t.skip("directory symlinks are not available on this platform");
+      return;
+    }
+    writeRegistry({
+      repos: [],
+      skills: [{ id: `local:${directory}`, key: `local:${directory}`, name: "Victim", directory, targets: [] }],
+    });
+
+    assert.throws(() => skills.uninstallSkill(`local:${directory}`), /Invalid skill directory/);
+    assert.ok(fs.existsSync(path.join(outside, "victim", "keep.txt")));
+  });
+
+  it("does not restore through a symlinked SSOT parent", (t) => {
+    const directory = "ssot-restore/victim";
+    const managedRoot = path.join(sandboxHome, ".tokentracker", "skills", "managed");
+    const outside = path.join(sandboxHome, "outside-ssot-restore");
+    const trashName = "restore-copy";
+    const trashSkill = path.join(sandboxHome, ".tokentracker", "skills", ".trash", trashName);
+    fs.mkdirSync(managedRoot, { recursive: true });
+    fs.mkdirSync(outside, { recursive: true });
+    fs.mkdirSync(trashSkill, { recursive: true });
+    fs.writeFileSync(path.join(trashSkill, "SKILL.md"), "---\nname: Restore Copy\n---\n");
+    try {
+      fs.symlinkSync(outside, path.join(managedRoot, "ssot-restore"), "dir");
+    } catch (_e) {
+      t.skip("directory symlinks are not available on this platform");
+      return;
+    }
+    writeRegistry({
+      repos: [],
+      skills: [
+        {
+          id: `local:${directory}`,
+          key: `local:${directory}`,
+          name: "Victim",
+          directory,
+          targets: [],
+          trashedAt: Date.now(),
+          trashedDirectory: trashName,
+          previousTargets: [],
+        },
+      ],
+    });
+
+    assert.throws(() => skills.restoreSkill(`local:${directory}`), /Invalid skill directory/);
+    assert.ok(!fs.existsSync(path.join(outside, "victim")));
+    assert.ok(fs.existsSync(path.join(trashSkill, "SKILL.md")));
+  });
+
+  it("does not alias a local import to an existing GitHub-managed skill", () => {
+    const directory = "github-local-conflict";
+    const localDir = writeLocalSkill(".codex/skills", directory, "---\nname: Local Conflict\n---\n");
+    writeManagedSkill(directory, "---\nname: GitHub Conflict\n---\n");
+    writeRegistry({
+      repos: [],
+      skills: [
+        {
+          id: `owner/repo:skills/${directory}`,
+          key: `owner/repo:skills/${directory}`,
+          name: "GitHub Conflict",
+          directory,
+          sourceDirectory: `skills/${directory}`,
+          repoOwner: "owner",
+          repoName: "repo",
+          repoBranch: "main",
+          targets: [],
+        },
+      ],
+    });
+
+    assert.throws(() => skills.importLocalSkill(directory, ["codex"]), /already managed by another installed skill/);
+    assert.match(fs.readFileSync(path.join(localDir, "SKILL.md"), "utf8"), /Local Conflict/);
   });
 });

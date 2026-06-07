@@ -576,6 +576,12 @@ function targetSkillPath(baseDir, directory) {
   const root = path.resolve(baseDir);
   const targetPath = path.resolve(root, safe);
   if (!pathStrictlyWithin(root, targetPath)) return null;
+  try {
+    const rootStat = fs.lstatSync(root);
+    if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) return null;
+  } catch (e) {
+    if (e?.code !== "ENOENT") return null;
+  }
   const parts = safe.split("/");
   let current = root;
   for (let i = 0; i < parts.length - 1; i += 1) {
@@ -590,6 +596,12 @@ function targetSkillPath(baseDir, directory) {
     if (stat.isSymbolicLink() || !stat.isDirectory()) return null;
   }
   return targetPath;
+}
+
+function managedSkillPath(directory) {
+  const skillPath = targetSkillPath(ssotDir(), directory);
+  if (!skillPath) throw new Error(`Invalid skill directory: ${directory}`);
+  return skillPath;
 }
 
 function copyDir(source, dest) {
@@ -614,7 +626,7 @@ function removeEmptyAncestors(startDir, stopDir) {
 function syncSkillToTarget(directory, targetId) {
   const target = TARGETS[targetId];
   if (!target) throw new Error(`Unsupported target: ${targetId}`);
-  const source = path.join(ssotDir(), directory);
+  const source = managedSkillPath(directory);
   if (!fs.existsSync(source)) throw new Error(`Managed skill not found: ${directory}`);
   for (const baseDir of targetDirs(target)) {
     const dest = targetSkillPath(baseDir, directory);
@@ -769,7 +781,7 @@ async function installSkill(skillInput, targetIds = ["claude", "codex"]) {
   );
   if (!files.some((entry) => /(^|\/)SKILL\.md$/i.test(entry.path))) throw new Error("SKILL.md not found in selected directory");
 
-  const dest = path.join(ssotDir(), installName);
+  const dest = managedSkillPath(installName);
   const temp = path.join(dataDir(), "tmp", `${installName}-${Date.now()}`);
   removePath(temp);
   ensureDir(temp);
@@ -825,10 +837,10 @@ function uninstallSkill(id) {
   const registry = readRegistry();
   const skill = registry.skills.find((entry) => entry.id === id || entry.key === id);
   if (!skill) throw new Error("Managed skill not found");
+  const ssotPath = managedSkillPath(skill.directory);
   for (const targetId of Object.keys(TARGETS)) removeSkillFromTarget(skill.directory, targetId);
   // Move SSOT copy into a trash bucket so it can be restored briefly. The
   // registry entry is retained but flagged so restoreSkill can re-link it.
-  const ssotPath = path.join(ssotDir(), skill.directory);
   if (fs.existsSync(ssotPath)) {
     ensureDir(trashDir());
     const stamp = Date.now();
@@ -885,7 +897,7 @@ function restoreSkill(id) {
     throw new Error("Restore window expired");
   }
   const trashPath = path.join(trashDir(), skill.trashedDirectory || "");
-  const ssotPath = path.join(ssotDir(), skill.directory);
+  const ssotPath = managedSkillPath(skill.directory);
   if (!fs.existsSync(trashPath)) throw new Error("Trashed copy is missing");
   ensureDir(path.dirname(ssotPath));
   removePath(ssotPath);
@@ -935,8 +947,11 @@ function importLocalSkill(directory, targetIds = []) {
   const sourceDir = sanitizeLocalSkillPath(directory);
   if (!sourceDir) throw new Error("Invalid skill directory");
   const registry = readRegistry();
-  const existing = registry.skills.find((entry) => entry.directory.toLowerCase() === sourceDir.toLowerCase());
+  const existing = registry.skills.find((entry) => String(entry.directory || "").toLowerCase() === sourceDir.toLowerCase());
   if (existing) {
+    if (!String(existing.id || existing.key || "").startsWith("local:")) {
+      throw new Error(`Skill directory "${sourceDir}" is already managed by another installed skill`);
+    }
     if (!targetIds || !targetIds.length) {
       return { ...existing, managed: true, targets: existing.targets || [] };
     }
@@ -946,7 +961,7 @@ function importLocalSkill(directory, targetIds = []) {
   const source = findLocalSkillSource(sourceDir);
   if (!source) throw new Error("Local skill not found");
 
-  const dest = path.join(ssotDir(), sourceDir);
+  const dest = managedSkillPath(sourceDir);
   copyDir(source.path, dest);
   const skillMarker = findSkillMarker(dest);
   const metadata = readSkillMetadata(skillMarker ? fs.readFileSync(skillMarker, "utf8") : "", installNameFromDirectory(sourceDir));
