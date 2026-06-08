@@ -217,7 +217,7 @@ function codexSparkFallbackCandidates(primary, secondary) {
   }
 
   if (primary) out.push({ kind: "session", window: primary });
-  if (secondary) out.push({ kind: primary ? "weekly" : "session", window: secondary });
+  if (secondary) out.push({ kind: "weekly", window: secondary });
   return out;
 }
 

@@ -580,6 +580,55 @@ describe("getUsageLimits", () => {
     }
   });
 
+  it("keeps a lone unknown Spark secondary window in the weekly lane", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-codex-spark-secondary-only-"));
+    try {
+      writeCodexAuth(tmp, "plus");
+
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 1000,
+        securityRunner: inactiveRunner,
+        commandRunner: inactiveRunner,
+        fetchImpl(url) {
+          if (typeof url === "string" && url.includes("chatgpt.com/backend-api/wham/usage")) {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                rate_limit: {
+                  primary_window: { used_percent: 1, limit_window_seconds: 18000, reset_at: 100 },
+                  secondary_window: { used_percent: 2, limit_window_seconds: 604800, reset_at: 200 },
+                },
+                additional_rate_limits: [
+                  {
+                    limit_name: "codex spark model",
+                    rate_limit: {
+                      primary_window: null,
+                      secondary_window: { used_percent: 37, reset_at: 300 },
+                    },
+                  },
+                ],
+              }),
+            });
+          }
+          return new Promise(() => {});
+        },
+      });
+
+      assert.equal(result.codex.spark_primary_window, null);
+      assert.deepEqual(result.codex.spark_secondary_window, {
+        used_percent: 37,
+        reset_at: 300,
+      });
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("keeps an unknown secondary Spark window as 5h when paired with a classified weekly window", async () => {
     resetUsageLimitsCache();
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-codex-spark-weekly-unknown-"));
@@ -883,46 +932,48 @@ describe("getUsageLimits", () => {
     }
   });
 
-  it("treats wham 403 (free / unauthorized) as no-data instead of a hard error", async () => {
-    resetUsageLimitsCache();
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-codex-403-"));
-    try {
-      const codexHome = path.join(tmp, ".codex");
-      fs.mkdirSync(codexHome, { recursive: true });
-      fs.writeFileSync(
-        path.join(codexHome, "auth.json"),
-        JSON.stringify({ tokens: { access_token: "opaque-token" } }),
-      );
-
-      const result = await getUsageLimits({
-        home: tmp,
-        platform: "linux",
-        providerTimeoutMs: 1000,
-        securityRunner() {
-          return { status: 1, stdout: "" };
-        },
-        commandRunner() {
-          return { status: 1, stdout: "" };
-        },
-        fetchImpl(url) {
-          if (typeof url === "string" && url.includes("chatgpt.com/backend-api/wham/usage")) {
-            return Promise.resolve({ ok: false, status: 403, json: async () => ({}) });
-          }
-          return new Promise(() => {});
-        },
-      });
-
-      assert.equal(result.codex.configured, true);
-      assert.equal(result.codex.error, null);
-      assert.equal(result.codex.primary_window, null);
-      assert.equal(result.codex.secondary_window, null);
-      assert.equal(result.codex.spark_primary_window, null);
-      assert.equal(result.codex.spark_secondary_window, null);
-    } finally {
+  for (const status of [401, 403, 404]) {
+    it(`treats wham ${status} as no-data instead of a hard error`, async () => {
       resetUsageLimitsCache();
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
-  });
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `tokentracker-limits-codex-${status}-`));
+      try {
+        const codexHome = path.join(tmp, ".codex");
+        fs.mkdirSync(codexHome, { recursive: true });
+        fs.writeFileSync(
+          path.join(codexHome, "auth.json"),
+          JSON.stringify({ tokens: { access_token: "opaque-token" } }),
+        );
+
+        const result = await getUsageLimits({
+          home: tmp,
+          platform: "linux",
+          providerTimeoutMs: 1000,
+          securityRunner() {
+            return { status: 1, stdout: "" };
+          },
+          commandRunner() {
+            return { status: 1, stdout: "" };
+          },
+          fetchImpl(url) {
+            if (typeof url === "string" && url.includes("chatgpt.com/backend-api/wham/usage")) {
+              return Promise.resolve({ ok: false, status, json: async () => ({}) });
+            }
+            return new Promise(() => {});
+          },
+        });
+
+        assert.equal(result.codex.configured, true);
+        assert.equal(result.codex.error, null);
+        assert.equal(result.codex.primary_window, null);
+        assert.equal(result.codex.secondary_window, null);
+        assert.equal(result.codex.spark_primary_window, null);
+        assert.equal(result.codex.spark_secondary_window, null);
+      } finally {
+        resetUsageLimitsCache();
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+  }
 
   it("reads the Claude OAuth access token from ~/.claude/.credentials.json on Linux", async () => {
     resetUsageLimitsCache();
