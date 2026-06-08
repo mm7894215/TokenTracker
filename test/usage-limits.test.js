@@ -315,7 +315,55 @@ describe("getUsageLimits", () => {
     }
   });
 
-  it("falls back to Spark slot position only inside each Spark entry when durations are unknown", async () => {
+  it("rounds fractional Codex and Spark usage percentages before exposing windows", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-codex-fractional-"));
+    try {
+      writeCodexAuth(tmp, "plus");
+
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 1000,
+        securityRunner: inactiveRunner,
+        commandRunner: inactiveRunner,
+        fetchImpl(url) {
+          if (typeof url === "string" && url.includes("chatgpt.com/backend-api/wham/usage")) {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                rate_limit: {
+                  primary_window: { used_percent: 12.4, limit_window_seconds: 18000, reset_at: 100 },
+                  secondary_window: { used_percent: 30.6, limit_window_seconds: 604800, reset_at: 200 },
+                },
+                additional_rate_limits: [
+                  {
+                    limit_name: "codex spark model",
+                    rate_limit: {
+                      primary_window: { used_percent: 4.4, limit_window_seconds: 18000, reset_at: 300 },
+                      secondary_window: { used_percent: 18.6, limit_window_seconds: 604800, reset_at: 400 },
+                    },
+                  },
+                ],
+              }),
+            });
+          }
+          return new Promise(() => {});
+        },
+      });
+
+      assert.equal(result.codex.primary_window.used_percent, 12);
+      assert.equal(result.codex.secondary_window.used_percent, 31);
+      assert.equal(result.codex.spark_primary_window.used_percent, 4);
+      assert.equal(result.codex.spark_secondary_window.used_percent, 19);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("prefers classified Spark windows across all entries before slot fallback", async () => {
     resetUsageLimitsCache();
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-codex-spark-fallback-"));
     try {
@@ -361,13 +409,285 @@ describe("getUsageLimits", () => {
       });
 
       assert.deepEqual(result.codex.spark_primary_window, {
-        used_percent: 7,
-        limit_window_seconds: 12345,
+        used_percent: 99,
+        limit_window_seconds: 18000,
+        reset_at: 500,
+      });
+      assert.deepEqual(result.codex.spark_secondary_window, {
+        used_percent: 88,
+        limit_window_seconds: 604800,
+        reset_at: 600,
+      });
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("does not let an unknown Spark window override a classified 5h window", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-codex-spark-mixed-"));
+    try {
+      writeCodexAuth(tmp, "plus");
+
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 1000,
+        securityRunner: inactiveRunner,
+        commandRunner: inactiveRunner,
+        fetchImpl(url) {
+          if (typeof url === "string" && url.includes("chatgpt.com/backend-api/wham/usage")) {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                rate_limit: {
+                  primary_window: { used_percent: 1, limit_window_seconds: 18000, reset_at: 100 },
+                  secondary_window: { used_percent: 2, limit_window_seconds: 604800, reset_at: 200 },
+                },
+                additional_rate_limits: [
+                  {
+                    limit_name: "codex spark model",
+                    rate_limit: {
+                      primary_window: { used_percent: 90, limit_window_seconds: 12345, reset_at: 300 },
+                      secondary_window: { used_percent: 15, limit_window_seconds: 18000, reset_at: 400 },
+                    },
+                  },
+                ],
+              }),
+            });
+          }
+          return new Promise(() => {});
+        },
+      });
+
+      assert.deepEqual(result.codex.spark_primary_window, {
+        used_percent: 15,
+        limit_window_seconds: 18000,
+        reset_at: 400,
+      });
+      assert.equal(result.codex.spark_secondary_window, null);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("fills a missing Spark weekly slot from position when the secondary window is classified 5h", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-codex-spark-primary-fallback-"));
+    try {
+      writeCodexAuth(tmp, "plus");
+
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 1000,
+        securityRunner: inactiveRunner,
+        commandRunner: inactiveRunner,
+        fetchImpl(url) {
+          if (typeof url === "string" && url.includes("chatgpt.com/backend-api/wham/usage")) {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                rate_limit: {
+                  primary_window: { used_percent: 1, limit_window_seconds: 18000, reset_at: 100 },
+                  secondary_window: { used_percent: 2, limit_window_seconds: 604800, reset_at: 200 },
+                },
+                additional_rate_limits: [
+                  {
+                    limit_name: "codex spark model",
+                    rate_limit: {
+                      primary_window: { used_percent: 44, reset_at: 300 },
+                      secondary_window: { used_percent: 12, limit_window_seconds: 18000, reset_at: 400 },
+                    },
+                  },
+                ],
+              }),
+            });
+          }
+          return new Promise(() => {});
+        },
+      });
+
+      assert.deepEqual(result.codex.spark_primary_window, {
+        used_percent: 12,
+        limit_window_seconds: 18000,
+        reset_at: 400,
+      });
+      assert.deepEqual(result.codex.spark_secondary_window, {
+        used_percent: 44,
+        reset_at: 300,
+      });
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("fills an empty Spark slot from position when the other window is classified", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-codex-spark-mixed-fallback-"));
+    try {
+      writeCodexAuth(tmp, "plus");
+
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 1000,
+        securityRunner: inactiveRunner,
+        commandRunner: inactiveRunner,
+        fetchImpl(url) {
+          if (typeof url === "string" && url.includes("chatgpt.com/backend-api/wham/usage")) {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                rate_limit: {
+                  primary_window: { used_percent: 1, limit_window_seconds: 18000, reset_at: 100 },
+                  secondary_window: { used_percent: 2, limit_window_seconds: 604800, reset_at: 200 },
+                },
+                additional_rate_limits: [
+                  {
+                    limit_name: "codex spark model",
+                    rate_limit: {
+                      primary_window: { used_percent: 11, reset_at: 300 },
+                      secondary_window: { used_percent: 25, limit_window_seconds: 604800, reset_at: 400 },
+                    },
+                  },
+                ],
+              }),
+            });
+          }
+          return new Promise(() => {});
+        },
+      });
+
+      assert.deepEqual(result.codex.spark_primary_window, {
+        used_percent: 11,
         reset_at: 300,
       });
       assert.deepEqual(result.codex.spark_secondary_window, {
-        used_percent: 19,
+        used_percent: 25,
+        limit_window_seconds: 604800,
         reset_at: 400,
+      });
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps an unknown secondary Spark window as 5h when paired with a classified weekly window", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-codex-spark-weekly-unknown-"));
+    try {
+      writeCodexAuth(tmp, "plus");
+
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 1000,
+        securityRunner: inactiveRunner,
+        commandRunner: inactiveRunner,
+        fetchImpl(url) {
+          if (typeof url === "string" && url.includes("chatgpt.com/backend-api/wham/usage")) {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                rate_limit: {
+                  primary_window: { used_percent: 1, limit_window_seconds: 18000, reset_at: 100 },
+                  secondary_window: { used_percent: 2, limit_window_seconds: 604800, reset_at: 200 },
+                },
+                additional_rate_limits: [
+                  {
+                    limit_name: "codex spark model",
+                    rate_limit: {
+                      primary_window: { used_percent: 31, limit_window_seconds: 604800, reset_at: 300 },
+                      secondary_window: { used_percent: 12, limit_window_seconds: 32400, reset_at: 400 },
+                    },
+                  },
+                ],
+              }),
+            });
+          }
+          return new Promise(() => {});
+        },
+      });
+
+      assert.deepEqual(result.codex.spark_primary_window, {
+        used_percent: 12,
+        limit_window_seconds: 32400,
+        reset_at: 400,
+      });
+      assert.deepEqual(result.codex.spark_secondary_window, {
+        used_percent: 31,
+        limit_window_seconds: 604800,
+        reset_at: 300,
+      });
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores malformed Spark windows before exposing Codex usage limits", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-codex-spark-malformed-"));
+    try {
+      writeCodexAuth(tmp, "plus");
+
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 1000,
+        securityRunner: inactiveRunner,
+        commandRunner: inactiveRunner,
+        fetchImpl(url) {
+          if (typeof url === "string" && url.includes("chatgpt.com/backend-api/wham/usage")) {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                rate_limit: {
+                  primary_window: { used_percent: 1, limit_window_seconds: 18000, reset_at: 100 },
+                  secondary_window: { used_percent: 2, limit_window_seconds: 604800, reset_at: 200 },
+                },
+                additional_rate_limits: [
+                  {
+                    limit_name: "codex spark broken",
+                    rate_limit: {
+                      primary_window: { limit_window_seconds: 18000, reset_at: 300 },
+                      secondary_window: {},
+                    },
+                  },
+                  {
+                    limit_name: "codex spark valid",
+                    rate_limit: {
+                      primary_window: { used_percent: 25, limit_window_seconds: 18000, reset_at: 500 },
+                      secondary_window: { used_percent: 40, limit_window_seconds: 604800, reset_at: 600 },
+                    },
+                  },
+                ],
+              }),
+            });
+          }
+          return new Promise(() => {});
+        },
+      });
+
+      assert.deepEqual(result.codex.spark_primary_window, {
+        used_percent: 25,
+        limit_window_seconds: 18000,
+        reset_at: 500,
+      });
+      assert.deepEqual(result.codex.spark_secondary_window, {
+        used_percent: 40,
+        limit_window_seconds: 604800,
+        reset_at: 600,
       });
     } finally {
       resetUsageLimitsCache();

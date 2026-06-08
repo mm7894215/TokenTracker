@@ -1,8 +1,14 @@
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { setCopyLocale } from "../../../lib/copy";
+import { EN_LOCALE, ZH_CN_LOCALE } from "../../../lib/locale";
 import { UsageLimitsPanel } from "./UsageLimitsPanel.jsx";
 
 describe("UsageLimitsPanel", () => {
+  afterEach(() => {
+    setCopyLocale(EN_LOCALE);
+  });
+
   it("shows provider status rows instead of hiding configured providers with errors", () => {
     render(
       <UsageLimitsPanel
@@ -102,13 +108,14 @@ describe("UsageLimitsPanel", () => {
     expect(screen.getByText("Cursor")).toBeInTheDocument();
   });
 
-  it("renders Codex Spark quota windows", () => {
+  it("renders Codex Spark quota windows through compact copy labels", () => {
     function expectLimitRow(label, value) {
       const row = screen.getByText(label).closest("div");
       expect(row).not.toBeNull();
       expect(within(row).getByText(value)).toBeInTheDocument();
     }
 
+    setCopyLocale(ZH_CN_LOCALE);
     render(
       <UsageLimitsPanel
         codex={{

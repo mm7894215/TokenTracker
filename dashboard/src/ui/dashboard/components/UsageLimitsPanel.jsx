@@ -50,7 +50,7 @@ function LimitBar({ label, pct, reset, mode = LIMIT_DISPLAY_MODES.USED }) {
   }
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[11px] text-oai-gray-500 dark:text-oai-gray-400 w-12 shrink-0">{label}</span>
+      <span className="text-[11px] text-oai-gray-500 dark:text-oai-gray-400 w-14 shrink-0 whitespace-nowrap truncate">{label}</span>
       <div className="flex-1 bg-oai-gray-100 dark:bg-oai-gray-700/50 rounded-full h-1.5 overflow-hidden">
         <div
           className={`${barColor(displayPct, mode)} rounded-full h-full transition-[width] duration-500 ease-out`}

@@ -152,10 +152,20 @@ function classifyCodexWindow(window) {
   return null;
 }
 
+function normalizeCodexRateWindow(window) {
+  if (!window || typeof window !== "object" || Array.isArray(window)) return null;
+  const usedPercent = clampPercent(window.used_percent);
+  if (usedPercent === null) return null;
+  return {
+    ...window,
+    used_percent: Math.round(usedPercent),
+  };
+}
+
 function normalizeCodexRateWindows(rateLimit) {
-  const candidates = [rateLimit?.primary_window, rateLimit?.secondary_window].filter(
-    (w) => w && typeof w === "object",
-  );
+  const primary = normalizeCodexRateWindow(rateLimit?.primary_window);
+  const secondary = normalizeCodexRateWindow(rateLimit?.secondary_window);
+  const candidates = [primary, secondary].filter(Boolean);
   let session = null;
   let weekly = null;
   for (const w of candidates) {
@@ -167,8 +177,8 @@ function normalizeCodexRateWindows(rateLimit) {
   // from unexpected window durations rather than dropping it silently.
   if (!session && !weekly && candidates.length > 0) {
     return {
-      primary_window: candidates[0] ?? null,
-      secondary_window: candidates[1] ?? null,
+      primary_window: primary,
+      secondary_window: secondary,
     };
   }
   return { primary_window: session, secondary_window: weekly };
@@ -181,6 +191,36 @@ function isCodexSparkLimit(entry) {
   ));
 }
 
+function codexSparkFallbackCandidates(primary, secondary) {
+  const primaryKind = classifyCodexWindow(primary);
+  const secondaryKind = classifyCodexWindow(secondary);
+  const out = [];
+  const primaryDurationMissing = primary
+    && (primary.limit_window_seconds === undefined
+      || primary.limit_window_seconds === null
+      || primary.limit_window_seconds === "");
+
+  if (primaryKind || secondaryKind) {
+    if (!primaryKind && primary && secondaryKind === "weekly") {
+      out.push({ kind: "session", window: primary });
+    }
+    if (!primaryKind && primaryDurationMissing && secondaryKind === "session") {
+      out.push({ kind: "weekly", window: primary });
+    }
+    if (!secondaryKind && secondary && primaryKind === "weekly") {
+      out.push({ kind: "session", window: secondary });
+    }
+    if (!secondaryKind && secondary && primaryKind === "session") {
+      out.push({ kind: "weekly", window: secondary });
+    }
+    return out;
+  }
+
+  if (primary) out.push({ kind: "session", window: primary });
+  if (secondary) out.push({ kind: primary ? "weekly" : "session", window: secondary });
+  return out;
+}
+
 function normalizeCodexSparkRateWindows(additionalRateLimits) {
   let session = null;
   let weekly = null;
@@ -188,21 +228,29 @@ function normalizeCodexSparkRateWindows(additionalRateLimits) {
     return { spark_primary_window: null, spark_secondary_window: null };
   }
 
+  const classifiedCandidates = [];
+  const fallbackCandidates = [];
   for (const entry of additionalRateLimits) {
     if (!isCodexSparkLimit(entry)) continue;
     const rateLimit = entry.rate_limit;
     if (!rateLimit || typeof rateLimit !== "object") continue;
 
-    const candidates = [
-      { window: rateLimit.primary_window, fallback: "session" },
-      { window: rateLimit.secondary_window, fallback: "weekly" },
-    ];
-    for (const { window, fallback } of candidates) {
-      if (!window || typeof window !== "object") continue;
-      const kind = classifyCodexWindow(window) || fallback;
-      if (kind === "session" && !session) session = window;
-      else if (kind === "weekly" && !weekly) weekly = window;
+    const primary = normalizeCodexRateWindow(rateLimit.primary_window);
+    const secondary = normalizeCodexRateWindow(rateLimit.secondary_window);
+    for (const window of [primary, secondary]) {
+      const kind = classifyCodexWindow(window);
+      if (kind) classifiedCandidates.push({ kind, window });
     }
+    fallbackCandidates.push(...codexSparkFallbackCandidates(primary, secondary));
+  }
+
+  for (const candidate of classifiedCandidates) {
+    if (candidate.kind === "session" && !session) session = candidate.window;
+    else if (candidate.kind === "weekly" && !weekly) weekly = candidate.window;
+  }
+  for (const candidate of fallbackCandidates) {
+    if (candidate.kind === "session" && !session) session = candidate.window;
+    else if (candidate.kind === "weekly" && !weekly) weekly = candidate.window;
   }
 
   return {

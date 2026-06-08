@@ -60,14 +60,14 @@ final class NativeBridge {
             .store(in: &cancellables)
     }
 
-    /// Compact selectable item snapshot. The settings payload sends
-    /// `availableItemsPayload`, so use the same source to avoid stale dropdowns
-    /// when a provider stays available but one specific limit window appears or
-    /// disappears.
+    /// Compact selectable item fingerprint used only for `usageLimits`
+    /// publisher de-duplication. It mirrors the available id list without
+    /// constructing the full dashboard payload dictionaries.
     private static func availableItemsFingerprint(for limits: UsageLimitsResponse?) -> String {
-        guard let limits else { return "" }
-        return MenuBarDisplayPreferences.availableItemsPayload(for: limits)
-            .compactMap { $0["id"] }
+        MenuBarDisplayPreferences.availableItemIDs(
+            for: limits,
+            keepingSelected: MenuBarDisplayPreferences.read()
+        )
             .joined(separator: "|")
     }
 
@@ -123,12 +123,25 @@ final class NativeBridge {
             launchAtLoginValue = false
             launchAtLoginSupported = false
         }
+        let menuBarItems = MenuBarDisplayPreferences.read()
+        let availableItemIDs = MenuBarDisplayPreferences.availableItemIDs(
+            for: viewModel?.usageLimits,
+            keepingSelected: menuBarItems
+        )
+        let normalizedMenuBarItems = MenuBarDisplayPreferences.normalize(
+            menuBarItems,
+            allowedIDs: Set(availableItemIDs)
+        )
+        if normalizedMenuBarItems != menuBarItems {
+            MenuBarDisplayPreferences.write(normalizedMenuBarItems)
+            NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
+        }
         let payload: [String: Any] = [
             "showStats": UserDefaults.standard.object(forKey: "MenuBarShowStats") as? Bool ?? true,
-            "menuBarItems": MenuBarDisplayPreferences.read(),
+            "menuBarItems": normalizedMenuBarItems,
             "menuBarAvailableItems": MenuBarDisplayPreferences.availableItemsPayload(
                 for: viewModel?.usageLimits,
-                keepingSelected: MenuBarDisplayPreferences.read()
+                keepingSelected: normalizedMenuBarItems
             ),
             "menuBarMaxItems": MenuBarDisplayPreferences.maxVisibleItems,
             "animatedIcon": UserDefaults.standard.object(forKey: "MenuBarAnimationEnabled") as? Bool ?? true,

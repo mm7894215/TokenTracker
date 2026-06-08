@@ -1,7 +1,8 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { copy } from "../lib/copy";
+import { copy, setCopyLocale } from "../lib/copy";
+import { EN_LOCALE, ZH_CN_LOCALE } from "../lib/locale";
 import { WidgetsPage } from "./WidgetsPage.jsx";
 
 function installNativeBridge(settings) {
@@ -26,6 +27,7 @@ function installNativeBridge(settings) {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  setCopyLocale(EN_LOCALE);
   window.history.pushState({}, "", "/");
   if (typeof window.localStorage?.removeItem === "function") {
     window.localStorage.removeItem("tokentracker_native_app");
@@ -91,5 +93,37 @@ describe("WidgetsPage menu bar configurator", () => {
         value: ["todayTokens", "todayCost"],
       });
     });
+  });
+
+  it("localizes Codex Spark native menu item labels through copy", async () => {
+    setCopyLocale(ZH_CN_LOCALE);
+    const bridge = installNativeBridge({
+      showStats: true,
+      menuBarItems: ["codexSpark5h", "codexSpark7d"],
+      menuBarMaxItems: 2,
+      menuBarAvailableItems: [
+        {
+          id: "codexSpark5h",
+          label: "Codex Spark 5h Limit",
+          shortLabel: "Cx Spark 5h",
+          category: "limits",
+        },
+        {
+          id: "codexSpark7d",
+          label: "Codex Spark 7d Limit",
+          shortLabel: "Cx Spark 7d",
+          category: "limits",
+        },
+      ],
+    });
+
+    render(<WidgetsPage />);
+    act(() => bridge.pushSettings());
+
+    const primary = await screen.findByRole("combobox", { name: copy("menubar.slot.primary") });
+    const secondary = screen.getByRole("combobox", { name: copy("menubar.slot.secondary") });
+
+    expect(primary).toHaveTextContent(copy("menubar.metric.codex_spark_5h"));
+    expect(secondary).toHaveTextContent(copy("menubar.metric.codex_spark_7d"));
   });
 });

@@ -10,6 +10,8 @@ export const FALLBACK_MENU_BAR_ITEMS = [
   { id: "claude7d", label: "Claude 7d Limit", shortLabel: "Cl 7d", category: "limits" },
   { id: "codex5h", label: "Codex 5h Limit", shortLabel: "Cx 5h", category: "limits" },
   { id: "codex7d", label: "Codex 7d Limit", shortLabel: "Cx 7d", category: "limits" },
+  { id: "codexSpark5h", label: "Codex Spark 5h Limit", shortLabel: "Cx Spark 5h", category: "limits" },
+  { id: "codexSpark7d", label: "Codex Spark 7d Limit", shortLabel: "Cx Spark 7d", category: "limits" },
   { id: "cursorPlan", label: "Cursor Plan Limit", shortLabel: "Cu Plan", category: "limits" },
   { id: "cursorAuto", label: "Cursor Auto Limit", shortLabel: "Cu Auto", category: "limits" },
   { id: "cursorAPI", label: "Cursor API Limit", shortLabel: "Cu API", category: "limits" },

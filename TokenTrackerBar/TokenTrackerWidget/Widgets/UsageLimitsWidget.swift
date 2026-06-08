@@ -1,9 +1,9 @@
 import SwiftUI
 import WidgetKit
 
-// Rate-limit progress widget. The bars ARE the widget — sorted by remaining
-// headroom (most-consumed first) so the most urgent provider is always at
-// the top. Reset countdown sits beside the bar where space allows.
+// Rate-limit progress widget. The bars ARE the widget. Providers are ordered
+// by their hottest window, while windows within a provider keep snapshot order
+// so paired quotas (5h, weekly, Spark 5h, Spark 7d) stay predictable.
 
 struct UsageLimitsWidget: Widget {
     let kind: String = "TokenTrackerLimitsWidget"
@@ -30,13 +30,13 @@ struct UsageLimitsWidgetView: View {
     /// Sort providers so all windows from the same source stay adjacent
     /// (Claude · 7d next to Claude · 5h). Sources are ordered by their
     /// hottest window so the most-urgent provider floats to the top.
-    /// Within a source, higher fraction comes first.
+    /// Within a source, keep the snapshot order emitted by the host app.
     private var orderedRows: [LimitProvider] {
         let grouped = Dictionary(grouping: entry.snapshot.limits, by: { $0.source })
         let orderedGroups = grouped.values.sorted { lhs, rhs in
             (lhs.map(\.fraction).max() ?? 0) > (rhs.map(\.fraction).max() ?? 0)
         }
-        let flat = orderedGroups.flatMap { $0.sorted { $0.fraction > $1.fraction } }
+        let flat = orderedGroups.flatMap { $0 }
         return Array(flat.prefix(maxRows))
     }
 
