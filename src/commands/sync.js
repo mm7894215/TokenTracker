@@ -501,7 +501,7 @@ async function cmdSync(argv) {
       });
     }
 
-    // ── Zed Agent (hosted models only; cumulative-delta over SQLite threads) ──
+    // ── Zed Agent (all providers; cumulative-delta over SQLite threads) ──
     const zedDbPath = resolveZedDbPath(process.env);
     let zedResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (fssync.existsSync(zedDbPath)) {

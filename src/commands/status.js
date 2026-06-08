@@ -230,9 +230,16 @@ async function cmdStatus(argv = []) {
   const roocodeTaskFiles = resolveRoocodeTaskFiles(process.env);
   const roocodeInstalled = roocodeTaskFiles.length > 0;
 
-  // Zed Agent — passive read of hosted threads.db (skips external ACP agents).
+  // Zed Agent — passive read of threads.db across all model providers
+  // (hosted "zed.dev" and bring-your-own alike). threadTotals tracks one entry
+  // per thread we've surfaced usage for, so its size distinguishes "DB present
+  // with usage" from "DB present but nothing counted yet" (fresh/undecodable).
   const zedDbPath = resolveZedDbPath(process.env);
   const zedInstalled = fssync.existsSync(zedDbPath);
+  const zedThreadsCounted =
+    cursors?.zed?.threadTotals && typeof cursors.zed.threadTotals === "object"
+      ? Object.keys(cursors.zed.threadTotals).length
+      : 0;
 
   // Goose (Block) — passive cumulative-delta read of sessions.db.
   const gooseDbPath = resolveGooseDbPath(process.env);
@@ -418,7 +425,11 @@ async function cmdStatus(argv = []) {
         ? `- Roo Code (VS Code extension): passive reader (${roocodeTaskFiles.length} task${roocodeTaskFiles.length !== 1 ? "s" : ""} across ${new Set(roocodeTaskFiles.map((t) => t.ide)).size} IDE${new Set(roocodeTaskFiles.map((t) => t.ide)).size !== 1 ? "s" : ""})`
         : null,
       zedInstalled
-        ? `- Zed Agent: passive reader (threads.db, hosted models only)`
+        ? `- Zed Agent: passive reader (threads.db, all providers${
+            zedThreadsCounted > 0
+              ? `, ${zedThreadsCounted} thread${zedThreadsCounted !== 1 ? "s" : ""} counted`
+              : ", no usage counted yet"
+          })`
         : null,
       gooseInstalled
         ? `- Goose (Block): passive reader (sessions.db, cumulative-delta)`

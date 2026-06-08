@@ -296,6 +296,34 @@ test("matcher: Antigravity model normalization covers families without gpt-4o fa
   assert.notEqual(matcher.normalizeAntigravityModel("gpt-oss-20b"), "gpt-4o");
 });
 
+test("matcher: Zed model normalization maps display names + ids to pricing keys", () => {
+  // Display names with "(Preview)" / spaces.
+  assert.equal(matcher.normalizeZedModel("Claude Sonnet 4"), "claude-sonnet-4");
+  assert.equal(matcher.normalizeZedModel("GPT-5 (Preview)"), "gpt-5");
+  assert.equal(matcher.normalizeZedModel("Gemini 3 Pro (Preview)"), "gemini-3-pro");
+  // "fast" must NOT be stripped (it is part of grok-code-fast-1).
+  assert.equal(matcher.normalizeZedModel("Grok Code Fast 1 (Preview)"), "grok-code-fast-1");
+  // Claude minors hyphenate; GPT minors keep the dot.
+  assert.equal(matcher.normalizeZedModel("Claude Opus 4.5"), "claude-opus-4-5");
+  assert.equal(matcher.normalizeZedModel("claude-opus-4.8"), "claude-opus-4-8");
+  assert.equal(matcher.normalizeZedModel("GPT-5.2"), "gpt-5.2");
+  assert.equal(matcher.normalizeZedModel("gpt-5.5"), "gpt-5.5");
+  // Slash-style ids pass through.
+  assert.equal(matcher.normalizeZedModel("openai/gpt-oss-20b"), "openai/gpt-oss-20b");
+});
+
+test("matcher: Zed normalization only applies to the zed source", () => {
+  const litellm = { "claude-opus-4-8": { input: 5, output: 25 } };
+  const curated = { exact: {}, alias: {}, fuzzy: [] };
+  // Under source=zed the display/dotted name resolves via normalization.
+  const zed = matcher.lookupPricing("Claude Opus 4.8 (Preview)", { curated, litellm, source: "zed" });
+  assert.equal(zed.hit, true);
+  assert.equal(zed.value.input, 5);
+  // Other sources do not get the Zed normalization (dotted name won't match).
+  const other = matcher.lookupPricing("Claude Opus 4.8 (Preview)", { curated, litellm, source: "openrouter" });
+  assert.equal(other.hit, false);
+});
+
 test("matcher: convertLitellmEntry rounds away float drift (1e-7 * 1e6 must be 0.1)", () => {
   const out = matcher.convertLitellmEntry({
     input_cost_per_token: 1e-6,
