@@ -33,8 +33,14 @@ struct UsageLimitsWidgetView: View {
     /// Within a source, keep the snapshot order emitted by the host app.
     private var orderedRows: [LimitProvider] {
         let grouped = Dictionary(grouping: entry.snapshot.limits, by: { $0.source })
+        // Order groups by their hottest window. Tie-break on source so equal-
+        // pressure providers keep a stable order instead of relying on the
+        // Dictionary's unstable iteration order (would reshuffle between refreshes).
         let orderedGroups = grouped.values.sorted { lhs, rhs in
-            (lhs.map(\.fraction).max() ?? 0) > (rhs.map(\.fraction).max() ?? 0)
+            let lf = lhs.map(\.fraction).max() ?? 0
+            let rf = rhs.map(\.fraction).max() ?? 0
+            if lf != rf { return lf > rf }
+            return (lhs.first?.source ?? "") < (rhs.first?.source ?? "")
         }
         let flat = orderedGroups.flatMap { $0 }
         return Array(flat.prefix(maxRows))
