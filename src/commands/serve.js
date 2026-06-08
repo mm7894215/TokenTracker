@@ -6,6 +6,10 @@ const cp = require("node:child_process");
 
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
 const { createLocalApiHandler, resolveQueuePath } = require("../lib/local-api");
+const {
+  buildServeDataPreflightMessage,
+  summarizeQueueData,
+} = require("../lib/local-data-preflight");
 const { ensurePricingLoaded } = require("../lib/pricing");
 const { serveStaticFile } = require("../lib/static-server");
 const { openInBrowser } = require("../lib/browser-auth");
@@ -50,11 +54,12 @@ async function cmdServe(argv) {
   }
 
   // 1. Optional sync
+  let syncSummary = null;
   if (opts.sync) {
     process.stdout.write("Syncing local data...\n");
     try {
       const { cmdSync } = require("./sync");
-      await cmdSync(["--auto"]);
+      syncSummary = await cmdSync(["--auto"]);
       process.stdout.write("Sync done.\n");
     } catch (e) {
       process.stdout.write(`Sync warning: ${e?.message || e}\n`);
@@ -64,6 +69,18 @@ async function cmdServe(argv) {
   // 2. Resolve paths
   const queuePath = resolveQueuePath();
   const dashboardDir = resolveDashboardDir();
+
+  if (opts.sync) {
+    try {
+      const queueSummary = await summarizeQueueData(queuePath);
+      const preflight = buildServeDataPreflightMessage({ queueSummary, syncSummary });
+      if (preflight?.message) {
+        process.stdout.write(`${preflight.message}\n`);
+      }
+    } catch (e) {
+      process.stdout.write(`Token data preflight warning: ${e?.message || e}\n`);
+    }
+  }
 
   // 2.1 Refresh LiteLLM pricing data in the background. The seed snapshot is
   //     already loaded synchronously at require-time, so cost calculation is

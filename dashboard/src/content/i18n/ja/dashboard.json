@@ -6,6 +6,7 @@
   "stats.period.last24h": "24h",
   "stats.period.week": "今週",
   "stats.period.month": "今月",
+  "stats.period.this_month": "今月",
   "stats.period.all": "全期間",
   "stats.period.convs": "会話",
   "dashboard.core_index.collapse_label": "▾",

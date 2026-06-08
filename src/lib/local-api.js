@@ -1347,6 +1347,15 @@ function createLocalApiHandler({ queuePath }) {
       const l30t = sumDays(l30);
       const l7fromStr = shiftDay(todayStr, -6);
       const l30fromStr = shiftDay(todayStr, -29);
+      const currentMonthFromStr = `${todayStr.slice(0, 7)}-01`;
+      const currentMonth = allDaily.filter((d) => d.day >= currentMonthFromStr && d.day <= todayStr);
+      const currentMonthTotals = currentMonth.reduce((a, r) => {
+        a.total_tokens += r.total_tokens;
+        a.billable_total_tokens += r.billable_total_tokens;
+        a.total_cost_usd += r.total_cost_usd || 0;
+        a.conversation_count += r.conversation_count;
+        return a;
+      }, { total_tokens: 0, billable_total_tokens: 0, total_cost_usd: 0, conversation_count: 0 });
 
       json(res, {
         from, to, days: daily.length, scope, excluded_sources: excludedSources,
@@ -1354,6 +1363,15 @@ function createLocalApiHandler({ queuePath }) {
         rolling: {
           last_7d: { from: l7fromStr, to: todayStr, active_days: l7.length, totals: l7t },
           last_30d: { from: l30fromStr, to: todayStr, active_days: l30.length, totals: l30t, avg_per_active_day: l30.length > 0 ? Math.round(l30t.billable_total_tokens / l30.length) : 0 },
+          current_month: {
+            from: currentMonthFromStr,
+            to: todayStr,
+            active_days: currentMonth.length,
+            totals: {
+              ...currentMonthTotals,
+              total_cost_usd: currentMonthTotals.total_cost_usd.toFixed(6),
+            },
+          },
         },
       });
       return true;

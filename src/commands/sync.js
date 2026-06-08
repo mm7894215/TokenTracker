@@ -992,57 +992,65 @@ async function cmdSync(argv) {
       }
     }
 
+    const totalParsed =
+      parseResult.filesProcessed +
+      openclawResult.filesProcessed +
+      claudeResult.filesProcessed +
+      geminiResult.filesProcessed +
+      antigravityResult.filesProcessed +
+      opencodeResult.filesProcessed +
+      cursorResult.recordsProcessed +
+      kiroResult.recordsProcessed +
+      kiroCliResult.recordsProcessed +
+      hermesResult.recordsProcessed +
+      kimiResult.recordsProcessed +
+      kimiCodeResult.recordsProcessed +
+      codebuddyResult.recordsProcessed +
+      ompResult.recordsProcessed +
+      piResult.recordsProcessed +
+      craftResult.recordsProcessed +
+      grokResult.recordsProcessed +
+      copilotResult.recordsProcessed +
+      kiloResult.messagesProcessed +
+      kilocodeResult.recordsProcessed +
+      roocodeResult.recordsProcessed +
+      zedResult.recordsProcessed +
+      gooseResult.recordsProcessed +
+      droidResult.recordsProcessed;
+    const totalBuckets =
+      parseResult.bucketsQueued +
+      openclawResult.bucketsQueued +
+      claudeResult.bucketsQueued +
+      geminiResult.bucketsQueued +
+      antigravityResult.bucketsQueued +
+      opencodeResult.bucketsQueued +
+      cursorResult.bucketsQueued +
+      kiroResult.bucketsQueued +
+      kiroCliResult.bucketsQueued +
+      hermesResult.bucketsQueued +
+      kimiResult.bucketsQueued +
+      kimiCodeResult.bucketsQueued +
+      codebuddyResult.bucketsQueued +
+      ompResult.bucketsQueued +
+      piResult.bucketsQueued +
+      craftResult.bucketsQueued +
+      grokResult.bucketsQueued +
+      copilotResult.bucketsQueued +
+      kiloResult.bucketsQueued +
+      kilocodeResult.bucketsQueued +
+      roocodeResult.bucketsQueued +
+      zedResult.bucketsQueued +
+      gooseResult.bucketsQueued +
+      droidResult.bucketsQueued;
+    const summary = {
+      totalParsed,
+      totalBuckets,
+      upload: uploadResult,
+      uploadAttempted,
+      pendingBytes,
+    };
+
     if (!opts.auto) {
-      const totalParsed =
-        parseResult.filesProcessed +
-        openclawResult.filesProcessed +
-        claudeResult.filesProcessed +
-        geminiResult.filesProcessed +
-        antigravityResult.filesProcessed +
-        opencodeResult.filesProcessed +
-        cursorResult.recordsProcessed +
-        kiroResult.recordsProcessed +
-        kiroCliResult.recordsProcessed +
-        hermesResult.recordsProcessed +
-        kimiResult.recordsProcessed +
-        kimiCodeResult.recordsProcessed +
-        codebuddyResult.recordsProcessed +
-        ompResult.recordsProcessed +
-        piResult.recordsProcessed +
-        craftResult.recordsProcessed +
-        grokResult.recordsProcessed +
-        copilotResult.recordsProcessed +
-        kiloResult.messagesProcessed +
-        kilocodeResult.recordsProcessed +
-        roocodeResult.recordsProcessed +
-        zedResult.recordsProcessed +
-        gooseResult.recordsProcessed +
-        droidResult.recordsProcessed;
-      const totalBuckets =
-        parseResult.bucketsQueued +
-        openclawResult.bucketsQueued +
-        claudeResult.bucketsQueued +
-        geminiResult.bucketsQueued +
-        antigravityResult.bucketsQueued +
-        opencodeResult.bucketsQueued +
-        cursorResult.bucketsQueued +
-        kiroResult.bucketsQueued +
-        kiroCliResult.bucketsQueued +
-        hermesResult.bucketsQueued +
-        kimiResult.bucketsQueued +
-        kimiCodeResult.bucketsQueued +
-        codebuddyResult.bucketsQueued +
-        ompResult.bucketsQueued +
-        piResult.bucketsQueued +
-        craftResult.bucketsQueued +
-        grokResult.bucketsQueued +
-        copilotResult.bucketsQueued +
-        kiloResult.bucketsQueued +
-        kilocodeResult.bucketsQueued +
-        roocodeResult.bucketsQueued +
-        zedResult.bucketsQueued +
-        gooseResult.bucketsQueued +
-        droidResult.bucketsQueued;
       process.stdout.write(
         [
           "Sync finished:",
@@ -1060,6 +1068,7 @@ async function cmdSync(argv) {
           .join("\n"),
       );
     }
+    return summary;
   } finally {
     progress?.stop();
     await lock.release();

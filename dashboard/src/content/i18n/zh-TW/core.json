@@ -200,6 +200,7 @@
   "menubar.metric.today_tokens": "今日 Token",
   "menubar.metric.today_cost": "今日成本",
   "menubar.metric.last_7d_tokens": "近 7 天 Token",
+  "menubar.metric.this_month_tokens": "本月 Token",
   "menubar.metric.total_tokens": "總 Token",
   "menubar.metric.total_cost": "總成本",
   "menubar.metric.claude_5h": "Claude 5 小時限額",

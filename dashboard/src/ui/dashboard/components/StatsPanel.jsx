@@ -100,9 +100,9 @@ export function StatsPanel({
           </div>
           <div className="flex flex-col items-center justify-center px-2 py-2 bg-oai-gray-50 dark:bg-oai-gray-800 rounded-lg">
             <span className="text-sm font-semibold text-oai-black dark:text-oai-white tabular-nums">
-              {formatValue(rolling?.last_30d?.avg_per_active_day)}
+              {formatValue(rolling?.current_month?.totals?.billable_total_tokens)}
             </span>
-            <span className="text-[10px] text-oai-gray-400 dark:text-oai-gray-400 mt-0.5 whitespace-nowrap">avg</span>
+            <span className="text-[10px] text-oai-gray-400 dark:text-oai-gray-400 mt-0.5 whitespace-nowrap">{copy("stats.period.this_month")}</span>
           </div>
           <div className="flex flex-col items-center justify-center px-2 py-2 bg-oai-gray-50 dark:bg-oai-gray-800 rounded-lg">
             <span className="text-sm font-semibold text-oai-black dark:text-oai-white tabular-nums">

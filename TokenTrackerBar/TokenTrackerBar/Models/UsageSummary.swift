@@ -28,20 +28,23 @@ struct UsageSummaryResponse: Codable, Equatable {
 struct RollingData: Codable, Equatable {
     var last7d: RollingPeriod
     var last30d: RollingPeriod
+    var currentMonth: RollingPeriod
 
-    init(last7d: RollingPeriod = RollingPeriod(), last30d: RollingPeriod = RollingPeriod()) {
-        self.last7d = last7d; self.last30d = last30d
+    init(last7d: RollingPeriod = RollingPeriod(), last30d: RollingPeriod = RollingPeriod(), currentMonth: RollingPeriod = RollingPeriod()) {
+        self.last7d = last7d; self.last30d = last30d; self.currentMonth = currentMonth
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         last7d = try c.decodeIfPresent(RollingPeriod.self, forKey: .last7d) ?? RollingPeriod()
         last30d = try c.decodeIfPresent(RollingPeriod.self, forKey: .last30d) ?? RollingPeriod()
+        currentMonth = try c.decodeIfPresent(RollingPeriod.self, forKey: .currentMonth) ?? RollingPeriod()
     }
 
     private enum CodingKeys: String, CodingKey {
         case last7d = "last_7d"
         case last30d = "last_30d"
+        case currentMonth = "current_month"
     }
 }
 

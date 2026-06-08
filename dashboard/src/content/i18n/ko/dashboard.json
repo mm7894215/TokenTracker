@@ -6,6 +6,7 @@
   "stats.period.last24h": "24h",
   "stats.period.week": "이번 주",
   "stats.period.month": "이번 달",
+  "stats.period.this_month": "이번 달",
   "stats.period.all": "전체",
   "stats.period.convs": "대화",
   "dashboard.core_index.collapse_label": "▾",

@@ -32,6 +32,12 @@ describe("DashboardPage period defaults", () => {
     expect(text).toContain("{ value: 0, labelKey: \"usage.auto_refresh.off\" }");
     expect(text).toContain("{ value: 120000, labelKey: \"usage.auto_refresh.120s\" }");
     expect(text).toContain("const [autoRefreshIntervalMs, setAutoRefreshIntervalMs] = useState(readAutoRefreshInterval);");
+    expect(text).toContain("const [dashboardNowMs, setDashboardNowMs] = useState(() => Date.now());");
+    expect(text).toContain("const dashboardNow = useMemo(");
+    expect(text).toContain("now: dashboardNow");
+    expect(text).toContain("setDashboardNowMs(nowMs);");
+    expect(text).toContain("const LOCAL_DAY_WATCH_INTERVAL_MS = 60000;");
+    expect(text).toContain("lastLocalDayRef.current");
     expect(text).toContain("window.localStorage?.setItem(AUTO_REFRESH_STORAGE_KEY, String(nextInterval));");
     expect(text).toContain("if (autoRefreshIntervalMs <= 0) return undefined;");
     expect(text).toContain("const handleManualRefresh = useCallback(async () => {");
@@ -60,5 +66,14 @@ describe("DashboardPage period defaults", () => {
     expect(text.slice(autoStart, optionsStart)).toContain("const syncPromise = startAutoSync();");
     expect(text.slice(autoStart, optionsStart)).toContain("await refreshAll();");
     expect(text.slice(autoStart, optionsStart)).toContain("return refreshAll();");
+  });
+
+  it("surfaces data-health copy for empty selected periods with recent usage", () => {
+    const text = src();
+    expect(text).toContain("dashboard.data_health.day_empty_has_recent");
+    expect(text).toContain("dashboard.data_health.period_empty_has_30d");
+    expect(text).toContain("dashboard.data_health.month_empty_has_30d");
+    expect(text).toContain("dashboard.data_health.no_recent_data");
+    expect(text).toContain("dataHealthMessage={dataHealthMessage}");
   });
 });

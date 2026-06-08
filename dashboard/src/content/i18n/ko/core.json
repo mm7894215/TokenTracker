@@ -200,6 +200,7 @@
   "menubar.metric.today_tokens": "오늘 토큰",
   "menubar.metric.today_cost": "오늘 비용",
   "menubar.metric.last_7d_tokens": "최근 7일",
+  "menubar.metric.this_month_tokens": "이번 달 토큰",
   "menubar.metric.total_tokens": "총 토큰",
   "menubar.metric.total_cost": "총 비용",
   "menubar.metric.claude_5h": "Claude 5시간 한도",

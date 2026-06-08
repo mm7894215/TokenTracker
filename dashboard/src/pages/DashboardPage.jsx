@@ -53,6 +53,7 @@ const AUTO_REFRESH_OPTIONS = [
   { value: 120000, labelKey: "usage.auto_refresh.120s" },
 ];
 const AUTO_REFRESH_FOCUS_THROTTLE_MS = 30000;
+const LOCAL_DAY_WATCH_INTERVAL_MS = 60000;
 const DETAILS_DATE_KEYS = new Set(["day", "hour", "month"]);
 const DETAILS_PAGED_PERIODS = new Set(["day", "24h", "total", "custom"]);
 const AUTO_REFRESH_VALUES = new Set(AUTO_REFRESH_OPTIONS.map((option) => option.value));
@@ -153,10 +154,12 @@ export function DashboardPage({
   const [coreIndexCollapsed, setCoreIndexCollapsed] = useState(true);
   const [manualSyncLoading, setManualSyncLoading] = useState(false);
   const [autoRefreshIntervalMs, setAutoRefreshIntervalMs] = useState(readAutoRefreshInterval);
+  const [dashboardNowMs, setDashboardNowMs] = useState(() => Date.now());
   const [lastUpdatedAtMs, setLastUpdatedAtMs] = useState(() => Date.now());
   const autoRefreshInFlightRef = useRef(false);
   const autoSyncInFlightRef = useRef(false);
   const lastAutoRefreshAtRef = useRef(0);
+  const lastLocalDayRef = useRef(null);
   const mainContentVisibleNotifiedRef = useRef(false);
   const mockEnabled = isMockEnabled();
   const authTokenAllowed = signedIn && !sessionSoftExpired;
@@ -233,6 +236,10 @@ export function DashboardPage({
   const timeZone = useMemo(() => getBrowserTimeZone(), []);
   const tzOffsetMinutes = useMemo(() => getBrowserTimeZoneOffsetMinutes(), []);
   const mockNow = useMemo(() => getMockNow(), []);
+  const dashboardNow = useMemo(
+    () => mockNow || new Date(dashboardNowMs),
+    [dashboardNowMs, mockNow],
+  );
   const cacheKey = publicMode ? null : auth?.userId || auth?.email || "default";
   const [selectedPeriod, setSelectedPeriod] = useState("day");
   const [customFrom, setCustomFrom] = useState(null);
@@ -246,9 +253,9 @@ export function DashboardPage({
     return getRangeForPeriod(period, {
       timeZone,
       offsetMinutes: tzOffsetMinutes,
-      now: mockNow,
+      now: dashboardNow,
     });
-  }, [mockNow, period, timeZone, tzOffsetMinutes, customFrom, customTo]);
+  }, [dashboardNow, period, timeZone, tzOffsetMinutes, customFrom, customTo]);
   const from = range.from;
   const to = range.to;
   const timeZoneLabel = useMemo(
@@ -271,9 +278,9 @@ export function DashboardPage({
       getLocalDayKey({
         timeZone,
         offsetMinutes: tzOffsetMinutes,
-        date: mockNow || new Date(),
+        date: dashboardNow,
       }),
-    [mockNow, timeZone, tzOffsetMinutes],
+    [dashboardNow, timeZone, tzOffsetMinutes],
   );
   const dailyBreakdownRange = useMemo(() => {
     const end = parseUtcDateKey(todayKey) || new Date();
@@ -302,7 +309,7 @@ export function DashboardPage({
     cacheKey,
     timeZone,
     tzOffsetMinutes,
-    now: mockNow,
+    now: dashboardNow,
   });
   const {
     daily: dailyBreakdownDaily,
@@ -318,7 +325,7 @@ export function DashboardPage({
     cacheKey: cacheKey ? `${cacheKey}.daily-breakdown` : "daily-breakdown",
     timeZone,
     tzOffsetMinutes,
-    now: mockNow,
+    now: dashboardNow,
   });
 
   const {
@@ -377,7 +384,7 @@ export function DashboardPage({
     cacheKey,
     timeZone: trendTimeZone,
     tzOffsetMinutes: trendTzOffsetMinutes,
-    now: mockNow,
+    now: dashboardNow,
     sharedRows: shareDailyToTrend ? daily : null,
     sharedRange: shareDailyToTrend ? { from, to } : null,
   });
@@ -393,9 +400,9 @@ export function DashboardPage({
       cacheKey,
       timeZone: trendTimeZone,
       tzOffsetMinutes: trendTzOffsetMinutes,
-      now: mockNow,
+      now: dashboardNow,
     }),
-    [baseUrl, accessToken, guestAllowed, cacheKey, trendTimeZone, trendTzOffsetMinutes, mockNow],
+    [baseUrl, accessToken, guestAllowed, cacheKey, trendTimeZone, trendTzOffsetMinutes, dashboardNow],
   );
 
   const {
@@ -411,7 +418,7 @@ export function DashboardPage({
     cacheKey,
     timeZone,
     tzOffsetMinutes,
-    now: mockNow,
+    now: dashboardNow,
   });
 
   const {
@@ -646,6 +653,8 @@ export function DashboardPage({
   }, [selectedPeriod, customFrom, prevPeriod]);
 
   const refreshAll = useCallback(async () => {
+    const nowMs = Date.now();
+    setDashboardNowMs(nowMs);
     await Promise.all([
       refreshUsage(),
       refreshHeatmap(),
@@ -655,7 +664,7 @@ export function DashboardPage({
       refreshDailyBreakdown(),
       refreshUsageLimits(),
     ]);
-    setLastUpdatedAtMs(Date.now());
+    setLastUpdatedAtMs(nowMs);
   }, [
     refreshDailyBreakdown,
     refreshHeatmap,
@@ -665,6 +674,42 @@ export function DashboardPage({
     refreshUsage,
     refreshUsageLimits,
   ]);
+
+  useEffect(() => {
+    if (screenshotMode || mockNow || typeof window === "undefined") return undefined;
+
+    const syncLocalDay = () => {
+      const now = new Date();
+      const localDay = getLocalDayKey({
+        timeZone,
+        offsetMinutes: tzOffsetMinutes,
+        date: now,
+      });
+      if (!localDay) return;
+      if (lastLocalDayRef.current == null) {
+        lastLocalDayRef.current = localDay;
+        return;
+      }
+      if (lastLocalDayRef.current === localDay) return;
+      lastLocalDayRef.current = localDay;
+      setDashboardNowMs(now.getTime());
+    };
+
+    syncLocalDay();
+    const intervalId = window.setInterval(syncLocalDay, LOCAL_DAY_WATCH_INTERVAL_MS);
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", syncLocalDay);
+    }
+    window.addEventListener("focus", syncLocalDay);
+
+    return () => {
+      window.clearInterval(intervalId);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", syncLocalDay);
+      }
+      window.removeEventListener("focus", syncLocalDay);
+    };
+  }, [mockNow, screenshotMode, timeZone, tzOffsetMinutes]);
 
   const handleManualRefresh = useCallback(async () => {
     setManualSyncLoading(true);
@@ -1116,6 +1161,38 @@ export function DashboardPage({
     () => summary?.conversation_count ?? null,
     [summary?.conversation_count],
   );
+  const dataHealthMessage = useMemo(() => {
+    const currentTokens = Number(summaryTotalTokens || 0);
+    if (currentTokens > 0 || usageLoading || usageError) return null;
+    const currentMonthTokens = Number(rolling?.current_month?.totals?.billable_total_tokens || 0);
+    const last30Tokens = Number(rolling?.last_30d?.totals?.billable_total_tokens || 0);
+    const last7Tokens = Number(rolling?.last_7d?.totals?.billable_total_tokens || 0);
+    if (period === "day" && last7Tokens > 0) {
+      return copy("dashboard.data_health.day_empty_has_recent", {
+        tokens: toDisplayNumber(last7Tokens),
+      });
+    }
+    if ((period === "week" || period === "custom") && last30Tokens > 0) {
+      return copy("dashboard.data_health.period_empty_has_30d", {
+        tokens: toDisplayNumber(last30Tokens),
+      });
+    }
+    if (period === "month" && currentMonthTokens === 0 && last30Tokens > 0) {
+      return copy("dashboard.data_health.month_empty_has_30d", {
+        tokens: toDisplayNumber(last30Tokens),
+      });
+    }
+    if (last30Tokens === 0 && rolling) {
+      return copy("dashboard.data_health.no_recent_data");
+    }
+    return null;
+  }, [
+    period,
+    rolling,
+    summaryTotalTokens,
+    usageError,
+    usageLoading,
+  ]);
 
   const fleetData = useMemo(
     () => buildFleetData(modelBreakdown, { copyFn: copy }),
@@ -1234,6 +1311,7 @@ export function DashboardPage({
       refreshAll={handleManualRefresh}
       usageLoadingState={usageLoadingState}
       usageError={usageError}
+      dataHealthMessage={dataHealthMessage}
       rangeLabel={rangeLabel}
       timeZoneRangeLabel={timeZoneRangeLabel}
       usageSourceLabel={usageSourceLabel}

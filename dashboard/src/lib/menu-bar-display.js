@@ -4,6 +4,7 @@ export const FALLBACK_MENU_BAR_ITEMS = [
   { id: "todayTokens", label: "Today Tokens", shortLabel: "Tokens", category: "tokens" },
   { id: "todayCost", label: "Today Cost", shortLabel: "Cost", category: "cost" },
   { id: "last7dTokens", label: "Last 7 Days", shortLabel: "7d", category: "tokens" },
+  { id: "thisMonthTokens", label: "This Month", shortLabel: "Month", category: "tokens" },
   { id: "totalTokens", label: "Total Tokens", shortLabel: "Total", category: "tokens" },
   { id: "totalCost", label: "Total Cost", shortLabel: "All $", category: "cost" },
   { id: "claude5h", label: "Claude 5h Limit", shortLabel: "Cl 5h", category: "limits" },

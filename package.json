@@ -1,6 +1,6 @@
 {
   "name": "@ipv9/tokentracker-cli",
-  "version": "0.39.3",
+  "version": "0.39.8",
   "description": "Local-first token and cost dashboard for 22 AI coding tools, including Claude Code, Codex, Cursor, Gemini, Kiro, OpenCode, OpenClaw, Copilot, Antigravity, Zed, and Goose.",
   "main": "src/cli.js",
   "bin": {
@@ -44,7 +44,7 @@
   },
   "dependencies": {
     "@mongodb-js/zstd": "^2.0.1",
-    "undici": "^8.2.0"
+    "undici": "^7.27.1"
   },
   "devDependencies": {
     "@sourcegraph/scip-typescript": "^0.3.6",

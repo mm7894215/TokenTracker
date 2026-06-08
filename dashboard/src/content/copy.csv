@@ -309,6 +309,10 @@ dashboard.install.cmd.sync,dashboard,DashboardPage,AsciiBox,install_cmd,"npx --y
 
 dashboard.daily.title,dashboard,DashboardPage,AsciiBox,title,"Daily Breakdown",,active
 dashboard.daily.empty,dashboard,DashboardPage,AsciiBox,empty_state,"No data yet. Use your AI CLI then run {{cmd}}.",,active
+dashboard.data_health.day_empty_has_recent,dashboard,DashboardPage,DashboardView,data_health_day_recent,"No tokens in today's local day. Last 7 days has {{tokens}} tokens; switch to 7d or 30d to review recent usage.",,active
+dashboard.data_health.period_empty_has_30d,dashboard,DashboardPage,DashboardView,data_health_period_30d,"No tokens in this range. Last 30 days has {{tokens}} tokens; widen the range to review recent usage.",,active
+dashboard.data_health.month_empty_has_30d,dashboard,DashboardPage,DashboardView,data_health_month_30d,"No tokens in this calendar month yet. Last 30 days has {{tokens}} tokens.",,active
+dashboard.data_health.no_recent_data,dashboard,DashboardPage,DashboardView,data_health_no_recent,"No recent token data found. Run sync or check status to confirm readable tool logs.",,active
 
 dashboard.identity.title,dashboard,DashboardPage,IdentityCard,title,"Your Profile",,active
 dashboard.identity.subtitle,dashboard,DashboardPage,IdentityCard,subtitle,"Track your coding journey",,active
@@ -395,6 +399,7 @@ stats.period.today,ui,DashboardPage,StatsPanel,period_today,"today convs",,activ
 stats.period.last24h,ui,DashboardPage,StatsPanel,period_last24h,"24h convs",,active
 stats.period.week,ui,DashboardPage,StatsPanel,period_week,"7d convs",,active
 stats.period.month,ui,DashboardPage,StatsPanel,period_month,"30d convs",,active
+stats.period.this_month,ui,DashboardPage,StatsPanel,period_this_month,"month",,active
 stats.period.all,ui,DashboardPage,StatsPanel,period_all,"all convs",,active
 stats.period.convs,ui,DashboardPage,StatsPanel,period_convs,"convs",,active
 leaderboard.column.est_cost,ui,LeaderboardPage,LeaderboardPage,column_est_cost,"Est. Cost",,active
@@ -433,6 +438,7 @@ menubar.native_only,ui,WidgetsPage,MenuBarDisplayCard,native_only,"Open TokenTra
 menubar.metric.today_tokens,ui,WidgetsPage,MenuBarDisplayCard,metric_today_tokens,"Today Tokens",,active
 menubar.metric.today_cost,ui,WidgetsPage,MenuBarDisplayCard,metric_today_cost,"Today Cost",,active
 menubar.metric.last_7d_tokens,ui,WidgetsPage,MenuBarDisplayCard,metric_last_7d,"Last 7 Days",,active
+menubar.metric.this_month_tokens,ui,WidgetsPage,MenuBarDisplayCard,metric_this_month,"This Month",,active
 menubar.metric.total_tokens,ui,WidgetsPage,MenuBarDisplayCard,metric_total_tokens,"Total Tokens",,active
 menubar.metric.total_cost,ui,WidgetsPage,MenuBarDisplayCard,metric_total_cost,"Total Cost",,active
 menubar.metric.claude_5h,ui,WidgetsPage,MenuBarDisplayCard,metric_claude_5h,"Claude 5h Limit",,active

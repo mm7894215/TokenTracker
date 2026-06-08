@@ -6,6 +6,7 @@ enum MenuBarDisplayMetric: String, CaseIterable {
     case todayTokens
     case todayCost
     case last7dTokens
+    case thisMonthTokens
     case totalTokens
     case totalCost
     case claude5h
@@ -34,6 +35,7 @@ enum MenuBarDisplayMetric: String, CaseIterable {
         case .todayTokens: return "Tokens"
         case .todayCost: return "Cost"
         case .last7dTokens: return "7d"
+        case .thisMonthTokens: return "Month"
         case .totalTokens: return "Total"
         case .totalCost: return "All $"
         case .claude5h: return "Cl 5h"
@@ -64,6 +66,7 @@ enum MenuBarDisplayMetric: String, CaseIterable {
         case .todayTokens: return "Today Tokens"
         case .todayCost: return "Today Cost"
         case .last7dTokens: return "Last 7 Days"
+        case .thisMonthTokens: return "This Month"
         case .totalTokens: return "Total Tokens"
         case .totalCost: return "Total Cost"
         case .claude5h: return "Claude 5h Limit"
@@ -91,7 +94,7 @@ enum MenuBarDisplayMetric: String, CaseIterable {
 
     var settingsCategory: String {
         switch self {
-        case .todayTokens, .last7dTokens, .totalTokens:
+        case .todayTokens, .last7dTokens, .thisMonthTokens, .totalTokens:
             return "tokens"
         case .todayCost, .totalCost:
             return "cost"
@@ -111,7 +114,7 @@ enum MenuBarDisplayMetric: String, CaseIterable {
     /// for providers they've configured.
     var providerKey: String? {
         switch self {
-        case .todayTokens, .todayCost, .last7dTokens, .totalTokens, .totalCost:
+        case .todayTokens, .todayCost, .last7dTokens, .thisMonthTokens, .totalTokens, .totalCost:
             return nil
         case .claude5h, .claude7d: return "claude"
         case .codex5h, .codex7d: return "codex"
@@ -444,6 +447,13 @@ final class StatusBarController: NSObject {
                     id: id,
                     label: metric.menuLabel,
                     value: TokenFormatter.formatCompact(viewModel.last7dTokens)
+                )
+            case .thisMonthTokens:
+                guard viewModel.rollingSummary != nil else { return nil }
+                return MenuBarDisplayValue(
+                    id: id,
+                    label: metric.menuLabel,
+                    value: TokenFormatter.formatCompact(viewModel.currentMonthTokens)
                 )
             case .totalTokens:
                 guard viewModel.totalSummary != nil else { return nil }

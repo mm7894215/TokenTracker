@@ -75,6 +75,46 @@ test("usage-summary normalizes legacy Codex rows whose input still includes cach
   }
 });
 
+test("usage-summary includes current calendar month rolling totals", async () => {
+  const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), "tt-localapi-current-month-"));
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    const currentMonthFrom = `${today.slice(0, 7)}-01`;
+    const hourStart = `${currentMonthFrom}T10:00:00.000Z`;
+    await writeQueue(queuePath, [
+      {
+        source: "claude",
+        model: "claude-sonnet-4-6",
+        hour_start: hourStart,
+        input_tokens: 100,
+        cached_input_tokens: 0,
+        output_tokens: 40,
+        reasoning_output_tokens: 0,
+        total_tokens: 140,
+        billable_total_tokens: 140,
+        conversation_count: 2,
+      },
+    ]);
+
+    const body = await callEndpoint(
+      queuePath,
+      `/functions/tokentracker-usage-summary?from=${today}&to=${today}&tz=UTC`,
+    );
+
+    assert.equal(body.totals.total_tokens, today === currentMonthFrom ? 140 : 0);
+    assert.equal(body.rolling.current_month.from, currentMonthFrom);
+    assert.equal(body.rolling.current_month.to, today);
+    assert.equal(body.rolling.current_month.active_days, 1);
+    assert.equal(body.rolling.current_month.totals.total_tokens, 140);
+    assert.equal(body.rolling.current_month.totals.billable_total_tokens, 140);
+    assert.equal(body.rolling.current_month.totals.conversation_count, 2);
+  } finally {
+    await fs.promises.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("usage-model-breakdown applies the same legacy Codex normalization before pricing", async () => {
   const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), "tt-localapi-codex-breakdown-"));
   try {

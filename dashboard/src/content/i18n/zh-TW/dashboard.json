@@ -6,6 +6,7 @@
   "stats.period.last24h": "24h",
   "stats.period.week": "本週",
   "stats.period.month": "本月",
+  "stats.period.this_month": "本月",
   "stats.period.all": "全部",
   "stats.period.convs": "對話",
   "dashboard.core_index.collapse_label": "▾",

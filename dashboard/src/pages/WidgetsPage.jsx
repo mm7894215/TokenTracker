@@ -257,7 +257,9 @@ function previewValueFor(item) {
     case "limits":
       return "62%";
     default:
-      return item.id === "last7dTokens" ? "1.8B" : "203M";
+      if (item.id === "last7dTokens") return "1.8B";
+      if (item.id === "thisMonthTokens") return "4.2B";
+      return "203M";
   }
 }
 
@@ -269,6 +271,8 @@ function metricLabel(id, fallback) {
       return copy("menubar.metric.today_cost");
     case "last7dTokens":
       return copy("menubar.metric.last_7d_tokens");
+    case "thisMonthTokens":
+      return copy("menubar.metric.this_month_tokens");
     case "totalTokens":
       return copy("menubar.metric.total_tokens");
     case "totalCost":

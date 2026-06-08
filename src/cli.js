@@ -13,7 +13,7 @@ async function run(argv) {
 
   // No args → launch dashboard
   if (!command) {
-    await cmdServe(argv);
+    await cmdServe(["--sync"]);
     return;
   }
 

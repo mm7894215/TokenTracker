@@ -70,6 +70,7 @@ class DashboardViewModel: ObservableObject {
     var last7dActiveDays: Int { rollingSummary?.rolling.last7d.activeDays ?? 0 }
     var last30dTokens: Int { rollingSummary?.rolling.last30d.totals.billableTotalTokens ?? 0 }
     var last30dAvgPerDay: Int { rollingSummary?.rolling.last30d.avgPerActiveDay ?? 0 }
+    var currentMonthTokens: Int { rollingSummary?.rolling.currentMonth.totals.billableTotalTokens ?? 0 }
 
     // All-time total (matches dashboard "Total" period)
     var totalTokens: Int { totalSummary?.totals.totalTokens ?? 0 }

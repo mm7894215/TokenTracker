@@ -200,6 +200,7 @@
   "menubar.metric.today_tokens": "今日のトークン",
   "menubar.metric.today_cost": "今日のコスト",
   "menubar.metric.last_7d_tokens": "直近 7 日間のトークン",
+  "menubar.metric.this_month_tokens": "今月のトークン",
   "menubar.metric.total_tokens": "トークン合計",
   "menubar.metric.total_cost": "コスト合計",
   "menubar.metric.claude_5h": "Claude 5 時間制限",

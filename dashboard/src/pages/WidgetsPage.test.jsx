@@ -43,6 +43,7 @@ describe("WidgetsPage menu bar configurator", () => {
       menuBarAvailableItems: [
         { id: "todayTokens", label: "Today Tokens", shortLabel: "Tokens", category: "tokens" },
         { id: "todayCost", label: "Today Cost", shortLabel: "Cost", category: "cost" },
+        { id: "thisMonthTokens", label: "This Month", shortLabel: "Month", category: "tokens" },
         { id: "claude5h", label: "Claude 5h Limit", shortLabel: "Cl 5h", category: "limits" },
       ],
     });
@@ -77,6 +78,9 @@ describe("WidgetsPage menu bar configurator", () => {
     const todayCostOption = within(listbox).getByRole("option", {
       name: copy("menubar.metric.today_cost"),
     });
+    expect(within(listbox).getByRole("option", {
+      name: copy("menubar.metric.this_month_tokens"),
+    })).toBeInTheDocument();
     await act(async () => {
       await user.pointer([
         { keys: "[TouchA>]", target: todayCostOption },

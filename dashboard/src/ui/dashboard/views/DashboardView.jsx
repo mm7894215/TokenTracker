@@ -62,6 +62,7 @@ export function DashboardView(props) {
     allowBreakdownToggle,
     refreshAll,
     usageLoadingState,
+    dataHealthMessage,
     fleetData,
     hasDetailsActual,
     dailyEmptyPrefix,
@@ -207,6 +208,16 @@ export function DashboardView(props) {
                     to={usageTo}
                   />
                 </FadeIn>
+
+                {!screenshotMode ? (
+                  dataHealthMessage ? (
+                    <FadeIn delay={D_USAGE_OVERVIEW + 0.03}>
+                      <div className="rounded-lg border border-oai-gray-200 bg-oai-gray-50 px-4 py-3 text-sm text-oai-gray-700 dark:border-oai-gray-800 dark:bg-oai-gray-900/70 dark:text-oai-gray-300">
+                        {dataHealthMessage}
+                      </div>
+                    </FadeIn>
+                  ) : null
+                ) : null}
 
                 {!screenshotMode ? (
                   <FadeIn delay={D_DATA_DETAILS}>

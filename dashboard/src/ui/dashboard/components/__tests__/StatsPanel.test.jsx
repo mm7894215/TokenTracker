@@ -12,6 +12,9 @@ function renderPanel(props = {}) {
           totals: { billable_total_tokens: 67890, conversation_count: 999 },
           avg_per_active_day: 2222,
         },
+        current_month: {
+          totals: { billable_total_tokens: 54321 },
+        },
       }}
       topModels={[]}
       {...props}
@@ -25,6 +28,14 @@ it("shows current-period conversations instead of fixed rolling 30-day conversat
   expect(screen.getByText("42")).toBeInTheDocument();
   expect(screen.getByText("30d convs")).toBeInTheDocument();
   expect(screen.queryByText("999")).not.toBeInTheDocument();
+});
+
+it("shows current-month tokens in the rolling stats strip", () => {
+  renderPanel();
+
+  expect(screen.getByText("54.3K")).toBeInTheDocument();
+  expect(screen.getByText("month")).toBeInTheDocument();
+  expect(screen.queryByText("2.2K")).not.toBeInTheDocument();
 });
 
 it("updates the conversations badge label for day period", () => {
