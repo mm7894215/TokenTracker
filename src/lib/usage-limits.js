@@ -30,6 +30,19 @@ const DEFAULT_PROVIDER_TIMEOUT_MS = 15_000;
 const ANTIGRAVITY_LIMITS_CACHE_FILE = "usage-limits-cache.json";
 const ANTIGRAVITY_LIMITS_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const ANTIGRAVITY_LIMITS_CACHE_UNKNOWN_RESET_TTL_MS = 12 * 60 * 60 * 1000;
+// Claude shares its OAuth usage endpoint budget with Claude Code itself, so a transient
+// 429 is common. Persist the last successful read so the panel can keep showing it instead
+// of flashing a red error. Separate file from Antigravity's (whose writer rewrites the whole
+// file with only its own key, so a shared file would clobber).
+const CLAUDE_LIMITS_CACHE_FILE = "claude-usage-limits-cache.json";
+const CLAUDE_LIMITS_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+// A 429 from the usage endpoint carries a long `retry-after` (often 20+ minutes). Persist
+// the cooldown so every surface — this process, the menu bar app's embedded server, a later
+// restart — stops calling until it expires. Hammering during the cooldown just renews the
+// penalty, which is what kept the panel stuck on the error.
+const CLAUDE_RATE_LIMIT_FILE = "claude-usage-rate-limit.json";
+const CLAUDE_RATE_LIMIT_DEFAULT_COOLDOWN_SEC = 5 * 60;
+const CLAUDE_RATE_LIMIT_MAX_COOLDOWN_SEC = 60 * 60;
 
 function clampPercent(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -99,6 +112,20 @@ function withProviderTimeout(promise, label, timeoutMs) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
+function parseRetryAfterSeconds(headers) {
+  const ra = headers?.get ? headers.get("retry-after") : null;
+  const sec = ra ? Number.parseInt(ra, 10) : NaN;
+  return Number.isFinite(sec) && sec > 0 ? sec : null;
+}
+
+function formatClaudeRateLimitMessage(retryAfterSec) {
+  if (Number.isFinite(retryAfterSec) && retryAfterSec > 0) {
+    const mins = Math.ceil(retryAfterSec / 60);
+    return `Claude API rate limited (429) — retry in ~${mins}m.`;
+  }
+  return "Claude API rate limited (429) — retry shortly.";
+}
+
 async function fetchClaudeUsageLimits(accessToken, { fetchImpl = fetch, maxAttempts = 3 } = {}) {
   const url = "https://api.anthropic.com/api/oauth/usage";
   const headers = {
@@ -120,9 +147,11 @@ async function fetchClaudeUsageLimits(accessToken, { fetchImpl = fetch, maxAttem
     }
     if (!res.ok) {
       if (res.status === 429) {
-        throw new Error(
-          "Claude API rate limited (429) — wait ~1 minute and refresh.",
-        );
+        const retryAfterSec = parseRetryAfterSeconds(res.headers);
+        const err = new Error(formatClaudeRateLimitMessage(retryAfterSec));
+        err.code = "RATE_LIMITED";
+        err.retryAfterSec = retryAfterSec;
+        throw err;
       }
       throw new Error(`Claude API returned ${res.status}`);
     }
@@ -1271,6 +1300,107 @@ function writeAntigravityLimitsCache(limits, { home, nowMs = Date.now() } = {}) 
   } catch (_error) {}
 }
 
+function resolveClaudeLimitsCachePath({ home } = {}) {
+  return path.join(home || os.homedir(), ".tokentracker", "tracker", CLAUDE_LIMITS_CACHE_FILE);
+}
+
+// Claude windows carry their own `resets_at`; a window whose reset has already passed is
+// stale data, not a usable fallback, so drop it. Windows without a reset stamp are kept
+// (the overall cached_at max-age gate already bounds them).
+function isClaudeCacheWindowUsable(window, { nowMs } = {}) {
+  if (!window || typeof window !== "object") return false;
+  const resetAtMs = parseTimeMs(window.resets_at);
+  if (resetAtMs === null) return true;
+  return resetAtMs > nowMs;
+}
+
+function hasClaudeWindow(limits) {
+  return Boolean(limits?.five_hour || limits?.seven_day || limits?.seven_day_opus);
+}
+
+function normalizeClaudeCachedLimits(raw, { nowMs = Date.now() } = {}) {
+  const cachedAtMs = parseTimeMs(raw?.cached_at);
+  if (!Number.isFinite(cachedAtMs)) return null;
+  if (cachedAtMs > nowMs + 60_000) return null;
+  if (nowMs - cachedAtMs > CLAUDE_LIMITS_CACHE_MAX_AGE_MS) return null;
+
+  const cached = {
+    configured: true,
+    error: null,
+    five_hour: isClaudeCacheWindowUsable(raw?.five_hour, { nowMs }) ? raw.five_hour : null,
+    seven_day: isClaudeCacheWindowUsable(raw?.seven_day, { nowMs }) ? raw.seven_day : null,
+    seven_day_opus: isClaudeCacheWindowUsable(raw?.seven_day_opus, { nowMs }) ? raw.seven_day_opus : null,
+    extra_usage: raw?.extra_usage ?? null,
+    stale: true,
+    cached_at: raw.cached_at,
+  };
+  return hasClaudeWindow(cached) ? cached : null;
+}
+
+function readClaudeLimitsCache({ home, nowMs = Date.now() } = {}) {
+  const cachePath = resolveClaudeLimitsCachePath({ home });
+  try {
+    const parsed = JSON.parse(fs.readFileSync(cachePath, "utf8"));
+    return normalizeClaudeCachedLimits(parsed?.claude, { nowMs });
+  } catch (_error) {
+    return null;
+  }
+}
+
+function writeClaudeLimitsCache(limits, { home, nowMs = Date.now() } = {}) {
+  if (!limits?.configured || limits.error || !hasClaudeWindow(limits)) return;
+  const cachePath = resolveClaudeLimitsCachePath({ home });
+  const payload = {
+    claude: {
+      five_hour: limits.five_hour || null,
+      seven_day: limits.seven_day || null,
+      seven_day_opus: limits.seven_day_opus || null,
+      extra_usage: limits.extra_usage || null,
+      cached_at: new Date(nowMs).toISOString(),
+    },
+  };
+  try {
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    const tmpPath = `${cachePath}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 0o600 });
+    fs.renameSync(tmpPath, cachePath);
+  } catch (_error) {}
+}
+
+function resolveClaudeRateLimitPath({ home } = {}) {
+  return path.join(home || os.homedir(), ".tokentracker", "tracker", CLAUDE_RATE_LIMIT_FILE);
+}
+
+// Returns the cooldown expiry in ms if a 429 cooldown is still active, else null.
+function readClaudeRateLimitRetryAtMs({ home, nowMs = Date.now() } = {}) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(resolveClaudeRateLimitPath({ home }), "utf8"));
+    const retryAtMs = parseTimeMs(parsed?.retry_at);
+    if (retryAtMs !== null && retryAtMs > nowMs) return retryAtMs;
+  } catch (_error) {}
+  return null;
+}
+
+function writeClaudeRateLimitCooldown(retryAfterSec, { home, nowMs = Date.now() } = {}) {
+  const sec = Number.isFinite(retryAfterSec) && retryAfterSec > 0
+    ? Math.min(retryAfterSec, CLAUDE_RATE_LIMIT_MAX_COOLDOWN_SEC)
+    : CLAUDE_RATE_LIMIT_DEFAULT_COOLDOWN_SEC;
+  const cachePath = resolveClaudeRateLimitPath({ home });
+  const payload = { retry_at: new Date(nowMs + sec * 1000).toISOString() };
+  try {
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    const tmpPath = `${cachePath}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 0o600 });
+    fs.renameSync(tmpPath, cachePath);
+  } catch (_error) {}
+}
+
+function clearClaudeRateLimitCooldown({ home } = {}) {
+  try {
+    fs.unlinkSync(resolveClaudeRateLimitPath({ home }));
+  } catch (_error) {}
+}
+
 function resolveLsofBinary({ commandRunner } = {}) {
   for (const candidate of ["/usr/sbin/lsof", "/usr/bin/lsof"]) {
     if (fs.existsSync(candidate)) return candidate;
@@ -1698,9 +1828,13 @@ async function getUsageLimits({
   const codexAccountId = codexAuthRefreshed?.accountId || null;
   const codexPlanType = codexAuthRefreshed?.planType || null;
 
+  // Skip the upstream Claude call entirely while a 429 cooldown is active — calling again
+  // just renews the penalty. The result handling below serves cache or a cooldown message.
+  const claudeRetryAtMs = claudeToken ? readClaudeRateLimitRetryAtMs({ home, nowMs }) : null;
+
   const providerFetch = withFetchTimeout(fetchImpl, providerTimeoutMs);
   const [claudeResult, codexResult, cursor, kimi, gemini, kiro, antigravity, copilot, grok] = await Promise.all([
-    claudeToken
+    claudeToken && !claudeRetryAtMs
       ? withProviderTimeout(fetchClaudeUsageLimits(claudeToken, { fetchImpl: providerFetch, maxAttempts: 1 }), "Claude", providerTimeoutMs).then(
           (value) => ({ status: "fulfilled", value }),
           (reason) => ({ status: "rejected", reason }),
@@ -1733,9 +1867,7 @@ async function getUsageLimits({
   let claude;
   if (!claudeToken) {
     claude = { configured: false };
-  } else if (!claudeResult || claudeResult.status === "rejected") {
-    claude = { configured: true, error: claudeResult?.reason?.message || "Unknown error" };
-  } else {
+  } else if (claudeResult && claudeResult.status === "fulfilled") {
     claude = {
       configured: true,
       error: null,
@@ -1744,6 +1876,28 @@ async function getUsageLimits({
       seven_day_opus: claudeResult.value.seven_day_opus,
       extra_usage: claudeResult.value.extra_usage,
     };
+    writeClaudeLimitsCache(claude, { home, nowMs });
+    clearClaudeRateLimitCooldown({ home });
+  } else {
+    // Either a fresh 429 (record its cooldown) or a call we skipped because a cooldown was
+    // already active. Serve the last successful read so the bars stay visible; otherwise
+    // surface an accurate "retry in ~Nm" message rather than the misleading hardcoded one.
+    const reason = claudeResult?.reason;
+    if (reason?.code === "RATE_LIMITED") {
+      writeClaudeRateLimitCooldown(reason.retryAfterSec, { home, nowMs });
+    }
+    const cached = readClaudeLimitsCache({ home, nowMs });
+    if (cached) {
+      claude = cached;
+    } else {
+      const retryAtMs = readClaudeRateLimitRetryAtMs({ home, nowMs }) || claudeRetryAtMs;
+      claude = {
+        configured: true,
+        error: retryAtMs
+          ? formatClaudeRateLimitMessage(Math.round((retryAtMs - nowMs) / 1000))
+          : reason?.message || "Unknown error",
+      };
+    }
   }
 
   let codex;

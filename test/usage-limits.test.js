@@ -1323,3 +1323,207 @@ describe("getUsageLimits plan_label", () => {
     }
   });
 });
+
+describe("getUsageLimits Claude stale fallback", () => {
+  const FUTURE_RESET = "2099-01-01T00:00:00.000Z";
+
+  function makeClaudeHome(tmp) {
+    const claudeDir = path.join(tmp, ".claude");
+    fs.mkdirSync(claudeDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(claudeDir, ".credentials.json"),
+      JSON.stringify({ claudeAiOauth: { accessToken: "claude-token" } }),
+    );
+  }
+
+  function runLimits(tmp, claudeResponder) {
+    return getUsageLimits({
+      home: tmp,
+      platform: "linux",
+      providerTimeoutMs: 1000,
+      securityRunner() {
+        return { status: 1, stdout: "" };
+      },
+      commandRunner() {
+        return { status: 1, stdout: "" };
+      },
+      fetchImpl(url) {
+        if (url === "https://api.anthropic.com/api/oauth/usage") return claudeResponder();
+        return new Promise(() => {});
+      },
+    });
+  }
+
+  it("serves the last successful read when a later fetch is rate limited", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-claude-stale-"));
+    try {
+      makeClaudeHome(tmp);
+
+      const ok = await runLimits(tmp, () =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            five_hour: { utilization: 11, resets_at: FUTURE_RESET },
+            seven_day: { utilization: 81, resets_at: FUTURE_RESET },
+            seven_day_opus: null,
+          }),
+        }),
+      );
+      assert.equal(ok.claude.error, null);
+      assert.equal(ok.claude.five_hour.utilization, 11);
+      assert.notEqual(ok.claude.stale, true);
+
+      // Drop the in-memory cache so the next call actually re-fetches and hits the 429.
+      resetUsageLimitsCache();
+
+      const limited = await runLimits(tmp, () =>
+        Promise.resolve({
+          ok: false,
+          status: 429,
+          headers: { get: () => null },
+        }),
+      );
+      // Bars stay visible from disk cache instead of flipping to a red error.
+      assert.equal(limited.claude.configured, true);
+      assert.equal(limited.claude.error, null);
+      assert.equal(limited.claude.stale, true);
+      assert.equal(limited.claude.five_hour.utilization, 11);
+      assert.equal(limited.claude.seven_day.utilization, 81);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("surfaces the error when a fetch fails and there is no cached fallback", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-claude-nocache-"));
+    try {
+      makeClaudeHome(tmp);
+
+      const limited = await runLimits(tmp, () =>
+        Promise.resolve({
+          ok: false,
+          status: 429,
+          headers: { get: () => null },
+        }),
+      );
+      assert.equal(limited.claude.configured, true);
+      assert.match(limited.claude.error, /rate limited \(429\)/);
+      assert.notEqual(limited.claude.stale, true);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("records a cooldown on 429 and stops calling the endpoint until it expires", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-claude-cooldown-"));
+    try {
+      makeClaudeHome(tmp);
+
+      let claudeCalls = 0;
+      const responder = () => {
+        claudeCalls += 1;
+        return Promise.resolve({
+          ok: false,
+          status: 429,
+          headers: { get: (h) => (h === "retry-after" ? "600" : null) },
+        });
+      };
+
+      const first = await runLimits(tmp, responder);
+      assert.equal(claudeCalls, 1);
+      assert.match(first.claude.error, /retry in ~10m/);
+
+      // Cooldown is active — the next call must not touch the endpoint again.
+      resetUsageLimitsCache();
+      const second = await runLimits(tmp, responder);
+      assert.equal(claudeCalls, 1, "endpoint must not be called again during cooldown");
+      assert.match(second.claude.error, /retry in ~\d+m/);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("clears the cooldown and resumes once a fetch succeeds", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-claude-recover-"));
+    try {
+      makeClaudeHome(tmp);
+
+      await runLimits(tmp, () =>
+        Promise.resolve({
+          ok: false,
+          status: 429,
+          headers: { get: (h) => (h === "retry-after" ? "600" : null) },
+        }),
+      );
+      const cooldownPath = path.join(tmp, ".tokentracker", "tracker", "claude-usage-rate-limit.json");
+      assert.ok(fs.existsSync(cooldownPath), "cooldown file should be written on 429");
+
+      // A test can't wait out a 10m cooldown, so clear it to simulate expiry, then succeed.
+      fs.unlinkSync(cooldownPath);
+      resetUsageLimitsCache();
+      const ok = await runLimits(tmp, () =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            five_hour: { utilization: 5, resets_at: FUTURE_RESET },
+            seven_day: { utilization: 9, resets_at: FUTURE_RESET },
+            seven_day_opus: null,
+          }),
+        }),
+      );
+      assert.equal(ok.claude.error, null);
+      assert.equal(ok.claude.five_hour.utilization, 5);
+      assert.equal(fs.existsSync(cooldownPath), false, "cooldown file should be cleared on success");
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("drops cached windows whose reset has already passed", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-claude-expired-"));
+    try {
+      makeClaudeHome(tmp);
+
+      const ok = await runLimits(tmp, () =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            five_hour: { utilization: 50, resets_at: "2000-01-01T00:00:00.000Z" },
+            seven_day: { utilization: 81, resets_at: FUTURE_RESET },
+            seven_day_opus: null,
+          }),
+        }),
+      );
+      assert.equal(ok.claude.error, null);
+
+      resetUsageLimitsCache();
+
+      const limited = await runLimits(tmp, () =>
+        Promise.resolve({
+          ok: false,
+          status: 429,
+          headers: { get: () => null },
+        }),
+      );
+      assert.equal(limited.claude.stale, true);
+      // Expired 5h window is dropped; the still-valid 7d window survives.
+      assert.equal(limited.claude.five_hour, null);
+      assert.equal(limited.claude.seven_day.utilization, 81);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
