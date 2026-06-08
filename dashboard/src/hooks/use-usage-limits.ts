@@ -63,7 +63,10 @@ export function useUsageLimits(options?: UseUsageLimitsOptions) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await getUsageLimits(initialRefresh ? { refresh: true } : {});
+        // Mount fetch reads the server's cache (in-memory + disk-backed) rather than forcing
+        // a live upstream call on every navigation — that repeated forcing is what tripped
+        // Claude's OAuth usage endpoint rate limit. Only the manual refresh() forces upstream.
+        const res = await getUsageLimits();
         if (cancelled) return;
         const nextData = res && typeof res === "object" ? res as UsageLimitsData : null;
         setData(nextData);
