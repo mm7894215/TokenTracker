@@ -1419,6 +1419,76 @@ describe("getUsageLimits Claude stale fallback", () => {
     }
   });
 
+  it("records a cooldown on 429 and stops calling the endpoint until it expires", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-claude-cooldown-"));
+    try {
+      makeClaudeHome(tmp);
+
+      let claudeCalls = 0;
+      const responder = () => {
+        claudeCalls += 1;
+        return Promise.resolve({
+          ok: false,
+          status: 429,
+          headers: { get: (h) => (h === "retry-after" ? "600" : null) },
+        });
+      };
+
+      const first = await runLimits(tmp, responder);
+      assert.equal(claudeCalls, 1);
+      assert.match(first.claude.error, /retry in ~10m/);
+
+      // Cooldown is active — the next call must not touch the endpoint again.
+      resetUsageLimitsCache();
+      const second = await runLimits(tmp, responder);
+      assert.equal(claudeCalls, 1, "endpoint must not be called again during cooldown");
+      assert.match(second.claude.error, /retry in ~\d+m/);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("clears the cooldown and resumes once a fetch succeeds", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-claude-recover-"));
+    try {
+      makeClaudeHome(tmp);
+
+      await runLimits(tmp, () =>
+        Promise.resolve({
+          ok: false,
+          status: 429,
+          headers: { get: (h) => (h === "retry-after" ? "600" : null) },
+        }),
+      );
+      const cooldownPath = path.join(tmp, ".tokentracker", "tracker", "claude-usage-rate-limit.json");
+      assert.ok(fs.existsSync(cooldownPath), "cooldown file should be written on 429");
+
+      // A test can't wait out a 10m cooldown, so clear it to simulate expiry, then succeed.
+      fs.unlinkSync(cooldownPath);
+      resetUsageLimitsCache();
+      const ok = await runLimits(tmp, () =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            five_hour: { utilization: 5, resets_at: FUTURE_RESET },
+            seven_day: { utilization: 9, resets_at: FUTURE_RESET },
+            seven_day_opus: null,
+          }),
+        }),
+      );
+      assert.equal(ok.claude.error, null);
+      assert.equal(ok.claude.five_hour.utilization, 5);
+      assert.equal(fs.existsSync(cooldownPath), false, "cooldown file should be cleared on success");
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("drops cached windows whose reset has already passed", async () => {
     resetUsageLimitsCache();
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-claude-expired-"));
