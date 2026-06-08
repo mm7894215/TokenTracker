@@ -30,6 +30,12 @@ const DEFAULT_PROVIDER_TIMEOUT_MS = 15_000;
 const ANTIGRAVITY_LIMITS_CACHE_FILE = "usage-limits-cache.json";
 const ANTIGRAVITY_LIMITS_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const ANTIGRAVITY_LIMITS_CACHE_UNKNOWN_RESET_TTL_MS = 12 * 60 * 60 * 1000;
+// Claude shares its OAuth usage endpoint budget with Claude Code itself, so a transient
+// 429 is common. Persist the last successful read so the panel can keep showing it instead
+// of flashing a red error. Separate file from Antigravity's (whose writer rewrites the whole
+// file with only its own key, so a shared file would clobber).
+const CLAUDE_LIMITS_CACHE_FILE = "claude-usage-limits-cache.json";
+const CLAUDE_LIMITS_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 function clampPercent(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -1271,6 +1277,73 @@ function writeAntigravityLimitsCache(limits, { home, nowMs = Date.now() } = {}) 
   } catch (_error) {}
 }
 
+function resolveClaudeLimitsCachePath({ home } = {}) {
+  return path.join(home || os.homedir(), ".tokentracker", "tracker", CLAUDE_LIMITS_CACHE_FILE);
+}
+
+// Claude windows carry their own `resets_at`; a window whose reset has already passed is
+// stale data, not a usable fallback, so drop it. Windows without a reset stamp are kept
+// (the overall cached_at max-age gate already bounds them).
+function isClaudeCacheWindowUsable(window, { nowMs } = {}) {
+  if (!window || typeof window !== "object") return false;
+  const resetAtMs = parseTimeMs(window.resets_at);
+  if (resetAtMs === null) return true;
+  return resetAtMs > nowMs;
+}
+
+function hasClaudeWindow(limits) {
+  return Boolean(limits?.five_hour || limits?.seven_day || limits?.seven_day_opus);
+}
+
+function normalizeClaudeCachedLimits(raw, { nowMs = Date.now() } = {}) {
+  const cachedAtMs = parseTimeMs(raw?.cached_at);
+  if (!Number.isFinite(cachedAtMs)) return null;
+  if (cachedAtMs > nowMs + 60_000) return null;
+  if (nowMs - cachedAtMs > CLAUDE_LIMITS_CACHE_MAX_AGE_MS) return null;
+
+  const cached = {
+    configured: true,
+    error: null,
+    five_hour: isClaudeCacheWindowUsable(raw?.five_hour, { nowMs }) ? raw.five_hour : null,
+    seven_day: isClaudeCacheWindowUsable(raw?.seven_day, { nowMs }) ? raw.seven_day : null,
+    seven_day_opus: isClaudeCacheWindowUsable(raw?.seven_day_opus, { nowMs }) ? raw.seven_day_opus : null,
+    extra_usage: raw?.extra_usage ?? null,
+    stale: true,
+    cached_at: raw.cached_at,
+  };
+  return hasClaudeWindow(cached) ? cached : null;
+}
+
+function readClaudeLimitsCache({ home, nowMs = Date.now() } = {}) {
+  const cachePath = resolveClaudeLimitsCachePath({ home });
+  try {
+    const parsed = JSON.parse(fs.readFileSync(cachePath, "utf8"));
+    return normalizeClaudeCachedLimits(parsed?.claude, { nowMs });
+  } catch (_error) {
+    return null;
+  }
+}
+
+function writeClaudeLimitsCache(limits, { home, nowMs = Date.now() } = {}) {
+  if (!limits?.configured || limits.error || !hasClaudeWindow(limits)) return;
+  const cachePath = resolveClaudeLimitsCachePath({ home });
+  const payload = {
+    claude: {
+      five_hour: limits.five_hour || null,
+      seven_day: limits.seven_day || null,
+      seven_day_opus: limits.seven_day_opus || null,
+      extra_usage: limits.extra_usage || null,
+      cached_at: new Date(nowMs).toISOString(),
+    },
+  };
+  try {
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    const tmpPath = `${cachePath}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 0o600 });
+    fs.renameSync(tmpPath, cachePath);
+  } catch (_error) {}
+}
+
 function resolveLsofBinary({ commandRunner } = {}) {
   for (const candidate of ["/usr/sbin/lsof", "/usr/bin/lsof"]) {
     if (fs.existsSync(candidate)) return candidate;
@@ -1734,7 +1807,12 @@ async function getUsageLimits({
   if (!claudeToken) {
     claude = { configured: false };
   } else if (!claudeResult || claudeResult.status === "rejected") {
-    claude = { configured: true, error: claudeResult?.reason?.message || "Unknown error" };
+    // Live fetch failed (e.g. a transient 429 against the OAuth usage endpoint). Serve the
+    // last successful read so the bars stay visible; only show the red error if there's no
+    // usable cached fallback.
+    claude =
+      readClaudeLimitsCache({ home, nowMs })
+      || { configured: true, error: claudeResult?.reason?.message || "Unknown error" };
   } else {
     claude = {
       configured: true,
@@ -1744,6 +1822,7 @@ async function getUsageLimits({
       seven_day_opus: claudeResult.value.seven_day_opus,
       extra_usage: claudeResult.value.extra_usage,
     };
+    writeClaudeLimitsCache(claude, { home, nowMs });
   }
 
   let codex;
