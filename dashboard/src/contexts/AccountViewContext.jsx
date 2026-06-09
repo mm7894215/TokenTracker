@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useInsforgeAuth } from "./InsforgeAuthContext.jsx";
-import { getCloudSyncEnabled, isLocalDashboardHost } from "../lib/cloud-sync-prefs";
+import { getCloudSyncEnabled, isLocalDashboardHost, syncCloudSyncPrefToLocalServer } from "../lib/cloud-sync-prefs";
 
 /**
  * AccountViewContext decides whether the dashboard reads aggregated cloud
@@ -40,6 +40,9 @@ export function AccountViewProvider({ children }) {
 
   useEffect(() => {
     setLocalHost(isLocalDashboardHost());
+    // Mirror the persisted cloud-sync toggle to the local CLI server so the
+    // native popover's cross-device view tracks the same preference.
+    syncCloudSyncPrefToLocalServer();
   }, []);
 
   useEffect(() => {

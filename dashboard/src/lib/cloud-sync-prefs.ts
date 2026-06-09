@@ -40,6 +40,11 @@ export function setCloudSyncEnabled(enabled: boolean): void {
   } catch {
     /* ignore */
   }
+  // Mirror the toggle to the local CLI server (best-effort, localhost only) so
+  // the auth-unaware native popover can gate its cross-device "account view" on
+  // the same preference. The dashboard remains the source of truth; this is a
+  // one-way push and never blocks the toggle.
+  mirrorCloudSyncPrefToLocalServer(enabled);
   // Notify the SAME tab. AccountViewContext listens for this event (and the
   // cross-tab `storage` event) to recompute accountView. Without it, toggling
   // cloud sync on localhost would not switch the dashboard to the cross-device
@@ -53,6 +58,32 @@ export function setCloudSyncEnabled(enabled: boolean): void {
   } catch {
     /* ignore */
   }
+}
+
+async function mirrorCloudSyncPrefToLocalServer(enabled: boolean): Promise<void> {
+  if (!isLocalDashboardHost()) return;
+  try {
+    const { getLocalApiAuthHeaders } = await import("./local-api-auth");
+    const authHeaders = await getLocalApiAuthHeaders();
+    await fetch("/functions/tokentracker-cloud-sync-pref", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json", ...authHeaders },
+      cache: "no-store",
+      body: JSON.stringify({ enabled }),
+    });
+  } catch {
+    /* best-effort: popover falls back to local data if the mirror is stale */
+  }
+}
+
+/**
+ * Push the dashboard's current cloud-sync preference to the local CLI server
+ * once on load, so the native popover's account view reflects the persisted
+ * toggle even when the user never re-toggles it this session. No-op off
+ * localhost. Best-effort.
+ */
+export function syncCloudSyncPrefToLocalServer(): void {
+  void mirrorCloudSyncPrefToLocalServer(getCloudSyncEnabled());
 }
 
 export function getStoredDeviceSession(): CloudDeviceSession | null {

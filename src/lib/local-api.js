@@ -10,6 +10,7 @@ const {
   listExcludedSources,
   normalizeUsageScope,
 } = require("./source-metadata");
+const { accountSlugFor, fetchAccountUsage } = require("./cloud-account");
 
 const SYNC_TIMEOUT_MS = 120_000;
 const TRACKER_BIN = path.resolve(__dirname, "../../bin/tracker.js");
@@ -936,6 +937,87 @@ function createLocalApiHandler({ queuePath }) {
     if (changed) persistRelayCookies();
   }
 
+  // --- Account (cross-device) view for the native popover ---------------
+  // The popover follows the dashboard: it shows aggregated cross-device data
+  // only when the user is signed in (a relayed refresh token exists) AND cloud
+  // sync is on. Cloud sync is a dashboard (WebView) preference persisted in
+  // localStorage; the dashboard mirrors it here via POST
+  // /functions/tokentracker-cloud-sync-pref so the auth-unaware popover can key
+  // off the same flag. Defaults OFF, exactly like the dashboard toggle.
+  const cloudSyncPrefPath = path.join(trackerDataDir, "cloud-sync-pref.json");
+  let cloudSyncPrefCache;
+  function getCloudSyncPref() {
+    if (cloudSyncPrefCache === undefined) {
+      try {
+        cloudSyncPrefCache = JSON.parse(fs.readFileSync(cloudSyncPrefPath, "utf8"))?.enabled === true;
+      } catch {
+        cloudSyncPrefCache = false;
+      }
+    }
+    return cloudSyncPrefCache;
+  }
+  function setCloudSyncPref(enabled) {
+    cloudSyncPrefCache = Boolean(enabled);
+    try {
+      if (!fs.existsSync(trackerDataDir)) fs.mkdirSync(trackerDataDir, { recursive: true });
+      fs.writeFileSync(
+        cloudSyncPrefPath,
+        JSON.stringify({ enabled: cloudSyncPrefCache, updatedAt: new Date().toISOString() }),
+        { encoding: "utf8", mode: 0o600 },
+      );
+    } catch (e) {
+      console.error("[LocalAPI] Failed to persist cloud sync pref:", e.message);
+    }
+  }
+
+  function getRefreshTokenForCloud() {
+    return getRelayCookieValue("insforge_refresh_token", { decode: true });
+  }
+  function setRelayRefreshToken(token) {
+    if (!token || typeof token !== "string") return;
+    const cookie = `insforge_refresh_token=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax`;
+    if (relayCookies.get("insforge_refresh_token") !== cookie) {
+      relayCookies.set("insforge_refresh_token", cookie);
+      persistRelayCookies();
+    }
+  }
+
+  // Returns "served" when the cross-device aggregate was written to `res`, or
+  // "fallthrough" when the caller should serve the local single-machine data.
+  // Any failure (not signed in, cloud sync off, network/auth error) falls
+  // through so the popover always renders something.
+  async function tryServeAccountView(usageSlug, url, res) {
+    if (!getCloudSyncPref()) return "fallthrough";
+    const refreshToken = getRefreshTokenForCloud();
+    if (!refreshToken) return "fallthrough";
+    const runtime = resolveRuntimeConfig();
+    try {
+      const out = await fetchAccountUsage({
+        usageSlug,
+        searchParams: url.searchParams,
+        baseUrl: runtime.baseUrl || DEFAULT_BASE_URL,
+        anonKey: runtime.anonKey,
+        refreshToken,
+      });
+      if (!out || out.data == null) return "fallthrough";
+      if (out.rotatedRefreshToken) setRelayRefreshToken(out.rotatedRefreshToken);
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+        "X-TokenTracker-Account-View": "1",
+      });
+      res.end(JSON.stringify(out.data));
+      return "served";
+    } catch (e) {
+      // Signed in + cloud sync on, but the cloud read failed (offline, token
+      // rejected, edge error). Fall back to local data rather than erroring.
+      if (resolveRuntimeConfig().debug) {
+        console.warn(`[LocalAPI] account view fallback for ${usageSlug}:`, e?.message || e);
+      }
+      return "fallthrough";
+    }
+  }
+
   function normalizeCookieHeader(value) {
     if (Array.isArray(value)) return value.filter(Boolean).join("; ");
     return typeof value === "string" ? value : "";
@@ -1346,6 +1428,20 @@ function createLocalApiHandler({ queuePath }) {
       return true;
     }
 
+    // --- account (cross-device) view proxy for the native popover ---
+    // When ?account=1 and the user is signed in with cloud sync on, serve the
+    // same cross-device aggregate the dashboard shows; otherwise tag the
+    // response (X-TokenTracker-Account-View: 0) so the popover knows it got
+    // local single-machine data, and fall through to the local handler below.
+    if (url.searchParams.get("account") === "1") {
+      const usageSlug = p.startsWith("/functions/") ? p.slice("/functions/".length) : "";
+      if (accountSlugFor(usageSlug)) {
+        const result = await tryServeAccountView(usageSlug, url, res);
+        if (result === "served") return true;
+        res.setHeader("X-TokenTracker-Account-View", "0");
+      }
+    }
+
     // --- usage-summary ---
     if (p === "/functions/tokentracker-usage-summary") {
       const from = url.searchParams.get("from") || "";
@@ -1681,7 +1777,46 @@ function createLocalApiHandler({ queuePath }) {
         user_id: "local-user", email: "local@localhost", name: "Local User", is_public: false,
         created_at: new Date().toISOString(),
         pro: { active: true, sources: ["local"], expires_at: null, partial: false, as_of: new Date().toISOString() },
+        // Cross-device popover state: whether account aggregation can be served
+        // (signed in) and whether the dashboard's cloud-sync toggle is on.
+        account: {
+          available: Boolean(getRefreshTokenForCloud()),
+          cloud_sync_enabled: getCloudSyncPref(),
+          account_view: Boolean(getRefreshTokenForCloud()) && getCloudSyncPref(),
+        },
       });
+      return true;
+    }
+
+    // --- cloud-sync preference mirror ---
+    // The dashboard's Settings → Account → Cloud sync toggle (a WebView
+    // localStorage flag) is mirrored here so the auth-unaware native popover can
+    // gate its account (cross-device) view on the same preference.
+    if (p === "/functions/tokentracker-cloud-sync-pref") {
+      const method = String(req.method || "GET").toUpperCase();
+      if (method === "GET") {
+        json(res, {
+          enabled: getCloudSyncPref(),
+          account_available: Boolean(getRefreshTokenForCloud()),
+        });
+        return true;
+      }
+      if (method === "POST" || method === "PUT") {
+        if (!isAuthorizedLocalMutation(req)) {
+          json(res, { ok: false, error: "Unauthorized" }, 401);
+          return true;
+        }
+        let body = {};
+        try {
+          body = await readJsonBody(req);
+        } catch {
+          body = {};
+        }
+        setCloudSyncPref(Boolean(body?.enabled));
+        json(res, { ok: true, enabled: getCloudSyncPref() });
+        return true;
+      }
+      json(res, { error: "Method Not Allowed" }, 405);
       return true;
     }
 

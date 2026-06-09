@@ -39,6 +39,10 @@ internal sealed class UsagePoller : IDisposable
     private static readonly HttpClient Http =
         new(new HttpClientHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(6) };
     private static readonly IReadOnlyList<TopModelStat> NoModels = Array.Empty<TopModelStat>();
+    // Request the cross-device ("account") aggregate; the local server decides
+    // whether to serve it (signed in + cloud sync on) or local data, keeping the
+    // tray/pet figures aligned with the dashboard.
+    private const string AccountQuery = "&account=1";
     private readonly Func<string> _baseUrl;
     private CancellationTokenSource? _cts;
 
@@ -88,8 +92,12 @@ internal sealed class UsagePoller : IDisposable
             var today = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             var tzQuery = TimeZoneQuery();
 
+            // account=1 → the server serves the same cross-device aggregate the
+            // dashboard shows when the user is signed in with cloud sync on, and
+            // otherwise falls back to local single-machine data. Same response
+            // schema either way, so parsing below is unchanged.
             var summaryUrl = $"{_baseUrl()}/functions/tokentracker-usage-summary"
-                             + $"?from={today}&to={today}{tzQuery}";
+                             + $"?from={today}&to={today}{tzQuery}{AccountQuery}";
 
             using var resp = await Http.GetAsync(summaryUrl);
             if (!resp.IsSuccessStatusCode) return null;
@@ -151,7 +159,7 @@ internal sealed class UsagePoller : IDisposable
     {
         try
         {
-            var url = $"{_baseUrl()}/functions/tokentracker-usage-heatmap?weeks=52{tzQuery}";
+            var url = $"{_baseUrl()}/functions/tokentracker-usage-heatmap?weeks=52{tzQuery}{AccountQuery}";
             using var resp = await Http.GetAsync(url);
             if (!resp.IsSuccessStatusCode) return (0, 0);
             await using var stream = await resp.Content.ReadAsStreamAsync();
@@ -174,7 +182,7 @@ internal sealed class UsagePoller : IDisposable
         {
             var from = DateTime.Now.AddDays(-29).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             var url = $"{_baseUrl()}/functions/tokentracker-usage-model-breakdown"
-                      + $"?from={from}&to={today}{tzQuery}";
+                      + $"?from={from}&to={today}{tzQuery}{AccountQuery}";
             using var resp = await Http.GetAsync(url);
             if (!resp.IsSuccessStatusCode) return NoModels;
             await using var stream = await resp.Content.ReadAsStreamAsync();
