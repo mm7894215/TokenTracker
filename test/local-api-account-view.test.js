@@ -156,6 +156,17 @@ test("POST cloud-sync-pref requires local auth, then persists and is reflected",
   const handler2 = freshHandler(queuePath);
   const get2 = await call(handler2, { endpoint: "/functions/tokentracker-cloud-sync-pref" });
   assert.equal(get2.json().enabled, true);
+
+  // A non-boolean payload is rejected (400) and must NOT overwrite the pref.
+  const token2 = (await call(handler2, { endpoint: "/api/local-auth" })).json().token;
+  const bad = await call(handler2, {
+    method: "POST",
+    endpoint: "/functions/tokentracker-cloud-sync-pref",
+    headers: { "content-type": "application/json", "x-tokentracker-local-auth": token2 },
+    body: JSON.stringify({ enabled: "yes" }),
+  });
+  assert.equal(bad.statusCode, 400);
+  assert.equal(JSON.parse(fs.readFileSync(prefFile, "utf8")).enabled, true, "pref must be unchanged");
 });
 
 test("usage-summary?account=1 falls back to local data when not signed in", async () => {

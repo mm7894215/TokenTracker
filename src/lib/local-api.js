@@ -1812,7 +1812,14 @@ function createLocalApiHandler({ queuePath }) {
         } catch {
           body = {};
         }
-        setCloudSyncPref(Boolean(body?.enabled));
+        // Reject malformed payloads rather than silently coercing them to a
+        // persisted `false` — this file is the shared cloud-sync preference, so
+        // a bad write would desync the popover from the dashboard.
+        if (typeof body?.enabled !== "boolean") {
+          json(res, { ok: false, error: "enabled must be a boolean" }, 400);
+          return true;
+        }
+        setCloudSyncPref(body.enabled);
         json(res, { ok: true, enabled: getCloudSyncPref() });
         return true;
       }

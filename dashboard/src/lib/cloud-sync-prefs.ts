@@ -20,7 +20,10 @@ function clearLegacyStoredDeviceSession(): void {
 export function isLocalDashboardHost(): boolean {
   if (typeof window === "undefined") return false;
   const h = window.location.hostname;
-  return h === "localhost" || h === "127.0.0.1";
+  // Mirror src/lib/local-api.js loopback handling (which includes IPv6) so the
+  // dashboard ↔ local-server contract — cloud-sync mirror, account view — holds
+  // on http://[::1] too. Browsers report IPv6 hostnames without brackets.
+  return h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]";
 }
 
 /** 默认关闭：需用户手动开启后才同步到云端 */
