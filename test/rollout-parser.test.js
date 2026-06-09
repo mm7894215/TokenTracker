@@ -616,6 +616,79 @@ test("parseRolloutIncremental splits usage into half-hour buckets", async () => 
   }
 });
 
+test("parseRolloutIncremental skips historical replay tokens in forked Codex rollouts", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  try {
+    const rolloutPath = path.join(
+      tmp,
+      "2026",
+      "06",
+      "09",
+      "rollout-2026-06-09T20-46-23-fork.jsonl",
+    );
+    await fs.mkdir(path.dirname(rolloutPath), { recursive: true });
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const replayUsage = {
+      input_tokens: 100,
+      cached_input_tokens: 0,
+      output_tokens: 10,
+      reasoning_output_tokens: 0,
+      total_tokens: 110,
+    };
+    const liveUsage = {
+      input_tokens: 7,
+      cached_input_tokens: 0,
+      output_tokens: 3,
+      reasoning_output_tokens: 0,
+      total_tokens: 10,
+    };
+    const liveTotals = {
+      input_tokens: replayUsage.input_tokens + liveUsage.input_tokens,
+      cached_input_tokens: 0,
+      output_tokens: replayUsage.output_tokens + liveUsage.output_tokens,
+      reasoning_output_tokens: 0,
+      total_tokens: replayUsage.total_tokens + liveUsage.total_tokens,
+    };
+
+    const lines = [
+      buildSessionMetaLine({
+        model: "gpt-5.5",
+        cwd: tmp,
+        forkedFromId: "019e095c-c041-7b40-b7cb-43ddb153086c",
+      }),
+      buildTurnContextLine({ model: "gpt-5.5", cwd: tmp, currentDate: "2026-05-08" }),
+      buildTokenCountLine({
+        ts: "2026-06-09T20:46:26.530Z",
+        last: replayUsage,
+        total: replayUsage,
+      }),
+      buildTurnContextLine({ model: "gpt-5.5", cwd: tmp, currentDate: "2026-06-09" }),
+      buildTokenCountLine({
+        ts: "2026-06-09T20:47:00.000Z",
+        last: liveUsage,
+        total: liveTotals,
+      }),
+    ];
+    await fs.writeFile(rolloutPath, lines.join("\n") + "\n", "utf8");
+
+    const res = await parseRolloutIncremental({ rolloutFiles: [rolloutPath], cursors, queuePath });
+    assert.equal(res.filesProcessed, 1);
+    assert.equal(res.eventsAggregated, 1);
+    assert.equal(res.bucketsQueued, 1);
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].input_tokens, liveUsage.input_tokens);
+    assert.equal(queued[0].output_tokens, liveUsage.output_tokens);
+    assert.equal(queued[0].total_tokens, liveUsage.total_tokens);
+    assert.deepEqual(cursors.files[rolloutPath].lastTotal, liveTotals);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseRolloutIncremental migrates v1 hourly buckets without resetting totals", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
   try {
@@ -2496,10 +2569,13 @@ test("parseClaudeIncremental defaults missing model to unknown", async () => {
   }
 });
 
-function buildTurnContextLine({ model, cwd }) {
+function buildTurnContextLine({ model, cwd, currentDate }) {
   const payload = { model };
   if (typeof cwd === "string" && cwd.length > 0) {
     payload.cwd = cwd;
+  }
+  if (typeof currentDate === "string" && currentDate.length > 0) {
+    payload.current_date = currentDate;
   }
   return JSON.stringify({
     type: "turn_context",
@@ -2507,10 +2583,13 @@ function buildTurnContextLine({ model, cwd }) {
   });
 }
 
-function buildSessionMetaLine({ model, cwd }) {
+function buildSessionMetaLine({ model, cwd, forkedFromId }) {
   const payload = { model };
   if (typeof cwd === "string" && cwd.length > 0) {
     payload.cwd = cwd;
+  }
+  if (typeof forkedFromId === "string" && forkedFromId.length > 0) {
+    payload.forked_from_id = forkedFromId;
   }
   return JSON.stringify({
     type: "session_meta",

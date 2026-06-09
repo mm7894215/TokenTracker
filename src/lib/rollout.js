@@ -746,6 +746,9 @@ async function parseRolloutFile({
   let model = typeof lastModel === "string" ? lastModel : null;
   let totals = lastTotal && typeof lastTotal === "object" ? lastTotal : null;
   let currentCwd = null;
+  let currentDate = null;
+  let isForkedRollout = false;
+  const rolloutDate = rolloutDateFromPath(filePath);
   let currentProjectRef = projectRef || null;
   let currentProjectKey = projectKey || null;
   let eventsAggregated = 0;
@@ -756,7 +759,10 @@ async function parseRolloutFile({
     const maybeTurnContext =
       !maybeTokenCount &&
       (line.includes('"turn_context"') || line.includes('"session_meta"')) &&
-      (line.includes('"model"') || line.includes('"cwd"'));
+      (line.includes('"model"') ||
+        line.includes('"cwd"') ||
+        line.includes('"current_date"') ||
+        line.includes('"forked_from_id"'));
     if (!maybeTokenCount && !maybeTurnContext) continue;
 
     let obj;
@@ -771,6 +777,12 @@ async function parseRolloutFile({
       obj?.payload &&
       typeof obj.payload === "object"
     ) {
+      if (obj.type === "session_meta" && typeof obj.payload.forked_from_id === "string") {
+        isForkedRollout = obj.payload.forked_from_id.trim().length > 0;
+      }
+      if (obj.type === "turn_context" && typeof obj.payload.current_date === "string") {
+        currentDate = normalizeIsoDate(obj.payload.current_date);
+      }
       if (typeof obj.payload.model === "string") {
         model = obj.payload.model;
       }
@@ -811,6 +823,8 @@ async function parseRolloutFile({
     if (totalUsage && typeof totalUsage === "object") {
       totals = totalUsage;
     }
+
+    if (isForkedReplayToken({ isForkedRollout, rolloutDate, currentDate })) continue;
 
     const bucketStart = toUtcHalfHourStart(tokenTimestamp);
     if (!bucketStart) continue;
@@ -1770,6 +1784,21 @@ function toUtcHalfHourStart(ts) {
     ),
   );
   return bucketStart.toISOString();
+}
+
+function rolloutDateFromPath(filePath) {
+  const match = path.basename(String(filePath || "")).match(/^rollout-(\d{4}-\d{2}-\d{2})T/);
+  return match ? match[1] : null;
+}
+
+function normalizeIsoDate(value) {
+  const raw = typeof value === "string" ? value.trim() : "";
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : null;
+}
+
+function isForkedReplayToken({ isForkedRollout, rolloutDate, currentDate }) {
+  return Boolean(isForkedRollout && rolloutDate && currentDate && currentDate < rolloutDate);
 }
 
 function normalizeNonNegativeNumber(value) {
