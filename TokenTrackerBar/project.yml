@@ -103,3 +103,14 @@ targets:
       properties:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true
+
+  TokenTrackerBarTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: TokenTrackerBarTests
+      - path: TokenTrackerBar/Models/LimitsSettingsStore.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tokentracker.bar.tests
+        GENERATE_INFOPLIST_FILE: YES

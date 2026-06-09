@@ -4,12 +4,6 @@ import ServiceManagement
 import WebKit
 import WidgetKit
 
-extension Notification.Name {
-    /// Posted whenever native UI settings or locale change via the bridge.
-    /// StatusBarController listens to refresh its display.
-    static let nativeSettingsChanged = Notification.Name("NativeSettingsChanged")
-}
-
 /// Bridges menu-bar app preferences and actions to the embedded dashboard WebView.
 ///
 /// The dashboard SettingsPage posts JSON messages via `window.webkit.messageHandlers.nativeBridge.postMessage(...)`.
@@ -49,12 +43,11 @@ final class NativeBridge {
             .sink { [weak self] _ in self?.pushSettings() }
             .store(in: &cancellables)
 
-        // Mirror local changes to the limits display mode (e.g. toggled in
-        // the menu-bar popover) so the embedded dashboard reflects the new
-        // rendering without a page reload.
-        LimitsSettingsStore.shared.$displayMode
-            .dropFirst()
-            .removeDuplicates()
+        // Mirror local limits preference changes (e.g. toggled in the
+        // menu-bar popover) so the embedded dashboard reflects them without a
+        // page reload.
+        let limitsSettings = LimitsSettingsStore.shared
+        limitsSettings.preferencesDidChange
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.pushSettings() }
             .store(in: &cancellables)
@@ -136,6 +129,7 @@ final class NativeBridge {
             MenuBarDisplayPreferences.write(normalizedMenuBarItems)
             NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
         }
+        let limitsSettings = LimitsSettingsStore.shared
         let payload: [String: Any] = [
             "showStats": UserDefaults.standard.object(forKey: "MenuBarShowStats") as? Bool ?? true,
             "menuBarItems": normalizedMenuBarItems,
@@ -155,7 +149,8 @@ final class NativeBridge {
             "currency": UserDefaults.standard.string(forKey: "MenuBarCurrency") ?? "USD",
             "currencySymbol": UserDefaults.standard.string(forKey: "MenuBarCurrencySymbol") ?? "$",
             "exchangeRate": UserDefaults.standard.object(forKey: "MenuBarExchangeRate") as? Double ?? 1.0,
-            "limitsDisplayMode": LimitsSettingsStore.shared.displayMode.bridgeKey,
+            "limitsDisplayMode": limitsSettings.displayMode.bridgeKey,
+            "limitsPreferences": limitsSettings.limitsPreferencesPayload,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
               let json = String(data: data, encoding: .utf8) else { return }
@@ -221,11 +216,14 @@ final class NativeBridge {
                 NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
                 WidgetCenter.shared.reloadAllTimelines()
             }
+        case "limitsPreferences":
+            if let raw = value as? [String: Any],
+               LimitsSettingsStore.shared.applyBridgeSnapshot(raw) {
+                return
+            }
         case "limitsDisplayMode":
-            if let raw = value as? String, let parsed = LimitDisplayMode(rawValue: raw),
-               parsed != LimitsSettingsStore.shared.displayMode {
-                LimitsSettingsStore.shared.displayMode = parsed
-                NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
+            if LimitsSettingsStore.shared.applyBridgeDisplayMode(value) {
+                return
             }
         default:
             break
