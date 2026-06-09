@@ -53,6 +53,14 @@ internal sealed class UsagePoller : IDisposable
     /// </summary>
     public volatile bool IncludeRichStats;
 
+    /// <summary>
+    /// Whether the most recent summary fetch returned cross-device ("account view")
+    /// data rather than local single-machine data. Mirrors the macOS APIClient's
+    /// <c>accountViewActive</c>; driven by the <c>X-TokenTracker-Account-View</c>
+    /// response header the local server sets.
+    /// </summary>
+    public volatile bool AccountViewActive;
+
     /// <summary>Raised on the thread-pool with fresh stats. UI must marshal to the UI thread.</summary>
     public event Action<UsageStats>? StatsUpdated;
 
@@ -101,6 +109,11 @@ internal sealed class UsagePoller : IDisposable
 
             using var resp = await Http.GetAsync(summaryUrl);
             if (!resp.IsSuccessStatusCode) return null;
+
+            // Track whether the server served the cross-device aggregate or fell
+            // back to local data, mirroring the macOS client.
+            if (resp.Headers.TryGetValues("X-TokenTracker-Account-View", out var accountViewValues))
+                AccountViewActive = accountViewValues.FirstOrDefault() == "1";
 
             await using var stream = await resp.Content.ReadAsStreamAsync();
             using var doc = await JsonDocument.ParseAsync(stream);
