@@ -824,6 +824,7 @@ async function parseRolloutFile({
       totals = totalUsage;
     }
 
+    // date matching is conservative; same-day fork replays are still counted.
     if (isForkedReplayToken({ isForkedRollout, rolloutDate, currentDate })) continue;
 
     const bucketStart = toUtcHalfHourStart(tokenTimestamp);
