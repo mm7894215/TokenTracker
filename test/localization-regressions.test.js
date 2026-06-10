@@ -179,7 +179,7 @@ test("Codex Spark usage limit row labels stay on one line", () => {
   const usageLimitsPanel = read("dashboard/src/ui/dashboard/components/UsageLimitsPanel.jsx");
 
   assert.match(usageLimitsView, /Text\(label\)[\s\S]*?\.lineLimit\(1\)[\s\S]*?\.fixedSize\(horizontal: true, vertical: false\)[\s\S]*?LimitLabelWidthKey[\s\S]*?\.frame\(width: labelColumnWidth > 0 \? labelColumnWidth : nil, alignment: \.leading\)/);
-  assert.match(usageLimitsPanel, /className="[^"]*\bw-14\b[^"]*\bwhitespace-nowrap\b[^"]*\btruncate\b/);
+  assert.match(usageLimitsPanel, /data-limit-label[\s\S]*?\bwhitespace-nowrap\b[\s\S]*?var\(--tt-limits-label-w\)/);
 });
 
 test("locale PR stays scoped away from silent auto update flags", () => {
