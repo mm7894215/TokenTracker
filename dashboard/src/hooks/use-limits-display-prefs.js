@@ -146,6 +146,18 @@ function readUpdatedAt() {
   }
 }
 
+function hasLocalLimitsPreferenceKeys() {
+  if (typeof window === "undefined") return false;
+  try {
+    for (const key of STORAGE_KEYS) {
+      if (window.localStorage.getItem(key) !== null) return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
 function readLocalSnapshot() {
   return normalizeSnapshot({
     displayMode: readDisplayMode(),
@@ -296,6 +308,10 @@ export function useLimitsDisplayPrefs() {
       const nativePrefs = detail?.[NATIVE_PREFERENCES_KEY];
       if (nativePrefs && typeof nativePrefs === "object") {
         const nativeSnapshot = normalizeSnapshot(nativePrefs);
+        if (!hasLocalLimitsPreferenceKeys()) {
+          applySnapshot(nativeSnapshot, { writeLocal: true });
+          return;
+        }
         const dashboardSnapshot = readLocalSnapshot();
         if (snapshotIsNewer(nativeSnapshot, dashboardSnapshot)) {
           applySnapshot(nativeSnapshot, { writeLocal: true });

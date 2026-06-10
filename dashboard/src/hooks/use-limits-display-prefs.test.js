@@ -299,6 +299,45 @@ describe("useLimitsDisplayPrefs", () => {
     expect(bridgeWrites(messages)).toHaveLength(0);
   });
 
+  it("applies native custom limitsPreferences without updatedAt when Dashboard storage is empty", () => {
+    const messages = installNativeBridge();
+    const { result } = renderHook(() => useLimitsDisplayPrefs());
+    messages.length = 0;
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("native:settings", {
+          detail: {
+            limitsPreferences: {
+              providerOrder: ["gemini", "claude"],
+              providerVisibility: { claude: false, unknown: false },
+            },
+          },
+        }),
+      );
+    });
+
+    const providerOrder = [
+      "gemini",
+      "claude",
+      ...LIMIT_PROVIDER_IDS.filter((id) => id !== "gemini" && id !== "claude"),
+    ];
+    const providerVisibility = {
+      ...defaultVisibility(),
+      claude: false,
+    };
+    expect(result.current.displayMode).toBe(LIMIT_DISPLAY_MODES.USED);
+    expect(result.current.order).toEqual(providerOrder);
+    expect(result.current.visibility).toEqual(providerVisibility);
+    expect(readStoredSnapshot()).toEqual({
+      displayMode: LIMIT_DISPLAY_MODES.USED,
+      providerOrder,
+      providerVisibility,
+      updatedAt: null,
+    });
+    expect(bridgeWrites(messages)).toHaveLength(0);
+  });
+
   it("does not write back when native limitsPreferences already matches Dashboard", () => {
     const messages = installNativeBridge();
     const providerOrder = [
@@ -376,14 +415,9 @@ describe("useLimitsDisplayPrefs", () => {
     });
   });
 
-  it("lets Dashboard win when both sides have no updatedAt or the same updatedAt", () => {
+  it("lets Dashboard win when a local key exists and both sides have no updatedAt", () => {
     const messages = installNativeBridge();
-    setStoredSnapshot({
-      displayMode: LIMIT_DISPLAY_MODES.REMAINING,
-      providerOrder: ["codex", "claude"],
-      providerVisibility: { claude: false },
-      updatedAt: null,
-    });
+    window.localStorage.setItem(DISPLAY_MODE_KEY, LIMIT_DISPLAY_MODES.REMAINING);
     const { result } = renderHook(() => useLimitsDisplayPrefs());
     messages.length = 0;
 
@@ -402,10 +436,26 @@ describe("useLimitsDisplayPrefs", () => {
     });
 
     expect(result.current.displayMode).toBe(LIMIT_DISPLAY_MODES.REMAINING);
-    expect(bridgeWrites(messages).at(-1).value.updatedAt).toBeNull();
+    expect(result.current.order).toEqual(LIMIT_PROVIDER_IDS);
+    expect(result.current.visibility).toEqual(defaultVisibility());
+    expect(bridgeWrites(messages)).toHaveLength(1);
+    expect(bridgeWrites(messages)[0].value).toEqual({
+      ...defaultSnapshot(null),
+      displayMode: LIMIT_DISPLAY_MODES.REMAINING,
+    });
+  });
 
+  it("lets Dashboard win when a local key exists and both sides have the same updatedAt", () => {
+    const messages = installNativeBridge();
+    setStoredSnapshot({
+      displayMode: LIMIT_DISPLAY_MODES.REMAINING,
+      providerOrder: ["codex", "claude"],
+      providerVisibility: { claude: false },
+      updatedAt: 60,
+    });
+    const { result } = renderHook(() => useLimitsDisplayPrefs());
     messages.length = 0;
-    setStoredSnapshot({ updatedAt: 60 });
+
     act(() => {
       window.dispatchEvent(
         new CustomEvent("native:settings", {
@@ -422,8 +472,38 @@ describe("useLimitsDisplayPrefs", () => {
     });
 
     expect(result.current.displayMode).toBe(LIMIT_DISPLAY_MODES.REMAINING);
+    expect(result.current.order.slice(0, 2)).toEqual(["codex", "claude"]);
+    expect(result.current.visibility.claude).toBe(false);
     expect(bridgeWrites(messages)).toHaveLength(1);
     expect(bridgeWrites(messages)[0].value.updatedAt).toBe(60);
+  });
+
+  it("treats an invalid local key as Dashboard opinion and normalizes through fallback", () => {
+    const messages = installNativeBridge();
+    window.localStorage.setItem(ORDER_KEY, "{");
+    const { result } = renderHook(() => useLimitsDisplayPrefs());
+    messages.length = 0;
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("native:settings", {
+          detail: {
+            limitsPreferences: {
+              displayMode: LIMIT_DISPLAY_MODES.REMAINING,
+              providerOrder: ["gemini", "claude"],
+              providerVisibility: { claude: false },
+            },
+          },
+        }),
+      );
+    });
+
+    expect(result.current.displayMode).toBe(LIMIT_DISPLAY_MODES.USED);
+    expect(result.current.order).toEqual(LIMIT_PROVIDER_IDS);
+    expect(result.current.visibility).toEqual(defaultVisibility());
+    expect(bridgeWrites(messages)).toHaveLength(1);
+    expect(bridgeWrites(messages)[0].value).toEqual(defaultSnapshot(null));
+    expect(window.localStorage.getItem(ORDER_KEY)).toBe("{");
   });
 
   it("uses local updatedAt + 1 when the clock moves backward", () => {
