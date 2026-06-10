@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useLayoutEffect, useRef, useState } from "react";
 import { Card } from "../../components";
 import { FadeIn } from "../../foundation/FadeIn.jsx";
 import { copy } from "../../../lib/copy";
@@ -50,7 +50,13 @@ function LimitBar({ label, pct, reset, mode = LIMIT_DISPLAY_MODES.USED }) {
   }
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[11px] text-oai-gray-500 dark:text-oai-gray-400 w-12 shrink-0">{label}</span>
+      <span
+        data-limit-label=""
+        className="text-[11px] text-oai-gray-500 dark:text-oai-gray-400 shrink-0 whitespace-nowrap"
+        style={{ width: "var(--tt-limits-label-w)" }}
+      >
+        {label}
+      </span>
       <div className="flex-1 bg-oai-gray-100 dark:bg-oai-gray-700/50 rounded-full h-1.5 overflow-hidden">
         <div
           className={`${barColor(displayPct, mode)} rounded-full h-full transition-[width] duration-500 ease-out`}
@@ -218,8 +224,38 @@ function CopilotOtelHint({ defaultDir }) {
   );
 }
 
+/**
+ * Width of the widest rendered row label, so every label column matches it.
+ * Mirrors the macOS popover behavior: bars stay aligned without reserving
+ * space for labels that aren't on screen, and longer labels (Spark,
+ * localized strings) still fit without truncation.
+ */
+function useWidestLabelWidth(containerRef) {
+  const [labelWidth, setLabelWidth] = useState(0);
+  useLayoutEffect(() => {
+    const root = containerRef.current;
+    if (!root) return;
+    const labels = root.querySelectorAll("[data-limit-label]");
+    let max = 0;
+    // jsdom has no canvas implementation; without it labels keep natural width.
+    const ctx = labels.length > 0 ? document.createElement("canvas").getContext("2d") : null;
+    if (ctx) {
+      const style = window.getComputedStyle(labels[0]);
+      ctx.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      for (const el of labels) {
+        max = Math.max(max, ctx.measureText(el.textContent).width);
+      }
+    }
+    const next = Math.ceil(max);
+    setLabelWidth((prev) => (prev === next ? prev : next));
+  });
+  return labelWidth;
+}
+
 export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, grok, antigravity, copilot, order, visibility, displayMode }) {
   const dataById = { claude, codex, cursor, gemini, kimi, kiro, grok, antigravity, copilot };
+  const containerRef = useRef(null);
+  const labelWidth = useWidestLabelWidth(containerRef);
   const effectiveOrder = Array.isArray(order) && order.length > 0 ? order : DEFAULT_ORDER;
   const effectiveMode = displayMode === LIMIT_DISPLAY_MODES.REMAINING
     ? LIMIT_DISPLAY_MODES.REMAINING
@@ -236,7 +272,11 @@ export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, gr
   return (
     <FadeIn delay={0.15}>
       <Card>
-        <div className="flex flex-col gap-3">
+        <div
+          ref={containerRef}
+          className="flex flex-col gap-3"
+          style={labelWidth > 0 ? { "--tt-limits-label-w": `${labelWidth}px` } : undefined}
+        >
           <h3 className="text-sm font-medium text-oai-gray-500 dark:text-oai-gray-300 uppercase tracking-wide">
             {copy("limits.panel.title")}{copy("limits.panel.mode_separator")}{modeLabel}
           </h3>

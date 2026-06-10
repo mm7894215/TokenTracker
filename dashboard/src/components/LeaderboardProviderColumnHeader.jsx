@@ -9,6 +9,7 @@ const INVERT_IN_DARK = new Set([
   "/brand-logos/kimi.svg",
   "/brand-logos/kiro.svg",
   "/brand-logos/copilot.svg",
+  "/brand-logos/hermes.svg",
 ]);
 
 /**

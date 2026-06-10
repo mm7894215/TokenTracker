@@ -19,7 +19,10 @@ struct LimitsSettingsView: View {
                     .font(.system(.body, design: .default))
                     .foregroundStyle(.primary)
                 Spacer()
-                Picker("", selection: $store.displayMode) {
+                Picker("", selection: Binding(
+                    get: { store.displayMode },
+                    set: { store.setDisplayModeFromMenu($0) }
+                )) {
                     Text(Strings.limitDisplayModeUsed).tag(LimitDisplayMode.used)
                     Text(Strings.limitDisplayModeRemaining).tag(LimitDisplayMode.remaining)
                 }
@@ -71,7 +74,7 @@ struct LimitsSettingsView: View {
 
             Toggle("", isOn: Binding(
                 get: { store.isVisible(id) },
-                set: { store.providerVisibility[id] = $0 }
+                set: { store.setProviderVisibilityFromMenu(id, isVisible: $0) }
             ))
             .toggleStyle(.switch)
             .controlSize(.mini)
@@ -161,7 +164,7 @@ private struct ReorderDropDelegate: DropDelegate {
               let to = store.providerOrder.firstIndex(of: targetId) else { return }
 
         withAnimation(.easeInOut(duration: 0.2)) {
-            store.move(from: IndexSet(integer: from), to: to > from ? to + 1 : to)
+            store.moveProviderFromMenu(from: IndexSet(integer: from), to: to > from ? to + 1 : to)
         }
     }
 

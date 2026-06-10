@@ -256,7 +256,9 @@ function quoteArg(value) {
   const v = typeof value === "string" ? value : "";
   if (!v) return '""';
   if (/^[A-Za-z0-9_\-./:@]+$/.test(v)) return v;
-  return `"${v.replace(/"/g, '\\"')}"`;
+  // Escape backslashes before quotes: a trailing backslash (Windows paths)
+  // would otherwise escape the closing quote and corrupt the hook command.
+  return `"${v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
 async function writeGeminiSettings({ settingsPath, settings }) {

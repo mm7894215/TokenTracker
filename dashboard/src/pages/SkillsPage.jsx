@@ -64,6 +64,37 @@ function getSkillKey(skill) {
   return `${skill.repoOwner || "local"}/${skill.repoName || "local"}:${skill.directory}`;
 }
 
+function normalizedDirectory(value) {
+  return String(value || "").replace(/\\/g, "/").trim().toLowerCase();
+}
+
+function directoryLeaf(value) {
+  const directory = normalizedDirectory(value);
+  return directory.split("/").filter(Boolean).pop() || "";
+}
+
+function installedDirectoryFallbackKey(skill) {
+  if (skill.repoOwner || skill.repoName) return "";
+  const directory = normalizedDirectory(skill.directory);
+  if (!directory || directory.includes("/")) return "";
+  return `dir:${directory}`;
+}
+
+function browseDirectoryFallbackKey(skill) {
+  const leaf = directoryLeaf(skill.directory);
+  return leaf ? `dir:${leaf}` : "";
+}
+
+function installedSkillKeys(skill) {
+  const keys = new Set([getSkillKey(skill).toLowerCase()]);
+  if (skill.repoOwner && skill.repoName) {
+    keys.add(`${skill.repoOwner}/${skill.repoName}:${skill.sourceDirectory || skill.directory}`.toLowerCase());
+  }
+  const fallback = installedDirectoryFallbackKey(skill);
+  if (fallback) keys.add(fallback);
+  return keys;
+}
+
 function installBusyKey(skill) {
   return `install:${getSkillKey(skill)}`;
 }
@@ -731,15 +762,7 @@ export function SkillsPage() {
   const installedKeys = useMemo(() => {
     const keys = new Set();
     for (const skill of installedData.skills || []) {
-      keys.add(getSkillKey(skill).toLowerCase());
-      if (skill.repoOwner && skill.repoName) {
-        keys.add(`${skill.repoOwner}/${skill.repoName}:${skill.sourceDirectory || skill.directory}`.toLowerCase());
-      }
-      // Directory-name fallback so unmanaged installs (no repoOwner recorded
-      // — e.g. CLI-installed skills physically placed under ~/.claude/skills/)
-      // still match browse entries from skills.sh or GitHub by skill folder name.
-      const tail = String(skill.directory || "").split(/[\\/]/).pop().toLowerCase();
-      if (tail) keys.add(`dir:${tail}`);
+      for (const key of installedSkillKeys(skill)) keys.add(key);
     }
     return keys;
   }, [installedData.skills]);
@@ -1177,9 +1200,13 @@ export function SkillsPage() {
   // in place (sync targets, usage, remove) without leaving the current tab.
   const handleManage = useCallback(
     (browseSkill) => {
-      const tail = String(browseSkill.directory || "").split(/[\\/]/).pop().toLowerCase();
+      const fullKey = getSkillKey(browseSkill).toLowerCase();
+      const fallbackKey = browseDirectoryFallbackKey(browseSkill);
       const match = (installedData.skills || []).find(
-        (s) => String(s.directory || "").toLowerCase() === tail,
+        (skill) => {
+          const keys = installedSkillKeys(skill);
+          return keys.has(fullKey) || (fallbackKey && keys.has(fallbackKey));
+        },
       );
       if (match) setSelectedSkillId(match.id || match.directory);
     },
@@ -1213,8 +1240,7 @@ export function SkillsPage() {
           (skill.description || "").toLowerCase().includes(q));
     return matched.map((skill) => {
       const fullKey = getSkillKey(skill).toLowerCase();
-      const tail = String(skill.directory || "").split(/[\\/]/).pop().toLowerCase();
-      const dirKey = tail ? `dir:${tail}` : "";
+      const dirKey = browseDirectoryFallbackKey(skill);
       return {
         ...skill,
         installed: installedKeys.has(fullKey) || (dirKey && installedKeys.has(dirKey)),

@@ -684,6 +684,31 @@ html.native-windows-app .tt-native-glass-shell aside[aria-label] {
     box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.1);
   }
 
+  /* Spinner and entry animation utilities */
+  .animate-spin-subtle {
+    animation: spinSubtle 1s linear infinite;
+  }
+
+  @keyframes spinSubtle {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  .animate-scale-up-fade {
+    animation: scaleUpFade 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  @keyframes scaleUpFade {
+    from {
+      opacity: 0;
+      transform: scale(0.96) translateY(2px);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+
   /* Shimmer effect for loading states */
   .shimmer {
     background: linear-gradient(
@@ -723,9 +748,9 @@ html.native-windows-app .tt-native-glass-shell aside[aria-label] {
   :root.dark .shimmer {
     background: linear-gradient(
       90deg,
-      var(--oai-gray-800) 25%,
-      var(--oai-gray-700) 50%,
-      var(--oai-gray-800) 75%
+      var(--oai-gray-100) 25%,
+      var(--oai-gray-200) 50%,
+      var(--oai-gray-100) 75%
     );
     background-size: 200% 100%;
   }

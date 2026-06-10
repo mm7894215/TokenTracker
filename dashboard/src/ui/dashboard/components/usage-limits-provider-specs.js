@@ -17,6 +17,8 @@ export const PROVIDER_LIMIT_SPECS = {
       return [
         { key: "5h", labelKey: "limits.label.codex_5h", window: data.primary_window },
         { key: "7d", labelKey: "limits.label.codex_7d", window: data.secondary_window },
+        { key: "spark-5h", labelKey: "limits.label.codex_spark_5h", window: data.spark_primary_window },
+        { key: "spark-7d", labelKey: "limits.label.codex_spark_7d", window: data.spark_secondary_window },
       ];
     },
   },
@@ -92,6 +94,8 @@ export function usageLimitsLabelCopyAnchor() {
     copy("limits.label.claude_opus"),
     copy("limits.label.codex_5h"),
     copy("limits.label.codex_7d"),
+    copy("limits.label.codex_spark_5h"),
+    copy("limits.label.codex_spark_7d"),
     copy("limits.label.cursor_plan"),
     copy("limits.label.cursor_auto"),
     copy("limits.label.cursor_api"),

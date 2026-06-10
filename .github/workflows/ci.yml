@@ -49,6 +49,9 @@ jobs:
           VITE_INSFORGE_ANON_KEY: ik_9f35735991b684f7cf57fa00bb4d0487
         run: npm run dashboard:build
 
+      - name: Test dashboard limits preferences
+        run: npm --prefix dashboard test -- src/hooks/use-limits-display-prefs.test.js
+
       # Same checks as `npm run ci:local`, with the dashboard build hoisted above.
       - name: Test and validate
         run: |
@@ -57,3 +60,27 @@ jobs:
           npm run validate:ui-hardcode
           npm run validate:guardrails
           node --test test/architecture-guardrails.test.js
+
+  macos-tests:
+    name: macOS unit tests
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: TokenTrackerBar
+        run: xcodegen generate
+
+      - name: Patch pbxproj for icon
+        working-directory: TokenTrackerBar
+        run: ruby scripts/patch-pbxproj-icon.rb
+
+      - name: Test TokenTrackerBar
+        working-directory: TokenTrackerBar
+        run: |
+          xcodebuild test \
+            -scheme TokenTrackerBarTests \
+            -destination 'platform=macOS'

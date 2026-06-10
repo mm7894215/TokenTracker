@@ -8,35 +8,26 @@
  * signature themselves — otherwise any caller can forge {"sub":"<victim>"}
  * and read another user's full token history.
  *
- * Aggregation safety:
- *   1. Only rows tied to an active device row (revoked_at IS NULL) are
- *      considered. tokentracker_devices_active_unique enforces one active
- *      device per (user, platform, device_name), so this filter drops the
- *      historic device_id churn from before partial-unique was enforced.
+ * Cross-device aggregation lives server-side in the account_usage_grouped RPC
+ * (this function just buckets/sums what the RPC returns). The RPC splits by
+ * source class — see its header + test/account-source-parity.test.js:
+ *   * MACHINE-LEVEL sources (claude/codex/gemini/...): real independent
+ *     per-machine work → SUM across the user's ACTIVE devices (revoked_at IS
+ *     NULL). The active-device filter + machine-stable device_name (the
+ *     dashboard derives it from /functions/tokentracker-machine-id, see
+ *     cloud-sync.ts resolveDeviceNameSuffix) drop historic device_id churn so
+ *     SUM doesn't double-count one machine opened in multiple browsers.
+ *   * ACCOUNT-LEVEL sources (cursor): data comes from a per-ACCOUNT cloud API,
+ *     NOT machine logs, so every device that synced it stores an IDENTICAL
+ *     copy. These are DEDUPED across ALL devices (one canonical whole row per
+ *     hour/source/model), NOT summed. Summing multiplied a user's Cursor total
+ *     by their device count — the v0.42–0.43 double-count bug (a 2-machine
+ *     user's Cursor was ~2x; ~5% of their grand total).
  *
- * Cross-device semantic = SUM (intentional; see GitHub Discussion #101).
- *   The account view aggregates a user's usage ACROSS devices, so two real
- *   machines MUST add up. SUM is correct ONLY when one physical machine maps
- *   to ONE device_id. That invariant is provided by the MACHINE-stable device
- *   identity: the dashboard derives device_name from a per-machine id served by
- *   the local CLI (`/functions/tokentracker-machine-id`, see
- *   dashboard/src/lib/cloud-sync.ts → resolveDeviceNameSuffix) instead of a
- *   per-browser localStorage id. Without that, one machine opened in multiple
- *   browsers split a bucket's cumulative emissions across device_ids and SUM
- *   inflated the total.
- *
- *   PRODUCTION CHECK (30d, real data): SUM exceeds the leaderboard's
- *   cross-device MAX by ~3.8% of the active-device total — but 99.3% of that
- *   gap is GENUINE multi-machine usage (e.g. one user on MacIntel + Win32, or a
- *   Linux server + a Mac laptop) that SUM correctly adds and MAX would wrongly
- *   drop. That is exactly why this view uses SUM. True same-machine duplication
- *   is only ~0.03% of the active total (1 user, same-platform device churn).
- *   F1 (machine-stable device_name, see cloud-sync.ts) prevents NEW same-machine
- *   spray; the tiny legacy churn ages out of rolling windows. Optional
- *   fast-follow: a NON-destructive device-consolidation cleanup (back up first;
- *   NEVER an offset-reset migration — that caused the 2.17B-token loss in
- *   CLAUDE.md). The dashboard total intentionally differs from the leaderboard
- *   rank because the leaderboard's MAX under-counts true multi-machine users.
+ *   Cross-device = additive (GitHub Discussion #101) still holds for the
+ *   machine-level sources that motivated it. The dashboard total and the
+ *   leaderboard rank now use the SAME two-class semantic
+ *   (leaderboard-refresh.ts / leaderboard-profile.ts), so they agree.
  */
 import { createClient } from "npm:@insforge/sdk";
 
@@ -149,6 +140,7 @@ async function fetchActiveDeviceIds(
 // TODO: extract to a shared edge-pricing module; tracked in feedback_model_pricing_sync.
 const MODEL_PRICING: Record<string, { input: number; output: number; cache_read: number; cache_write?: number }> = {
   // ── Anthropic Claude ──
+  "claude-fable-5": { input: 10, output: 50, cache_read: 1, cache_write: 12.5 },
   "claude-opus-4-6": { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
   "claude-opus-4-5-20250414": { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
   "claude-sonnet-4-6": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
@@ -270,6 +262,7 @@ function getModelPricing(model: string) {
   const exact = MODEL_PRICING[model];
   if (exact) return exact;
   const lower = model.toLowerCase();
+  if (lower.includes("fable")) return MODEL_PRICING["claude-fable-5"];
   if (lower.includes("opus")) return MODEL_PRICING["claude-opus-4-6"];
   if (lower.includes("haiku")) return MODEL_PRICING["claude-haiku-4-5-20251001"];
   if (lower.includes("sonnet")) return MODEL_PRICING["claude-sonnet-4-6"];

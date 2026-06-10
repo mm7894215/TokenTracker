@@ -29,7 +29,7 @@ targets:
         PRODUCT_NAME: TokenTrackerBar
         INFOPLIST_VALUES: |
           LSUIElement = YES
-        MARKETING_VERSION: "0.42.1"
+        MARKETING_VERSION: "0.48.0"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_EMIT_LOC_STRINGS: "YES"
         CODE_SIGN_STYLE: Automatic
@@ -79,7 +79,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tokentracker.bar.widget
         PRODUCT_NAME: TokenTrackerWidget
-        MARKETING_VERSION: "0.42.1"
+        MARKETING_VERSION: "0.48.0"
         CURRENT_PROJECT_VERSION: "1"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         SWIFT_EMIT_LOC_STRINGS: "YES"
@@ -103,3 +103,16 @@ targets:
       properties:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true
+
+  TokenTrackerBarTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: TokenTrackerBarTests
+      - path: TokenTrackerBar/Models/LimitsSettingsStore.swift
+      - path: TokenTrackerBar/Models/MenuBarDisplayPreferences.swift
+      - path: TokenTrackerBar/Models/UsageLimits.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tokentracker.bar.tests
+        GENERATE_INFOPLIST_FILE: YES

@@ -26,7 +26,10 @@ jobs:
         uses: github/codeql-action/init@v4
         with:
           languages: javascript-typescript
-          queries: security-and-quality
+          # security-extended only: the quality suite buried real findings under
+          # 100+ lint-grade alerts (unused variables etc.) that ESLint already
+          # covers in CI. Security alerts stay; maintainability noise goes.
+          queries: security-extended
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v4

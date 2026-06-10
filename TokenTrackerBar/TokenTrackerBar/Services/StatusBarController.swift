@@ -2,226 +2,6 @@ import AppKit
 import Combine
 import SwiftUI
 
-enum MenuBarDisplayMetric: String, CaseIterable {
-    case todayTokens
-    case todayCost
-    case last7dTokens
-    case totalTokens
-    case totalCost
-    case claude5h
-    case claude7d
-    case codex5h
-    case codex7d
-    case cursorPlan
-    case cursorAuto
-    case cursorAPI
-    case geminiPro
-    case geminiFlash
-    case geminiLite
-    case kimiWeekly
-    case kimi5h
-    case kimiTotal
-    case kiroMonth
-    case kiroBonus
-    case grokMonth
-    case grokOndemand
-    case copilotPremium
-    case copilotChat
-    case antigravityClaude
-    case antigravityGPro
-    case antigravityFlash
-
-    var menuLabel: String {
-        switch self {
-        case .todayTokens: return "Tokens"
-        case .todayCost: return "Cost"
-        case .last7dTokens: return "7d"
-        case .totalTokens: return "Total"
-        case .totalCost: return "All $"
-        case .claude5h: return "Cl 5h"
-        case .claude7d: return "Cl 7d"
-        case .codex5h: return "Cx 5h"
-        case .codex7d: return "Cx 7d"
-        case .cursorPlan: return "Cu Plan"
-        case .cursorAuto: return "Cu Auto"
-        case .cursorAPI: return "Cu API"
-        case .geminiPro: return "Gm Pro"
-        case .geminiFlash: return "Gm Flash"
-        case .geminiLite: return "Gm Lite"
-        case .kimiWeekly: return "Km Wk"
-        case .kimi5h: return "Km 5h"
-        case .kimiTotal: return "Km Tot"
-        case .kiroMonth: return "Kr Mo"
-        case .kiroBonus: return "Kr Bn"
-        case .grokMonth: return "Gk Mo"
-        case .grokOndemand: return "Gk OD"
-        case .copilotPremium: return "Co Prem"
-        case .copilotChat: return "Co Chat"
-        case .antigravityClaude: return "Ag Cl"
-        case .antigravityGPro: return "Ag GPro"
-        case .antigravityFlash: return "Ag Fl"
-        }
-    }
-
-    var settingsTitle: String {
-        switch self {
-        case .todayTokens: return "Today Tokens"
-        case .todayCost: return "Today Cost"
-        case .last7dTokens: return "Last 7 Days"
-        case .totalTokens: return "Total Tokens"
-        case .totalCost: return "Total Cost"
-        case .claude5h: return "Claude 5h Limit"
-        case .claude7d: return "Claude 7d Limit"
-        case .codex5h: return "Codex 5h Limit"
-        case .codex7d: return "Codex 7d Limit"
-        case .cursorPlan: return "Cursor Plan Limit"
-        case .cursorAuto: return "Cursor Auto Limit"
-        case .cursorAPI: return "Cursor API Limit"
-        case .geminiPro: return "Gemini Pro Limit"
-        case .geminiFlash: return "Gemini Flash Limit"
-        case .geminiLite: return "Gemini Lite Limit"
-        case .kimiWeekly: return "Kimi Weekly Limit"
-        case .kimi5h: return "Kimi 5h Limit"
-        case .kimiTotal: return "Kimi Total Limit"
-        case .kiroMonth: return "Kiro Monthly Limit"
-        case .kiroBonus: return "Kiro Bonus Limit"
-        case .grokMonth: return "Grok Build Monthly Limit"
-        case .grokOndemand: return "Grok Build On-demand Limit"
-        case .copilotPremium: return "Copilot Premium Limit"
-        case .copilotChat: return "Copilot Chat Limit"
-        case .antigravityClaude: return "Antigravity Claude Limit"
-        case .antigravityGPro: return "Antigravity Gemini Pro Limit"
-        case .antigravityFlash: return "Antigravity Flash Limit"
-        }
-    }
-
-    var settingsCategory: String {
-        switch self {
-        case .todayTokens, .last7dTokens, .totalTokens:
-            return "tokens"
-        case .todayCost, .totalCost:
-            return "cost"
-        case .claude5h, .claude7d, .codex5h, .codex7d,
-             .cursorPlan, .cursorAuto, .cursorAPI,
-             .geminiPro, .geminiFlash, .geminiLite,
-             .kimiWeekly, .kimi5h, .kimiTotal,
-             .kiroMonth, .kiroBonus,
-             .grokMonth, .grokOndemand,
-             .copilotPremium, .copilotChat,
-             .antigravityClaude, .antigravityGPro, .antigravityFlash:
-            return "limits"
-        }
-    }
-
-    /// Provider this metric is sourced from. `nil` for token/cost metrics that
-    /// always have data. Used to filter the dropdown so users only see slots
-    /// for providers they've configured.
-    var providerKey: String? {
-        switch self {
-        case .todayTokens, .todayCost, .last7dTokens, .totalTokens, .totalCost:
-            return nil
-        case .claude5h, .claude7d: return "claude"
-        case .codex5h, .codex7d: return "codex"
-        case .cursorPlan, .cursorAuto, .cursorAPI: return "cursor"
-        case .geminiPro, .geminiFlash, .geminiLite: return "gemini"
-        case .kimiWeekly, .kimi5h, .kimiTotal: return "kimi"
-        case .kiroMonth, .kiroBonus: return "kiro"
-        case .grokMonth, .grokOndemand: return "grok"
-        case .copilotPremium, .copilotChat: return "copilot"
-        case .antigravityClaude, .antigravityGPro, .antigravityFlash: return "antigravity"
-        }
-    }
-}
-
-private extension UsageLimitsResponse {
-    /// Whether a provider is currently usable (configured with no error).
-    /// Optional providers (kimi, copilot) treated as unavailable when nil.
-    func isProviderAvailable(_ key: String) -> Bool {
-        switch key {
-        case "claude": return claude.configured && claude.error == nil
-        case "codex": return codex.configured && codex.error == nil
-        case "cursor": return cursor.configured && cursor.error == nil
-        case "gemini": return gemini.configured && gemini.error == nil
-        case "kimi": return (kimi?.configured == true) && (kimi?.error == nil)
-        case "kiro": return kiro.configured && kiro.error == nil
-        case "grok": return (grok?.configured == true) && (grok?.error == nil)
-        case "copilot": return (copilot?.configured == true) && (copilot?.error == nil)
-        case "antigravity": return antigravity.configured && antigravity.error == nil
-        default: return false
-        }
-    }
-}
-
-enum MenuBarDisplayPreferences {
-    static let key = "MenuBarDisplayItems"
-    static let defaultIDs = [MenuBarDisplayMetric.todayTokens.rawValue, MenuBarDisplayMetric.todayCost.rawValue]
-    static let maxVisibleItems = 2
-
-    /// Payload of selectable metrics for the dashboard dropdown.
-    /// When `limits` is provided, limit slots whose provider is unconfigured or
-    /// reporting an error are filtered out so users only see options that have
-    /// data. Token/cost metrics are always included. Currently-selected ids are
-    /// kept regardless so users don't lose their selection during a transient
-    /// error (the rendered menu bar already hides those slots via compactMap).
-    /// When `limits` is nil (loading state), all metrics are returned.
-    static func availableItemsPayload(
-        for limits: UsageLimitsResponse? = nil,
-        keepingSelected selected: [String] = []
-    ) -> [[String: String]] {
-        let selectedSet = Set(selected)
-        return MenuBarDisplayMetric.allCases
-            .filter { metric in
-                guard let provider = metric.providerKey else { return true }
-                if selectedSet.contains(metric.rawValue) { return true }
-                guard let limits else { return true }
-                return limits.isProviderAvailable(provider)
-            }
-            .map {
-                [
-                    "id": $0.rawValue,
-                    "label": $0.settingsTitle,
-                    "shortLabel": $0.menuLabel,
-                    "category": $0.settingsCategory,
-                ]
-            }
-    }
-
-    static func read(from defaults: UserDefaults = .standard) -> [String] {
-        let raw = defaults.stringArray(forKey: key) ?? defaultIDs
-        let normalized = normalize(raw)
-        // Self-heal: if stored data drifted (legacy >2-item arrays from earlier
-        // dev builds, duplicates, or unknown ids), persist the cleaned version
-        // back so the next read doesn't have to keep trimming.
-        if raw != normalized {
-            defaults.set(normalized, forKey: key)
-        }
-        return normalized
-    }
-
-    static func write(_ ids: [String], to defaults: UserDefaults = .standard) {
-        defaults.set(normalize(ids), forKey: key)
-    }
-
-    static func normalize(_ ids: [String]) -> [String] {
-        var seen = Set<String>()
-        let allowed = Set(MenuBarDisplayMetric.allCases.map(\.rawValue))
-        var normalized = ids.compactMap { raw -> String? in
-            guard allowed.contains(raw), !seen.contains(raw) else { return nil }
-            seen.insert(raw)
-            return raw
-        }
-        // Pad up to `maxVisibleItems` with defaults that haven't been picked yet.
-        // Guards against legacy UserDefaults written by earlier dev builds
-        // (e.g. only `["todayTokens"]` would otherwise leave the second slot empty).
-        for fallbackID in defaultIDs where normalized.count < maxVisibleItems {
-            guard !seen.contains(fallbackID) else { continue }
-            normalized.append(fallbackID)
-            seen.insert(fallbackID)
-        }
-        return Array(normalized.prefix(maxVisibleItems))
-    }
-}
-
 private struct MenuBarDisplayValue {
     let id: String
     let label: String
@@ -433,8 +213,14 @@ final class StatusBarController: NSObject {
     }
 
     private func buildMenuBarDisplayValues() -> [MenuBarDisplayValue] {
-        MenuBarDisplayPreferences.read().compactMap { id -> MenuBarDisplayValue? in
+        // Filter here as well as in `availableItemIDs`: a dashboard-applied
+        // snapshot re-renders via `.nativeSettingsChanged` before the stored
+        // selection is re-normalized, so the stored ids can still contain a
+        // freshly hidden provider at this point.
+        let hiddenProviders = LimitsSettingsStore.shared.hiddenProviders
+        return MenuBarDisplayPreferences.read().compactMap { id -> MenuBarDisplayValue? in
             guard let metric = MenuBarDisplayMetric(rawValue: id) else { return nil }
+            if let provider = metric.providerKey, hiddenProviders.contains(provider) { return nil }
 
             switch metric {
             case .todayTokens:
@@ -475,15 +261,13 @@ final class StatusBarController: NSObject {
                       viewModel.usageLimits?.claude.error == nil else { return nil }
                 return MenuBarDisplayValue(id: id, label: metric.menuLabel, value: formatLimitWithReset(window.utilization, resetIso: window.resetsAt))
             case .codex5h:
-                guard let window = viewModel.usageLimits?.codex.primaryWindow,
-                      viewModel.usageLimits?.codex.configured == true,
-                      viewModel.usageLimits?.codex.error == nil else { return nil }
-                return MenuBarDisplayValue(id: id, label: metric.menuLabel, value: formatIntPercentWithReset(window.usedPercent, resetEpoch: window.resetAt))
+                return codexLimitValue(id: id, metric: metric, window: viewModel.usageLimits?.codex.primaryWindow)
             case .codex7d:
-                guard let window = viewModel.usageLimits?.codex.secondaryWindow,
-                      viewModel.usageLimits?.codex.configured == true,
-                      viewModel.usageLimits?.codex.error == nil else { return nil }
-                return MenuBarDisplayValue(id: id, label: metric.menuLabel, value: formatIntPercentWithReset(window.usedPercent, resetEpoch: window.resetAt))
+                return codexLimitValue(id: id, metric: metric, window: viewModel.usageLimits?.codex.secondaryWindow)
+            case .codexSpark5h:
+                return codexLimitValue(id: id, metric: metric, window: viewModel.usageLimits?.codex.sparkPrimaryWindow)
+            case .codexSpark7d:
+                return codexLimitValue(id: id, metric: metric, window: viewModel.usageLimits?.codex.sparkSecondaryWindow)
             case .cursorPlan:
                 return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.cursor.configured, error: viewModel.usageLimits?.cursor.error, window: viewModel.usageLimits?.cursor.primaryWindow)
             case .cursorAuto:
@@ -524,9 +308,25 @@ final class StatusBarController: NSObject {
         }
     }
 
+    private func codexLimitValue(id: String, metric: MenuBarDisplayMetric, window: CodexWindow?) -> MenuBarDisplayValue? {
+        let value = window.map { formatIntPercentWithReset($0.usedPercent, resetEpoch: $0.resetAt) }
+        return genericLimitValue(
+            id: id,
+            metric: metric,
+            configured: viewModel.usageLimits?.codex.configured,
+            error: viewModel.usageLimits?.codex.error,
+            value: value
+        )
+    }
+
     private func genericLimitValue(id: String, metric: MenuBarDisplayMetric, configured: Bool?, error: String?, window: GenericLimitWindow?) -> MenuBarDisplayValue? {
-        guard configured == true, error == nil, let window else { return nil }
-        return MenuBarDisplayValue(id: id, label: metric.menuLabel, value: formatLimitWithReset(window.usedPercent, resetIso: window.resetAt))
+        let value = window.map { formatLimitWithReset($0.usedPercent, resetIso: $0.resetAt) }
+        return genericLimitValue(id: id, metric: metric, configured: configured, error: error, value: value)
+    }
+
+    private func genericLimitValue(id: String, metric: MenuBarDisplayMetric, configured: Bool?, error: String?, value: String?) -> MenuBarDisplayValue? {
+        guard configured == true, error == nil, let value else { return nil }
+        return MenuBarDisplayValue(id: id, label: metric.menuLabel, value: value)
     }
 
     private func formatLimitPercent(_ value: Double) -> String {

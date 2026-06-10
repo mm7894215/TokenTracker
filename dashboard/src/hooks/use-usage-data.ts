@@ -327,6 +327,32 @@ export function useUsageData({
     accountViewResolving,
   ]);
 
+  // Auto-refresh when the dashboard regains focus / becomes visible again.
+  // Usage data otherwise only re-fetches on param changes, so a left-open
+  // dashboard never picks up usage that synced after page load — the user had
+  // to manually reload (the "open dashboard shows stale numbers" report).
+  // Upload itself is already near-real-time (the notify hook runs `sync` at
+  // most every ~20s); this closes the *display* refresh gap. Throttled so
+  // rapid window switches don't hammer the edge.
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") return;
+    const MIN_GAP_MS = 15_000;
+    let lastAt = Date.now(); // mount already fired the initial fetch above
+    const maybeRefresh = () => {
+      if (document.visibilityState !== "visible") return;
+      const nowMs = Date.now();
+      if (nowMs - lastAt < MIN_GAP_MS) return;
+      lastAt = nowMs;
+      void refresh();
+    };
+    window.addEventListener("focus", maybeRefresh);
+    document.addEventListener("visibilitychange", maybeRefresh);
+    return () => {
+      window.removeEventListener("focus", maybeRefresh);
+      document.removeEventListener("visibilitychange", maybeRefresh);
+    };
+  }, [refresh]);
+
   const normalizedSource = mockEnabled ? "mock" : source;
 
   return {

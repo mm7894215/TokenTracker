@@ -99,6 +99,89 @@ test("native macOS strings are wired through the Swift localization helpers", ()
   assert.ok(sharedWidgetViews.includes("WidgetStrings.updated(WidgetFormat.relativeUpdated(updated))"));
 });
 
+test("Codex Spark usage limits are wired through macOS consumers", () => {
+  const model = read("TokenTrackerBar/TokenTrackerBar/Models/UsageLimits.swift");
+  const usageLimitsView = read("TokenTrackerBar/TokenTrackerBar/Views/UsageLimitsView.swift");
+  const widgetSnapshotWriter = read("TokenTrackerBar/TokenTrackerBar/Services/WidgetSnapshotWriter.swift");
+  const usageLimitsWidget = read("TokenTrackerBar/TokenTrackerWidget/Widgets/UsageLimitsWidget.swift");
+  const widgetStrings = read("TokenTrackerBar/TokenTrackerWidget/Views/WidgetStrings.swift");
+  const statusBarController = read("TokenTrackerBar/TokenTrackerBar/Services/StatusBarController.swift");
+  const menuBarDisplayPreferences = read("TokenTrackerBar/TokenTrackerBar/Models/MenuBarDisplayPreferences.swift");
+  const nativeBridge = read("TokenTrackerBar/TokenTrackerBar/Services/NativeBridge.swift");
+
+  assert.ok(model.includes("let sparkPrimaryWindow: CodexWindow?"));
+  assert.ok(model.includes("let sparkSecondaryWindow: CodexWindow?"));
+  assert.ok(model.includes('case sparkPrimaryWindow = "spark_primary_window"'));
+  assert.ok(model.includes('case sparkSecondaryWindow = "spark_secondary_window"'));
+
+  assert.match(usageLimitsView, /if let w = codex\.sparkPrimaryWindow \{\s*limitRow\(label: "Spark 5h"/);
+  assert.match(usageLimitsView, /if let w = codex\.sparkSecondaryWindow \{\s*limitRow\(label: "Spark 7d"/);
+  assert.doesNotMatch(usageLimitsView, /limitRow\(label: "Sp [57][hd]"/);
+
+  assert.match(widgetSnapshotWriter, /if let w = limits\.codex\.sparkPrimaryWindow \{\s*out\.append\(LimitProvider\([^)]*label: "Codex · Spark 5h"/);
+  assert.match(widgetSnapshotWriter, /if let w = limits\.codex\.sparkSecondaryWindow \{\s*out\.append\(LimitProvider\([^)]*label: "Codex · Spark 7d"/);
+  assert.ok(widgetStrings.includes("let kind = limitKind(limit.label)"));
+  assert.ok(widgetStrings.includes('case "Spark 5h"'));
+  assert.ok(widgetStrings.includes('case "Spark 7d"'));
+  assert.doesNotMatch(widgetStrings, /label\.contains\("Spark/);
+  for (const localizedSparkLabel of [
+    String.raw`\(source) · Spark 5小时`,
+    String.raw`\(source) · Spark 7天`,
+    String.raw`\(source) · Spark 5小時`,
+    String.raw`\(source) · Spark 5時間`,
+    String.raw`\(source) · Spark 5시간`,
+    String.raw`\(source) · Spark 7일`,
+  ]) {
+    assert.ok(widgetStrings.includes(localizedSparkLabel));
+  }
+  assert.match(usageLimitsWidget, /let flat = orderedGroups\.flatMap \{ \$0 \}/);
+  assert.doesNotMatch(usageLimitsWidget, /flatMap \{ \$0\.sorted \{ \$0\.fraction > \$1\.fraction \} \}/);
+
+  assert.ok(menuBarDisplayPreferences.includes("case codexSpark5h"));
+  assert.ok(menuBarDisplayPreferences.includes("case codexSpark7d"));
+  assert.ok(menuBarDisplayPreferences.includes('case .codexSpark5h: return "Cx Spark 5h"'));
+  assert.ok(menuBarDisplayPreferences.includes('case .codexSpark7d: return "Cx Spark 7d"'));
+  assert.doesNotMatch(menuBarDisplayPreferences, /Cx Sp [57][hd]/);
+  assert.ok(menuBarDisplayPreferences.includes('case .codexSpark5h: return "Codex Spark 5h Limit"'));
+  assert.ok(menuBarDisplayPreferences.includes('case .codexSpark7d: return "Codex Spark 7d Limit"'));
+  assert.match(menuBarDisplayPreferences, /case \.codex5h,\s*\.codex7d,\s*\.codexSpark5h,\s*\.codexSpark7d:\s*return "codex"/);
+  assert.match(menuBarDisplayPreferences, /case \.codexSpark5h:\s*return codex\.sparkPrimaryWindow != nil/);
+  assert.match(menuBarDisplayPreferences, /case \.codexSpark7d:\s*return codex\.sparkSecondaryWindow != nil/);
+  assert.ok(menuBarDisplayPreferences.includes("return limits.isProviderAvailable(provider) && limits.hasWindow(for: metric)"));
+  assert.match(menuBarDisplayPreferences, /guard let limits else \{\s*return false\s*\}/);
+  assert.match(statusBarController, /case \.codexSpark5h:\s*return codexLimitValue\(id: id, metric: metric, window: viewModel\.usageLimits\?\.codex\.sparkPrimaryWindow\)/);
+  assert.match(statusBarController, /case \.codexSpark7d:\s*return codexLimitValue\(id: id, metric: metric, window: viewModel\.usageLimits\?\.codex\.sparkSecondaryWindow\)/);
+
+  assert.doesNotMatch(nativeBridge, /sparkPrimaryWindow|sparkSecondaryWindow|codexSpark/i);
+  assert.match(nativeBridge, /MenuBarDisplayPreferences\.availableItemIDs\(\s*for:\s*limits,\s*keepingSelected:\s*MenuBarDisplayPreferences\.read\(\),\s*hiddenProviders:\s*LimitsSettingsStore\.shared\.hiddenProviders\s*\)/);
+});
+
+test("Codex Spark usage limit labels use copy keys with compact defaults", () => {
+  const copyCsv = read("dashboard/src/content/copy.csv");
+  const providerSpecs = read("dashboard/src/ui/dashboard/components/usage-limits-provider-specs.js");
+
+  assert.match(copyCsv, /^limits\.label\.codex_spark_5h,.*"Spark 5h"/m);
+  assert.match(copyCsv, /^limits\.label\.codex_spark_7d,.*"Spark 7d"/m);
+  assert.match(providerSpecs, /{ key: "spark-5h", labelKey: "limits\.label\.codex_spark_5h", window: data\.spark_primary_window }/);
+  assert.match(providerSpecs, /{ key: "spark-7d", labelKey: "limits\.label\.codex_spark_7d", window: data\.spark_secondary_window }/);
+  assert.doesNotMatch(providerSpecs, /label: "Spark [57][hd]"/);
+
+  for (const locale of ["zh", "zh-TW", "ja", "ko"]) {
+    const core = JSON.parse(read(`dashboard/src/content/i18n/${locale}/core.json`));
+
+    assert.equal(core["limits.label.codex_spark_5h"], "Spark 5h");
+    assert.equal(core["limits.label.codex_spark_7d"], "Spark 7d");
+  }
+});
+
+test("Codex Spark usage limit row labels stay on one line", () => {
+  const usageLimitsView = read("TokenTrackerBar/TokenTrackerBar/Views/UsageLimitsView.swift");
+  const usageLimitsPanel = read("dashboard/src/ui/dashboard/components/UsageLimitsPanel.jsx");
+
+  assert.match(usageLimitsView, /Text\(label\)[\s\S]*?\.lineLimit\(1\)[\s\S]*?\.fixedSize\(horizontal: true, vertical: false\)[\s\S]*?LimitLabelWidthKey[\s\S]*?\.frame\(width: labelColumnWidth > 0 \? labelColumnWidth : nil, alignment: \.leading\)/);
+  assert.match(usageLimitsPanel, /data-limit-label[\s\S]*?\bwhitespace-nowrap\b[\s\S]*?var\(--tt-limits-label-w\)/);
+});
+
 test("locale PR stays scoped away from silent auto update flags", () => {
   const app = read("TokenTrackerBar/TokenTrackerBar/TokenTrackerBarApp.swift");
   const plist = read("TokenTrackerBar/TokenTrackerBar/Info.plist");

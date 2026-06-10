@@ -90,6 +90,7 @@ function getClient() {
 
 // ─────────────────────────── Pricing (mirror from refresh.ts) ──────────────────────────
 const MODEL_PRICING: Record<string, { input: number; output: number; cache_read: number; cache_write?: number }> = {
+  "claude-fable-5": { input: 10, output: 50, cache_read: 1, cache_write: 12.5 },
   "claude-opus-4-6": { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
   "claude-opus-4-5-20250414": { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
   "claude-sonnet-4-6": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
@@ -181,6 +182,7 @@ function getModelPricing(model: string) {
   const exact = MODEL_PRICING[model];
   if (exact) return exact;
   const lower = model.toLowerCase();
+  if (lower.includes("fable")) return MODEL_PRICING["claude-fable-5"];
   if (lower.includes("opus")) return MODEL_PRICING["claude-opus-4-6"];
   if (lower.includes("haiku")) return MODEL_PRICING["claude-haiku-4-5-20251001"];
   if (lower.includes("sonnet")) return MODEL_PRICING["claude-sonnet-4-6"];
@@ -224,6 +226,7 @@ function getModelPricing(model: string) {
 }
 
 interface HourlyRow {
+  device_id: string;
   source: string;
   model: string;
   hour_start: string;
@@ -259,6 +262,15 @@ const KNOWN_SOURCES = new Set([
 function canonicalSource(s: string) {
   return KNOWN_SOURCES.has(s) ? s : "other";
 }
+
+// Account-level sources (data from a per-ACCOUNT cloud API, e.g. Cursor's usage
+// CSV — NOT machine-local logs) are stored IDENTICALLY on every device that
+// synced them, so they must be DEDUPED across devices, not summed. Machine-level
+// sources are real independent per-machine work and SUM across active devices.
+// Keep in sync with ACCOUNT_LEVEL_SOURCES in src/lib/source-metadata.js, the
+// account_usage_grouped RPC, and tokentracker-leaderboard-refresh.ts
+// (parity: test/account-source-parity.test.js).
+const ACCOUNT_LEVEL_SOURCES = new Set<string>(["cursor"]);
 
 // ─────────────────────────── Window bounds ──────────────────────────
 function windowBoundsForPeriod(period: string): { from_day: string; to_day: string } {
@@ -321,17 +333,42 @@ function computeStreak(daysWithActivity: Set<string>): { current_days: number; l
 // ─────────────────────────── Main handler ──────────────────────────
 // deno-lint-ignore no-explicit-any
 async function scanHourlyForUser(client: any, userId: string, rangeStartIso: string, rangeEndIso: string) {
-  // Dedup by (source, model, hour_start) keeping MAX total_tokens — same
-  // multi-device strategy as refresh.ts. Within one user_id this matters when
-  // cumulative queue replay double-records the same hour under multiple
-  // device sessions. SUM would double-count; MAX picks the canonical row.
-  const bucketMap = new Map<string, HourlyRow>();
+  // Two-class cross-device aggregation, matching the account_usage_grouped RPC
+  // and tokentracker-leaderboard-refresh.ts:
+  //   * ACCOUNT-LEVEL sources (cursor): same data on every device → keep ONE
+  //     canonical whole row per (source, model, hour) (highest total_tokens),
+  //     across ALL devices (device-independent, not active-filtered).
+  //   * MACHINE-LEVEL sources: real per-machine work → SUM across the user's
+  //     ACTIVE devices (revoked_at IS NULL), dropping historic device churn.
+  // Returns one merged map; the handler consumes its values() unchanged.
+  const activeDeviceIds = new Set<string>();
+  {
+    let dOff = 0;
+    const DPAGE = 1000;
+    while (true) {
+      const { data: devs, error: dErr } = await client.database
+        .from("tokentracker_devices")
+        .select("id")
+        .eq("user_id", userId)
+        .is("revoked_at", null)
+        .order("id", { ascending: true })
+        .range(dOff, dOff + DPAGE - 1);
+      if (dErr) throw new Error(dErr.message);
+      if (!devs || devs.length === 0) break;
+      for (const d of devs as Array<{ id: string }>) activeDeviceIds.add(d.id);
+      if (devs.length < DPAGE) break;
+      dOff += DPAGE;
+    }
+  }
+
+  const accountMap = new Map<string, HourlyRow>(); // canonical whole row
+  const machineMap = new Map<string, HourlyRow>(); // SUM accumulator
   let offset = 0;
   const PAGE_SIZE = 1000;
   while (true) {
     const { data: rows, error } = await client.database
       .from("tokentracker_hourly")
-      .select("source, model, hour_start, total_tokens, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens")
+      .select("device_id, source, model, hour_start, total_tokens, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens")
       .eq("user_id", userId)
       .gte("hour_start", rangeStartIso)
       .lt("hour_start", rangeEndIso)
@@ -341,16 +378,41 @@ async function scanHourlyForUser(client: any, userId: string, rangeStartIso: str
     if (!rows || rows.length === 0) break;
     for (const row of rows as HourlyRow[]) {
       const key = `${row.source}|${row.model}|${row.hour_start}`;
-      const existing = bucketMap.get(key);
-      const incoming = Number(row.total_tokens) || 0;
-      if (!existing || incoming > (Number(existing.total_tokens) || 0)) {
-        bucketMap.set(key, row);
+      if (ACCOUNT_LEVEL_SOURCES.has(row.source)) {
+        const existing = accountMap.get(key);
+        if (!existing || (Number(row.total_tokens) || 0) > (Number(existing.total_tokens) || 0)) {
+          accountMap.set(key, row);
+        }
+      } else {
+        if (!activeDeviceIds.has(row.device_id)) continue;
+        const acc = machineMap.get(key);
+        if (!acc) {
+          machineMap.set(key, {
+            ...row,
+            total_tokens: Number(row.total_tokens) || 0,
+            input_tokens: Number(row.input_tokens) || 0,
+            output_tokens: Number(row.output_tokens) || 0,
+            cached_input_tokens: Number(row.cached_input_tokens) || 0,
+            cache_creation_input_tokens: Number(row.cache_creation_input_tokens) || 0,
+            reasoning_output_tokens: Number(row.reasoning_output_tokens) || 0,
+          });
+        } else {
+          acc.total_tokens = (Number(acc.total_tokens) || 0) + (Number(row.total_tokens) || 0);
+          acc.input_tokens = (Number(acc.input_tokens) || 0) + (Number(row.input_tokens) || 0);
+          acc.output_tokens = (Number(acc.output_tokens) || 0) + (Number(row.output_tokens) || 0);
+          acc.cached_input_tokens = (Number(acc.cached_input_tokens) || 0) + (Number(row.cached_input_tokens) || 0);
+          acc.cache_creation_input_tokens = (Number(acc.cache_creation_input_tokens) || 0) + (Number(row.cache_creation_input_tokens) || 0);
+          acc.reasoning_output_tokens = (Number(acc.reasoning_output_tokens) || 0) + (Number(row.reasoning_output_tokens) || 0);
+        }
       }
     }
     if (rows.length < PAGE_SIZE) break;
     offset += PAGE_SIZE;
   }
-  return bucketMap;
+  // Merge (account and machine keys never collide — disjoint source sets).
+  const merged = new Map<string, HourlyRow>(machineMap);
+  for (const [k, v] of accountMap) merged.set(k, v);
+  return merged;
 }
 
 export default async function (req: Request): Promise<Response> {

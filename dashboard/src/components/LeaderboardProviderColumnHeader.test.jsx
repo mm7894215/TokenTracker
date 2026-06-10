@@ -11,4 +11,13 @@ describe("LeaderboardProviderColumnHeader", () => {
     const img = container.querySelector('img[src="/brand-logos/kimi.svg"]');
     expect(img).toHaveClass("dark:invert");
   });
+
+  it("inverts the monochrome Hermes logo in dark mode", () => {
+    const { container } = render(
+      <LeaderboardProviderColumnHeader iconSrc="/brand-logos/hermes.svg" label="Hermes" />,
+    );
+
+    const img = container.querySelector('img[src="/brand-logos/hermes.svg"]');
+    expect(img).toHaveClass("dark:invert");
+  });
 });

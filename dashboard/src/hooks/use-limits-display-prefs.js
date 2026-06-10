@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   isNativeEmbed,
   onNativeSettings,
@@ -9,9 +9,9 @@ import {
 /**
  * Display preferences for the Usage Limits panel.
  *
- * Mirrors the native macOS app's LimitsSettingsStore (order + visibility per provider),
- * persisted in localStorage. The display mode additionally syncs through NativeBridge
- * inside the macOS app so the dashboard, menu bar, and popover render the same mode.
+ * Uses Dashboard localStorage as the persistence entry point, then mirrors the
+ * full limitsPreferences snapshot through the macOS NativeBridge so the
+ * Dashboard and menu bar converge on the same preferences.
  */
 
 import {
@@ -28,6 +28,8 @@ export { LIMIT_PROVIDER_ICON_KEYS, limitProviderIconKey, limitProviderName };
 const ORDER_KEY = "tt.limits.providerOrder";
 const VISIBILITY_KEY = "tt.limits.providerVisibility";
 const DISPLAY_MODE_KEY = "tt.limits.displayMode";
+const UPDATED_AT_KEY = "tt.limits.updatedAt";
+const NATIVE_PREFERENCES_KEY = "limitsPreferences";
 const NATIVE_DISPLAY_MODE_KEY = "limitsDisplayMode";
 
 export const LIMIT_DISPLAY_MODES = Object.freeze({
@@ -36,40 +38,92 @@ export const LIMIT_DISPLAY_MODES = Object.freeze({
 });
 
 const VALID_DISPLAY_MODES = new Set(Object.values(LIMIT_DISPLAY_MODES));
+const STORAGE_KEYS = new Set([
+  ORDER_KEY,
+  VISIBILITY_KEY,
+  DISPLAY_MODE_KEY,
+  UPDATED_AT_KEY,
+]);
+
+function defaultOrder() {
+  return [...ALL_LIMIT_PROVIDERS];
+}
+
+function defaultVisibility() {
+  return Object.fromEntries(ALL_LIMIT_PROVIDERS.map((id) => [id, true]));
+}
+
+function normalizeOrder(value) {
+  const known = [];
+  if (Array.isArray(value)) {
+    for (const id of value) {
+      if (ALL_LIMIT_PROVIDERS.includes(id) && !known.includes(id)) {
+        known.push(id);
+      }
+    }
+  }
+  for (const id of ALL_LIMIT_PROVIDERS) {
+    if (!known.includes(id)) known.push(id);
+  }
+  return known;
+}
+
+function normalizeVisibility(value) {
+  const merged = defaultVisibility();
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return merged;
+  }
+  for (const id of ALL_LIMIT_PROVIDERS) {
+    if (typeof value[id] === "boolean") merged[id] = value[id];
+  }
+  return merged;
+}
+
+function normalizeDisplayMode(value) {
+  return VALID_DISPLAY_MODES.has(value) ? value : LIMIT_DISPLAY_MODES.USED;
+}
+
+function normalizeUpdatedAt(value) {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) ? value : undefined;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed === "") return undefined;
+    const updatedAt = Number(trimmed);
+    return Number.isSafeInteger(updatedAt) ? updatedAt : undefined;
+  }
+  return undefined;
+}
+
+function normalizeSnapshot(value = {}) {
+  const source = value && typeof value === "object" ? value : {};
+  return {
+    displayMode: normalizeDisplayMode(source.displayMode),
+    providerOrder: normalizeOrder(source.providerOrder),
+    providerVisibility: normalizeVisibility(source.providerVisibility),
+    updatedAt: normalizeUpdatedAt(source.updatedAt),
+  };
+}
 
 function readOrder() {
-  if (typeof window === "undefined") return [...ALL_LIMIT_PROVIDERS];
+  if (typeof window === "undefined") return defaultOrder();
   try {
     const raw = window.localStorage.getItem(ORDER_KEY);
-    if (!raw) return [...ALL_LIMIT_PROVIDERS];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [...ALL_LIMIT_PROVIDERS];
-    // Merge with any new providers + filter out unknowns
-    const known = parsed.filter((id) => ALL_LIMIT_PROVIDERS.includes(id));
-    for (const id of ALL_LIMIT_PROVIDERS) {
-      if (!known.includes(id)) known.push(id);
-    }
-    return known;
+    return normalizeOrder(raw ? JSON.parse(raw) : undefined);
   } catch {
-    return [...ALL_LIMIT_PROVIDERS];
+    return defaultOrder();
   }
 }
 
 function readVisibility() {
-  const defaults = Object.fromEntries(ALL_LIMIT_PROVIDERS.map((id) => [id, true]));
-  if (typeof window === "undefined") return defaults;
+  if (typeof window === "undefined") return defaultVisibility();
   try {
     const raw = window.localStorage.getItem(VISIBILITY_KEY);
-    if (!raw) return defaults;
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return defaults;
-    const merged = { ...defaults };
-    for (const id of ALL_LIMIT_PROVIDERS) {
-      if (typeof parsed[id] === "boolean") merged[id] = parsed[id];
-    }
-    return merged;
+    return normalizeVisibility(raw ? JSON.parse(raw) : undefined);
   } catch {
-    return defaults;
+    return defaultVisibility();
   }
 }
 
@@ -83,90 +137,247 @@ function readDisplayMode() {
   }
 }
 
-export function useLimitsDisplayPrefs() {
-  const [order, setOrder] = useState(readOrder);
-  const [visibility, setVisibility] = useState(readVisibility);
-  const [displayMode, setDisplayModeState] = useState(readDisplayMode);
+function readUpdatedAt() {
+  if (typeof window === "undefined") return undefined;
+  try {
+    return normalizeUpdatedAt(window.localStorage.getItem(UPDATED_AT_KEY));
+  } catch {
+    return undefined;
+  }
+}
 
-  const setDisplayMode = useCallback((mode) => {
-    if (!VALID_DISPLAY_MODES.has(mode)) return;
-    setDisplayModeState(mode);
+function hasLocalLimitsPreferenceKeys() {
+  if (typeof window === "undefined") return false;
+  try {
+    for (const key of STORAGE_KEYS) {
+      if (window.localStorage.getItem(key) !== null) return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+function readLocalSnapshot() {
+  return normalizeSnapshot({
+    displayMode: readDisplayMode(),
+    providerOrder: readOrder(),
+    providerVisibility: readVisibility(),
+    updatedAt: readUpdatedAt(),
+  });
+}
+
+function writeLocalSnapshot(snapshot) {
+  if (typeof window === "undefined") return;
+  const normalized = normalizeSnapshot(snapshot);
+  try {
+    window.localStorage.setItem(
+      ORDER_KEY,
+      JSON.stringify(normalized.providerOrder),
+    );
+    window.localStorage.setItem(
+      VISIBILITY_KEY,
+      JSON.stringify(normalized.providerVisibility),
+    );
+    window.localStorage.setItem(DISPLAY_MODE_KEY, normalized.displayMode);
+    if (normalized.updatedAt === undefined) {
+      window.localStorage.removeItem(UPDATED_AT_KEY);
+    } else {
+      window.localStorage.setItem(UPDATED_AT_KEY, String(normalized.updatedAt));
+    }
+  } catch (error) {
+    console.warn("[tokentracker] limits preferences localStorage write failed:", error);
+  }
+}
+
+function toBridgeSnapshot(snapshot) {
+  const normalized = normalizeSnapshot(snapshot);
+  return {
+    displayMode: normalized.displayMode,
+    providerOrder: [...normalized.providerOrder],
+    providerVisibility: { ...normalized.providerVisibility },
+    updatedAt: normalized.updatedAt ?? null,
+  };
+}
+
+function nextUpdatedAt(...currentUpdatedAts) {
+  let latest;
+  for (const value of currentUpdatedAts) {
+    const updatedAt = normalizeUpdatedAt(value);
+    if (updatedAt === undefined) continue;
+    latest = latest === undefined ? updatedAt : Math.max(latest, updatedAt);
+  }
+  const now = Date.now();
+  if (latest !== undefined && now <= latest) {
+    return latest + 1;
+  }
+  return now;
+}
+
+function sameOrder(a, b) {
+  return a.length === b.length && a.every((id, index) => id === b[index]);
+}
+
+function sameVisibility(a, b) {
+  return ALL_LIMIT_PROVIDERS.every((id) => a[id] === b[id]);
+}
+
+function samePreferences(a, b) {
+  return (
+    a.displayMode === b.displayMode &&
+    sameOrder(a.providerOrder, b.providerOrder) &&
+    sameVisibility(a.providerVisibility, b.providerVisibility)
+  );
+}
+
+function sameSnapshot(a, b) {
+  return (
+    samePreferences(a, b) &&
+    normalizeUpdatedAt(a.updatedAt) === normalizeUpdatedAt(b.updatedAt)
+  );
+}
+
+function snapshotIsNewer(candidateSnapshot, currentSnapshot) {
+  const candidateUpdatedAt = normalizeUpdatedAt(candidateSnapshot.updatedAt);
+  const currentUpdatedAt = normalizeUpdatedAt(currentSnapshot.updatedAt);
+  return (
+    candidateUpdatedAt !== undefined &&
+    (currentUpdatedAt === undefined || candidateUpdatedAt > currentUpdatedAt)
+  );
+}
+
+export function useLimitsDisplayPrefs() {
+  const [prefs, setPrefs] = useState(readLocalSnapshot);
+  const prefsRef = useRef(prefs);
+
+  const applySnapshot = useCallback((snapshot, options = {}) => {
+    const next = normalizeSnapshot(snapshot);
+    prefsRef.current = next;
+    setPrefs(next);
+    if (options.writeLocal) writeLocalSnapshot(next);
+    return next;
+  }, []);
+
+  const sendNativeSnapshot = useCallback((snapshot) => {
     if (isNativeEmbed()) {
-      setNativeSetting(NATIVE_DISPLAY_MODE_KEY, mode);
+      setNativeSetting(NATIVE_PREFERENCES_KEY, toBridgeSnapshot(snapshot));
     }
   }, []);
 
-  // Persist on change
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(ORDER_KEY, JSON.stringify(order));
-    } catch { /* ignore */ }
-  }, [order]);
+  const commitUserChange = useCallback((buildNext) => {
+    const localSnapshot = readLocalSnapshot();
+    const current = snapshotIsNewer(localSnapshot, prefsRef.current)
+      ? applySnapshot(localSnapshot)
+      : prefsRef.current;
+    const nextValues = normalizeSnapshot(buildNext(current));
+    if (samePreferences(current, nextValues)) return;
+    const updatedAt = nextUpdatedAt(
+      localSnapshot.updatedAt,
+      current.updatedAt,
+    );
+    const next = applySnapshot(
+      { ...nextValues, updatedAt },
+      { writeLocal: true },
+    );
+    sendNativeSnapshot(next);
+  }, [applySnapshot, sendNativeSnapshot]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(VISIBILITY_KEY, JSON.stringify(visibility));
-    } catch { /* ignore */ }
-  }, [visibility]);
+  const setDisplayMode = useCallback((mode) => {
+    if (!VALID_DISPLAY_MODES.has(mode)) return;
+    commitUserChange((current) => ({ ...current, displayMode: mode }));
+  }, [commitUserChange]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(DISPLAY_MODE_KEY, displayMode);
-    } catch { /* ignore */ }
-  }, [displayMode]);
+  const applyLegacyDisplayMode = useCallback((mode) => {
+    if (!VALID_DISPLAY_MODES.has(mode)) return;
+    const dashboardSnapshot = readLocalSnapshot();
+    if (dashboardSnapshot.updatedAt !== undefined) {
+      applySnapshot(dashboardSnapshot);
+      return;
+    }
+    applySnapshot(
+      { ...dashboardSnapshot, displayMode: mode, updatedAt: undefined },
+      { writeLocal: true },
+    );
+  }, [applySnapshot]);
 
-  // Native app sync: native pushes the canonical UserDefaults-backed value,
-  // while explicit dashboard changes are sent through setDisplayMode().
+  // The macOS bridge now sends full mirror snapshots; the old displayMode field
+  // remains only for compatibility.
   useEffect(() => {
     if (!isNativeEmbed()) return undefined;
     const unsubscribe = onNativeSettings((detail) => {
-      const next = detail?.[NATIVE_DISPLAY_MODE_KEY];
-      if (VALID_DISPLAY_MODES.has(next)) {
-        setDisplayModeState(next);
+      const nativePrefs = detail?.[NATIVE_PREFERENCES_KEY];
+      if (nativePrefs && typeof nativePrefs === "object") {
+        const nativeSnapshot = normalizeSnapshot(nativePrefs);
+        if (!hasLocalLimitsPreferenceKeys()) {
+          applySnapshot(nativeSnapshot, { writeLocal: true });
+          return;
+        }
+        const dashboardSnapshot = readLocalSnapshot();
+        if (snapshotIsNewer(nativeSnapshot, dashboardSnapshot)) {
+          applySnapshot(nativeSnapshot, { writeLocal: true });
+        } else {
+          const dashboard = applySnapshot(dashboardSnapshot);
+          if (!sameSnapshot(nativeSnapshot, dashboardSnapshot)) {
+            sendNativeSnapshot(dashboard);
+          }
+        }
+        return;
       }
+      applyLegacyDisplayMode(detail?.[NATIVE_DISPLAY_MODE_KEY]);
     });
     requestNativeSettings();
     return unsubscribe;
-  }, []);
+  }, [applyLegacyDisplayMode, applySnapshot, sendNativeSnapshot]);
 
-  // Cross-tab sync
+  // Cross-tab updates only apply the local snapshot. They do not create a new
+  // timestamp or write back to native.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const onStorage = (e) => {
-      if (e.key === ORDER_KEY) setOrder(readOrder());
-      if (e.key === VISIBILITY_KEY) setVisibility(readVisibility());
-      if (e.key === DISPLAY_MODE_KEY) setDisplayModeState(readDisplayMode());
+      if (e.key === null || STORAGE_KEYS.has(e.key)) {
+        applySnapshot(readLocalSnapshot());
+      }
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
-  }, []);
+  }, [applySnapshot]);
 
   const toggle = useCallback((id) => {
-    setVisibility((prev) => ({ ...prev, [id]: !prev[id] }));
-  }, []);
+    if (!ALL_LIMIT_PROVIDERS.includes(id)) return;
+    commitUserChange((current) => ({
+      ...current,
+      providerVisibility: {
+        ...current.providerVisibility,
+        [id]: !current.providerVisibility[id],
+      },
+    }));
+  }, [commitUserChange]);
 
   const moveUp = useCallback((id) => {
-    setOrder((prev) => {
-      const idx = prev.indexOf(id);
-      if (idx <= 0) return prev;
-      const next = [...prev];
-      [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
-      return next;
+    commitUserChange((current) => {
+      const idx = current.providerOrder.indexOf(id);
+      if (idx <= 0) return current;
+      const providerOrder = [...current.providerOrder];
+      [providerOrder[idx - 1], providerOrder[idx]] = [
+        providerOrder[idx],
+        providerOrder[idx - 1],
+      ];
+      return { ...current, providerOrder };
     });
-  }, []);
+  }, [commitUserChange]);
 
   const moveDown = useCallback((id) => {
-    setOrder((prev) => {
-      const idx = prev.indexOf(id);
-      if (idx < 0 || idx >= prev.length - 1) return prev;
-      const next = [...prev];
-      [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
-      return next;
+    commitUserChange((current) => {
+      const idx = current.providerOrder.indexOf(id);
+      if (idx < 0 || idx >= current.providerOrder.length - 1) return current;
+      const providerOrder = [...current.providerOrder];
+      [providerOrder[idx], providerOrder[idx + 1]] = [
+        providerOrder[idx + 1],
+        providerOrder[idx],
+      ];
+      return { ...current, providerOrder };
     });
-  }, []);
+  }, [commitUserChange]);
 
   /**
    * Reorder by dragging `sourceId` to the position of `targetId`.
@@ -174,33 +385,38 @@ export function useLimitsDisplayPrefs() {
    */
   const moveToward = useCallback((sourceId, targetId) => {
     if (sourceId === targetId) return;
-    setOrder((prev) => {
-      const from = prev.indexOf(sourceId);
-      const to = prev.indexOf(targetId);
-      if (from < 0 || to < 0) return prev;
-      const next = [...prev];
-      const [item] = next.splice(from, 1);
-      next.splice(to, 0, item);
-      return next;
+    commitUserChange((current) => {
+      const from = current.providerOrder.indexOf(sourceId);
+      const to = current.providerOrder.indexOf(targetId);
+      if (from < 0 || to < 0) return current;
+      const providerOrder = [...current.providerOrder];
+      const [item] = providerOrder.splice(from, 1);
+      providerOrder.splice(to, 0, item);
+      return { ...current, providerOrder };
     });
-  }, []);
+  }, [commitUserChange]);
 
   const reset = useCallback(() => {
-    setOrder([...ALL_LIMIT_PROVIDERS]);
-    setVisibility(Object.fromEntries(ALL_LIMIT_PROVIDERS.map((id) => [id, true])));
-    setDisplayMode(LIMIT_DISPLAY_MODES.USED);
-  }, [setDisplayMode]);
+    commitUserChange(() => ({
+      displayMode: LIMIT_DISPLAY_MODES.USED,
+      providerOrder: defaultOrder(),
+      providerVisibility: defaultVisibility(),
+    }));
+  }, [commitUserChange]);
 
-  // Derived: visible providers in user's order
+  // Return the currently visible providers in user order.
   const visibleOrdered = useMemo(
-    () => order.filter((id) => visibility[id] !== false),
-    [order, visibility],
+    () =>
+      prefs.providerOrder.filter(
+        (id) => prefs.providerVisibility[id] !== false,
+      ),
+    [prefs.providerOrder, prefs.providerVisibility],
   );
 
   return {
-    order,
-    visibility,
-    displayMode,
+    order: prefs.providerOrder,
+    visibility: prefs.providerVisibility,
+    displayMode: prefs.displayMode,
     setDisplayMode,
     visibleOrdered,
     toggle,

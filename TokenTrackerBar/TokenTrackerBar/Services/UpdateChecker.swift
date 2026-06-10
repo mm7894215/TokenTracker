@@ -21,6 +21,9 @@ final class UpdateChecker {
     /// Retain delegate until download completes (URLSession holds weak ref only)
     private var activeDownloadDelegate: DownloadProgressDelegate?
 
+    /// Native progress panel, present only during user-initiated (non-silent) updates
+    private var progressPanel: UpdateProgressPanelController?
+
     /// Cached app icon for alerts (capture before activationPolicy changes)
     private lazy var appIcon: NSImage? = NSApp.applicationIconImage
 
@@ -133,7 +136,7 @@ final class UpdateChecker {
                         return
                     }
                     // Silent auto-update: download and install without prompting
-                    startDownloadAndInstall(dmg, targetVersion: release.tagVersion)
+                    startDownloadAndInstall(dmg, targetVersion: release.tagVersion, interactive: false)
                 } else {
                     promptUpdate(release: release, currentVersion: current)
                 }
@@ -159,6 +162,8 @@ final class UpdateChecker {
     private func finishUpdate() {
         isBusy = false
         statusText = nil
+        progressPanel?.close()
+        progressPanel = nil
     }
 
     // MARK: - Version
@@ -221,6 +226,8 @@ final class UpdateChecker {
 
         let alert = NSAlert()
         alert.messageText = Strings.newVersionTitle(release.tagVersion)
+        // Keep the prompt lean: version + size only. Release notes are markdown,
+        // which NSAlert can't render — intentionally omitted.
         alert.informativeText = buildUpdateMessage(release: release, currentVersion: currentVersion)
         alert.alertStyle = .informational
         alert.icon = appIcon
@@ -230,7 +237,7 @@ final class UpdateChecker {
         presentAlert(alert) { response in
             if response == .alertFirstButtonReturn {
                 if let dmg = release.dmgAsset {
-                    self.startDownloadAndInstall(dmg, targetVersion: release.tagVersion)
+                    self.startDownloadAndInstall(dmg, targetVersion: release.tagVersion, interactive: true)
                 } else if let url = URL(string: release.html_url) {
                     NSWorkspace.shared.open(url)
                 }
@@ -240,23 +247,26 @@ final class UpdateChecker {
 
     private func buildUpdateMessage(release: GitHubRelease, currentVersion: String) -> String {
         var lines = [Strings.updateCurrentLine(current: currentVersion, target: release.tagVersion)]
-        if let body = release.body, !body.isEmpty {
-            lines.append("\n\(Strings.releaseNotesTitle)\n\(body.prefix(300))")
-            if body.count > 300 { lines.append("…") }
-        }
         if let dmg = release.dmgAsset {
-            lines.append("\n\(Strings.updateSize(String(format: "%.1f", Double(dmg.size) / 1_048_576)))")
+            lines.append(Strings.updateSize(String(format: "%.1f", Double(dmg.size) / 1_048_576)))
         }
-        return lines.joined()
+        return lines.joined(separator: "\n")
     }
 
     // MARK: - Download + Install (URLSession for proxy support)
 
-    private func startDownloadAndInstall(_ asset: GitHubRelease.Asset, targetVersion: String) {
+    private func startDownloadAndInstall(_ asset: GitHubRelease.Asset, targetVersion: String, interactive: Bool) {
         isBusy = true
         let totalSize = Int64(asset.size)
         let totalMB = Double(totalSize) / 1_048_576
         statusText = Strings.downloadingPercent(0)
+
+        if interactive {
+            let panel = UpdateProgressPanelController()
+            panel.show(title: Strings.updateProgressTitle(targetVersion))
+            panel.setProgress(percent: 0, detail: Strings.downloadingPercent(0))
+            progressPanel = panel
+        }
 
         // Download into the app's own data directory rather than ~/Downloads/.
         // Downloads is TCC-protected on macOS, so writing there triggers a
@@ -303,15 +313,19 @@ final class UpdateChecker {
                 let denom = expected > 0 ? expected : totalSize
                 guard denom > 0 else {
                     self.statusText = Strings.downloadingUnknown
+                    self.progressPanel?.setIndeterminate(detail: Strings.downloadingUnknown)
                     return
                 }
-                let pct = min(Int(Double(received) / Double(denom) * 100), 99)
+                let fraction = Double(received) / Double(denom) * 100
+                let pct = min(Int(fraction), 99)
                 let receivedMB = Double(received) / 1_048_576
-                self.statusText = Strings.downloadingProgress(
+                let progressText = Strings.downloadingProgress(
                     pct: pct,
                     receivedMB: String(format: "%.0f", receivedMB),
                     totalMB: String(format: "%.0f", totalMB)
                 )
+                self.statusText = progressText
+                self.progressPanel?.setProgress(percent: fraction, detail: progressText)
             },
             onComplete: { [weak self] result in
                 guard let self else { return }
@@ -319,6 +333,7 @@ final class UpdateChecker {
                 switch result {
                 case .success(let dmgURL):
                     self.statusText = Strings.installing
+                    self.progressPanel?.setIndeterminate(detail: Strings.installing)
                     self.performInstallAsync(dmgURL, targetVersion: targetVersion)
                 case .failure(let error):
                     self.finishUpdate()
@@ -352,6 +367,7 @@ final class UpdateChecker {
                 case .success(let appURL):
                     self.recordInstalledVersion(targetVersion)
                     self.statusText = Strings.restarting
+                    self.progressPanel?.setIndeterminate(detail: Strings.restarting)
                     self.relaunch(appURL: appURL)
                 case .failure(let error):
                     self.finishUpdate()
@@ -456,17 +472,12 @@ final class UpdateChecker {
         }
     }
 
-    /// 更新提示必须压过菜单栏 Popover（NSPanel）和仪表盘；仅用 sheet 仍可能被 Popover 挡住，故统一 `runModal` 并把模态窗提到高层级。
+    /// 更新提示必须压过菜单栏 Popover（NSPanel）；仅用 sheet 仍可能被 Popover 挡住，故统一 `runModal` 并把模态窗提到高层级。
+    /// 注意：不要在这里 order front 仪表盘窗口——靠下方的 level bump 已足够置顶，强开仪表盘会打扰用户。
     private func presentAlert(_ alert: NSAlert, completion: @escaping (NSApplication.ModalResponse) -> Void) {
         NSApp.setActivationPolicy(.regular)
         StatusBarController.prepareForSystemAlert()
-        NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
         NSApp.activate(ignoringOtherApps: true)
-        NSApp.unhide(nil)
-
-        if let dash = DashboardWindowController.shared.windowForSheet {
-            dash.makeKeyAndOrderFront(nil)
-        }
 
         var bumpTimer: Timer?
         let bumpAttempts = BumpAttempts()

@@ -27,7 +27,7 @@ function resolveGrokBillingBaseUrl(env = process.env) {
 
 function grokValNumber(value) {
   if (value == null) return null;
-  if (typeof value === "object" && value !== null && "val" in value) {
+  if (typeof value === "object" && "val" in value) {
     return grokValNumber(value.val);
   }
   const n = Number(value);

@@ -39,6 +39,10 @@ internal sealed class UsagePoller : IDisposable
     private static readonly HttpClient Http =
         new(new HttpClientHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(6) };
     private static readonly IReadOnlyList<TopModelStat> NoModels = Array.Empty<TopModelStat>();
+    // Cross-device ("account") aggregate request flag; the local server decides
+    // whether to serve it (signed in + cloud sync on) or local data, keeping the
+    // tray/pet figures aligned with the dashboard. Joined with an explicit '&'.
+    private const string AccountQuery = "account=1";
     private readonly Func<string> _baseUrl;
     private CancellationTokenSource? _cts;
 
@@ -48,6 +52,14 @@ internal sealed class UsagePoller : IDisposable
     /// the extra work only happens while the pet is on screen.
     /// </summary>
     public volatile bool IncludeRichStats;
+
+    /// <summary>
+    /// Whether the most recent summary fetch returned cross-device ("account view")
+    /// data rather than local single-machine data. Mirrors the macOS APIClient's
+    /// <c>accountViewActive</c>; driven by the <c>X-TokenTracker-Account-View</c>
+    /// response header the local server sets.
+    /// </summary>
+    public volatile bool AccountViewActive;
 
     /// <summary>Raised on the thread-pool with fresh stats. UI must marshal to the UI thread.</summary>
     public event Action<UsageStats>? StatsUpdated;
@@ -88,11 +100,20 @@ internal sealed class UsagePoller : IDisposable
             var today = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             var tzQuery = TimeZoneQuery();
 
+            // account=1 → the server serves the same cross-device aggregate the
+            // dashboard shows when the user is signed in with cloud sync on, and
+            // otherwise falls back to local single-machine data. Same response
+            // schema either way, so parsing below is unchanged.
             var summaryUrl = $"{_baseUrl()}/functions/tokentracker-usage-summary"
-                             + $"?from={today}&to={today}{tzQuery}";
+                             + $"?from={today}&to={today}{tzQuery}&{AccountQuery}";
 
             using var resp = await Http.GetAsync(summaryUrl);
             if (!resp.IsSuccessStatusCode) return null;
+
+            // Track whether the server served the cross-device aggregate or fell
+            // back to local data, mirroring the macOS client.
+            if (resp.Headers.TryGetValues("X-TokenTracker-Account-View", out var accountViewValues))
+                AccountViewActive = accountViewValues.FirstOrDefault() == "1";
 
             await using var stream = await resp.Content.ReadAsStreamAsync();
             using var doc = await JsonDocument.ParseAsync(stream);
@@ -151,7 +172,7 @@ internal sealed class UsagePoller : IDisposable
     {
         try
         {
-            var url = $"{_baseUrl()}/functions/tokentracker-usage-heatmap?weeks=52{tzQuery}";
+            var url = $"{_baseUrl()}/functions/tokentracker-usage-heatmap?weeks=52{tzQuery}&{AccountQuery}";
             using var resp = await Http.GetAsync(url);
             if (!resp.IsSuccessStatusCode) return (0, 0);
             await using var stream = await resp.Content.ReadAsStreamAsync();
@@ -174,7 +195,7 @@ internal sealed class UsagePoller : IDisposable
         {
             var from = DateTime.Now.AddDays(-29).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             var url = $"{_baseUrl()}/functions/tokentracker-usage-model-breakdown"
-                      + $"?from={from}&to={today}{tzQuery}";
+                      + $"?from={from}&to={today}{tzQuery}&{AccountQuery}";
             using var resp = await Http.GetAsync(url);
             if (!resp.IsSuccessStatusCode) return NoModels;
             await using var stream = await resp.Content.ReadAsStreamAsync();

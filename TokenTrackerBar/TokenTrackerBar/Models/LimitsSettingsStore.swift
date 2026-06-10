@@ -1,6 +1,10 @@
 import Foundation
 import Combine
 
+extension Notification.Name {
+    static let nativeSettingsChanged = Notification.Name("NativeSettingsChanged")
+}
+
 /// How the Usage Limits panel renders utilization values.
 ///
 /// `used` is the historical default and matches the public API surface
@@ -17,10 +21,17 @@ enum LimitDisplayMode: String, CaseIterable, Identifiable {
     var bridgeKey: String { rawValue }
 }
 
+struct LimitsPreferencesSnapshot: Equatable {
+    let displayMode: LimitDisplayMode
+    let providerOrder: [String]
+    let providerVisibility: [String: Bool]
+    let updatedAt: Int64?
+}
+
 /// Persists provider visibility and display order for the Usage Limits panel.
 final class LimitsSettingsStore: ObservableObject {
 
-    static let shared = LimitsSettingsStore()
+    static let shared = LimitsSettingsStore(userDefaults: .standard)
 
     /// All known provider identifiers, in default display order.
     static let allProviders: [String] = ["claude", "codex", "cursor", "gemini", "kimi", "kiro", "grok", "copilot", "antigravity"]
@@ -51,24 +62,21 @@ final class LimitsSettingsStore: ObservableObject {
     // MARK: - Published state
 
     /// Ordered list of provider IDs reflecting the user's preferred order.
-    @Published var providerOrder: [String] {
-        didSet { save() }
-    }
+    @Published private(set) var providerOrder: [String]
 
     /// Visibility per provider. `true` = shown.
-    @Published var providerVisibility: [String: Bool] {
-        didSet { save() }
-    }
+    @Published private(set) var providerVisibility: [String: Bool]
 
     /// Global rendering mode for utilization values. Default `.used` so
     /// users on existing installs see no change after upgrade.
-    @Published var displayMode: LimitDisplayMode {
-        didSet {
-            save()
-            // Re-render the menu-bar percent value (StatusBarController
-            // listens for this notification to refresh its composite image).
-            NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
-        }
+    @Published private(set) var displayMode: LimitDisplayMode
+
+    /// Millisecond Unix timestamp for the last user-authored preference change.
+    @Published private(set) var updatedAt: Int64?
+
+    private let preferencesChangedSubject = PassthroughSubject<Void, Never>()
+    var preferencesDidChange: AnyPublisher<Void, Never> {
+        preferencesChangedSubject.eraseToAnyPublisher()
     }
 
     // MARK: - UserDefaults keys
@@ -76,55 +84,290 @@ final class LimitsSettingsStore: ObservableObject {
     private static let orderKey = "LimitsProviderOrder"
     private static let visibilityKey = "LimitsProviderVisibility"
     private static let displayModeKey = "LimitsDisplayMode"
+    private static let updatedAtKey = "LimitsPreferencesUpdatedAt"
+    private let userDefaults: UserDefaults
 
     // MARK: - Init
 
-    private init() {
-        let savedOrder = UserDefaults.standard.stringArray(forKey: Self.orderKey)
-        let savedVis = UserDefaults.standard.dictionary(forKey: Self.visibilityKey) as? [String: Bool]
+    init(userDefaults: UserDefaults) {
+        self.userDefaults = userDefaults
+        let savedOrder = userDefaults.stringArray(forKey: Self.orderKey)
+        let savedVis = userDefaults.dictionary(forKey: Self.visibilityKey)
 
-        // Merge saved order with any new providers that may have been added
-        var order = savedOrder ?? Self.allProviders
-        for p in Self.allProviders where !order.contains(p) {
-            order.append(p)
-        }
-        // Remove providers no longer in allProviders
-        order = order.filter { Self.allProviders.contains($0) }
+        self.providerOrder = Self.normalizeProviderOrder(savedOrder)
+        self.providerVisibility = Self.normalizeProviderVisibility(savedVis)
+        self.displayMode = Self.readDisplayMode(from: userDefaults)
+        self.updatedAt = Self.readUpdatedAt(from: userDefaults)
 
-        self.providerOrder = order
-        self.providerVisibility = savedVis ?? Dictionary(uniqueKeysWithValues: Self.allProviders.map { ($0, true) })
-        self.displayMode = Self.readDisplayMode()
+        save()
     }
 
-    private static func readDisplayMode() -> LimitDisplayMode {
-        guard let raw = UserDefaults.standard.string(forKey: displayModeKey),
+    private static func readDisplayMode(from userDefaults: UserDefaults) -> LimitDisplayMode {
+        guard let raw = userDefaults.string(forKey: displayModeKey),
               let parsed = LimitDisplayMode(rawValue: raw) else {
             return .used
         }
         return parsed
     }
 
+    private static func readUpdatedAt(from userDefaults: UserDefaults) -> Int64? {
+        parseUpdatedAt(userDefaults.object(forKey: updatedAtKey))
+    }
+
     // MARK: - Helpers
+
+    var limitsPreferencesPayload: [String: Any] {
+        [
+            "displayMode": displayMode.bridgeKey,
+            "providerOrder": providerOrder,
+            "providerVisibility": providerVisibility,
+            "updatedAt": updatedAt.map { NSNumber(value: $0) } ?? NSNull(),
+        ]
+    }
 
     func isVisible(_ id: String) -> Bool {
         providerVisibility[id] ?? true
     }
 
-    func move(from source: IndexSet, to destination: Int) {
-        var updated = providerOrder
-        // MutableCollection.move is available on Array
-        let items = source.map { updated[$0] }
-        for index in source.sorted().reversed() {
+    /// Providers the user explicitly hid. Hiding is user-authored intent, so it
+    /// also removes that provider's metrics from the menu bar — unlike a
+    /// transient provider outage, which keeps an already-selected metric.
+    var hiddenProviders: Set<String> {
+        Set(providerVisibility.filter { !$0.value }.keys)
+    }
+
+    func setDisplayModeFromMenu(_ mode: LimitDisplayMode) {
+        guard mode != displayMode else { return }
+        applySnapshot(LimitsPreferencesSnapshot(
+            displayMode: mode,
+            providerOrder: providerOrder,
+            providerVisibility: providerVisibility,
+            updatedAt: nextLocalUpdatedAt()
+        ), notifyBridge: true)
+    }
+
+    func setProviderVisibilityFromMenu(_ id: String, isVisible: Bool) {
+        guard Self.allProviders.contains(id), providerVisibility[id] != isVisible else { return }
+        var updated = providerVisibility
+        updated[id] = isVisible
+        applySnapshot(LimitsPreferencesSnapshot(
+            displayMode: displayMode,
+            providerOrder: providerOrder,
+            providerVisibility: Self.normalizeProviderVisibility(updated),
+            updatedAt: nextLocalUpdatedAt()
+        ), notifyBridge: true)
+    }
+
+    func moveProviderFromMenu(from source: IndexSet, to destination: Int) {
+        let normalized = Self.reorderedProviderOrder(providerOrder, moving: source, to: destination)
+        guard normalized != providerOrder else { return }
+
+        applySnapshot(LimitsPreferencesSnapshot(
+            displayMode: displayMode,
+            providerOrder: normalized,
+            providerVisibility: providerVisibility,
+            updatedAt: nextLocalUpdatedAt()
+        ), notifyBridge: true)
+    }
+
+    /// `destination` follows SwiftUI `move(fromOffsets:toOffset:)` semantics on the original array.
+    static func reorderedProviderOrder(_ currentOrder: [String], moving source: IndexSet, to destination: Int) -> [String] {
+        var updated = normalizeProviderOrder(currentOrder)
+        let indexes = source.filter { $0 >= 0 && $0 < updated.count }
+        guard !indexes.isEmpty else { return updated }
+
+        let items = indexes.map { updated[$0] }
+        for index in indexes.sorted().reversed() {
             updated.remove(at: index)
         }
-        let insertAt = min(destination, updated.count)
+
+        let removedBeforeDestination = indexes.filter { $0 < destination }.count
+        let insertAt = max(0, min(destination - removedBeforeDestination, updated.count))
         updated.insert(contentsOf: items, at: insertAt)
-        providerOrder = updated
+        return normalizeProviderOrder(updated)
+    }
+
+    func applyBridgeSnapshot(_ raw: [String: Any]) -> Bool {
+        let snapshot = LimitsPreferencesSnapshot(
+            displayMode: Self.normalizeDisplayMode(raw["displayMode"]),
+            providerOrder: Self.normalizeProviderOrder(Self.rawProviderOrder(raw["providerOrder"])),
+            providerVisibility: Self.normalizeProviderVisibility(raw["providerVisibility"] as? [String: Any]),
+            updatedAt: Self.parseUpdatedAt(raw["updatedAt"])
+        )
+        guard shouldApplyBridgeSnapshot(snapshot) else {
+            return false
+        }
+        applySnapshot(snapshot, notifyBridge: false)
+        return true
+    }
+
+    func applyBridgeDisplayMode(_ raw: Any?) -> Bool {
+        guard let raw = raw as? String,
+              let mode = LimitDisplayMode(rawValue: raw) else {
+            return false
+        }
+        guard updatedAt == nil else {
+            return false
+        }
+        return applySnapshot(LimitsPreferencesSnapshot(
+            displayMode: mode,
+            providerOrder: providerOrder,
+            providerVisibility: providerVisibility,
+            updatedAt: nil
+        ), notifyBridge: false)
+    }
+
+    @discardableResult
+    private func applySnapshot(_ snapshot: LimitsPreferencesSnapshot, notifyBridge: Bool) -> Bool {
+        let normalized = LimitsPreferencesSnapshot(
+            displayMode: snapshot.displayMode,
+            providerOrder: Self.normalizeProviderOrder(snapshot.providerOrder),
+            providerVisibility: Self.normalizeProviderVisibility(snapshot.providerVisibility),
+            updatedAt: snapshot.updatedAt
+        )
+        guard normalized.displayMode != displayMode ||
+            normalized.providerOrder != providerOrder ||
+            normalized.providerVisibility != providerVisibility ||
+            normalized.updatedAt != updatedAt else {
+            return false
+        }
+
+        providerOrder = normalized.providerOrder
+        providerVisibility = normalized.providerVisibility
+        displayMode = normalized.displayMode
+        updatedAt = normalized.updatedAt
+        save()
+
+        // StatusBarController listens for this to refresh the composite image.
+        NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
+        if notifyBridge {
+            preferencesChangedSubject.send()
+        }
+        return true
+    }
+
+    private func shouldApplyBridgeSnapshot(_ snapshot: LimitsPreferencesSnapshot) -> Bool {
+        switch (snapshot.updatedAt, updatedAt) {
+        case let (incoming?, current?):
+            return incoming >= current
+        case (_?, nil):
+            return true
+        case (nil, nil):
+            return true
+        case (nil, _?):
+            return false
+        }
+    }
+
+    private func nextLocalUpdatedAt() -> Int64 {
+        let now = Self.currentTimeMillis()
+        guard let current = updatedAt, now <= current else {
+            return now
+        }
+        return current == Int64.max ? current : current + 1
+    }
+
+    private static func currentTimeMillis() -> Int64 {
+        Int64((Date().timeIntervalSince1970 * 1000).rounded(.down))
+    }
+
+    private static func normalizeProviderOrder(_ raw: [String]?) -> [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for id in raw ?? [] where allProviders.contains(id) && !seen.contains(id) {
+            ordered.append(id)
+            seen.insert(id)
+        }
+        for id in allProviders where !seen.contains(id) {
+            ordered.append(id)
+        }
+        return ordered
+    }
+
+    private static func normalizeProviderVisibility(_ raw: [String: Any]?) -> [String: Bool] {
+        Dictionary(uniqueKeysWithValues: allProviders.map { id in
+            (id, rawBool(raw?[id]) ?? true)
+        })
+    }
+
+    private static func normalizeProviderVisibility(_ raw: [String: Bool]) -> [String: Bool] {
+        Dictionary(uniqueKeysWithValues: allProviders.map { id in
+            (id, raw[id] ?? true)
+        })
+    }
+
+    private static func normalizeDisplayMode(_ raw: Any?) -> LimitDisplayMode {
+        guard let raw = raw as? String,
+              let parsed = LimitDisplayMode(rawValue: raw) else {
+            return .used
+        }
+        return parsed
+    }
+
+    private static func rawProviderOrder(_ raw: Any?) -> [String]? {
+        if let ids = raw as? [String] {
+            return ids
+        }
+        if let values = raw as? [Any] {
+            return values.compactMap { $0 as? String }
+        }
+        return nil
+    }
+
+    private static func rawBool(_ raw: Any?) -> Bool? {
+        guard let number = raw as? NSNumber,
+              CFGetTypeID(number) == CFBooleanGetTypeID() else {
+            return nil
+        }
+        return number.boolValue
+    }
+
+    private static func parseUpdatedAt(_ raw: Any?) -> Int64? {
+        guard let raw, !(raw is NSNull) else {
+            return nil
+        }
+
+        guard let number = raw as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID() else {
+            return nil
+        }
+
+        switch String(cString: number.objCType) {
+        case "c", "s", "i", "l", "q":
+            return safeUpdatedAt(number.int64Value)
+        case "C", "S", "I", "L", "Q":
+            let value = number.uint64Value
+            guard value <= UInt64(maxSafeUpdatedAt) else { return nil }
+            return Int64(value)
+        default:
+            let value = number.doubleValue
+            guard value.isFinite,
+                  value.rounded(.towardZero) == value,
+                  value >= Double(-maxSafeUpdatedAt),
+                  value <= Double(maxSafeUpdatedAt) else {
+                return nil
+            }
+            return Int64(value)
+        }
+    }
+
+    private static let maxSafeUpdatedAt: Int64 = 9_007_199_254_740_991
+
+    private static func safeUpdatedAt(_ value: Int64) -> Int64? {
+        guard value >= -maxSafeUpdatedAt, value <= maxSafeUpdatedAt else {
+            return nil
+        }
+        return value
     }
 
     private func save() {
-        UserDefaults.standard.set(providerOrder, forKey: Self.orderKey)
-        UserDefaults.standard.set(providerVisibility, forKey: Self.visibilityKey)
-        UserDefaults.standard.set(displayMode.rawValue, forKey: Self.displayModeKey)
+        userDefaults.set(providerOrder, forKey: Self.orderKey)
+        userDefaults.set(providerVisibility, forKey: Self.visibilityKey)
+        userDefaults.set(displayMode.rawValue, forKey: Self.displayModeKey)
+        if let updatedAt {
+            userDefaults.set(updatedAt, forKey: Self.updatedAtKey)
+        } else {
+            userDefaults.removeObject(forKey: Self.updatedAtKey)
+        }
     }
 }

@@ -109,7 +109,7 @@ function flagImg(cc) {
     : low === "tw"
       ? `${PROXY}/favicons/flags/tw.png`
       : `${PROXY}/favicons/flags/${low}.png`;
-  return `<img src="${src}" alt="${low}" class="inline-block h-4 w-auto rounded-sm align-[-2px]" onerror="this.onerror=null;this.style.display='none'">`;
+  return `<img src="${src}" alt="${low}" class="inline-block h-4 w-auto align-[-2px]" onerror="this.onerror=null;this.style.display='none'">`;
 }
 
 function maskIpText(text) {
@@ -314,18 +314,30 @@ export default function IpCheckPage() {
       if (!ip) return `<span class="text-oai-gray-400 dark:text-oai-gray-500">${esc(t.failed)}</span>`;
       return `<span class="ip-link">${displayIP(ip)}</span>`;
     }
-    function row(label, valueHtml) {
-      const value = valueHtml === undefined
-        ? '<span class="block h-3 w-20 rounded bg-oai-gray-200 dark:bg-oai-gray-800 animate-pulse"></span>'
-        : valueHtml;
-      return `<div class="flex items-center justify-between py-3 gap-3">
+    function row(label, valueHtml, isChecking = false) {
+      let value = valueHtml;
+      if (valueHtml === undefined) {
+        if (isChecking) {
+          value = `<div class="inline-flex items-center gap-1.5 text-xs text-oai-gray-400">
+            <svg class="animate-spin-subtle h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+          </div>`;
+        } else {
+          value = '<span class="block h-3 w-20 rounded bg-oai-gray-100 dark:bg-oai-gray-800 shimmer"></span>';
+        }
+      } else {
+        value = `<div class="animate-scale-up-fade">${valueHtml}</div>`;
+      }
+      return `<div class="flex items-center justify-between py-2.5 gap-3">
         <span class="text-sm text-oai-gray-500 dark:text-oai-gray-400 shrink-0">${label}</span>
         <span class="text-sm font-medium text-oai-black dark:text-white text-right min-w-0">${value}</span>
       </div>`;
     }
     function loadingRows(labels) { return labels.map((l) => row(l, undefined)).join(""); }
-    function ipHeroSkeleton() { return '<div class="h-7 w-44 rounded bg-oai-gray-200 dark:bg-oai-gray-800 animate-pulse"></div>'; }
-    function ipGeoSkeleton() { return '<div class="h-3 w-52 mt-2 rounded bg-oai-gray-200 dark:bg-oai-gray-800 animate-pulse"></div>'; }
+    function ipHeroSkeleton() { return '<div class="h-7 w-44 rounded bg-oai-gray-100 dark:bg-oai-gray-800 shimmer"></div>'; }
+    function ipGeoSkeleton() { return '<div class="h-3 w-52 mt-2 rounded bg-oai-gray-100 dark:bg-oai-gray-800 shimmer"></div>'; }
 
     function scoreLabel(score) {
       if (score >= 95) return { text: t.score.pristine, variant: "safe" };
@@ -338,6 +350,8 @@ export default function IpCheckPage() {
     const state = {
       ip: null, ippure: null, ipapis: null,
       claudeGeo: null, claudeRisk: null, cfGeo: "",
+      scoreAnimId: null,
+      lastScore: 0
     };
 
     function restrictedRegion() {
@@ -357,6 +371,7 @@ export default function IpCheckPage() {
 
     // ─── Initial skeletons (own the containers fully) ─────────────────────
     const skeletons = {
+      gaugeScore: '<span class="block h-8 w-16 rounded bg-oai-gray-100 dark:bg-oai-gray-800 shimmer"></span>',
       ipAddrCN: ipHeroSkeleton(),
       ipGeoCN: ipGeoSkeleton(),
       ipAddr: ipHeroSkeleton(),
@@ -365,9 +380,9 @@ export default function IpCheckPage() {
       ipGeoClaude: ipGeoSkeleton(),
       propsContent: loadingRows([t.propsRegion, t.propsCity, t.propsType, t.propsAsn, t.propsOrg]),
       securityContent: loadingRows([t.secVpn, t.secProxy, t.secTor, t.secCrawler, t.secAbuser]),
-      claudeAvailContent: loadingRows(["claude.ai", "anthropic.com"]),
-      dnsLeakContent: loadingRows([t.dnsStatus, t.dnsOutletIp]),
-      udpLeakContent: loadingRows([t.udpStatus, t.udpOutletIp]),
+      claudeAvailContent: row("claude.ai", undefined, true) + row("anthropic.com", undefined, true),
+      dnsLeakContent: row(t.dnsStatus, undefined, true) + row(t.dnsOutletIp, undefined, true),
+      udpLeakContent: row(t.udpStatus, undefined, true) + row(t.udpOutletIp, undefined, true),
       deviceContent: loadingRows([t.devTz, t.devLang, t.devOs, t.devTouch, t.devNet, t.devDnt, t.devWebglRender, t.devCanvasFp]),
       ipHistoryContent: `<span class="text-sm text-oai-gray-400 dark:text-oai-gray-500">${t.histLoading}</span>`,
     };
@@ -472,9 +487,11 @@ export default function IpCheckPage() {
       const gaugeScoreEl = $("gaugeScore");
       const gaugeTextEl = $("gaugeText");
       if (trustScore === null) {
-        gaugeScoreEl.innerHTML = `<span class="text-oai-gray-400 dark:text-oai-gray-500">—</span> ${tag(t.noData, "neutral")}`;
+        gaugeScoreEl.innerHTML = `<span class="text-4xl font-bold tracking-tight tabular-nums text-oai-gray-400 dark:text-oai-gray-500">—</span> ${tag(t.noData, "neutral")}`;
         gaugePointer.style.left = "0%";
         gaugePointer.style.opacity = "0.3";
+        gaugePointer.style.borderColor = "";
+        gaugePointer.style.boxShadow = "";
         gaugeTextEl.textContent = hasClaudeIp ? t.noScore : t.noIp;
       } else {
         const sl = restrictedName ? { text: t.score.unreachable, variant: "danger" } : scoreLabel(trustScore);
@@ -482,9 +499,60 @@ export default function IpCheckPage() {
           trustScore >= 50 ? "text-emerald-500"
           : trustScore >= 25 ? "text-amber-500"
           : "text-red-500";
-        gaugeScoreEl.innerHTML = `<span class="${scoreColor}">${trustScore}</span> ${tag(sl.text, sl.variant)}`;
-        gaugePointer.style.left = Math.min(trustScore, 100) + "%";
-        gaugePointer.style.opacity = "1";
+        const pointerColor =
+          trustScore >= 50 ? "#10b981"
+          : trustScore >= 25 ? "#f59e0b"
+          : "#ef4444";
+
+        // Number Ticker animation for Trust Score
+        if (state.lastScore !== trustScore) {
+          if (state.scoreAnimId) {
+            cancelAnimationFrame(state.scoreAnimId);
+          }
+          const startVal = state.lastScore || 0;
+          state.lastScore = trustScore;
+
+          const startTime = performance.now();
+          const duration = 800; // ms
+
+          const updateScoreAnim = (currentTime) => {
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            const ease = progress * (2 - progress); // easeOutQuad
+            const currentVal = Math.round(startVal + (trustScore - startVal) * ease);
+
+            const curColor =
+              currentVal >= 50 ? "text-emerald-500"
+              : currentVal >= 25 ? "text-amber-500"
+              : "text-red-500";
+
+            if (gaugeScoreEl) {
+              gaugeScoreEl.innerHTML = `<span class="text-4xl font-bold tracking-tight tabular-nums ${curColor}">${currentVal}</span> ${tag(sl.text, sl.variant)}`;
+            }
+
+            if (progress < 1) {
+              state.scoreAnimId = requestAnimationFrame(updateScoreAnim);
+            } else {
+              state.scoreAnimId = null;
+            }
+          };
+          state.scoreAnimId = requestAnimationFrame(updateScoreAnim);
+        } else {
+          gaugeScoreEl.innerHTML = `<span class="text-4xl font-bold tracking-tight tabular-nums ${scoreColor}">${trustScore}</span> ${tag(sl.text, sl.variant)}`;
+        }
+
+        // Smooth transition slide for pointer
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (gaugePointer) {
+              gaugePointer.style.left = Math.min(trustScore, 100) + "%";
+              gaugePointer.style.opacity = "1";
+              gaugePointer.style.borderColor = pointerColor;
+              gaugePointer.style.boxShadow = `0 0 10px ${pointerColor}80, 0 2px 6px rgba(0,0,0,0.15)`;
+            }
+          });
+        });
+
         gaugeTextEl.textContent = restrictedText
           || (trustScore >= 95 ? t.scoreText.excellent
             : trustScore >= 80 ? t.scoreText.great
@@ -575,6 +643,7 @@ export default function IpCheckPage() {
     async function detectDNSLeak() {
       const el = $("dnsLeakContent");
       if (!el) return;
+      el.innerHTML = row(t.dnsStatus, undefined, true) + row(t.dnsOutletIp, undefined, true);
       const token = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
       for (let i = 1; i <= 2; i++) {
         await new Promise((resolve) => {
@@ -631,7 +700,7 @@ export default function IpCheckPage() {
       }
       let html = row(t.dnsStatus, isLeaked ? tag(t.dnsLeaked, "warn") : tag(t.dnsNoLeak, "safe"));
       if (showIP) {
-        const ipValue = `${flagImg(showIP.cc)} <span class="ip-mask-target font-mono tabular-nums">${esc(showIP.ip)}</span>${showIP.leaked ? " " + tag(t.dnsCnTag, "warn") : ""}`;
+        const ipValue = `${flagImg(showIP.cc)} <span class="ip-mask-target ${showIP.leaked ? "text-amber-600 dark:text-amber-400 font-medium" : ""}">${esc(showIP.ip)}</span>${showIP.leaked ? " " + tag(t.dnsCnTag, "warn") : ""}`;
         html += row(t.dnsOutlet, ipValue);
         if (showIP.isp) html += row(t.dnsIsp, `<span class="text-xs text-oai-gray-500 dark:text-oai-gray-400 font-normal truncate inline-block max-w-[12rem] align-bottom">${esc(showIP.isp)}</span>`);
       }
@@ -642,6 +711,7 @@ export default function IpCheckPage() {
     async function detectWebRTCLeak() {
       const el = $("udpLeakContent");
       if (!el) return;
+      el.innerHTML = row(t.udpStatus, undefined, true) + row(t.udpOutletIp, undefined, true);
       const udpIPs = new Set();
       try {
         const pc = new RTCPeerConnection({
@@ -695,7 +765,7 @@ export default function IpCheckPage() {
         const r = await fetch(`${PROXY}/api/geoip/${showIP}`, { signal: AbortSignal.timeout(5000) });
         if (r.ok) { const g = await r.json(); showFlag = g.country_code || ""; showCountry = g.country || ""; }
       } catch {}
-      const ipValue = `${flagImg(showFlag)} <span class="font-mono tabular-nums">${displayIP(showIP)}</span>${matchesClaude ? "" : isLeaked ? " " + tag(t.udpAnomaly, "warn") : ""}`;
+      const ipValue = `${flagImg(showFlag)} <span class="${isLeaked ? "text-amber-600 dark:text-amber-400 font-medium" : ""}">${displayIP(showIP)}</span>${matchesClaude ? "" : isLeaked ? " " + tag(t.udpAnomaly, "warn") : ""}`;
       html += row(t.udpOutlet, ipValue);
       if (showCountry) html += row(t.udpOrigin, `<span class="text-xs text-oai-gray-500 dark:text-oai-gray-400 font-normal">${esc(showCountry)}</span>`);
       el.innerHTML = html;
@@ -705,7 +775,7 @@ export default function IpCheckPage() {
     async function detectClaudeAvail() {
       const el = $("claudeAvailContent");
       if (!el) return;
-      el.innerHTML = loadingRows(["claude.ai", "anthropic.com"]);
+      el.innerHTML = row("claude.ai", undefined, true) + row("anthropic.com", undefined, true);
       const targets = [
         { name: "claude.ai", url: "https://claude.ai/cdn-cgi/trace" },
         { name: "anthropic.com", url: "https://www.anthropic.com/favicon.ico" },
@@ -855,11 +925,11 @@ export default function IpCheckPage() {
         + row(t.devLang, langHtml)
         + row(t.devOs, `${esc(os)} <span class="text-oai-gray-400 dark:text-oai-gray-500">/</span> ${esc(browser)}`)
         + row(t.devTouch, isTouch ? tag(t.devTouchYes, "info") : tag(t.devTouchNo, "neutral"))
-        + row(t.devNet, `<span class="font-mono tabular-nums uppercase">${esc(netType)}</span>`)
+        + row(t.devNet, `<span class="font-mono uppercase">${esc(netType)}</span>`)
         + row(t.devDnt, esc(dnt))
         + row(t.devWebglRender, `<span class="text-xs font-normal text-oai-gray-600 dark:text-oai-gray-400 break-all">${esc(webglRenderer)}</span>`)
-        + row(t.devCanvasFp, `<span class="font-mono tabular-nums tracking-wider text-oai-gray-700 dark:text-oai-gray-300">${esc(canvasHash)}</span>`)
-        + row(t.devWebglFp, `<span class="font-mono tabular-nums tracking-wider text-oai-gray-700 dark:text-oai-gray-300">${esc(webglHash)}</span>`);
+        + row(t.devCanvasFp, `<span class="font-mono text-oai-gray-700 dark:text-oai-gray-300">${esc(canvasHash)}</span>`)
+        + row(t.devWebglFp, `<span class="font-mono text-oai-gray-700 dark:text-oai-gray-300">${esc(webglHash)}</span>`);
     }
 
     // ─── IP history ───────────────────────────────────────────────────────
@@ -902,7 +972,7 @@ export default function IpCheckPage() {
           const isCurrent = i === 0;
           return `<li class="flex items-center justify-between py-3 gap-4">
             <div class="flex items-center gap-2 min-w-0">
-              <span class="text-sm tabular-nums ${isCurrent ? "text-oai-black dark:text-white" : "text-oai-gray-500 dark:text-oai-gray-400"}">${timeStr}</span>
+              <span class="text-sm ${isCurrent ? "text-oai-black dark:text-white" : "text-oai-gray-500 dark:text-oai-gray-400"}">${timeStr}</span>
               ${isCurrent ? `<span class="inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300 px-1.5 py-0.5 text-[10px] font-medium">${esc(t.histCurrent)}</span>` : ""}
             </div>
             <div class="flex items-center gap-2 text-sm font-medium text-oai-black dark:text-white min-w-0">
@@ -1016,6 +1086,7 @@ export default function IpCheckPage() {
     return () => {
       aborted = true;
       maskObserver.disconnect();
+      if (state.scoreAnimId) cancelAnimationFrame(state.scoreAnimId);
       delete root.__setMaskOn;
       delete root.__clearIPHistory;
       delete root.__detectClaudeAvail;
@@ -1047,8 +1118,25 @@ export default function IpCheckPage() {
                 {copy("ipcheck.page.subtitle")}
               </p>
             </div>
-            <label className="shrink-0 inline-flex items-center gap-2 cursor-pointer select-none">
-              <span className="text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy("ipcheck.mask.toggle")}</span>
+            <label className="shrink-0 inline-flex items-center gap-2.5 cursor-pointer select-none group">
+              <div className="text-oai-gray-400 group-hover:text-oai-gray-600 dark:text-oai-gray-500 dark:group-hover:text-oai-gray-300 transition-colors duration-200">
+                {maskOn ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4.5 w-4.5 animate-scale-up-fade">
+                    <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+                    <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+                    <path d="M6.61 6.61A13.52 13.52 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+                    <line x1="2" y1="2" x2="22" y2="22" />
+                  </svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4.5 w-4.5 animate-scale-up-fade">
+                    <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                )}
+              </div>
+              <span className="text-xs font-medium text-oai-gray-500 group-hover:text-oai-gray-700 dark:text-oai-gray-400 dark:group-hover:text-oai-gray-200 transition-colors duration-200">
+                {copy("ipcheck.mask.toggle")}
+              </span>
               <span className="relative inline-block w-9 h-5">
                 <input
                   type="checkbox"
@@ -1056,8 +1144,8 @@ export default function IpCheckPage() {
                   onChange={(e) => handleMaskToggle(e.target.checked)}
                   className="peer sr-only"
                 />
-                <span className="absolute inset-0 rounded-full bg-oai-gray-200 dark:bg-oai-gray-800 peer-checked:bg-oai-brand-500 transition-colors" />
-                <span className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4" />
+                <span className="absolute inset-0 rounded-full bg-oai-gray-200 dark:bg-oai-gray-800 peer-checked:bg-oai-brand-500 transition-colors duration-200" />
+                <span className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 peer-checked:translate-x-4" />
               </span>
             </label>
           </div>
@@ -1069,38 +1157,40 @@ export default function IpCheckPage() {
           <div className="space-y-4">
           {/* IP trio */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <IpHero id="CN" label={copy("ipcheck.ip.cn")} icon={null} />
-            <IpHero id="" label={copy("ipcheck.ip.cloudflare")} icon={<img src={`${PROXY}/favicons/cloudflare.webp`} alt="" className="h-4 w-4" />} />
-            <IpHero id="Claude" label={copy("ipcheck.ip.claude")} icon={<img src={`${PROXY}/favicons/claude.webp`} alt="" className="h-4 w-4" />} statusDot />
+            <IpHero id="CN" label={copy("ipcheck.ip.cn")} icon={null} className="animate-fade-in-up stagger-1" />
+            <IpHero id="" label={copy("ipcheck.ip.cloudflare")} icon={<img src={`${PROXY}/favicons/cloudflare.webp`} alt="" className="h-4 w-4" />} className="animate-fade-in-up stagger-2" />
+            <IpHero id="Claude" label={copy("ipcheck.ip.claude")} icon={<img src={`${PROXY}/favicons/claude.webp`} alt="" className="h-4 w-4" />} statusDot className="animate-fade-in-up stagger-3" />
           </div>
 
           {/* Trust + Properties + Security */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <Card title={copy("ipcheck.trust.title")} subtitle={copy("ipcheck.trust.subtitle")}>
+            <Card title={copy("ipcheck.trust.title")} subtitle={copy("ipcheck.trust.subtitle")} className="animate-fade-in-up stagger-4">
               <div className="px-1 py-2">
                 <div className="flex items-baseline justify-between mb-2 gap-3">
                   <div
                     id="gaugeScore"
-                    className="text-3xl font-semibold tabular-nums leading-none flex items-center gap-2"
+                    className="flex items-baseline gap-2 min-h-[2.5rem]"
                     dangerouslySetInnerHTML={heroEmpty}
                   />
                 </div>
                 <div id="gaugeText" className="text-xs text-oai-gray-500 dark:text-oai-gray-400 mb-4 min-h-[1rem]" />
-                <div className="relative">
-                  <div
-                    className="h-1.5 rounded-full"
-                    style={{ background: "linear-gradient(90deg, #ef4444 0%, #f59e0b 50%, #10b981 100%)" }}
-                  />
-                  <span
-                    id="gaugePointer"
-                    className="absolute -top-1 h-3.5 w-[3px] rounded-sm bg-oai-black dark:bg-white shadow-[0_0_0_1px_rgba(255,255,255,0.6)] dark:shadow-[0_0_0_1px_rgba(0,0,0,0.6)] -translate-x-1/2 transition-[left] duration-700 ease-out"
-                    style={{ left: "0%" }}
-                  />
+                <div>
+                  <div className="relative">
+                    <div
+                      className="h-1.5 rounded-full"
+                      style={{ background: "linear-gradient(90deg, #ef4444 0%, #f59e0b 50%, #10b981 100%)" }}
+                    />
+                    <span
+                      id="gaugePointer"
+                      className="absolute top-1/2 -translate-y-1/2 h-3.5 w-3.5 rounded-full bg-white dark:bg-oai-gray-900 border-2 border-oai-gray-300 dark:border-oai-gray-700 shadow-[0_2px_6px_rgba(0,0,0,0.15)] dark:shadow-[0_2px_6px_rgba(0,0,0,0.4)] -translate-x-1/2 transition-[left,border-color] duration-700 ease-out"
+                      style={{ left: "0%" }}
+                    />
+                  </div>
                   <div className="mt-2 flex justify-between text-[10px] uppercase tracking-wider text-oai-gray-400 dark:text-oai-gray-500 font-medium">
                     <span>{copy("ipcheck.trust.gauge.low")}</span>
-                    <span>25</span>
-                    <span>50</span>
-                    <span>75</span>
+                    <span className="tracking-normal">25</span>
+                    <span className="tracking-normal">50</span>
+                    <span className="tracking-normal">75</span>
                     <span>{copy("ipcheck.trust.gauge.high")}</span>
                   </div>
                 </div>
@@ -1112,12 +1202,12 @@ export default function IpCheckPage() {
               </div>
             </Card>
 
-            <Card title={copy("ipcheck.props.title")}>
-              <div id="propsContent" className="divide-y divide-oai-gray-100 dark:divide-oai-gray-800" dangerouslySetInnerHTML={heroEmpty} />
+            <Card title={copy("ipcheck.props.title")} className="animate-fade-in-up stagger-4">
+              <div id="propsContent" className="divide-y divide-oai-gray-100 dark:divide-oai-gray-800 pt-1" dangerouslySetInnerHTML={heroEmpty} />
             </Card>
 
-            <Card title={copy("ipcheck.security.title")}>
-              <div id="securityContent" className="divide-y divide-oai-gray-100 dark:divide-oai-gray-800" dangerouslySetInnerHTML={heroEmpty} />
+            <Card title={copy("ipcheck.security.title")} className="animate-fade-in-up stagger-4">
+              <div id="securityContent" className="divide-y divide-oai-gray-100 dark:divide-oai-gray-800 pt-1" dangerouslySetInnerHTML={heroEmpty} />
             </Card>
           </div>
 
@@ -1126,25 +1216,27 @@ export default function IpCheckPage() {
             <Card
               title={<span className="flex items-center gap-1.5">{copy("ipcheck.avail.title")}<Tooltip text={copy("ipcheck.avail.tooltip")} /></span>}
               action={<CardAction label={copy("ipcheck.avail.refresh")} onClick={handleRefreshAvail} />}
+              className="animate-fade-in-up stagger-5"
             >
-              <div id="claudeAvailContent" className="divide-y divide-oai-gray-100 dark:divide-oai-gray-800" dangerouslySetInnerHTML={heroEmpty} />
+              <div id="claudeAvailContent" className="divide-y divide-oai-gray-100 dark:divide-oai-gray-800 pt-1" dangerouslySetInnerHTML={heroEmpty} />
             </Card>
-            <Card title={copy("ipcheck.dns.title")}>
-              <div id="dnsLeakContent" className="divide-y divide-oai-gray-100 dark:divide-oai-gray-800" dangerouslySetInnerHTML={heroEmpty} />
+            <Card title={copy("ipcheck.dns.title")} className="animate-fade-in-up stagger-5">
+              <div id="dnsLeakContent" className="divide-y divide-oai-gray-100 dark:divide-oai-gray-800 pt-1" dangerouslySetInnerHTML={heroEmpty} />
             </Card>
-            <Card title={copy("ipcheck.udp.title")}>
-              <div id="udpLeakContent" className="divide-y divide-oai-gray-100 dark:divide-oai-gray-800" dangerouslySetInnerHTML={heroEmpty} />
+            <Card title={copy("ipcheck.udp.title")} className="animate-fade-in-up stagger-5">
+              <div id="udpLeakContent" className="divide-y divide-oai-gray-100 dark:divide-oai-gray-800 pt-1" dangerouslySetInnerHTML={heroEmpty} />
             </Card>
           </div>
 
-          <Card title={copy("ipcheck.device.title")}>
-            <div id="deviceContent" className="divide-y divide-oai-gray-100 dark:divide-oai-gray-800" dangerouslySetInnerHTML={heroEmpty} />
+          <Card title={copy("ipcheck.device.title")} className="animate-fade-in-up stagger-6">
+            <div id="deviceContent" className="divide-y divide-oai-gray-100 dark:divide-oai-gray-800 pt-1" dangerouslySetInnerHTML={heroEmpty} />
           </Card>
 
           <Card
             title={copy("ipcheck.history.title")}
             subtitle={copy("ipcheck.history.subtitle")}
             action={<CardAction label={copy("ipcheck.history.clear")} onClick={handleClearHistory} />}
+            className="animate-fade-in-up stagger-6"
           >
             <div id="ipHistoryContent" dangerouslySetInnerHTML={heroEmpty} />
           </Card>
@@ -1163,7 +1255,7 @@ function Card({ title, subtitle, action, children, className = "" }) {
   // via its user-agent stylesheet (Blink does not). Chrome looks fine, the
   // app does not. <div> sidesteps all UA semantics.
   return (
-    <section className={`rounded-xl border border-oai-gray-200 dark:border-oai-gray-800 bg-white dark:bg-oai-gray-900 p-5 sm:p-6 ${className}`}>
+    <section className={`rounded-xl border border-oai-gray-200 dark:border-oai-gray-800 bg-white dark:bg-oai-gray-900 p-5 sm:p-6 transition-colors duration-200 ${className}`}>
       <div className="flex items-start justify-between gap-3 mb-4">
         <div className="min-w-0">
           <h2 className="text-[15px] font-semibold text-oai-black dark:text-white">{title}</h2>
@@ -1194,14 +1286,14 @@ function Tooltip({ text }) {
       <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 text-oai-gray-400 dark:text-oai-gray-500" fill="currentColor" aria-hidden>
         <path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM7.25 6.75a.75.75 0 0 1 1.5 0V11a.75.75 0 0 1-1.5 0V6.75zM8 4a.85.85 0 1 1 0 1.7A.85.85 0 0 1 8 4z" />
       </svg>
-      <span className="pointer-events-none absolute left-1/2 top-full z-10 mt-1.5 -translate-x-1/2 w-56 rounded-md bg-oai-gray-900 dark:bg-oai-gray-800 px-2.5 py-2 text-[11px] font-normal text-white opacity-0 transition-opacity group-hover:opacity-100 leading-relaxed shadow-lg">
+      <span className="pointer-events-none absolute left-1/2 top-full z-10 mt-1.5 -translate-x-1/2 w-56 rounded-md bg-oai-gray-900 dark:bg-oai-gray-800 px-2.5 py-2 text-[11px] font-normal text-white opacity-0 scale-95 translate-y-1 group-hover:opacity-100 group-hover:scale-100 group-hover:translate-y-0 transition-all duration-200 cubic-bezier(0.16, 1, 0.3, 1) leading-relaxed shadow-lg origin-top">
         {text}
       </span>
     </span>
   );
 }
 
-function IpHero({ id, label, icon, statusDot }) {
+function IpHero({ id, label, icon, statusDot, className = "" }) {
   const addrId = `ipAddr${id}`;
   const geoId = `ipGeo${id}`;
   // Pulse dot signals "live, monitored connection" and encodes safety state
@@ -1210,7 +1302,7 @@ function IpHero({ id, label, icon, statusDot }) {
   return (
     <article
       id={`ipHero${id}`}
-      className="rounded-xl border border-oai-gray-200 dark:border-oai-gray-800 bg-white dark:bg-oai-gray-900 p-5 sm:p-6"
+      className={`rounded-xl border border-oai-gray-200 dark:border-oai-gray-800 bg-white dark:bg-oai-gray-900 p-5 sm:p-6 cursor-default transition-colors duration-200 ${className}`}
     >
       <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-medium text-oai-gray-500 dark:text-oai-gray-400 mb-2">
         {icon}
@@ -1226,7 +1318,7 @@ function IpHero({ id, label, icon, statusDot }) {
           </span>
         ) : null}
       </div>
-      <div id={addrId} className="text-xl sm:text-2xl font-semibold tabular-nums text-oai-black dark:text-white flex items-center gap-2 min-h-[2rem]" dangerouslySetInnerHTML={{ __html: "" }} />
+      <div id={addrId} className="text-xl sm:text-2xl font-semibold text-oai-black dark:text-white flex items-center gap-2 min-h-[2rem]" dangerouslySetInnerHTML={{ __html: "" }} />
       <div id={geoId} className="mt-1 text-xs text-oai-gray-500 dark:text-oai-gray-400 truncate min-h-[1rem]" />
     </article>
   );

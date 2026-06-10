@@ -59,7 +59,8 @@ describe("useUsageLimits", () => {
 
     await waitFor(() => expect(result.current.data).toEqual(freshLimits));
 
-    expect(getUsageLimits).toHaveBeenCalledWith({ refresh: true });
+    // Mount fetch reads the server cache (no forced upstream refresh).
+    expect(getUsageLimits).toHaveBeenCalledWith();
     expect(publishUsageLimitsPreloadState).toHaveBeenCalledWith(freshLimits, {
       source: "page-load",
     });
@@ -75,7 +76,7 @@ describe("useUsageLimits", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(getUsageLimits).toHaveBeenCalledWith({ refresh: true });
+    expect(getUsageLimits).toHaveBeenCalledWith();
     expect(result.current.data).toEqual(freshLimits);
     expect(result.current.error).toBeNull();
   });

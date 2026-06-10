@@ -18,6 +18,13 @@ describe("normalizeMenuBarItems", () => {
     ]);
   });
 
+  it("keeps Codex Spark selections when the native bridge has not provided items", () => {
+    expect(normalizeMenuBarItems(["codexSpark5h", "codexSpark7d"])).toEqual([
+      "codexSpark5h",
+      "codexSpark7d",
+    ]);
+  });
+
   it("caps selections to the native menu bar width limit", () => {
     const ids = FALLBACK_MENU_BAR_ITEMS.map((item) => item.id);
     expect(normalizeMenuBarItems(ids, FALLBACK_MENU_BAR_ITEMS, 3)).toEqual(ids.slice(0, 3));
