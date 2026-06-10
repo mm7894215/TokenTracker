@@ -234,3 +234,35 @@ struct AntigravityLimits: Codable, Equatable {
         case tertiaryWindow = "tertiary_window"
     }
 }
+
+/// Helper to decide whether a response from the limits API contains at least one
+/// usable (configured + no error) provider record. Used by the ViewModel to
+/// protect the "last good record" on partial failures (do not overwrite a
+/// previously successful snapshot with an all-error response).
+extension UsageLimitsResponse {
+    var hasAnyProviderWithoutError: Bool {
+        let providers: [(Bool, String?)] = [
+            (claude.configured, claude.error),
+            (codex.configured, codex.error),
+            (cursor.configured, cursor.error),
+            (gemini.configured, gemini.error),
+            (kimi?.configured ?? false, kimi?.error),
+            (kiro.configured, kiro.error),
+            (grok?.configured ?? false, grok?.error),
+            (antigravity.configured, antigravity.error),
+            (copilot?.configured ?? false, copilot?.error),
+        ]
+        return providers.contains { $0.0 && $0.1 == nil }
+    }
+
+    /// Decide which record the UI should display after a successful fetch:
+    /// adopt the incoming response unless it has no usable provider data while a
+    /// previous record exists (keeps the last good snapshot on an all-error response).
+    static func displayRecord(
+        current: UsageLimitsResponse?,
+        incoming: UsageLimitsResponse
+    ) -> UsageLimitsResponse {
+        guard let current, !incoming.hasAnyProviderWithoutError else { return incoming }
+        return current
+    }
+}

@@ -96,6 +96,18 @@ enum Strings {
     static var limitSuffixUsed: String { t("used", "已用", "已用", "使用済み", "사용됨") }
     static var limitSuffixRemaining: String { t("remaining", "剩余", "剩餘", "残り", "남음") }
 
+    /// Prompt shown inside the native Limits section (popover) when the latest
+    /// fetch failed but we are still displaying the previous successful record.
+    static func limitsRefreshFailed(_ message: String) -> String {
+        t(
+            "Refresh failed: \(message). Showing last synced limits.",
+            "限额刷新失败：\(message)。显示上次同步的记录。",
+            "限額刷新失敗：\(message)。顯示上次同步的記錄。",
+            "更新に失敗しました：\(message)。前回の同期データを表示します。",
+            "새로고침 실패: \(message). 마지막 동기화 데이터를 표시합니다."
+        )
+    }
+
     static var menuSyncNow: String { t("Sync Now", "立即同步", "立即同步", "今すぐ同期", "지금 동기화") }
     static var menuCheckForUpdates: String { t("Check for Updates…", "检查更新…", "檢查更新…", "アップデートを確認…", "업데이트 확인…") }
     static var menuLaunchAtLogin: String { t("Launch at Login", "登录时启动", "登入時啟動", "ログイン時に起動", "로그인 시 실행") }

@@ -9,21 +9,20 @@ struct UsageLimitsView: View {
     /// bars align without reserving space for labels that aren't on screen.
     @State private var labelColumnWidth: CGFloat = 0
     let limits: UsageLimitsResponse?
+    /// When non-nil, a prompt should be shown to the user (e.g. "refresh failed")
+    /// while we still render `limits` (the retained last good record from a
+    /// previous successful sync).
+    let fetchError: String?
+
+    init(limits: UsageLimitsResponse?, fetchError: String? = nil) {
+        self.limits = limits
+        self.fetchError = fetchError
+    }
 
     /// At least one provider is configured and error-free.
+    /// Delegates to the model helper (single source of truth for the predicate).
     private func hasAnyAvailable(_ limits: UsageLimitsResponse) -> Bool {
-        let providers: [(Bool, String?)] = [
-            (limits.claude.configured, limits.claude.error),
-            (limits.codex.configured, limits.codex.error),
-            (limits.cursor.configured, limits.cursor.error),
-            (limits.gemini.configured, limits.gemini.error),
-            (limits.kimi?.configured ?? false, limits.kimi?.error),
-            (limits.kiro.configured, limits.kiro.error),
-            (limits.grok?.configured ?? false, limits.grok?.error),
-            (limits.antigravity.configured, limits.antigravity.error),
-            (limits.copilot?.configured ?? false, limits.copilot?.error),
-        ]
-        return providers.contains { $0.0 && $0.1 == nil }
+        limits.hasAnyProviderWithoutError
     }
 
     var body: some View {
@@ -52,10 +51,31 @@ struct UsageLimitsView: View {
                         group
                     }
                 }
+
+                // Prompt when we are showing retained (possibly stale) data because
+                // the most recent limits fetch failed. Placed inside the section so
+                // it is contextual and does not block the bars.
+                if let fetchError {
+                    Text(Strings.limitsRefreshFailed(fetchError))
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .padding(.top, 2)
+                }
             }
             .onPreferenceChange(LimitLabelWidthKey.self) { labelColumnWidth = ceil($0) }
         } else if limits == nil {
-            LimitsSkeleton()
+            if let fetchError {
+                // First load (or never succeeded) + error: show a compact note instead
+                // of (or in addition to) skeleton. Header keeps the section visible.
+                VStack(alignment: .leading, spacing: 8) {
+                    SectionHeader(title: Strings.usageLimitsTitle)
+                    Text(Strings.limitsRefreshFailed(fetchError))
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+            } else {
+                LimitsSkeleton()
+            }
         }
     }
 
