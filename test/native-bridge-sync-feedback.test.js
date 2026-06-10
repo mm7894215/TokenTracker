@@ -37,7 +37,7 @@ test("NativeBridge settings fingerprint tracks available menu items", () => {
   );
   assert.match(
     source,
-    /private static func availableItemsFingerprint[\s\S]*?MenuBarDisplayPreferences\.availableItemIDs\(\s*for:\s*limits,\s*keepingSelected:\s*MenuBarDisplayPreferences\.read\(\)\s*\)[\s\S]*?\.joined\(separator:\s*"\|"\)/,
+    /private static func availableItemsFingerprint[\s\S]*?MenuBarDisplayPreferences\.availableItemIDs\(\s*for:\s*limits,\s*keepingSelected:\s*MenuBarDisplayPreferences\.read\(\),\s*hiddenProviders:\s*LimitsSettingsStore\.shared\.hiddenProviders\s*\)[\s\S]*?\.joined\(separator:\s*"\|"\)/,
     "fingerprint should use the same available ids as the settings payload without building full dictionaries",
   );
   assert.doesNotMatch(
@@ -57,8 +57,8 @@ test("NativeBridge self-heals saved menu bar selections against available items"
 
   assert.match(
     source,
-    /let\s+availableItemIDs\s*=\s*MenuBarDisplayPreferences\.availableItemIDs\(\s*for:\s*viewModel\?\.usageLimits,\s*keepingSelected:\s*menuBarItems\s*\)/,
-    "pushSettings should compute the current selectable ids from usage limits",
+    /let\s+availableItemIDs\s*=\s*MenuBarDisplayPreferences\.availableItemIDs\(\s*for:\s*viewModel\?\.usageLimits,\s*keepingSelected:\s*menuBarItems,\s*hiddenProviders:\s*hiddenProviders\s*\)/,
+    "pushSettings should compute the current selectable ids from usage limits and hidden providers",
   );
   assert.match(
     source,

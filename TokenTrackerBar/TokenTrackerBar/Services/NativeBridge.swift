@@ -59,7 +59,8 @@ final class NativeBridge {
     private static func availableItemsFingerprint(for limits: UsageLimitsResponse?) -> String {
         MenuBarDisplayPreferences.availableItemIDs(
             for: limits,
-            keepingSelected: MenuBarDisplayPreferences.read()
+            keepingSelected: MenuBarDisplayPreferences.read(),
+            hiddenProviders: LimitsSettingsStore.shared.hiddenProviders
         )
             .joined(separator: "|")
     }
@@ -116,10 +117,13 @@ final class NativeBridge {
             launchAtLoginValue = false
             launchAtLoginSupported = false
         }
+        let limitsSettings = LimitsSettingsStore.shared
+        let hiddenProviders = limitsSettings.hiddenProviders
         let menuBarItems = MenuBarDisplayPreferences.read()
         let availableItemIDs = MenuBarDisplayPreferences.availableItemIDs(
             for: viewModel?.usageLimits,
-            keepingSelected: menuBarItems
+            keepingSelected: menuBarItems,
+            hiddenProviders: hiddenProviders
         )
         let normalizedMenuBarItems = MenuBarDisplayPreferences.normalize(
             menuBarItems,
@@ -129,13 +133,13 @@ final class NativeBridge {
             MenuBarDisplayPreferences.write(normalizedMenuBarItems)
             NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
         }
-        let limitsSettings = LimitsSettingsStore.shared
         let payload: [String: Any] = [
             "showStats": UserDefaults.standard.object(forKey: "MenuBarShowStats") as? Bool ?? true,
             "menuBarItems": normalizedMenuBarItems,
             "menuBarAvailableItems": MenuBarDisplayPreferences.availableItemsPayload(
                 for: viewModel?.usageLimits,
-                keepingSelected: normalizedMenuBarItems
+                keepingSelected: normalizedMenuBarItems,
+                hiddenProviders: hiddenProviders
             ),
             "menuBarMaxItems": MenuBarDisplayPreferences.maxVisibleItems,
             "animatedIcon": UserDefaults.standard.object(forKey: "MenuBarAnimationEnabled") as? Bool ?? true,
@@ -217,9 +221,13 @@ final class NativeBridge {
                 WidgetCenter.shared.reloadAllTimelines()
             }
         case "limitsPreferences":
-            if let raw = value as? [String: Any],
-               LimitsSettingsStore.shared.applyBridgeSnapshot(raw) {
-                return
+            // Fall through to pushSettings even when the snapshot applies:
+            // provider visibility affects the selectable menu-bar metrics, so
+            // the stored selection must self-heal and the dropdown payload
+            // refresh. The echo is convergent — the dashboard receives its own
+            // snapshot back and does not write again.
+            if let raw = value as? [String: Any] {
+                _ = LimitsSettingsStore.shared.applyBridgeSnapshot(raw)
             }
         case "limitsDisplayMode":
             if LimitsSettingsStore.shared.applyBridgeDisplayMode(value) {

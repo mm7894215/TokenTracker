@@ -106,6 +106,7 @@ test("Codex Spark usage limits are wired through macOS consumers", () => {
   const usageLimitsWidget = read("TokenTrackerBar/TokenTrackerWidget/Widgets/UsageLimitsWidget.swift");
   const widgetStrings = read("TokenTrackerBar/TokenTrackerWidget/Views/WidgetStrings.swift");
   const statusBarController = read("TokenTrackerBar/TokenTrackerBar/Services/StatusBarController.swift");
+  const menuBarDisplayPreferences = read("TokenTrackerBar/TokenTrackerBar/Models/MenuBarDisplayPreferences.swift");
   const nativeBridge = read("TokenTrackerBar/TokenTrackerBar/Services/NativeBridge.swift");
 
   assert.ok(model.includes("let sparkPrimaryWindow: CodexWindow?"));
@@ -136,23 +137,23 @@ test("Codex Spark usage limits are wired through macOS consumers", () => {
   assert.match(usageLimitsWidget, /let flat = orderedGroups\.flatMap \{ \$0 \}/);
   assert.doesNotMatch(usageLimitsWidget, /flatMap \{ \$0\.sorted \{ \$0\.fraction > \$1\.fraction \} \}/);
 
-  assert.ok(statusBarController.includes("case codexSpark5h"));
-  assert.ok(statusBarController.includes("case codexSpark7d"));
-  assert.ok(statusBarController.includes('case .codexSpark5h: return "Cx Spark 5h"'));
-  assert.ok(statusBarController.includes('case .codexSpark7d: return "Cx Spark 7d"'));
-  assert.doesNotMatch(statusBarController, /Cx Sp [57][hd]/);
-  assert.ok(statusBarController.includes('case .codexSpark5h: return "Codex Spark 5h Limit"'));
-  assert.ok(statusBarController.includes('case .codexSpark7d: return "Codex Spark 7d Limit"'));
-  assert.match(statusBarController, /case \.codex5h,\s*\.codex7d,\s*\.codexSpark5h,\s*\.codexSpark7d:\s*return "codex"/);
-  assert.match(statusBarController, /case \.codexSpark5h:\s*return codex\.sparkPrimaryWindow != nil/);
-  assert.match(statusBarController, /case \.codexSpark7d:\s*return codex\.sparkSecondaryWindow != nil/);
-  assert.ok(statusBarController.includes("return limits.isProviderAvailable(provider) && limits.hasWindow(for: metric)"));
-  assert.match(statusBarController, /guard let limits else \{\s*return false\s*\}/);
+  assert.ok(menuBarDisplayPreferences.includes("case codexSpark5h"));
+  assert.ok(menuBarDisplayPreferences.includes("case codexSpark7d"));
+  assert.ok(menuBarDisplayPreferences.includes('case .codexSpark5h: return "Cx Spark 5h"'));
+  assert.ok(menuBarDisplayPreferences.includes('case .codexSpark7d: return "Cx Spark 7d"'));
+  assert.doesNotMatch(menuBarDisplayPreferences, /Cx Sp [57][hd]/);
+  assert.ok(menuBarDisplayPreferences.includes('case .codexSpark5h: return "Codex Spark 5h Limit"'));
+  assert.ok(menuBarDisplayPreferences.includes('case .codexSpark7d: return "Codex Spark 7d Limit"'));
+  assert.match(menuBarDisplayPreferences, /case \.codex5h,\s*\.codex7d,\s*\.codexSpark5h,\s*\.codexSpark7d:\s*return "codex"/);
+  assert.match(menuBarDisplayPreferences, /case \.codexSpark5h:\s*return codex\.sparkPrimaryWindow != nil/);
+  assert.match(menuBarDisplayPreferences, /case \.codexSpark7d:\s*return codex\.sparkSecondaryWindow != nil/);
+  assert.ok(menuBarDisplayPreferences.includes("return limits.isProviderAvailable(provider) && limits.hasWindow(for: metric)"));
+  assert.match(menuBarDisplayPreferences, /guard let limits else \{\s*return false\s*\}/);
   assert.match(statusBarController, /case \.codexSpark5h:\s*return codexLimitValue\(id: id, metric: metric, window: viewModel\.usageLimits\?\.codex\.sparkPrimaryWindow\)/);
   assert.match(statusBarController, /case \.codexSpark7d:\s*return codexLimitValue\(id: id, metric: metric, window: viewModel\.usageLimits\?\.codex\.sparkSecondaryWindow\)/);
 
   assert.doesNotMatch(nativeBridge, /sparkPrimaryWindow|sparkSecondaryWindow|codexSpark/i);
-  assert.match(nativeBridge, /MenuBarDisplayPreferences\.availableItemIDs\(\s*for:\s*limits,\s*keepingSelected:\s*MenuBarDisplayPreferences\.read\(\)\s*\)/);
+  assert.match(nativeBridge, /MenuBarDisplayPreferences\.availableItemIDs\(\s*for:\s*limits,\s*keepingSelected:\s*MenuBarDisplayPreferences\.read\(\),\s*hiddenProviders:\s*LimitsSettingsStore\.shared\.hiddenProviders\s*\)/);
 });
 
 test("Codex Spark usage limit labels use copy keys with compact defaults", () => {

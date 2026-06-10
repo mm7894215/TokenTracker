@@ -110,6 +110,8 @@ targets:
     sources:
       - path: TokenTrackerBarTests
       - path: TokenTrackerBar/Models/LimitsSettingsStore.swift
+      - path: TokenTrackerBar/Models/MenuBarDisplayPreferences.swift
+      - path: TokenTrackerBar/Models/UsageLimits.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tokentracker.bar.tests

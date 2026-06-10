@@ -129,6 +129,13 @@ final class LimitsSettingsStore: ObservableObject {
         providerVisibility[id] ?? true
     }
 
+    /// Providers the user explicitly hid. Hiding is user-authored intent, so it
+    /// also removes that provider's metrics from the menu bar — unlike a
+    /// transient provider outage, which keeps an already-selected metric.
+    var hiddenProviders: Set<String> {
+        Set(providerVisibility.filter { !$0.value }.keys)
+    }
+
     func setDisplayModeFromMenu(_ mode: LimitDisplayMode) {
         guard mode != displayMode else { return }
         applySnapshot(LimitsPreferencesSnapshot(
