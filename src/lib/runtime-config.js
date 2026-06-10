@@ -1,6 +1,11 @@
 const DEFAULT_BASE_URL = "https://srctyff5.us-east.insforge.app";
 const DEFAULT_DASHBOARD_URL = "https://www.tokentracker.cc";
 const DEFAULT_HTTP_TIMEOUT_MS = 20_000;
+// Public InsForge anon/publishable key. Mirrors dashboard/src/lib/insforge-config.ts
+// (PROD_INSFORGE_ANON_KEY) — it is public by design (ships in the browser bundle
+// and appears in .github/workflows/*.yml). The local server needs it to call the
+// cross-device `tokentracker-account-*` edge functions on the popover's behalf.
+const DEFAULT_ANON_KEY = "ik_9f35735991b684f7cf57fa00bb4d0487";
 
 function resolveRuntimeConfig({ cli = {}, config = {}, env = process.env, defaults = {} } = {}) {
   const baseUrl = pickString(
@@ -9,6 +14,13 @@ function resolveRuntimeConfig({ cli = {}, config = {}, env = process.env, defaul
     env?.TOKENTRACKER_INSFORGE_BASE_URL,
     defaults.baseUrl,
     DEFAULT_BASE_URL,
+  );
+  const anonKey = pickString(
+    cli.anonKey,
+    config.anonKey,
+    env?.TOKENTRACKER_INSFORGE_ANON_KEY,
+    defaults.anonKey,
+    DEFAULT_ANON_KEY,
   );
   const dashboardUrl = pickString(
     cli.dashboardUrl,
@@ -42,6 +54,7 @@ function resolveRuntimeConfig({ cli = {}, config = {}, env = process.env, defaul
 
   return {
     baseUrl: baseUrl.value,
+    anonKey: anonKey.value,
     dashboardUrl: dashboardUrl.value,
     deviceToken: deviceToken.value,
     httpTimeoutMs: httpTimeoutMs.value,
@@ -49,6 +62,7 @@ function resolveRuntimeConfig({ cli = {}, config = {}, env = process.env, defaul
     autoRetryNoSpawn: autoRetryNoSpawn.value,
     sources: {
       baseUrl: baseUrl.source,
+      anonKey: anonKey.source,
       dashboardUrl: dashboardUrl.source,
       deviceToken: deviceToken.source,
       httpTimeoutMs: httpTimeoutMs.source,
@@ -116,6 +130,7 @@ function clampInt(value, min, max) {
 
 module.exports = {
   DEFAULT_BASE_URL,
+  DEFAULT_ANON_KEY,
   DEFAULT_DASHBOARD_URL,
   DEFAULT_HTTP_TIMEOUT_MS,
   resolveRuntimeConfig,

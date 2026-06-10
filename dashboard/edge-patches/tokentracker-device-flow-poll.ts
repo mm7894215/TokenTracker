@@ -117,7 +117,12 @@ export default async function (req: Request): Promise<Response> {
     .eq("device_code", deviceCode)
     .maybeSingle();
 
-  if (error) return json({ error: "db error", detail: String(error?.message ?? error) }, 502);
+  if (error) {
+    // Log internals server-side only — this is a public endpoint and error
+    // messages can leak schema/infrastructure details.
+    console.error("[device-flow-poll] db error:", String(error?.message ?? error));
+    return json({ error: "db error" }, 502);
+  }
   if (!data) return json({ status: "unknown" }, 404);
 
   const row = data as { user_id: string | null; status: string; expires_at: string; client_info: string | null };
@@ -145,7 +150,8 @@ export default async function (req: Request): Promise<Response> {
         device_id: issued.deviceId,
       });
     } catch (e) {
-      return json({ error: "Failed to issue device token", detail: String((e as Error)?.message ?? e) }, 500);
+      console.error("[device-flow-poll] issue failed:", String((e as Error)?.message ?? e));
+      return json({ error: "Failed to issue device token" }, 500);
     }
   }
   return json({ status: "pending" });

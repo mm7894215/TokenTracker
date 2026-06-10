@@ -34,6 +34,7 @@ const BLOCKED_LEADERBOARD_USER_IDS = new Set(
 /** Per-model pricing (USD per million tokens), synced from local-api.js */
 const MODEL_PRICING: Record<string, { input: number; output: number; cache_read: number; cache_write?: number }> = {
   // ── Anthropic Claude ──
+  "claude-fable-5": { input: 10, output: 50, cache_read: 1, cache_write: 12.5 },
   "claude-opus-4-6": { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
   "claude-opus-4-5-20250414": { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
   "claude-sonnet-4-6": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
@@ -155,6 +156,7 @@ function getModelPricing(model: string) {
   const exact = MODEL_PRICING[model];
   if (exact) return exact;
   const lower = model.toLowerCase();
+  if (lower.includes("fable")) return MODEL_PRICING["claude-fable-5"];
   if (lower.includes("opus")) return MODEL_PRICING["claude-opus-4-6"];
   if (lower.includes("haiku")) return MODEL_PRICING["claude-haiku-4-5-20251001"];
   if (lower.includes("sonnet")) return MODEL_PRICING["claude-sonnet-4-6"];
@@ -400,70 +402,45 @@ export default async function (req: Request): Promise<Response> {
       }
     }
 
-    // --- Query hourly data for date range ---
-    // hour_start is timestamptz; filter by >= from_day 00:00 UTC and < to_day+1 00:00 UTC
+    // --- Aggregate via server-side RPC ---
+    // leaderboard_usage_grouped does the two-class cross-device aggregation in
+    // Postgres — account-level sources (cursor) deduped to ONE canonical whole
+    // row per (user, source, model, hour) across all devices; machine-level
+    // sources SUMmed across each user's ACTIVE devices — returning one
+    // pre-aggregated {user_id, source, model, ...tokens} object per group.
+    // Moving the multi-million-row hourly scan out of the edge fixes the
+    // total-period failure (the in-edge scan 500'd at ~5s on the schedule and
+    // 504'd at the 30s gateway once history grew). Mirrors how the account-*
+    // functions delegate to account_usage_grouped.
     const rangeStart = `${from_day}T00:00:00Z`;
     const nextDay = new Date(to_day + "T00:00:00Z");
     nextDay.setUTCDate(nextDay.getUTCDate() + 1);
     const rangeEnd = nextDay.toISOString();
 
-    // Paginate through all hourly rows (1000 per page).
-    // Dedupe by (user_id, source, model, hour_start) keeping the MAX
-    // total_tokens across devices — the same logical bucket can be recorded
-    // under multiple device_id rows (cloud-sync issues a new device per
-    // session; cumulative queue replays upsert under whichever device ran
-    // the sync). SUM across devices would double-count the same usage.
-    const bucketMap = new Map<string, HourlyRow>();
-    let offset = 0;
-    const PAGE_SIZE = 1000;
-    let hasMore = true;
-    let scannedRows = 0;
-    let pageCount = 0;
-
-    while (hasMore) {
-      const { data: rows, error } = await client.database
-        .from("tokentracker_hourly")
-        .select("user_id, source, model, hour_start, total_tokens, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens")
-        .gte("hour_start", rangeStart)
-        .lt("hour_start", rangeEnd)
-        .order("hour_start", { ascending: true })
-        .range(offset, offset + PAGE_SIZE - 1);
-
-      if (error) {
-        logRefreshEvent({
-          event: "period_error",
-          request_id: requestId,
-          source: requestSource,
-          period,
-          from_day,
-          to_day,
-          stage: "scan_hourly",
-          error: error.message,
-          scanned_rows: scannedRows,
-          pages_fetched: pageCount,
-          duration_ms: Date.now() - periodStartedAt,
-        });
-        return json({ error: error.message }, 500);
-      }
-      if (!rows || rows.length === 0) break;
-      scannedRows += rows.length;
-      pageCount += 1;
-
-      for (const row of rows as HourlyRow[]) {
-        const key = `${row.user_id}|${row.source}|${row.model}|${row.hour_start}`;
-        const existing = bucketMap.get(key);
-        const incoming = Number(row.total_tokens) || 0;
-        if (!existing || incoming > (Number(existing.total_tokens) || 0)) {
-          bucketMap.set(key, row);
-        }
-      }
-
-      hasMore = rows.length === PAGE_SIZE;
-      offset += PAGE_SIZE;
+    const { data: groupedData, error: rpcErr } = await client.database.rpc(
+      "leaderboard_usage_grouped",
+      { p_from: rangeStart, p_to: rangeEnd },
+    );
+    if (rpcErr) {
+      logRefreshEvent({
+        event: "period_error",
+        request_id: requestId,
+        source: requestSource,
+        period,
+        from_day,
+        to_day,
+        stage: "rpc_aggregate",
+        error: rpcErr.message,
+        duration_ms: Date.now() - periodStartedAt,
+      });
+      return json({ error: rpcErr.message }, 500);
     }
+    const grouped = (Array.isArray(groupedData) ? groupedData : []) as HourlyRow[];
+    const scannedRows = grouped.length; // pre-aggregated groups (not raw rows)
+    const pageCount = 1; // single RPC round-trip
 
     const aggMap = new Map<string, UserAgg>();
-    for (const row of bucketMap.values()) {
+    for (const row of grouped) {
       let agg = aggMap.get(row.user_id);
       if (!agg) {
         agg = newUserAgg();
@@ -490,7 +467,7 @@ export default async function (req: Request): Promise<Response> {
         to_day,
         scanned_rows: scannedRows,
         pages_fetched: pageCount,
-        deduped_buckets: bucketMap.size,
+        deduped_buckets: grouped.length,
         aggregated_users: 0,
         upserted: 0,
         skipped: false,
@@ -653,7 +630,7 @@ export default async function (req: Request): Promise<Response> {
           error: upsertErr.message,
           scanned_rows: scannedRows,
           pages_fetched: pageCount,
-          deduped_buckets: bucketMap.size,
+          deduped_buckets: grouped.length,
           aggregated_users: aggMap.size,
           duration_ms: Date.now() - periodStartedAt,
         });
@@ -671,7 +648,7 @@ export default async function (req: Request): Promise<Response> {
       to_day,
       scanned_rows: scannedRows,
       pages_fetched: pageCount,
-      deduped_buckets: bucketMap.size,
+      deduped_buckets: grouped.length,
       aggregated_users: aggMap.size,
       upserted: upsertRows.length,
       skipped: false,

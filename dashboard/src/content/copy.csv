@@ -437,6 +437,8 @@ menubar.metric.claude_5h,ui,WidgetsPage,MenuBarDisplayCard,metric_claude_5h,"Cla
 menubar.metric.claude_7d,ui,WidgetsPage,MenuBarDisplayCard,metric_claude_7d,"Claude 7d Limit",,active
 menubar.metric.codex_5h,ui,WidgetsPage,MenuBarDisplayCard,metric_codex_5h,"Codex 5h Limit",,active
 menubar.metric.codex_7d,ui,WidgetsPage,MenuBarDisplayCard,metric_codex_7d,"Codex 7d Limit",,active
+menubar.metric.codex_spark_5h,ui,WidgetsPage,MenuBarDisplayCard,metric_codex_spark_5h,"Codex Spark 5h Limit",,active
+menubar.metric.codex_spark_7d,ui,WidgetsPage,MenuBarDisplayCard,metric_codex_spark_7d,"Codex Spark 7d Limit",,active
 share.modal.title,share,DashboardPage,ShareModal,title,"Share your stats",,active
 share.modal.subtitle,share,DashboardPage,ShareModal,subtitle,"Generate a poster-style card and share anywhere.",,active
 share.modal.close,share,DashboardPage,ShareModal,close,"Close",,active
@@ -546,6 +548,8 @@ limits.label.claude_7d,ui,LimitsPage,UsageLimitsPanel,claude_7d,"7d",,active
 limits.label.claude_opus,ui,LimitsPage,UsageLimitsPanel,claude_opus,"Opus",,active
 limits.label.codex_5h,ui,LimitsPage,UsageLimitsPanel,codex_5h,"5h",,active
 limits.label.codex_7d,ui,LimitsPage,UsageLimitsPanel,codex_7d,"7d",,active
+limits.label.codex_spark_5h,ui,LimitsPage,UsageLimitsPanel,codex_spark_5h,"Spark 5h",,active
+limits.label.codex_spark_7d,ui,LimitsPage,UsageLimitsPanel,codex_spark_7d,"Spark 7d",,active
 limits.label.gemini_pro,ui,LimitsPage,UsageLimitsPanel,gemini_pro,"Pro",,active
 limits.label.gemini_flash,ui,LimitsPage,UsageLimitsPanel,gemini_flash,"Flash",,active
 limits.label.gemini_lite,ui,LimitsPage,UsageLimitsPanel,gemini_lite,"Lite",,active

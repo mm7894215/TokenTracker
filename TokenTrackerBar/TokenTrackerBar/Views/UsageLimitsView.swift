@@ -147,6 +147,12 @@ struct UsageLimitsView: View {
             if let w = codex.secondaryWindow {
                 limitRow(label: "7d", pct: Double(w.usedPercent), reset: relativeReset(epoch: w.resetAt), toolName: "Codex")
             }
+            if let w = codex.sparkPrimaryWindow {
+                limitRow(label: "Spark 5h", pct: Double(w.usedPercent), reset: relativeReset(epoch: w.resetAt), toolName: "Codex")
+            }
+            if let w = codex.sparkSecondaryWindow {
+                limitRow(label: "Spark 7d", pct: Double(w.usedPercent), reset: relativeReset(epoch: w.resetAt), toolName: "Codex")
+            }
         }
     }
 
@@ -278,7 +284,8 @@ struct UsageLimitsView: View {
             Text(label)
                 .font(.system(.caption, design: .default))
                 .foregroundStyle(.secondary)
-                .frame(width: 34, alignment: .leading)
+                .lineLimit(1)
+                .frame(width: 56, alignment: .leading)
 
             GeometryReader { geo in
                 ZStack(alignment: .leading) {

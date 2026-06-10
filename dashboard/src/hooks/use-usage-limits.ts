@@ -5,7 +5,7 @@ import { publishUsageLimitsPreloadState } from "../lib/dashboard-preload.js";
 interface UsageLimitsData {
   fetched_at: string;
   claude: { configured: boolean; error?: string | null; plan_label?: string | null; five_hour?: { utilization: number; resets_at?: string }; seven_day?: { utilization: number; resets_at?: string }; seven_day_opus?: { utilization: number; resets_at?: string } | null; extra_usage?: { is_enabled: boolean; monthly_limit?: number | null; used_credits?: number | null; currency?: string | null } | null };
-  codex: { configured: boolean; error?: string | null; plan_label?: string | null; primary_window?: { used_percent: number; reset_at?: number; limit_window_seconds?: number } | null; secondary_window?: { used_percent: number; reset_at?: number; limit_window_seconds?: number } | null };
+  codex: { configured: boolean; error?: string | null; plan_label?: string | null; primary_window?: { used_percent: number; reset_at?: number; limit_window_seconds?: number } | null; secondary_window?: { used_percent: number; reset_at?: number; limit_window_seconds?: number } | null; spark_primary_window?: { used_percent: number; reset_at?: number; limit_window_seconds?: number } | null; spark_secondary_window?: { used_percent: number; reset_at?: number; limit_window_seconds?: number } | null };
   cursor: { configured: boolean; error?: string | null; plan_label?: string | null; membership_type?: string | null; primary_window?: { used_percent: number; reset_at?: string | null } | null; secondary_window?: { used_percent: number; reset_at?: string | null } | null; tertiary_window?: { used_percent: number; reset_at?: string | null } | null };
   gemini: { configured: boolean; error?: string | null; plan_label?: string | null; account_email?: string | null; account_plan?: string | null; primary_window?: { used_percent: number; reset_at?: string | null } | null; secondary_window?: { used_percent: number; reset_at?: string | null } | null; tertiary_window?: { used_percent: number; reset_at?: string | null } | null };
   kimi: { configured: boolean; error?: string | null; plan_label?: string | null; membership_level?: string | null; subscription_type?: string | null; parallel_limit?: number | null; primary_window?: { used_percent: number; reset_at?: string | null } | null; secondary_window?: { used_percent: number; reset_at?: string | null } | null; tertiary_window?: { used_percent: number; reset_at?: string | null } | null };
@@ -63,7 +63,10 @@ export function useUsageLimits(options?: UseUsageLimitsOptions) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await getUsageLimits(initialRefresh ? { refresh: true } : {});
+        // Mount fetch reads the server's cache (in-memory + disk-backed) rather than forcing
+        // a live upstream call on every navigation — that repeated forcing is what tripped
+        // Claude's OAuth usage endpoint rate limit. Only the manual refresh() forces upstream.
+        const res = await getUsageLimits();
         if (cancelled) return;
         const nextData = res && typeof res === "object" ? res as UsageLimitsData : null;
         setData(nextData);

@@ -5,6 +5,7 @@
     "deepseek_v4_pro_discount_expiry": "2026-05-31T15:59:00Z — DeepSeek v4-pro is currently at a 75% promotional discount. After expiry the prices revert to 4x: input $1.74/M, output $3.48/M, cache_read $0.0145/M, cache_write $1.74/M. Update this file before the cutover."
   },
   "exact": {
+    "claude-fable-5":   { "input": 10,   "output": 50,   "cache_read": 1,     "cache_write": 12.5, "note": "Fable 5 — Anthropic's top tier above Opus. Not yet in LiteLLM. $10/$50 per MTok; cache_read 0.1x, cache_write 1.25x. Remove once LiteLLM carries it." },
     "claude-opus-4-8":  { "input": 5,    "output": 25,   "cache_read": 0.5,   "cache_write": 6.25, "note": "Opus 4.8 not yet in LiteLLM. Pin to the standard Opus tier (same as 4.6/4.7); remove once LiteLLM carries it." },
     "kiro-agent":       { "input": 3,    "output": 15,   "cache_read": 0.3,   "cache_write": 3.75 },
     "kiro-cli-agent":   { "input": 3,    "output": 15,   "cache_read": 0.3,   "cache_write": 3.75 },

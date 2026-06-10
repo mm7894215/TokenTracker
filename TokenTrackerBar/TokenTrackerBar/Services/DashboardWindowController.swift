@@ -19,9 +19,6 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
 
     static let shared = DashboardWindowController()
 
-    /// Sheet parent for `NSAlert` and similar UI, so modal overlays do not appear behind the dashboard or other windows.
-    var windowForSheet: NSWindow? { window }
-
     private var window: NSWindow?
     /// True when `theme === "system"`: leave the window `appearance` nil to follow the system; otherwise pin light/dark.
     private var chromeFollowsSystem = false

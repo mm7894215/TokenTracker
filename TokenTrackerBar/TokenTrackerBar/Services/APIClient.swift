@@ -10,6 +10,13 @@ actor APIClient {
     private let session: URLSession
     private let decoder: JSONDecoder
 
+    /// Whether the most recent account-eligible fetch returned cross-device
+    /// ("account view") data rather than local single-machine data. Mirrors the
+    /// dashboard: the local server serves the cross-device aggregate only when
+    /// the user is signed in and cloud sync is on, and reports which it served
+    /// via the `X-TokenTracker-Account-View` response header.
+    private(set) var accountViewActive: Bool = false
+
     private init() {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 10
@@ -24,33 +31,34 @@ actor APIClient {
     // MARK: - Public API
 
 	func fetchSummary(from: String, to: String) async throws -> UsageSummaryResponse {
-		try await fetch("/functions/tokentracker-usage-summary", queryItems: withTimeZoneQueryItems([
+		try await fetch("/functions/tokentracker-usage-summary", queryItems: withAccountQueryItems([
 			URLQueryItem(name: "from", value: from),
 			URLQueryItem(name: "to", value: to)
 		]))
 	}
 
 	func fetchDaily(from: String, to: String) async throws -> DailyUsageResponse {
-		try await fetch("/functions/tokentracker-usage-daily", queryItems: withTimeZoneQueryItems([
+		try await fetch("/functions/tokentracker-usage-daily", queryItems: withAccountQueryItems([
 			URLQueryItem(name: "from", value: from),
 			URLQueryItem(name: "to", value: to)
 		]))
 	}
 
 	func fetchHeatmap(weeks: Int = 52) async throws -> HeatmapResponse {
-		try await fetch("/functions/tokentracker-usage-heatmap", queryItems: withTimeZoneQueryItems([
+		try await fetch("/functions/tokentracker-usage-heatmap", queryItems: withAccountQueryItems([
 			URLQueryItem(name: "weeks", value: String(weeks))
 		]))
 	}
 
 	func fetchModelBreakdown(from: String, to: String) async throws -> ModelBreakdownResponse {
-		try await fetch("/functions/tokentracker-usage-model-breakdown", queryItems: withTimeZoneQueryItems([
+		try await fetch("/functions/tokentracker-usage-model-breakdown", queryItems: withAccountQueryItems([
 			URLQueryItem(name: "from", value: from),
 			URLQueryItem(name: "to", value: to)
 		]))
 	}
 
 	func fetchProjectUsage(from: String, to: String) async throws -> ProjectUsageResponse {
+		// Project breakdown has no cross-device aggregate — stays local-only.
 		try await fetch("/functions/tokentracker-project-usage-summary", queryItems: withTimeZoneQueryItems([
 			URLQueryItem(name: "from", value: from),
 			URLQueryItem(name: "to", value: to)
@@ -58,14 +66,14 @@ actor APIClient {
 	}
 
 	func fetchMonthly(from: String, to: String) async throws -> MonthlyUsageResponse {
-		try await fetch("/functions/tokentracker-usage-monthly", queryItems: withTimeZoneQueryItems([
+		try await fetch("/functions/tokentracker-usage-monthly", queryItems: withAccountQueryItems([
 			URLQueryItem(name: "from", value: from),
 			URLQueryItem(name: "to", value: to)
 		]))
 	}
 
 	func fetchHourly(day: String) async throws -> HourlyUsageResponse {
-		try await fetch("/functions/tokentracker-usage-hourly", queryItems: withTimeZoneQueryItems([
+		try await fetch("/functions/tokentracker-usage-hourly", queryItems: withAccountQueryItems([
 			URLQueryItem(name: "day", value: day)
 		]))
 	}
@@ -105,6 +113,13 @@ actor APIClient {
         }
         let (data, response) = try await session.data(from: url)
         try validateResponse(response)
+        // Account-eligible endpoints tag whether the server served cross-device
+        // (account) data or fell back to local single-machine data. Other
+        // endpoints omit the header, so only update when it's present.
+        if let httpResponse = response as? HTTPURLResponse,
+           let raw = httpResponse.value(forHTTPHeaderField: "X-TokenTracker-Account-View") {
+            accountViewActive = (raw == "1")
+        }
         return try decoder.decode(T.self, from: data)
     }
 
@@ -113,6 +128,14 @@ actor APIClient {
 			URLQueryItem(name: "tz", value: DateHelpers.currentTimeZoneIdentifier),
 			URLQueryItem(name: "tz_offset_minutes", value: String(DateHelpers.currentUTCOffsetMinutes()))
 		]
+	}
+
+	/// Cross-device "account view": ask the local server for the same aggregate
+	/// the dashboard shows. The server returns local single-machine data instead
+	/// (X-TokenTracker-Account-View: 0) when the user isn't signed in or cloud
+	/// sync is off, so this is always safe to request.
+	private func withAccountQueryItems(_ items: [URLQueryItem]) -> [URLQueryItem] {
+		withTimeZoneQueryItems(items) + [URLQueryItem(name: "account", value: "1")]
 	}
 
     private func post<T: Decodable>(_ path: String) async throws -> T {

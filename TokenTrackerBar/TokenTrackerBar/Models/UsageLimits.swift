@@ -67,12 +67,16 @@ struct CodexLimits: Codable, Equatable {
     let planLabel: String?
     let primaryWindow: CodexWindow?
     let secondaryWindow: CodexWindow?
+    let sparkPrimaryWindow: CodexWindow?
+    let sparkSecondaryWindow: CodexWindow?
 
     enum CodingKeys: String, CodingKey {
         case configured, error
         case planLabel = "plan_label"
         case primaryWindow = "primary_window"
         case secondaryWindow = "secondary_window"
+        case sparkPrimaryWindow = "spark_primary_window"
+        case sparkSecondaryWindow = "spark_secondary_window"
     }
 }
 

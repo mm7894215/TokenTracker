@@ -281,6 +281,10 @@ function metricLabel(id, fallback) {
       return copy("menubar.metric.codex_5h");
     case "codex7d":
       return copy("menubar.metric.codex_7d");
+    case "codexSpark5h":
+      return copy("menubar.metric.codex_spark_5h");
+    case "codexSpark7d":
+      return copy("menubar.metric.codex_spark_7d");
     default:
       return fallback;
   }

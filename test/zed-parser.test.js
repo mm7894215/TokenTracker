@@ -3,7 +3,8 @@
  *
  * Builds a synthetic threads.db SQLite file (mirroring Zed's real schema
  * including data_type='zstd' compressed blobs) and verifies:
- *   - Hosted-provider gate (only provider=='zed.dev' counts)
+ *   - All providers counted (hosted "zed.dev" + bring-your-own), with the
+ *     ZED_DOUBLE_COUNTED_PROVIDERS skip
  *   - request_token_usage > cumulative_token_usage precedence
  *   - zstd decompression of blob payloads
  *   - Cumulative-delta accounting across sync runs (no double-count)
@@ -100,22 +101,32 @@ test("decodeZedThreadBlob falls back when native zstd is unavailable", async () 
   }
 });
 
-test("extractZedTotals: skip imported, non-zed.dev provider, missing model", () => {
+test("extractZedTotals: skip imported + missing model; count all providers", () => {
   assert.equal(extractZedTotals(null), null);
   assert.equal(
     extractZedTotals(JSON.parse(threadJson({ imported: true, usage: { r1: { input_tokens: 1, output_tokens: 1 } } }))),
     null,
   );
   assert.equal(
-    extractZedTotals(
-      JSON.parse(threadJson({ provider: "anthropic", usage: { r1: { input_tokens: 1, output_tokens: 1 } } })),
-    ),
-    null,
-  );
-  assert.equal(
     extractZedTotals(JSON.parse(threadJson({ model: "", usage: { r1: { input_tokens: 1 } } }))),
     null,
   );
+  // Bring-your-own provider (formerly dropped by the hosted-only filter) is now
+  // counted, attributed to its real model.
+  const byo = extractZedTotals(
+    JSON.parse(
+      threadJson({ provider: "copilot_chat", model: "gpt-5.5", usage: { r1: { input_tokens: 10, output_tokens: 2 } } }),
+    ),
+  );
+  assert.deepEqual(byo, {
+    totals: { input: 10, output: 2, cache_read: 0, cache_write: 0 },
+    model: "gpt-5.5",
+  });
+  // Hosted (zed.dev) threads are still counted, unchanged.
+  const hosted = extractZedTotals(
+    JSON.parse(threadJson({ provider: "zed.dev", model: "claude-sonnet-4", usage: { r1: { input_tokens: 4 } } })),
+  );
+  assert.deepEqual(hosted, { totals: { input: 4, output: 0, cache_read: 0, cache_write: 0 }, model: "claude-sonnet-4" });
 });
 
 test("extractZedTotals: prefer summed request_token_usage over cumulative", () => {
@@ -167,7 +178,7 @@ test("sumZedRequestUsage handles map vs array vs missing", () => {
   );
 });
 
-test("parseZedIncremental: aggregates hosted threads only, deltas across runs", async () => {
+test("parseZedIncremental: aggregates hosted + BYO providers, deltas across runs", async () => {
   const { dir, dbPath } = await makeDb({
     rows: [
       {
@@ -182,15 +193,16 @@ test("parseZedIncremental: aggregates hosted threads only, deltas across runs", 
         }),
       },
       {
-        id: "th-b-skip",
+        // Bring-your-own provider — formerly dropped, now counted.
+        id: "th-b-byo",
         updatedAt: "2026-05-01T15:00:00Z",
         createdAt: "2026-05-01T15:00:00Z",
         dataType: "json",
         compressed: false,
         json: threadJson({
-          provider: "openai", // external ACP — must be skipped
+          provider: "copilot_chat",
           model: "gpt-4o",
-          usage: { r1: { input_tokens: 9999 } },
+          usage: { r1: { input_tokens: 9999, output_tokens: 1 } },
         }),
       },
     ],
@@ -201,8 +213,8 @@ test("parseZedIncremental: aggregates hosted threads only, deltas across runs", 
   // ── Run 1 ──
   const res1 = await parseZedIncremental({ dbPath, cursors, queuePath });
   assert.equal(res1.recordsProcessed, 2, "iterated both rows");
-  assert.equal(res1.eventsAggregated, 1, "only zed.dev row aggregated");
-  assert.equal(res1.bucketsQueued, 1);
+  assert.equal(res1.eventsAggregated, 2, "hosted + BYO both aggregated");
+  assert.equal(res1.bucketsQueued, 2);
 
   const rows1 = fs
     .readFileSync(queuePath, "utf8")
@@ -211,12 +223,16 @@ test("parseZedIncremental: aggregates hosted threads only, deltas across runs", 
     .filter(Boolean)
     .map(JSON.parse)
     .filter((r) => r.source === "zed");
-  assert.equal(rows1.length, 1);
-  assert.equal(rows1[0].model, "claude-sonnet-4");
-  assert.equal(rows1[0].input_tokens, 1000);
-  assert.equal(rows1[0].output_tokens, 200);
-  assert.equal(rows1[0].cached_input_tokens, 100);
-  assert.equal(rows1[0].total_tokens, 1300);
+  assert.equal(rows1.length, 2);
+  const claudeRow = rows1.find((r) => r.model === "claude-sonnet-4");
+  const byoRow = rows1.find((r) => r.model === "gpt-4o");
+  assert.ok(claudeRow && byoRow, "both a hosted and a BYO row are emitted");
+  assert.equal(claudeRow.input_tokens, 1000);
+  assert.equal(claudeRow.output_tokens, 200);
+  assert.equal(claudeRow.cached_input_tokens, 100);
+  assert.equal(claudeRow.total_tokens, 1300);
+  assert.equal(byoRow.input_tokens, 9999);
+  assert.equal(byoRow.total_tokens, 10000);
 
   // ── Run 2 (same DB, no thread changes) → zero delta ──
   const res2 = await parseZedIncremental({ dbPath, cursors, queuePath });
@@ -227,18 +243,20 @@ test("parseZedIncremental: aggregates hosted threads only, deltas across runs", 
     dbPath,
     "DELETE FROM threads WHERE id='th-a';",
   ], { stdio: ["ignore", "ignore", "pipe"] });
+  // Threads grow with an advancing updated_at; this must be after the BYO
+  // thread's 15:00 timestamp (which set the incremental watermark in run 1).
   const grownJson = threadJson({
     model: "claude-sonnet-4",
     usage: {
       r1: { input_tokens: 1000, output_tokens: 200, cache_read_input_tokens: 100 },
       r2: { input_tokens: 500, output_tokens: 80 },
     },
-    updatedAt: "2026-05-01T14:30:00Z",
+    updatedAt: "2026-05-01T16:00:00Z",
   });
   const grown = await zstdCompress(Buffer.from(grownJson));
   cp.execFileSync("sqlite3", [
     dbPath,
-    `INSERT INTO threads (id, updated_at, data_type, data, created_at) VALUES ('th-a', '2026-05-01T14:30:00Z', 'zstd', X'${grown.toString("hex")}', '2026-05-01T13:00:00Z');`,
+    `INSERT INTO threads (id, updated_at, data_type, data, created_at) VALUES ('th-a', '2026-05-01T16:00:00Z', 'zstd', X'${grown.toString("hex")}', '2026-05-01T13:00:00Z');`,
   ], { stdio: ["ignore", "ignore", "pipe"] });
 
   const res3 = await parseZedIncremental({ dbPath, cursors, queuePath });
@@ -250,11 +268,60 @@ test("parseZedIncremental: aggregates hosted threads only, deltas across runs", 
     .filter(Boolean)
     .map(JSON.parse)
     .filter((r) => r.source === "zed");
-  // Should have 2 queue rows (1 from initial, 1 from update). Total tokens
-  // across all zed rows == new cumulative.
-  const totalTokensAcrossRows = rows3.reduce((s, r) => s + r.total_tokens, 0);
-  assert.equal(totalTokensAcrossRows, 1300 + 580, "delta only, not full cumulative");
+  // claude rows total = initial 1300 + grow delta 580; BYO row = 10000. Each
+  // delta is enqueued once — no full-cumulative re-count.
+  const claudeTotal = rows3.filter((r) => r.model === "claude-sonnet-4").reduce((s, r) => s + r.total_tokens, 0);
+  assert.equal(claudeTotal, 1300 + 580, "delta only, not full cumulative");
 
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("parseZedIncremental: BYO request_token_usage map keyed by request-id (real shape)", async () => {
+  // Mirrors the real on-disk shape: request_token_usage is a map of
+  // request-uuid -> usage, cumulative_token_usage is empty.
+  const { dir, dbPath } = await makeDb({
+    rows: [
+      {
+        id: "th-copilot",
+        updatedAt: "2026-06-07T17:25:00Z",
+        createdAt: "2026-06-07T17:00:00Z",
+        dataType: "zstd",
+        compressed: true,
+        json: JSON.stringify({
+          version: "0.3.0",
+          updated_at: "2026-06-07T17:25:00Z",
+          model: { provider: "openai-subscribed", model: "gpt-5.5" },
+          request_token_usage: {
+            "af7eb9b5-3e26-4c17-8981-8c5385a64c69": {
+              input_tokens: 1100,
+              output_tokens: 626,
+              cache_read_input_tokens: 50176,
+            },
+            "6b5416d5-9d7a-4170-a34b-e03c98a046b7": {
+              input_tokens: 41884,
+              output_tokens: 533,
+              cache_read_input_tokens: 48640,
+            },
+          },
+          cumulative_token_usage: {},
+        }),
+      },
+    ],
+  });
+  const queuePath = path.join(dir, "queue.jsonl");
+  const res = await parseZedIncremental({ dbPath, cursors: {}, queuePath });
+  assert.equal(res.eventsAggregated, 1, "BYO thread counted");
+  const row = fs
+    .readFileSync(queuePath, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map(JSON.parse)
+    .find((r) => r.source === "zed");
+  assert.equal(row.model, "gpt-5.5");
+  assert.equal(row.input_tokens, 1100 + 41884);
+  assert.equal(row.output_tokens, 626 + 533);
+  assert.equal(row.cached_input_tokens, 50176 + 48640);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 

@@ -51,34 +51,56 @@ enum WidgetStrings {
     }
     static func resetInDays(_ days: Int) -> String { t("in \(days)d", "\(days) 天后", "\(days) 天後", "\(days)日後", "\(days)일 후") }
 
+    private static func limitKind(_ label: String) -> String {
+        let parts = label.components(separatedBy: "·")
+        return (parts.last ?? label).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     static func limitLabel(_ limit: LimitProvider) -> String {
         let label = limit.label
+        let kind = limitKind(limit.label)
         let source = limit.source.capitalized
         switch loc {
         case NativeLocalization.chineseLocale:
-            if label.contains("5h") { return "\(source) · 5小时" }
-            if label.contains("7d Opus") { return "\(source) · 7天 Opus" }
-            if label.contains("7d") || label.contains("weekly") { return "\(source) · 7天" }
-            if label == "Cursor" { return "Cursor · 套餐" }
-            return label
+            switch kind {
+            case "Spark 5h": return "\(source) · Spark 5小时"
+            case "Spark 7d": return "\(source) · Spark 7天"
+            case "5h": return "\(source) · 5小时"
+            case "7d Opus": return "\(source) · 7天 Opus"
+            case "7d", "weekly": return "\(source) · 7天"
+            case "Cursor": return "Cursor · 套餐"
+            default: return label
+            }
         case NativeLocalization.traditionalChineseLocale:
-            if label.contains("5h") { return "\(source) · 5小時" }
-            if label.contains("7d Opus") { return "\(source) · 7天 Opus" }
-            if label.contains("7d") || label.contains("weekly") { return "\(source) · 7天" }
-            if label == "Cursor" { return "Cursor · 套餐" }
-            return label
+            switch kind {
+            case "Spark 5h": return "\(source) · Spark 5小時"
+            case "Spark 7d": return "\(source) · Spark 7天"
+            case "5h": return "\(source) · 5小時"
+            case "7d Opus": return "\(source) · 7天 Opus"
+            case "7d", "weekly": return "\(source) · 7天"
+            case "Cursor": return "Cursor · 套餐"
+            default: return label
+            }
         case NativeLocalization.japaneseLocale:
-            if label.contains("5h") { return "\(source) · 5時間" }
-            if label.contains("7d Opus") { return "\(source) · 7日 Opus" }
-            if label.contains("7d") || label.contains("weekly") { return "\(source) · 7日" }
-            if label == "Cursor" { return "Cursor · プラン" }
-            return label
+            switch kind {
+            case "Spark 5h": return "\(source) · Spark 5時間"
+            case "Spark 7d": return "\(source) · Spark 7日"
+            case "5h": return "\(source) · 5時間"
+            case "7d Opus": return "\(source) · 7日 Opus"
+            case "7d", "weekly": return "\(source) · 7日"
+            case "Cursor": return "Cursor · プラン"
+            default: return label
+            }
         case NativeLocalization.koreanLocale:
-            if label.contains("5h") { return "\(source) · 5시간" }
-            if label.contains("7d Opus") { return "\(source) · 7일 Opus" }
-            if label.contains("7d") || label.contains("weekly") { return "\(source) · 7일" }
-            if label == "Cursor" { return "Cursor · 플랜" }
-            return label
+            switch kind {
+            case "Spark 5h": return "\(source) · Spark 5시간"
+            case "Spark 7d": return "\(source) · Spark 7일"
+            case "5h": return "\(source) · 5시간"
+            case "7d Opus": return "\(source) · 7일 Opus"
+            case "7d", "weekly": return "\(source) · 7일"
+            case "Cursor": return "Cursor · 플랜"
+            default: return label
+            }
         default:
             return label
         }

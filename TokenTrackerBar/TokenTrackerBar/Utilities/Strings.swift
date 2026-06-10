@@ -174,9 +174,14 @@ enum Strings {
     static var viewOnGitHubButton: String { t("View on GitHub", "在 GitHub 查看", "在 GitHub 檢視", "GitHub で見る", "GitHub에서 보기") }
     static var laterButton: String { t("Later", "稍后", "稍後", "後で", "나중에") }
     static func updateCurrentLine(current: String, target: String) -> String {
-        t("Current: \(current) → \(target)", "当前版本：\(current) → \(target)", "當前版本：\(current) → \(target)", "現在：\(current) → \(target)", "현재: \(current) → \(target)")
+        t(
+            "Version \(target) is available. You have \(current).",
+            "新版本 \(target) 可供更新，当前版本为 \(current)。",
+            "新版本 \(target) 可供更新，目前版本為 \(current)。",
+            "バージョン \(target) が利用可能です。現在のバージョンは \(current) です。",
+            "버전 \(target)을(를) 사용할 수 있습니다. 현재 버전은 \(current)입니다."
+        )
     }
-    static var releaseNotesTitle: String { t("Release Notes:", "更新说明：", "更新說明：", "リリースノート：", "릴리스 노트:") }
     static func updateSize(_ size: String) -> String { t("Size: \(size) MB", "大小：\(size) MB", "大小：\(size) MB", "サイズ：\(size) MB", "크기: \(size) MB") }
     static var downloadFailedTitle: String { t("Download Failed", "下载失败", "下載失敗", "ダウンロードに失敗", "다운로드 실패") }
     static var invalidDownloadURL: String {
@@ -189,6 +194,9 @@ enum Strings {
     static func downloadingPercent(_ pct: Int) -> String { t("Downloading \(pct)%...", "正在下载 \(pct)%...", "正在下載 \(pct)%...", "ダウンロード中 \(pct)%...", "다운로드 중 \(pct)%...") }
     static func downloadingProgress(pct: Int, receivedMB: String, totalMB: String) -> String {
         t("Downloading \(pct)% (\(receivedMB)/\(totalMB) MB)", "正在下载 \(pct)%（\(receivedMB)/\(totalMB) MB）", "正在下載 \(pct)%（\(receivedMB)/\(totalMB) MB）", "ダウンロード中 \(pct)%（\(receivedMB)/\(totalMB) MB）", "다운로드 중 \(pct)% (\(receivedMB)/\(totalMB) MB)")
+    }
+    static func updateProgressTitle(_ version: String) -> String {
+        t("Updating to \(version)…", "正在更新到 \(version)…", "正在更新到 \(version)…", "\(version) にアップデート中…", "\(version)(으)로 업데이트 중…")
     }
     static var installing: String { t("Installing...", "正在安装...", "正在安裝...", "インストール中...", "설치 중...") }
     static var restarting: String { t("Restarting...", "正在重启...", "正在重啟...", "再起動中...", "재시작 중...") }
