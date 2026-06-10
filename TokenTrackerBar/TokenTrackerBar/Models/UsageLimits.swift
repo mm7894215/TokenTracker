@@ -254,4 +254,15 @@ extension UsageLimitsResponse {
         ]
         return providers.contains { $0.0 && $0.1 == nil }
     }
+
+    /// Decide which record the UI should display after a successful fetch:
+    /// adopt the incoming response unless it has no usable provider data while a
+    /// previous record exists (keeps the last good snapshot on an all-error response).
+    static func displayRecord(
+        current: UsageLimitsResponse?,
+        incoming: UsageLimitsResponse
+    ) -> UsageLimitsResponse {
+        guard let current, !incoming.hasAnyProviderWithoutError else { return incoming }
+        return current
+    }
 }

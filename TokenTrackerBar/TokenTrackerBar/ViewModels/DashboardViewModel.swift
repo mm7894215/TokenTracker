@@ -215,11 +215,10 @@ class DashboardViewModel: ObservableObject {
                 do {
                     let newLimits = try await APIClient.shared.fetchUsageLimits()
                     self.limitsError = nil
-                    if self.usageLimits == nil || newLimits.hasAnyProviderWithoutError {
-                        self.usageLimits = newLimits
-                    }
-                    // else: keep prior record (last synced limits) – the response had
-                    // no usable providers this time.
+                    self.usageLimits = UsageLimitsResponse.displayRecord(
+                        current: self.usageLimits,
+                        incoming: newLimits
+                    )
                 } catch {
                     // Non-fatal: usage limits are best-effort, don't increment errorCount.
                     // Retain whatever `usageLimits` we had before (the "last record").
