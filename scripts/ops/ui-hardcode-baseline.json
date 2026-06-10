@@ -1,23 +1,15 @@
 {
-  "generatedAt": "2026-06-01T05:54:25.303Z",
+  "generatedAt": "2026-06-10T13:21:39.860Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
     "rawText": "JSX text nodes containing letters or digits"
   },
   "totals": {
-    "colors": 265,
-    "rawText": 172
+    "colors": 269,
+    "rawText": 163
   },
   "files": {
-    "dashboard/src/pet.jsx": {
-      "colors": 3,
-      "rawText": 2,
-      "rawTextTokens": [
-        "/@keyframes // so the animations still run. const result = raw.replace(/",
-        "whose class/id contains \"eye\" (e.g. eyes-look, * eyes-focus, eyes-read). Those groups already run their own blink/track transform * animations, which would override any transform we set directly — so after a pose * loads we wrap each (non-shut) eye group in our own"
-      ]
-    },
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
       "colors": 0,
       "rawText": 3,
@@ -88,16 +80,15 @@
       ]
     },
     "dashboard/src/pages/IpCheckPage.jsx": {
-      "colors": 8,
-      "rawText": 18,
+      "colors": 12,
+      "rawText": 17,
       "rawTextTokens": [
-        "' : valueHtml; return `",
+        "', ipAddrCN: ipHeroSkeleton(), ipGeoCN: ipGeoSkeleton(), ipAddr: ipHeroSkeleton(), ipGeo: ipGeoSkeleton(), ipAddrClaude: ipHeroSkeleton(), ipGeoClaude: ipGeoSkeleton(), propsContent: loadingRows([t.propsRegion, t.propsCity, t.propsType, t.propsAsn, t.propsOrg]), securityContent: loadingRows([t.secVpn, t.secProxy, t.secTor, t.secCrawler, t.secAbuser]), claudeAvailContent: row(\"claude.ai\", undefined, true) + row(\"anthropic.com\", undefined, true), dnsLeakContent: row(t.dnsStatus, undefined, true) + row(t.dnsOutletIp, undefined, true), udpLeakContent: row(t.udpStatus, undefined, true) + row(t.udpOutletIp, undefined, true), deviceContent: loadingRows([t.devTz, t.devLang, t.devOs, t.devTouch, t.devNet, t.devDnt, t.devWebglRender, t.devCanvasFp]), ipHistoryContent: `",
         "// via its user-agent stylesheet (Blink does not). Chrome looks fine, the // app does not.",
         "25",
         "50",
         "75",
         "= 0 ? \"+\" : \"\") + localOffset; const cr = state.claudeRisk; const _cc = (cr?.countryCode || \"\").toUpperCase(); const claudeTz = cr?.timezone || CC_TO_TZ[_cc] || \"\"; const tzIsExact = !!cr?.timezone; const claudeOffMin = currentOffsetMinutes(claudeTz); const localOffMin = -new Date().getTimezoneOffset(); let tzMatch = null; if (claudeTz && claudeOffMin != null) tzMatch = Math.abs(claudeOffMin - localOffMin)",
-        "= 25 ? \"text-amber-500\" : \"text-red-500\"; gaugeScoreEl.innerHTML = `",
         "`) + row(t.devCanvasFp, `",
         "`) + row(t.devDnt, esc(dnt)) + row(t.devWebglRender, `",
         "`) + row(t.devWebglFp, `",
@@ -173,6 +164,14 @@
         "tools",
         "tracker sync",
         "tracker wrapped --json"
+      ]
+    },
+    "dashboard/src/pet.jsx": {
+      "colors": 3,
+      "rawText": 2,
+      "rawTextTokens": [
+        "/@keyframes // so the animations still run. const result = raw.replace(/",
+        "whose class/id contains \"eye\" (e.g. eyes-look, * eyes-focus, eyes-read). Those groups already run their own blink/track transform * animations, which would override any transform we set directly — so after a pose * loads we wrap each (non-shut) eye group in our own"
       ]
     },
     "dashboard/src/ui/components/ConfirmModal.jsx": {
@@ -260,14 +259,6 @@
         "1 ? ("
       ]
     },
-    "dashboard/src/ui/dashboard/components/DateRangePopover.jsx": {
-      "colors": 0,
-      "rawText": 2,
-      "rawTextTokens": [
-        "Apply",
-        "Cancel"
-      ]
-    },
     "dashboard/src/ui/dashboard/components/LikeButton.jsx": {
       "colors": 6,
       "rawText": 1,
@@ -313,16 +304,8 @@
     },
     "dashboard/src/ui/dashboard/components/UsageLimitsPanel.jsx": {
       "colors": 0,
-      "rawText": 10,
+      "rawText": 2,
       "rawTextTokens": [
-        "); case \"antigravity\": return (",
-        "); case \"codex\": return (",
-        "); case \"copilot\": return (",
-        "); case \"cursor\": return (",
-        "); case \"gemini\": return (",
-        "); case \"kimi\": return (",
-        "); case \"kiro\": return (",
-        "0 && rounded === 0 ? \"",
         "0 ? groups :",
         "renderProviderGroup(id, dataById[id], effectiveMode)) .filter(Boolean); return ("
       ]
