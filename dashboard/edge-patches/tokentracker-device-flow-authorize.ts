@@ -61,13 +61,22 @@ export default async function (req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
-  let body: { client_info?: string } = {};
+  let body: { client_info?: string; machine_id?: string } = {};
   try {
     body = await req.json();
   } catch (_e) {
     /* empty body is fine */
   }
   const clientInfo = typeof body.client_info === "string" ? body.client_info.slice(0, 200) : null;
+  // Stable per-machine id from the CLI's config.json. Stored on the flow row
+  // so the poll step can anchor the issued device to the machine instead of
+  // the hostname-derived display name (two machines sharing a default
+  // hostname used to collapse into ONE device and ping-pong each other's
+  // tokens; a renamed hostname minted a duplicate device).
+  const machineId =
+    typeof body.machine_id === "string" && body.machine_id.trim().length >= 8
+      ? body.machine_id.trim().slice(0, 64)
+      : null;
 
   const baseUrl = Deno.env.get("INSFORGE_BASE_URL");
   const serviceRoleKey = Deno.env.get("INSFORGE_SERVICE_ROLE_KEY");
@@ -96,6 +105,7 @@ export default async function (req: Request): Promise<Response> {
         user_code,
         status: "pending",
         client_info: clientInfo,
+        machine_id: machineId,
         expires_at: expiresAt,
       },
     ]);

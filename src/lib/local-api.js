@@ -2138,4 +2138,8 @@ module.exports = {
   // Shared legacy-row correction so every queue reader (main queue, project
   // queue, wrapped aggregator) reports the same numbers for the same data.
   normalizeQueueRow,
+  // Machine-stable identity (config.json machineId) — shared with
+  // `tracker device-login` so the CLI device-flow anchors its cloud device
+  // to the machine, not the hostname.
+  getOrCreateMachineId,
 };

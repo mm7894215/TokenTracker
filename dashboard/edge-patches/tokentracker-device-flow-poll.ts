@@ -35,36 +35,112 @@ async function sha256Hex(input: string): Promise<string> {
 }
 
 // deno-lint-ignore no-explicit-any
-async function issueDeviceToken(client: any, userId: string, clientInfo: string | null) {
+async function issueDeviceToken(client: any, userId: string, clientInfo: string | null, machineId: string | null) {
   const platform = "cli-device-flow";
-  const deviceName = `TokenTracker CLI${clientInfo ? ` (${clientInfo})` : ""}`.slice(0, 128);
-  const newDeviceId = crypto.randomUUID();
-  const { data: insertedDevice } = await client.database
-    .from("tokentracker_devices")
-    .insert([{ id: newDeviceId, user_id: userId, device_name: deviceName, platform }], {
-      onConflict: "user_id,platform,device_name",
-      ignoreDuplicates: true,
-    })
-    .select("id");
+  // The machine-id suffix keeps display names unique per machine: two Macs on
+  // the default "MacBook-Pro.local" hostname used to collapse into ONE device
+  // (the name-keyed unique index), overwriting each other's hourly rows and
+  // revoking each other's tokens on every login.
+  const deviceName = `TokenTracker CLI${clientInfo ? ` (${clientInfo})` : ""}${machineId ? ` #${machineId.slice(0, 8)}` : ""}`.slice(0, 128);
 
-  let deviceId: string;
-  if (Array.isArray(insertedDevice) && insertedDevice.length > 0) {
-    deviceId = (insertedDevice[0] as { id: string }).id;
-  } else {
-    const { data: winner, error: lookupErr } = await client.database
+  // Device identity resolution — same machine-anchored scheme as
+  // tokentracker-device-token-issue.ts: (1) reuse by (user, machine_id),
+  // (2) adopt a legacy same-name row by backfilling machine_id, (3) insert,
+  // falling back to re-select on a unique-violation race. Legacy CLIs that
+  // send no machine_id keep the old name-keyed path.
+  let deviceId: string | null = null;
+
+  if (machineId) {
+    const { data: byMachine } = await client.database
       .from("tokentracker_devices")
       .select("id")
       .eq("user_id", userId)
-      .eq("platform", platform)
-      .eq("device_name", deviceName)
+      .eq("machine_id", machineId)
       .is("revoked_at", null)
-      .order("created_at", { ascending: true })
       .limit(1)
       .maybeSingle();
-    if (lookupErr || !winner) {
-      throw new Error(lookupErr?.message || "device lookup failed");
+    if (byMachine && (byMachine as { id: string }).id) {
+      deviceId = (byMachine as { id: string }).id;
+      await client.database
+        .from("tokentracker_devices")
+        .update({ device_name: deviceName, platform })
+        .eq("id", deviceId);
     }
-    deviceId = (winner as { id: string }).id;
+
+    if (!deviceId) {
+      const { data: legacy } = await client.database
+        .from("tokentracker_devices")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("platform", platform)
+        .eq("device_name", deviceName)
+        .is("revoked_at", null)
+        .is("machine_id", null)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (legacy && (legacy as { id: string }).id) {
+        const legacyId = (legacy as { id: string }).id;
+        const { error: adoptErr } = await client.database
+          .from("tokentracker_devices")
+          .update({ machine_id: machineId })
+          .eq("id", legacyId)
+          .is("machine_id", null);
+        if (!adoptErr) deviceId = legacyId;
+      }
+    }
+
+    if (!deviceId) {
+      const newDeviceId = crypto.randomUUID();
+      const { data: inserted, error: insErr } = await client.database
+        .from("tokentracker_devices")
+        .insert([{ id: newDeviceId, user_id: userId, device_name: deviceName, platform, machine_id: machineId }])
+        .select("id");
+      if (!insErr && Array.isArray(inserted) && inserted.length > 0) {
+        deviceId = (inserted[0] as { id: string }).id;
+      } else {
+        const { data: winner } = await client.database
+          .from("tokentracker_devices")
+          .select("id")
+          .eq("user_id", userId)
+          .eq("machine_id", machineId)
+          .is("revoked_at", null)
+          .limit(1)
+          .maybeSingle();
+        if (!winner || !(winner as { id: string }).id) {
+          throw new Error(insErr?.message || "device resolution failed");
+        }
+        deviceId = (winner as { id: string }).id;
+      }
+    }
+  } else {
+    const newDeviceId = crypto.randomUUID();
+    const { data: insertedDevice } = await client.database
+      .from("tokentracker_devices")
+      .insert([{ id: newDeviceId, user_id: userId, device_name: deviceName, platform }], {
+        onConflict: "user_id,platform,device_name",
+        ignoreDuplicates: true,
+      })
+      .select("id");
+
+    if (Array.isArray(insertedDevice) && insertedDevice.length > 0) {
+      deviceId = (insertedDevice[0] as { id: string }).id;
+    } else {
+      const { data: winner, error: lookupErr } = await client.database
+        .from("tokentracker_devices")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("platform", platform)
+        .eq("device_name", deviceName)
+        .is("revoked_at", null)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (lookupErr || !winner) {
+        throw new Error(lookupErr?.message || "device lookup failed");
+      }
+      deviceId = (winner as { id: string }).id;
+    }
   }
 
   const createdAt = new Date().toISOString();
@@ -113,7 +189,7 @@ export default async function (req: Request): Promise<Response> {
 
   const { data, error } = await client.database
     .from("tokentracker_device_codes")
-    .select("device_code, user_id, status, expires_at, approved_at, client_info")
+    .select("device_code, user_id, status, expires_at, approved_at, client_info, machine_id")
     .eq("device_code", deviceCode)
     .maybeSingle();
 
@@ -125,7 +201,7 @@ export default async function (req: Request): Promise<Response> {
   }
   if (!data) return json({ status: "unknown" }, 404);
 
-  const row = data as { user_id: string | null; status: string; expires_at: string; client_info: string | null };
+  const row = data as { user_id: string | null; status: string; expires_at: string; client_info: string | null; machine_id: string | null };
   const expiresAt = new Date(row.expires_at).getTime();
   if (Date.now() > expiresAt) {
     // Best-effort cleanup. Scope the UPDATE to status='pending' so two
@@ -142,7 +218,7 @@ export default async function (req: Request): Promise<Response> {
 
   if (row.status === "approved" && row.user_id) {
     try {
-      const issued = await issueDeviceToken(client, row.user_id, row.client_info);
+      const issued = await issueDeviceToken(client, row.user_id, row.client_info, row.machine_id);
       return json({
         status: "approved",
         user_id: row.user_id,

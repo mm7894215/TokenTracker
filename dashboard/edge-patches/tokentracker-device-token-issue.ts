@@ -128,57 +128,143 @@ export default async function (req: Request): Promise<Response> {
     });
   }
 
-  const deviceName = String(body.device_name ?? (body.data as Record<string, unknown> | undefined)?.device_name ?? "Token Tracker")
+  const dataObj2 = body.data && typeof body.data === "object" ? (body.data as Record<string, unknown>) : undefined;
+  const deviceName = String(body.device_name ?? dataObj2?.device_name ?? "Token Tracker")
     .slice(0, 128);
-  const platform = String(body.platform ?? (body.data as Record<string, unknown> | undefined)?.platform ?? "web").slice(
+  const platform = String(body.platform ?? dataObj2?.platform ?? "web").slice(
     0,
     32,
   );
+  const machineIdRaw = body.machine_id ?? dataObj2?.machine_id;
+  const machineId =
+    typeof machineIdRaw === "string" && machineIdRaw.trim().length >= 8
+      ? machineIdRaw.trim().slice(0, 64)
+      : null;
 
-  // Reuse an existing active device for the same (user, platform, device_name)
-  // instead of minting a fresh one on every issue. Client localStorage is
-  // isolated across Safari / Chrome / WKWebView, so the client asks for a new
-  // token on every environment — if we created a fresh device_id each time,
-  // `tokentracker_hourly` ends up with the same logical bucket written under
-  // many device_ids, and leaderboard SUM would double-count. Keeping a single
-  // device_id per logical device means every sync upserts onto the same row.
+  // Device identity resolution (machine-anchored since 2026-06):
   //
-  // Concurrency: two parallel calls (tab + webview on first login) must not
-  // each INSERT a fresh row. The partial unique index
-  // `tokentracker_devices_active_unique` on (user_id, platform, device_name)
-  // WHERE revoked_at IS NULL guarantees one active row per logical device.
-  // We INSERT with ON CONFLICT DO NOTHING; if the insert loses the race it
-  // returns zero rows, and we SELECT to get the winner's id.
-  const newDeviceId = crypto.randomUUID();
-  const { data: insertedDevice } = await dbClient.database
-    .from("tokentracker_devices")
-    .insert([{ id: newDeviceId, user_id: userId, device_name: deviceName, platform }], {
-      onConflict: "user_id,platform,device_name",
-      ignoreDuplicates: true,
-    })
-    .select("id");
+  //   1. machine_id match — the SAME physical machine always resolves to one
+  //      device row, no matter how its display name drifted (hostname rename,
+  //      suffix-derivation changes, browser storage resets). This is what
+  //      actually prevents cross-device SUM double-counting: the v0.42 scheme
+  //      keyed identity off the device NAME (with a best-effort machineId
+  //      suffix), so a clientId fallback or a regenerated config.json minted
+  //      a brand-new "device" and re-uploaded history under it (28.4B mirrored
+  //      tokens across 18 users until the 2026-06 cleanup).
+  //   2. Legacy adoption — an active same-name row without machine_id is
+  //      claimed by backfilling machine_id, migrating existing installs
+  //      in-place on their next token issue/rotation.
+  //   3. Insert — new machine. A unique-violation race (concurrent first
+  //      login from two contexts) falls back to re-selecting the winner.
+  //
+  // Without machine_id (legacy clients) the old name-keyed path is preserved.
+  let deviceId: string | null = null;
 
-  let deviceId: string;
-  if (Array.isArray(insertedDevice) && insertedDevice.length > 0) {
-    deviceId = (insertedDevice[0] as { id: string }).id;
-  } else {
-    const { data: winner, error: lookupErr } = await dbClient.database
+  if (machineId) {
+    const { data: byMachine } = await dbClient.database
       .from("tokentracker_devices")
       .select("id")
       .eq("user_id", userId)
-      .eq("platform", platform)
-      .eq("device_name", deviceName)
+      .eq("machine_id", machineId)
       .is("revoked_at", null)
-      .order("created_at", { ascending: true })
       .limit(1)
       .maybeSingle();
-    if (lookupErr || !winner) {
-      return json(
-        { error: "Failed to issue device token", detail: lookupErr?.message || "device lookup failed" },
-        500,
-      );
+    if (byMachine && (byMachine as { id: string }).id) {
+      deviceId = (byMachine as { id: string }).id;
+      // Keep the display name fresh; identity is the machine_id, not the name.
+      await dbClient.database
+        .from("tokentracker_devices")
+        .update({ device_name: deviceName, platform })
+        .eq("id", deviceId);
     }
-    deviceId = (winner as { id: string }).id;
+
+    if (!deviceId) {
+      const { data: legacy } = await dbClient.database
+        .from("tokentracker_devices")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("platform", platform)
+        .eq("device_name", deviceName)
+        .is("revoked_at", null)
+        .is("machine_id", null)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (legacy && (legacy as { id: string }).id) {
+        const legacyId = (legacy as { id: string }).id;
+        const { error: adoptErr } = await dbClient.database
+          .from("tokentracker_devices")
+          .update({ machine_id: machineId })
+          .eq("id", legacyId)
+          .is("machine_id", null);
+        if (!adoptErr) deviceId = legacyId;
+        // adoptErr → lost a race against another adopter/inserter; fall through.
+      }
+    }
+
+    if (!deviceId) {
+      const newDeviceId = crypto.randomUUID();
+      const { data: inserted, error: insErr } = await dbClient.database
+        .from("tokentracker_devices")
+        .insert([{ id: newDeviceId, user_id: userId, device_name: deviceName, platform, machine_id: machineId }])
+        .select("id");
+      if (!insErr && Array.isArray(inserted) && inserted.length > 0) {
+        deviceId = (inserted[0] as { id: string }).id;
+      } else {
+        // Unique violation on (user_id, machine_id) — a concurrent call won.
+        const { data: winner } = await dbClient.database
+          .from("tokentracker_devices")
+          .select("id")
+          .eq("user_id", userId)
+          .eq("machine_id", machineId)
+          .is("revoked_at", null)
+          .limit(1)
+          .maybeSingle();
+        if (winner && (winner as { id: string }).id) {
+          deviceId = (winner as { id: string }).id;
+        } else {
+          return json(
+            { error: "Failed to issue device token", detail: insErr?.message || "device resolution failed" },
+            500,
+          );
+        }
+      }
+    }
+  } else {
+    // Legacy name-keyed path. The partial unique index
+    // `tokentracker_devices_active_unique` on (user_id, platform, device_name)
+    // WHERE revoked_at IS NULL guarantees one active row per name; INSERT with
+    // ON CONFLICT DO NOTHING, then SELECT the winner on a lost race.
+    const newDeviceId = crypto.randomUUID();
+    const { data: insertedDevice } = await dbClient.database
+      .from("tokentracker_devices")
+      .insert([{ id: newDeviceId, user_id: userId, device_name: deviceName, platform }], {
+        onConflict: "user_id,platform,device_name",
+        ignoreDuplicates: true,
+      })
+      .select("id");
+
+    if (Array.isArray(insertedDevice) && insertedDevice.length > 0) {
+      deviceId = (insertedDevice[0] as { id: string }).id;
+    } else {
+      const { data: winner, error: lookupErr } = await dbClient.database
+        .from("tokentracker_devices")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("platform", platform)
+        .eq("device_name", deviceName)
+        .is("revoked_at", null)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (lookupErr || !winner) {
+        return json(
+          { error: "Failed to issue device token", detail: lookupErr?.message || "device lookup failed" },
+          500,
+        );
+      }
+      deviceId = (winner as { id: string }).id;
+    }
   }
 
   const tokenId = crypto.randomUUID();

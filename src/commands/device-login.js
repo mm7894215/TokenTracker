@@ -20,11 +20,18 @@ function readBaseUrl(config) {
   );
 }
 
-async function authorize({ baseUrl, clientInfo }) {
+async function authorize({ baseUrl, clientInfo, machineId }) {
   const res = await fetch(`${baseUrl}/functions/tokentracker-device-flow-authorize`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ client_info: clientInfo }),
+    body: JSON.stringify({
+      client_info: clientInfo,
+      // Machine-stable identity: the server anchors the issued device to this
+      // id instead of the hostname-derived display name, so hostname renames
+      // don't mint duplicate devices and two machines sharing a default
+      // hostname don't collapse into one (token ping-pong + row overwrite).
+      ...(machineId ? { machine_id: machineId } : {}),
+    }),
   });
   if (!res.ok) {
     const text = await res.text();
@@ -70,8 +77,12 @@ async function cmdDeviceLogin(argv = [], options = {}) {
   const baseUrl = opts.baseUrl || readBaseUrl(config);
 
   const clientInfo = `${os.platform()}-${os.arch()} ${os.hostname()}`;
+  // Same machineId the local API serves to the dashboard — both login paths
+  // must resolve to the SAME cloud device row for this machine.
+  const { getOrCreateMachineId } = require("../lib/local-api");
+  const machineId = getOrCreateMachineId(path.join(trackerDir, "queue.jsonl"));
   process.stdout.write(`Requesting device code from ${baseUrl}...\n`);
-  const authResp = await authorize({ baseUrl, clientInfo });
+  const authResp = await authorize({ baseUrl, clientInfo, machineId });
 
   if (opts.json) {
     process.stdout.write(JSON.stringify(authResp, null, 2) + "\n");
@@ -125,6 +136,11 @@ async function cmdDeviceLogin(argv = [], options = {}) {
       }
       const next = {
         ...config,
+        // `config` was read BEFORE getOrCreateMachineId persisted the
+        // machineId — spreading it alone would clobber the freshly-written
+        // machineId on disk and the next caller would mint a different one
+        // (device identity drift, the exact bug this field exists to fix).
+        ...(machineId ? { machineId } : {}),
         baseUrl,
         user_id: result.user_id,
         deviceToken: result.deviceToken,

@@ -81,6 +81,20 @@ test("cmdDeviceLogin persists the approved device token used by sync", async () 
     assert.equal(config.deviceId, "device-1");
     assert.equal(config.baseUrl, "https://example.invalid");
     assert.equal(calls.length, 2);
+    // Machine-anchored device identity: authorize must carry the SAME
+    // machineId that was persisted to config.json, so the server can anchor
+    // the issued device to the machine instead of the hostname-derived name.
+    const authorizeCall = calls.find((c) => c.url.endsWith("/tokentracker-device-flow-authorize"));
+    assert.ok(authorizeCall, "authorize call recorded");
+    assert.equal(
+      authorizeCall.body.machine_id,
+      config.machineId,
+      "authorize must send the persisted config.json machineId",
+    );
+    assert.ok(
+      typeof config.machineId === "string" && config.machineId.length >= 8,
+      "login must persist a machineId",
+    );
   } finally {
     process.stdout.write = originalStdoutWrite;
     global.fetch = originalFetch;
@@ -122,10 +136,14 @@ test("cmdDeviceLogin rejects approved responses without a usable device token", 
       () => cmdDeviceLogin(["--base-url", "https://example.invalid"], { home, sleep: async () => {} }),
       /server did not return a device token/,
     );
-    await assert.rejects(
-      () => fs.readFile(path.join(home, ".tokentracker", "tracker", "config.json"), "utf8"),
-      { code: "ENOENT" },
-    );
+    // Login start persists a machineId in config.json (machine-anchored
+    // device identity), but a failed login must never persist credentials.
+    const raw = await fs
+      .readFile(path.join(home, ".tokentracker", "tracker", "config.json"), "utf8")
+      .catch(() => "{}");
+    const config = JSON.parse(raw);
+    assert.equal(config.deviceToken, undefined, "failed login must not persist a device token");
+    assert.equal(config.user_id, undefined, "failed login must not persist a user id");
   } finally {
     process.stdout.write = originalStdoutWrite;
     global.fetch = originalFetch;
