@@ -948,6 +948,10 @@ function createLocalApiHandler({ queuePath }) {
     const refreshToken = getRefreshTokenForCloud();
     if (!refreshToken) return "fallthrough";
     const runtime = resolveRuntimeConfig();
+    const envTimeout = process.env.TOKENTRACKER_HTTP_TIMEOUT_MS
+      ? parseInt(process.env.TOKENTRACKER_HTTP_TIMEOUT_MS, 10)
+      : 0;
+    const timeoutMs = envTimeout > 0 ? envTimeout : 4000;
     try {
       const out = await fetchAccountUsage({
         usageSlug,
@@ -955,6 +959,7 @@ function createLocalApiHandler({ queuePath }) {
         baseUrl: runtime.baseUrl || DEFAULT_BASE_URL,
         anonKey: runtime.anonKey,
         refreshToken,
+        timeoutMs,
       });
       if (!out || out.data == null) return "fallthrough";
       if (out.rotatedRefreshToken) setRelayRefreshToken(out.rotatedRefreshToken);
@@ -968,7 +973,7 @@ function createLocalApiHandler({ queuePath }) {
       return "served";
     } catch (e) {
       // Signed in + cloud sync on, but the cloud read failed (offline, token
-      // rejected, edge error). Fall back to local data rather than erroring.
+      // rejected, edge error, or timeout). Fall back to local data rather than erroring.
       if (resolveRuntimeConfig().debug) {
         console.warn(`[LocalAPI] account view fallback for ${usageSlug}:`, e?.message || e);
       }

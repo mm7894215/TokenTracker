@@ -240,3 +240,168 @@ test("usage-summary?account=1 serves the cross-device aggregate when signed in +
     global.fetch = realFetch;
   }
 });
+
+test("usage-hourly?account=1 serves account hourly data when signed in + cloud sync on", async () => {
+  const queuePath = path.join(tmpHome, "queue.jsonl");
+  writeQueue(queuePath, [SAMPLE_ROW]);
+
+  const trackerDir = path.join(tmpHome, ".tokentracker", "tracker");
+  fs.mkdirSync(trackerDir, { recursive: true });
+  fs.writeFileSync(path.join(trackerDir, "cloud-sync-pref.json"), JSON.stringify({ enabled: true }));
+  fs.writeFileSync(
+    path.join(trackerDir, "relay-cookies.json"),
+    JSON.stringify({
+      insforge_refresh_token: "insforge_refresh_token=refresh-xyz; Path=/; HttpOnly; SameSite=Lax",
+    }),
+  );
+
+  const accessJwt = `${Buffer.from(JSON.stringify({ alg: "HS256" })).toString("base64url")}.${Buffer.from(
+    JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 }),
+  ).toString("base64url")}.sig`;
+  const accountPayload = {
+    day: "2026-04-20",
+    data: [
+      {
+        hour: "2026-04-20T10:00:00",
+        total_tokens: 999999,
+        conversation_count: 3,
+        models: { "claude-sonnet-4-6": 999999 },
+      },
+    ],
+  };
+  const realFetch = global.fetch;
+  const seen = [];
+  global.fetch = async (urlStr, opts) => {
+    seen.push(String(urlStr));
+    if (String(urlStr).includes("/api/auth/refresh")) {
+      return { ok: true, status: 200, json: async () => ({ accessToken: accessJwt }) };
+    }
+    if (String(urlStr).includes("/functions/tokentracker-account-hourly")) {
+      assert.equal(opts.headers.Authorization, `Bearer ${accessJwt}`);
+      return { ok: true, status: 200, json: async () => accountPayload };
+    }
+    throw new Error(`unexpected fetch ${urlStr}`);
+  };
+
+  try {
+    const handler = freshHandler(queuePath);
+    const res = await call(handler, {
+      endpoint: "/functions/tokentracker-usage-hourly?day=2026-04-20&tz=UTC&account=1",
+    });
+    assert.equal(res._headers["x-tokentracker-account-view"], "1");
+    assert.deepEqual(res.json(), accountPayload);
+    assert.ok(seen.some((u) => u.includes("/functions/tokentracker-account-hourly")));
+  } finally {
+    global.fetch = realFetch;
+  }
+});
+
+test("usage-hourly?account=1 falls back to local hourly data when account hourly fails", async () => {
+  const queuePath = path.join(tmpHome, "queue.jsonl");
+  writeQueue(queuePath, [SAMPLE_ROW]);
+
+  const trackerDir = path.join(tmpHome, ".tokentracker", "tracker");
+  fs.mkdirSync(trackerDir, { recursive: true });
+  fs.writeFileSync(path.join(trackerDir, "cloud-sync-pref.json"), JSON.stringify({ enabled: true }));
+  fs.writeFileSync(
+    path.join(trackerDir, "relay-cookies.json"),
+    JSON.stringify({
+      insforge_refresh_token: "insforge_refresh_token=refresh-xyz; Path=/; HttpOnly; SameSite=Lax",
+    }),
+  );
+
+  const accessJwt = `${Buffer.from(JSON.stringify({ alg: "HS256" })).toString("base64url")}.${Buffer.from(
+    JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 }),
+  ).toString("base64url")}.sig`;
+  const realFetch = global.fetch;
+  global.fetch = async (urlStr) => {
+    if (String(urlStr).includes("/api/auth/refresh")) {
+      return { ok: true, status: 200, json: async () => ({ accessToken: accessJwt }) };
+    }
+    if (String(urlStr).includes("/functions/tokentracker-account-hourly")) {
+      return { ok: false, status: 500, json: async () => ({ error: "boom" }) };
+    }
+    throw new Error(`unexpected fetch ${urlStr}`);
+  };
+
+  try {
+    const handler = freshHandler(queuePath);
+    const res = await call(handler, {
+      endpoint: "/functions/tokentracker-usage-hourly?day=2026-04-20&tz=UTC&account=1",
+    });
+    assert.equal(res._headers["x-tokentracker-account-view"], "0");
+    const body = res.json();
+    assert.equal(body.day, "2026-04-20");
+    assert.equal(body.data.length, 1);
+    assert.equal(body.data[0].hour, "2026-04-20T10:00:00");
+    assert.equal(body.data[0].total_tokens, 120);
+  } finally {
+    global.fetch = realFetch;
+  }
+});
+
+test("usage-hourly?account=1 falls back to local hourly data when account hourly times out", async () => {
+  const queuePath = path.join(tmpHome, "queue.jsonl");
+  writeQueue(queuePath, [SAMPLE_ROW]);
+
+  const trackerDir = path.join(tmpHome, ".tokentracker", "tracker");
+  fs.mkdirSync(trackerDir, { recursive: true });
+  fs.writeFileSync(path.join(trackerDir, "cloud-sync-pref.json"), JSON.stringify({ enabled: true }));
+  fs.writeFileSync(
+    path.join(trackerDir, "relay-cookies.json"),
+    JSON.stringify({
+      insforge_refresh_token: "insforge_refresh_token=refresh-xyz; Path=/; HttpOnly; SameSite=Lax",
+    }),
+  );
+
+  const accessJwt = `${Buffer.from(JSON.stringify({ alg: "HS256" })).toString("base64url")}.${Buffer.from(
+    JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 }),
+  ).toString("base64url")}.sig`;
+
+  const prevTimeout = process.env.TOKENTRACKER_HTTP_TIMEOUT_MS;
+  process.env.TOKENTRACKER_HTTP_TIMEOUT_MS = "10"; // 超低超时：10ms
+
+  const realFetch = global.fetch;
+  global.fetch = async (urlStr, opts) => {
+    if (String(urlStr).includes("/api/auth/refresh")) {
+      return { ok: true, status: 200, json: async () => ({ accessToken: accessJwt }) };
+    }
+    if (String(urlStr).includes("/functions/tokentracker-account-hourly")) {
+      return new Promise((resolve, reject) => {
+        const t = setTimeout(() => {
+          resolve({ ok: true, status: 200, json: async () => ({ day: "2026-04-20", data: [] }) });
+        }, 10000);
+        if (opts && opts.signal) {
+          opts.signal.addEventListener("abort", () => {
+            clearTimeout(t);
+            const err = new Error("The operation was aborted.");
+            err.name = "AbortError";
+            reject(err);
+          });
+        }
+      });
+    }
+    throw new Error(`unexpected fetch ${urlStr}`);
+  };
+
+  try {
+    const handler = freshHandler(queuePath);
+    const res = await call(handler, {
+      endpoint: "/functions/tokentracker-usage-hourly?day=2026-04-20&tz=UTC&account=1",
+    });
+    assert.equal(res._headers["x-tokentracker-account-view"], "0");
+    const body = res.json();
+    assert.equal(body.day, "2026-04-20");
+    assert.equal(body.data.length, 1);
+    assert.equal(body.data[0].hour, "2026-04-20T10:00:00");
+    assert.equal(body.data[0].total_tokens, 120);
+  } finally {
+    global.fetch = realFetch;
+    if (prevTimeout === undefined) {
+      delete process.env.TOKENTRACKER_HTTP_TIMEOUT_MS;
+    } else {
+      process.env.TOKENTRACKER_HTTP_TIMEOUT_MS = prevTimeout;
+    }
+  }
+});
+

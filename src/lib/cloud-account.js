@@ -97,6 +97,7 @@ async function mintAccessToken({
   fetchImpl = fetch,
   now = Date.now,
   skewMs = 60_000,
+  timeoutMs,
 } = {}) {
   if (!refreshToken) return null;
   if (
@@ -111,15 +112,30 @@ async function mintAccessToken({
   const headers = { "Content-Type": "application/json", Accept: "application/json" };
   if (anonKey) headers.apikey = anonKey;
 
+  let timeoutId;
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const signal = controller ? controller.signal : undefined;
+
+  if (controller && timeoutMs && timeoutMs > 0) {
+    timeoutId = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
+  }
+
   let res;
   try {
     res = await fetchImpl(`${root}/api/auth/refresh?client_type=mobile`, {
       method: "POST",
       headers,
       body: JSON.stringify({ refresh_token: refreshToken }),
+      signal,
     });
   } catch {
     return null;
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
   }
   if (!res || !res.ok) return null;
 
@@ -159,6 +175,7 @@ async function fetchAccountFunction({
   slug,
   searchParams,
   fetchImpl = fetch,
+  timeoutMs,
 } = {}) {
   const root = String(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "");
   const url = new URL(`${root}/functions/${slug}`);
@@ -171,13 +188,30 @@ async function fetchAccountFunction({
   const headers = { Accept: "application/json", Authorization: `Bearer ${accessToken}` };
   if (anonKey) headers.apikey = anonKey;
 
-  const res = await fetchImpl(url.toString(), { method: "GET", headers });
-  if (!res || !res.ok) {
-    const err = new Error(`Account fetch failed with HTTP ${res ? res.status : "?"}`);
-    err.status = res ? res.status : 0;
-    throw err;
+  let timeoutId;
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const signal = controller ? controller.signal : undefined;
+
+  if (controller && timeoutMs && timeoutMs > 0) {
+    timeoutId = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
   }
-  return res.json();
+
+  try {
+    const res = await fetchImpl(url.toString(), { method: "GET", headers, signal });
+    if (!res || !res.ok) {
+      const err = new Error(`Account fetch failed with HTTP ${res ? res.status : "?"}`);
+      err.status = res ? res.status : 0;
+      throw err;
+    }
+    const data = await res.json();
+    return data;
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 /**
@@ -197,11 +231,27 @@ async function fetchAccountUsage({
   refreshToken,
   fetchImpl = fetch,
   now = Date.now,
+  timeoutMs,
 } = {}) {
   const slug = accountSlugFor(usageSlug);
   if (!slug) return null;
 
-  const minted = await mintAccessToken({ baseUrl, anonKey, refreshToken, fetchImpl, now });
+  const startTime = now();
+  const getRemainingTimeout = () => {
+    if (!timeoutMs) return undefined;
+    const elapsed = now() - startTime;
+    const remaining = timeoutMs - elapsed;
+    return remaining > 0 ? remaining : 1;
+  };
+
+  const minted = await mintAccessToken({
+    baseUrl,
+    anonKey,
+    refreshToken,
+    fetchImpl,
+    now,
+    timeoutMs: getRemainingTimeout(),
+  });
   if (!minted) return null;
 
   const data = await fetchAccountFunction({
@@ -211,6 +261,7 @@ async function fetchAccountUsage({
     slug,
     searchParams,
     fetchImpl,
+    timeoutMs: getRemainingTimeout(),
   });
   return { data, rotatedRefreshToken: minted.refreshToken, rotatedCsrfToken: minted.csrfToken };
 }
