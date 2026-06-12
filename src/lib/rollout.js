@@ -7891,18 +7891,31 @@ function grokEventId(value, fallback) {
   return fallback;
 }
 
-async function readGrokUpdateTokenEvents(updatesPath, fallbackTimestamp) {
-  if (!updatesPath) return { events: [], recordsProcessed: 0 };
+async function readGrokUpdateTokenEvents(updatesPath, fallbackTimestamp, prevOffsetEntry) {
+  if (!updatesPath) return { events: [], offsetEntry: null };
+  let stat;
   try {
-    const stat = fssync.statSync(updatesPath);
-    if (!stat.isFile()) return { events: [], recordsProcessed: 0 };
+    stat = fssync.statSync(updatesPath);
+    if (!stat.isFile()) return { events: [], offsetEntry: null };
   } catch {
-    return { events: [], recordsProcessed: 0 };
+    return { events: [], offsetEntry: null };
   }
+
+  // updates.jsonl is append-only and carries cumulative totalTokens, deduped
+  // by the session high-watermark, so resuming from the last consumed byte is
+  // safe: re-read events stay below the watermark (no double count), and any
+  // bytes a write race leaves unparsed are covered by the next event's
+  // cumulative total. Re-read from 0 on truncation or inode change.
+  const prevSize = Number(prevOffsetEntry?.size) || 0;
+  const prevIno = prevOffsetEntry?.ino;
+  const inodeChanged = typeof prevIno === "number" && prevIno !== stat.ino;
+  const startOffset = stat.size < prevSize || inodeChanged ? 0 : prevSize;
+  const offsetEntry = { size: stat.size, mtimeMs: stat.mtimeMs, ino: stat.ino };
+  if (stat.size <= startOffset) return { events: [], offsetEntry };
 
   const events = [];
   let lineIndex = 0;
-  const input = fssync.createReadStream(updatesPath, { encoding: "utf8" });
+  const input = fssync.createReadStream(updatesPath, { encoding: "utf8", start: startOffset });
   const rl = readline.createInterface({ input, crlfDelay: Infinity });
   try {
     for await (const line of rl) {
@@ -7926,10 +7939,12 @@ async function readGrokUpdateTokenEvents(updatesPath, fallbackTimestamp) {
       });
     }
   } catch {
-    return { events, recordsProcessed: events.length };
+    // Stream error mid-read: keep the events we got, but do not advance the
+    // offset so the next sync retries the same range (watermark-safe).
+    return { events, offsetEntry: prevOffsetEntry || null };
   }
 
-  return { events, recordsProcessed: events.length };
+  return { events, offsetEntry };
 }
 
 function estimateGrokTokenDelta(totalTokens, conversationCount, options = {}) {
@@ -7962,6 +7977,13 @@ async function parseGrokBuildIncremental({
   const hourlyState = normalizeHourlyState(cursors?.hourly);
   const grokState = cursors.grok && typeof cursors.grok === "object" ? { ...cursors.grok } : {};
   let sessionSnapshots = normalizeGrokSessionSnapshots(grokState);
+  const prevUpdateOffsets =
+    grokState.updateOffsets && typeof grokState.updateOffsets === "object"
+      ? grokState.updateOffsets
+      : {};
+  // Rebuilt from the sessions seen this scan, so entries for deleted session
+  // dirs are pruned and the cursor stays bounded by the on-disk session count.
+  const updateOffsets = {};
   const touchedBuckets = new Set();
 
   const sessionList = Array.isArray(sessions) && sessions.length > 0
@@ -8013,7 +8035,15 @@ async function parseGrokBuildIncremental({
       return true;
     };
 
-    const updates = await readGrokUpdateTokenEvents(grokUpdatesPathForSession(sess), lastActive);
+    const updatesPath = grokUpdatesPathForSession(sess);
+    const updates = await readGrokUpdateTokenEvents(
+      updatesPath,
+      lastActive,
+      updatesPath ? prevUpdateOffsets[updatesPath] : null,
+    );
+    if (updatesPath && updates.offsetEntry) {
+      updateOffsets[updatesPath] = updates.offsetEntry;
+    }
     for (const event of updates.events) {
       observedTotal = Math.max(observedTotal, event.totalTokens);
       lastEventId = event.eventId || lastEventId;
@@ -8081,6 +8111,7 @@ async function parseGrokBuildIncremental({
     version: GROK_CURSOR_VERSION,
     sessionSnapshots,
     seenSessions: Object.keys(sessionSnapshots),
+    updateOffsets,
     updatedAt: new Date().toISOString()
   };
 
