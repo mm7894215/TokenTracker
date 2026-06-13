@@ -136,9 +136,11 @@ async function issueDeviceTokenForCloud(accessToken: string): Promise<CloudDevic
 async function postLocalUsageSync(options: {
   deviceToken: string;
   insforgeBaseUrl?: string;
+  drain?: boolean;
 }): Promise<{ ok?: boolean; code?: number; stdout?: string; stderr?: string }> {
-  const { deviceToken, insforgeBaseUrl } = options;
-  const body: Record<string, string> = { deviceToken };
+  const { deviceToken, insforgeBaseUrl, drain } = options;
+  const body: Record<string, string | boolean> = { deviceToken };
+  if (drain === true) body.drain = true;
   const bu = insforgeBaseUrl || getInsforgeRemoteUrl();
   if (isRemoteHttpBase(bu)) body.insforgeBaseUrl = bu.trim();
   const authHeaders = await getLocalApiAuthHeaders();
@@ -171,7 +173,10 @@ async function resolveCloudDeviceSession(getAccessToken: () => Promise<string | 
   return issued;
 }
 
-async function syncCloudUsageWithRecovery(getAccessToken: () => Promise<string | null>): Promise<string | null> {
+async function syncCloudUsageWithRecovery(
+  getAccessToken: () => Promise<string | null>,
+  options: { drain?: boolean } = {},
+): Promise<string | null> {
   let accessToken = await getAccessToken();
   if (!accessToken) return null;
 
@@ -182,6 +187,7 @@ async function syncCloudUsageWithRecovery(getAccessToken: () => Promise<string |
     await postLocalUsageSync({
       deviceToken: session.token,
       insforgeBaseUrl: getInsforgeRemoteUrl(),
+      drain: options.drain === true,
     });
     return accessToken;
   } catch (error) {
@@ -194,6 +200,7 @@ async function syncCloudUsageWithRecovery(getAccessToken: () => Promise<string |
     await postLocalUsageSync({
       deviceToken: session.token,
       insforgeBaseUrl: getInsforgeRemoteUrl(),
+      drain: options.drain === true,
     });
     return accessToken;
   }
@@ -214,7 +221,7 @@ export async function runCloudUsageSyncIfDue(getAccessToken: () => Promise<strin
 
 /** 用户打开「同步到云端」后立即尝试一次（忽略节流） */
 export async function runCloudUsageSyncNow(getAccessToken: () => Promise<string | null>): Promise<void> {
-  const accessToken = await syncCloudUsageWithRecovery(getAccessToken);
+  const accessToken = await syncCloudUsageWithRecovery(getAccessToken, { drain: true });
   if (!accessToken) return;
   setLastCloudSyncTs(Date.now());
   await triggerLeaderboardRefresh(accessToken, "cloud-sync-now");

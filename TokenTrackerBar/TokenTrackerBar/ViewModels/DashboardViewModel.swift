@@ -253,7 +253,7 @@ class DashboardViewModel: ObservableObject {
         guard !isSyncing else { return }
         isSyncing = true
         do {
-            _ = try await APIClient.shared.triggerSync()
+            _ = try await APIClient.shared.triggerSync(drain: true)
             await loadAll()
         } catch {
             self.error = error.localizedDescription

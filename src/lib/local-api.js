@@ -10,7 +10,7 @@ const {
   listExcludedSources,
   normalizeUsageScope,
 } = require("./source-metadata");
-const { accountSlugFor, fetchAccountUsage } = require("./cloud-account");
+const { accountSlugFor, fetchAccountUsage, mintAccessToken } = require("./cloud-account");
 const { getOrCreateMachineId, computeStableMachineId } = require("./machine-id");
 
 const SYNC_TIMEOUT_MS = 120_000;
@@ -525,9 +525,11 @@ function readJsonBody(req) {
   });
 }
 
-function runSyncCommand(extraEnv = {}) {
+function runSyncCommand(extraEnv = {}, opts = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [TRACKER_BIN, "sync"], {
+    const args = [TRACKER_BIN, "sync"];
+    if (opts.drain === true) args.push("--drain");
+    const child = spawn(process.execPath, args, {
       env: { ...process.env, ...extraEnv },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -937,6 +939,67 @@ function createLocalApiHandler({ queuePath }) {
       relayCookies.set(csrfRelayCookieName, cookie);
       persistRelayCookies();
     }
+  }
+
+  async function issueDeviceTokenForDrainSync(queuePathForMachineId) {
+    if (!getCloudSyncPref()) return null;
+    const refreshToken = getRefreshTokenForCloud();
+    if (!refreshToken) return null;
+
+    const runtime = resolveRuntimeConfig();
+    const baseUrl = runtime.baseUrl || DEFAULT_BASE_URL;
+    const minted = await mintAccessToken({
+      baseUrl,
+      anonKey: runtime.anonKey,
+      refreshToken,
+      timeoutMs: runtime.httpTimeoutMs,
+    });
+    if (!minted?.accessToken) return null;
+    if (minted.refreshToken) setRelayRefreshToken(minted.refreshToken);
+    if (minted.csrfToken) setRelayCsrfToken(minted.csrfToken);
+
+    const machineId = getOrCreateMachineId(queuePathForMachineId);
+    if (!machineId) return null;
+
+    const root = String(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "");
+    const headers = {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      Authorization: `Bearer ${minted.accessToken}`,
+    };
+    if (runtime.anonKey) headers.apikey = runtime.anonKey;
+
+    let timeoutId;
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    if (controller && runtime.httpTimeoutMs > 0) {
+      timeoutId = setTimeout(() => controller.abort(), runtime.httpTimeoutMs);
+    }
+
+    const dashboardPlatform =
+      process.platform === "darwin" ? "MacIntel" :
+        process.platform === "win32" ? "Win32" :
+          process.platform === "linux" ? "Linux x86_64" :
+            "web";
+
+    const res = await fetch(`${root}/functions/tokentracker-device-token-issue`, {
+      method: "POST",
+      headers,
+      signal: controller ? controller.signal : undefined,
+      body: JSON.stringify({
+        // 必须和 dashboard/src/lib/cloud-sync.ts 使用同一个设备身份。
+        // 旧云端设备按 (platform, device_name) 认领；如果这里发明
+        // local-sync 身份，会多出一个 active device，账户视图会把历史求和两次。
+        device_name: `Token Tracker (dashboard) #${machineId.slice(0, 8)}`,
+        platform: dashboardPlatform,
+        machine_id: machineId,
+      }),
+    }).finally(() => {
+      if (timeoutId) clearTimeout(timeoutId);
+    });
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => null);
+    const token = typeof data?.token === "string" ? data.token.trim() : "";
+    return token || null;
   }
 
   // Returns "served" when the cross-device aggregate was written to `res`, or
@@ -1395,6 +1458,7 @@ function createLocalApiHandler({ queuePath }) {
           body = {};
         }
         const extraEnv = {};
+        const drain = body.drain === true;
         if (typeof body.deviceToken === "string" && body.deviceToken.trim()) {
           extraEnv.TOKENTRACKER_DEVICE_TOKEN = body.deviceToken.trim();
         }
@@ -1406,7 +1470,15 @@ function createLocalApiHandler({ queuePath }) {
           }
           extraEnv.TOKENTRACKER_INSFORGE_BASE_URL = allowedBaseUrl;
         }
-        const result = await runSyncCommand(extraEnv);
+        if (drain && !extraEnv.TOKENTRACKER_DEVICE_TOKEN && getCloudSyncPref() && getRefreshTokenForCloud()) {
+          const issuedToken = await issueDeviceTokenForDrainSync(qp).catch(() => null);
+          if (!issuedToken) {
+            json(res, { ok: false, error: "Unable to issue cloud device token for drain sync" }, 502);
+            return true;
+          }
+          extraEnv.TOKENTRACKER_DEVICE_TOKEN = issuedToken;
+        }
+        const result = await runSyncCommand(extraEnv, { drain });
         try {
           const { resetUsageLimitsCache } = require("./usage-limits");
           resetUsageLimitsCache();

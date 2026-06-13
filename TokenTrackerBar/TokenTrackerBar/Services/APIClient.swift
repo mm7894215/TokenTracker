@@ -82,8 +82,11 @@ actor APIClient {
         try await fetch("/functions/tokentracker-usage-limits")
     }
 
-    func triggerSync() async throws -> SyncResponse {
-        try await post("/functions/tokentracker-local-sync")
+    func triggerSync(drain: Bool = false) async throws -> SyncResponse {
+        try await post(
+            "/functions/tokentracker-local-sync",
+            body: drain ? Data(#"{"drain":true}"#.utf8) : Data("{}".utf8)
+        )
     }
 
     func checkServerHealth() async -> Bool {
@@ -138,7 +141,7 @@ actor APIClient {
 		withTimeZoneQueryItems(items) + [URLQueryItem(name: "account", value: "1")]
 	}
 
-    private func post<T: Decodable>(_ path: String) async throws -> T {
+    private func post<T: Decodable>(_ path: String, body: Data = Data("{}".utf8)) async throws -> T {
         guard let url = URL(string: baseURL + path) else {
             throw APIError.invalidURL
         }
@@ -148,7 +151,7 @@ actor APIClient {
         if path == "/functions/tokentracker-local-sync" {
             request.setValue(try await fetchLocalAuthToken(), forHTTPHeaderField: "x-tokentracker-local-auth")
         }
-        request.httpBody = Data("{}".utf8)
+        request.httpBody = body
         let (data, response) = try await session.data(for: request)
         try validateResponse(response)
         return try decoder.decode(T.self, from: data)

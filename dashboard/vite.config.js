@@ -225,9 +225,11 @@ function readJsonBodyVite(req) {
   });
 }
 
-async function runLocalSyncCommand(extraEnv = {}) {
+async function runLocalSyncCommand(extraEnv = {}, opts = {}) {
   return await new Promise((resolve, reject) => {
-    const child = spawn(process.platform === "win32" ? "npx.cmd" : "npx", ["tokentracker-cli", "sync"], {
+    const args = ["tokentracker-cli", "sync"];
+    if (opts.drain === true) args.push("--drain");
+    const child = spawn(process.platform === "win32" ? "npx.cmd" : "npx", args, {
       cwd: REPO_ROOT,
       env: { ...process.env, ...extraEnv },
       stdio: ["ignore", "pipe", "pipe"],
@@ -448,13 +450,14 @@ async function handleLocalApi(req, res, url) {
         body = {};
       }
       const extraEnv = {};
+      const drain = body.drain === true;
       if (typeof body.deviceToken === "string" && body.deviceToken.trim()) {
         extraEnv.TOKENTRACKER_DEVICE_TOKEN = body.deviceToken.trim();
       }
       if (typeof body.insforgeBaseUrl === "string" && /^https?:\/\//i.test(body.insforgeBaseUrl.trim())) {
         extraEnv.TOKENTRACKER_INSFORGE_BASE_URL = body.insforgeBaseUrl.trim();
       }
-      const result = await runLocalSyncCommand(extraEnv);
+      const result = await runLocalSyncCommand(extraEnv, { drain });
       try {
         const esmRequire = createRequire(import.meta.url);
         const { resetUsageLimitsCache } = esmRequire("../src/lib/usage-limits");
