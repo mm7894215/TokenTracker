@@ -38,6 +38,12 @@ const FIXTURE_LITELLM = {
     cache_read_input_token_cost: 3e-7,
     cache_creation_input_token_cost: 3.75e-6,
   },
+  "claude-opus-4-6": {
+    input_cost_per_token: 5e-6,
+    output_cost_per_token: 2.5e-5,
+    cache_read_input_token_cost: 5e-7,
+    cache_creation_input_token_cost: 6.25e-6,
+  },
   "claude-haiku-4-5-20251001": {
     input_cost_per_token: 1e-6,
     output_cost_per_token: 5e-6,
@@ -312,6 +318,16 @@ test("matcher: Zed model normalization maps display names + ids to pricing keys"
   assert.equal(matcher.normalizeZedModel("openai/gpt-oss-20b"), "openai/gpt-oss-20b");
 });
 
+test("matcher: Claude normalization maps dotted display names to curated keys", () => {
+  assert.equal(matcher.normalizeClaudeModel("Claude Opus 4.8"), "claude-opus-4-8");
+  assert.equal(matcher.normalizeClaudeModel("claude-opus-4.8"), "claude-opus-4-8");
+  assert.equal(matcher.normalizeClaudeModel("claude-opus-4.8-20260601"), "claude-opus-4-8-20260601");
+  assert.equal(matcher.normalizeClaudeModel("opus-4-6"), "claude-opus-4-6");
+  assert.equal(matcher.normalizeClaudeModel("opus-4.6"), "claude-opus-4-6");
+  assert.equal(matcher.normalizeClaudeModel("opus8[1m]"), "opus8-1m");
+  assert.equal(matcher.normalizeClaudeModel("4.6"), "4.6");
+});
+
 test("matcher: Zed normalization only applies to the zed source", () => {
   const litellm = { "claude-opus-4-8": { input: 5, output: 25 } };
   const curated = { exact: {}, alias: {}, fuzzy: [] };
@@ -461,6 +477,58 @@ test("index: getModelPricing resolves claude-fable-5 from CURATED (not yet in Li
     reasoning_output_tokens: 0,
   });
   assert.equal(cost, 10);
+});
+
+test("index: getModelPricing resolves Claude Opus 4.8 aliases from CURATED", async () => {
+  pricing.resetPricingForTests();
+  const cachePath = tmpCachePath();
+  await pricing.ensurePricingLoaded({
+    cachePath,
+    fetchImpl: makeFetchImpl(FIXTURE_LITELLM),
+  });
+
+  const dotted = pricing.getModelPricing("claude-opus-4.8", { source: "claude" });
+  assert.equal(dotted.input, 5);
+  assert.equal(dotted.output, 25);
+  assert.equal(dotted.cache_read, 0.5);
+  assert.equal(dotted.cache_write, 6.25);
+
+  const typo = pricing.getModelPricing("opus8[1m]", { source: "claude" });
+  assert.equal(typo.input, 0);
+  assert.equal(typo.output, 0);
+
+  const dated = pricing.getModelPricing("claude-opus-4.8-20260601", { source: "claude" });
+  assert.equal(dated.input, 5);
+  assert.equal(dated.output, 25);
+
+  const familyOnlyDash = pricing.getModelPricing("opus-4-6", { source: "claude" });
+  assert.equal(familyOnlyDash.input, 5);
+  assert.equal(familyOnlyDash.output, 25);
+
+  const familyOnlyDot = pricing.getModelPricing("opus-4.6", { source: "claude" });
+  assert.equal(familyOnlyDot.input, 5);
+  assert.equal(familyOnlyDot.output, 25);
+
+  const bareVersion = pricing.getModelPricing("4.6", { source: "claude" });
+  assert.equal(bareVersion.input, 0);
+  assert.equal(bareVersion.output, 0);
+
+  // Regression for GitHub #178: the reporter's latest-version row previously
+  // rendered zero because the model id used a dotted minor (`4.8`).
+  const issueRowCost = pricing.computeRowCost({
+    source: "claude",
+    model: "claude-opus-4.8",
+    hour_start: "2026-06-12T00:30:00.000Z",
+    input_tokens: 846_877,
+    cached_input_tokens: 2_750_316,
+    cache_creation_input_tokens: 568_789,
+    output_tokens: 13_169,
+    reasoning_output_tokens: 0,
+    total_tokens: 4_179_151,
+    billable_total_tokens: 4_179_151,
+    conversation_count: 2,
+  });
+  assert.equal(issueRowCost, 9.49369925);
 });
 
 test("index: getModelPricing finds LiteLLM mainstream models with correct unit conversion", async () => {

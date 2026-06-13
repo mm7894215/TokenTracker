@@ -59,6 +59,7 @@
     { "match": "kiro",                   "ref": "kiro-cli-agent" },
     { "match": "hy3",                    "ref": "hy3-preview-agent" },
     { "match": "composer",               "ref": "composer-1" },
+    { "match": "claude-opus-4-8",         "ref": "claude-opus-4-8" },
     { "match": "minimax-m2.7-highspeed", "ref": "MiniMax-M2.7-highspeed" },
     { "match": "minimax-m2.7",           "ref": "MiniMax-M2.7" },
     { "match": "deepseek-v4-flash",      "ref": "deepseek-v4-flash" },

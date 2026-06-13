@@ -79,11 +79,37 @@ function normalizeZedModel(model) {
   return m;
 }
 
+// Claude desktop/CLI sometimes reports display-style names such as
+// `claude-opus-4.8` or `Claude Opus 4.8`, while curated keys use Anthropic's
+// historical dash style (`claude-opus-4-8`).
+function normalizeClaudeModel(model) {
+  if (!model || typeof model !== "string") return model;
+  let m = model
+    .trim()
+    .replace(/\([^)]*\)/g, " ")
+    .toLowerCase()
+    .replace(/[^a-z0-9.]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+
+  if (/^claude-(sonnet|opus|haiku)-\d+\.\d+/.test(m)) {
+    return m.replace(/^(claude-(?:sonnet|opus|haiku)-\d+)\.(\d+)/, "$1-$2");
+  }
+  if (/^(sonnet|opus|haiku)-\d+[.-]\d+/.test(m)) {
+    return m
+      .replace(/^(sonnet|opus|haiku)-/, "claude-$1-")
+      .replace(/^(claude-(?:sonnet|opus|haiku)-\d+)\.(\d+)/, "$1-$2");
+  }
+
+  return m;
+}
+
 // Per-source model-name normalizers, applied at pricing-lookup time only (the
 // raw model name is preserved for storage/display). Add a source here when its
 // model strings don't match the LiteLLM/curated keys verbatim.
 const SOURCE_MODEL_NORMALIZERS = {
   antigravity: normalizeAntigravityModel,
+  claude: normalizeClaudeModel,
   zed: normalizeZedModel,
 };
 
@@ -277,6 +303,7 @@ module.exports = {
   lookupPricing,
   stripReasoningSuffix,
   normalizeAntigravityModel,
+  normalizeClaudeModel,
   normalizeZedModel,
   convertLitellmEntry,
   buildLitellmPerMillionMap,
