@@ -6447,6 +6447,56 @@ test("parseGrokBuildIncremental resumes Grok updates from the stored byte offset
   }
 });
 
+test("parseGrokBuildIncremental re-reads a partial Grok updates line once it completes", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-grok-partial-"));
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    const sessionDir = path.join(tmp, "sessions", "encoded-cwd", "grok-session-partial");
+    await fs.mkdir(sessionDir, { recursive: true });
+    const signalsPath = path.join(sessionDir, "signals.json");
+    const updatesPath = path.join(sessionDir, "updates.jsonl");
+    await fs.writeFile(
+      signalsPath,
+      JSON.stringify({
+        primaryModelId: "grok-build",
+        lastActiveAt: "2026-04-05T14:50:00.000Z",
+      }),
+      "utf8",
+    );
+
+    const fullLine = JSON.stringify({
+      method: "session/update",
+      params: { _meta: { totalTokens: 100, agentTimestampMs: Date.parse("2026-04-05T14:05:00.000Z"), eventId: "evt-1" } },
+    });
+    // Simulate Grok still writing: only the first half of the JSON line, no "\n".
+    const splitAt = Math.floor(fullLine.length / 2);
+    await fs.writeFile(updatesPath, fullLine.slice(0, splitAt), "utf8");
+
+    const session = { sessionDir, updatesPath, signalsPath, summaryPath: path.join(sessionDir, "summary.json"), sessionId: "grok-session-partial" };
+
+    // First scan: partial line is unparseable, so nothing is aggregated AND the
+    // stored offset must NOT advance past the partial tail (regression guard).
+    const firstRun = await parseGrokBuildIncremental({ sessions: [session], cursors, queuePath });
+    assert.equal(firstRun.eventsAggregated, 0);
+    assert.equal(cursors.grok.updateOffsets[updatesPath].size, 0);
+
+    // Grok finishes writing the same line.
+    await fs.writeFile(updatesPath, fullLine + "\n", "utf8");
+
+    // Second scan: the now-complete line is parsed and queued (not skipped).
+    const secondRun = await parseGrokBuildIncremental({ sessions: [session], cursors, queuePath });
+    assert.equal(secondRun.eventsAggregated, 1);
+    assert.equal(cursors.grok.updateOffsets[updatesPath].size, Buffer.byteLength(fullLine + "\n"));
+    assert.equal(cursors.grok.sessionSnapshots["grok-session-partial"].totalTokens, 100);
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].total_tokens, 100);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseGrokBuildIncremental re-reads truncated Grok updates without double counting", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-grok-truncate-"));
   try {

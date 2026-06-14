@@ -7891,6 +7891,27 @@ function grokEventId(value, fallback) {
   return fallback;
 }
 
+function grokFileEndsWithNewline(filePath, size) {
+  if (!(size > 0)) return false;
+  let fd;
+  try {
+    fd = fssync.openSync(filePath, "r");
+    const buf = Buffer.alloc(1);
+    const read = fssync.readSync(fd, buf, 0, 1, size - 1);
+    return read === 1 && buf[0] === 0x0a; // trailing "\n"
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fssync.closeSync(fd);
+      } catch {
+        /* ignore close failure */
+      }
+    }
+  }
+}
+
 async function readGrokUpdateTokenEvents(updatesPath, fallbackTimestamp, prevOffsetEntry) {
   if (!updatesPath) return { events: [], offsetEntry: null };
   let stat;
@@ -7910,16 +7931,30 @@ async function readGrokUpdateTokenEvents(updatesPath, fallbackTimestamp, prevOff
   const prevIno = prevOffsetEntry?.ino;
   const inodeChanged = typeof prevIno === "number" && prevIno !== stat.ino;
   const startOffset = stat.size < prevSize || inodeChanged ? 0 : prevSize;
-  const offsetEntry = { size: stat.size, mtimeMs: stat.mtimeMs, ino: stat.ino };
-  if (stat.size <= startOffset) return { events: [], offsetEntry };
+  const baseOffset = { mtimeMs: stat.mtimeMs, ino: stat.ino };
+  if (stat.size <= startOffset) {
+    return { events: [], offsetEntry: { size: startOffset, ...baseOffset } };
+  }
+
+  // Only advance the stored offset to the end of the last newline-terminated
+  // line. If Grok is mid-write, the final JSONL line has no trailing "\n" yet;
+  // its bytes are left unconsumed so the next scan re-reads the line once it is
+  // complete instead of skipping it forever (which would undercount tokens).
+  const endsWithNewline = grokFileEndsWithNewline(updatesPath, stat.size);
 
   const events = [];
   let lineIndex = 0;
-  const input = fssync.createReadStream(updatesPath, { encoding: "utf8", start: startOffset });
+  let lastLine = "";
+  const input = fssync.createReadStream(updatesPath, {
+    encoding: "utf8",
+    start: startOffset,
+    end: stat.size - 1, // inclusive; bound the read to the stat'd size
+  });
   const rl = readline.createInterface({ input, crlfDelay: Infinity });
   try {
     for await (const line of rl) {
       lineIndex++;
+      lastLine = line;
       if (!line || !line.trim()) continue;
       let record;
       try {
@@ -7944,7 +7979,12 @@ async function readGrokUpdateTokenEvents(updatesPath, fallbackTimestamp, prevOff
     return { events, offsetEntry: prevOffsetEntry || null };
   }
 
-  return { events, offsetEntry };
+  // When the file does not end on a newline, the final emitted line is a
+  // partial tail still being written. Exclude its bytes so the committed offset
+  // stays on a complete-line boundary and the line is re-read once finished.
+  const trailingPartialBytes = endsWithNewline ? 0 : Buffer.byteLength(lastLine, "utf8");
+  const committedSize = Math.max(startOffset, stat.size - trailingPartialBytes);
+  return { events, offsetEntry: { size: committedSize, ...baseOffset } };
 }
 
 function estimateGrokTokenDelta(totalTokens, conversationCount, options = {}) {
