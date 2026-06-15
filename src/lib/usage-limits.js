@@ -1,4 +1,5 @@
 const cp = require("node:child_process");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -22,6 +23,7 @@ const {
   fetchCursorUsageSummary,
 } = require("./cursor-config");
 const { fetchGrokLimits } = require("./grok-limits");
+const { readSqliteJsonRows } = require("./sqlite-reader");
 
 // 2-minute in-memory cache
 let cache = { data: null, fetchedAt: 0 };
@@ -1157,11 +1159,26 @@ function parseKiroUsageOutput(output, { now = new Date() } = {}) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GitHub Copilot — `GET https://api.github.com/copilot_internal/user`
-// Reuses the OAuth token from the user's existing Copilot install
-// (`~/.config/github-copilot/{apps,hosts}.json`). No device flow needed.
+// Reuses the OAuth token from the user's existing Copilot install. Older clients
+// keep it in plaintext (`~/.config/github-copilot/{apps,hosts}.json`); recent
+// copilot-language-server builds (Zed, copilot.vim) migrate it into an encrypted
+// SQLite store (`auth.db`) and leave the plaintext files behind as stale legacy
+// copies. Read the plaintext first, then fall back to the encrypted store. No
+// device flow needed either way.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function readCopilotOauthToken({ home = require("node:os").homedir() } = {}) {
+const MACOS_SECURITY_BIN = "/usr/bin/security";
+// copilot-language-server stores the OAuth token as AES-256-GCM ciphertext in
+// auth.db (`oauth_tokens.token_ciphertext`) and the 32-byte key in the macOS
+// Keychain (service `copilot-language-server`, account `oauth-token-key`,
+// base64-encoded). Ciphertext layout: iv(12) ‖ ciphertext ‖ authTag(16).
+const COPILOT_LS_KEYCHAIN_SERVICE = "copilot-language-server";
+const COPILOT_LS_KEYCHAIN_ACCOUNT = "oauth-token-key";
+const COPILOT_AUTH_DB_SQL =
+  "SELECT user_login, auth_authority, scopes, hex(token_ciphertext) AS token_hex, "
+  + "last_used_at, updated_at FROM oauth_tokens ORDER BY last_used_at DESC, updated_at DESC";
+
+function readPlaintextCopilotOauthToken({ home }) {
   const candidates = [
     path.join(home, ".config", "github-copilot", "apps.json"),
     path.join(home, ".config", "github-copilot", "hosts.json"),
@@ -1190,6 +1207,96 @@ function readCopilotOauthToken({ home = require("node:os").homedir() } = {}) {
     }
   }
   return fallback;
+}
+
+function readMacosKeychainGenericPassword({ service, account, securityRunner } = {}) {
+  const runner = typeof securityRunner === "function" ? securityRunner : cp.spawnSync;
+  if (runner === cp.spawnSync && !fs.existsSync(MACOS_SECURITY_BIN)) return null;
+  const args = ["find-generic-password", "-s", service];
+  if (account) args.push("-a", account);
+  args.push("-w");
+  const result = runner(MACOS_SECURITY_BIN, args, {
+    stdio: ["ignore", "pipe", "ignore"],
+    timeout: 2000,
+    encoding: "utf8",
+  });
+  if (!result || result.error || result.status !== 0) return null;
+  const stdout =
+    typeof result.stdout === "string"
+      ? result.stdout
+      : Buffer.isBuffer(result.stdout)
+        ? result.stdout.toString("utf8")
+        : "";
+  const trimmed = stdout.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function decryptCopilotAuthDbToken(keyBase64, ciphertextHex) {
+  if (typeof keyBase64 !== "string" || typeof ciphertextHex !== "string") return null;
+  let key;
+  let blob;
+  try {
+    key = Buffer.from(keyBase64, "base64");
+    blob = Buffer.from(ciphertextHex, "hex");
+  } catch (_e) {
+    return null;
+  }
+  if (key.length !== 32) return null; // AES-256 key
+  if (blob.length < 12 + 16 + 1) return null; // iv(12) + authTag(16) + >=1 byte token
+  const iv = blob.subarray(0, 12);
+  const authTag = blob.subarray(blob.length - 16);
+  const data = blob.subarray(12, blob.length - 16);
+  try {
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(authTag);
+    const out = Buffer.concat([decipher.update(data), decipher.final()]);
+    const token = out.toString("utf8").trim();
+    return token.length > 0 ? token : null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+function readCopilotAuthDbToken({ home, platform = process.platform, securityRunner, sqliteReader } = {}) {
+  // The decryption key lives in the macOS Keychain. On Linux/Windows the
+  // copilot-language-server uses libsecret / Credential Manager instead, which we
+  // don't read yet — callers fall back to the plaintext path there.
+  if (platform !== "darwin") return null;
+  const resolvedHome = home || os.homedir();
+  const dbPath = path.join(resolvedHome, ".config", "github-copilot", "auth.db");
+  const reader = typeof sqliteReader === "function" ? sqliteReader : readSqliteJsonRows;
+  let rows;
+  try {
+    rows = reader(dbPath, COPILOT_AUTH_DB_SQL, { label: "GitHub Copilot" });
+  } catch (_e) {
+    return null;
+  }
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  // Prefer the public github.com host (mirrors the plaintext reader); rows are
+  // already ordered most-recently-used first.
+  const row =
+    rows.find((r) => String(r?.auth_authority || "").split(":")[0] === "github.com") || rows[0];
+  const ciphertextHex = typeof row?.token_hex === "string" ? row.token_hex : null;
+  if (!ciphertextHex) return null;
+  const keyBase64 = readMacosKeychainGenericPassword({
+    service: COPILOT_LS_KEYCHAIN_SERVICE,
+    account: COPILOT_LS_KEYCHAIN_ACCOUNT,
+    securityRunner,
+  });
+  if (!keyBase64) return null;
+  return decryptCopilotAuthDbToken(keyBase64, ciphertextHex);
+}
+
+function readCopilotOauthToken({
+  home = os.homedir(),
+  platform = process.platform,
+  securityRunner,
+  sqliteReader,
+} = {}) {
+  const plaintext = readPlaintextCopilotOauthToken({ home });
+  if (plaintext) return plaintext;
+  // No plaintext token found — recover the live one from the encrypted auth.db.
+  return readCopilotAuthDbToken({ home, platform, securityRunner, sqliteReader });
 }
 
 function copilotRequestHeaders(token) {
@@ -1232,7 +1339,7 @@ function buildCopilotWindow(snapshot, resetIso) {
 }
 
 function describeCopilotOtelStatus({ home, env = process.env } = {}) {
-  const resolvedHome = home || env.HOME || require("node:os").homedir();
+  const resolvedHome = home || env.HOME || os.homedir();
   const enabled = String(env.COPILOT_OTEL_ENABLED || "").toLowerCase() === "true";
   const exporterType = String(env.COPILOT_OTEL_EXPORTER_TYPE || "").toLowerCase();
   const explicitPath = typeof env.COPILOT_OTEL_FILE_EXPORTER_PATH === "string"
@@ -1255,9 +1362,21 @@ function describeCopilotOtelStatus({ home, env = process.env } = {}) {
   };
 }
 
-async function fetchCopilotLimits({ home, env = process.env, fetchImpl = fetch } = {}) {
+async function fetchCopilotLimits({
+  home,
+  env = process.env,
+  fetchImpl = fetch,
+  platform = process.platform,
+  securityRunner,
+  sqliteReader,
+} = {}) {
   const otel = describeCopilotOtelStatus({ home, env });
-  const token = readCopilotOauthToken({ home: home || (env.HOME || require("node:os").homedir()) });
+  const token = readCopilotOauthToken({
+    home: home || (env.HOME || os.homedir()),
+    platform,
+    securityRunner,
+    sqliteReader,
+  });
   if (!token) return { configured: false, ...otel };
 
   try {
@@ -2072,7 +2191,7 @@ async function fetchUsageLimitsUncached({
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
     fetchKiroLimits({ commandRunner, now }),
     fetchAntigravityLimits({ home, commandRunner, requestFn, nowMs }),
-    withProviderTimeout(fetchCopilotLimits({ home, env, fetchImpl: providerFetch }), "GitHub Copilot", providerTimeoutMs)
+    withProviderTimeout(fetchCopilotLimits({ home, env, fetchImpl: providerFetch, platform, securityRunner }), "GitHub Copilot", providerTimeoutMs)
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
     withProviderTimeout(fetchGrokLimits({ home, env, fetchImpl: providerFetch }), "Grok Build", providerTimeoutMs)
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
@@ -2183,6 +2302,8 @@ module.exports = {
   fetchAntigravityLimits,
   fetchCopilotLimits,
   readCopilotOauthToken,
+  readCopilotAuthDbToken,
+  decryptCopilotAuthDbToken,
   describeCopilotOtelStatus,
   fetchGrokLimits,
 };
