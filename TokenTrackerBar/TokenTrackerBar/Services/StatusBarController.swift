@@ -26,6 +26,7 @@ final class StatusBarController: NSObject {
 
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
+    private var popoverAnchorWindow: NSWindow?
     private let viewModel: DashboardViewModel
     private let serverManager: ServerManager
     private let launchAtLoginManager: LaunchAtLoginManager
@@ -103,6 +104,7 @@ final class StatusBarController: NSObject {
         if popover.isShown {
             popover.performClose(nil)
         }
+        popoverAnchorWindow?.orderOut(nil)
     }
 
     /// React to setting changes pushed by the dashboard SettingsPage via NativeBridge.
@@ -510,7 +512,10 @@ final class StatusBarController: NSObject {
             object: popover,
             queue: .main
         ) { [weak self] _ in
-            self?.updateStatsDisplay()
+            Task { @MainActor [weak self] in
+                self?.popoverAnchorWindow?.orderOut(nil)
+                self?.updateStatsDisplay()
+            }
         }
     }
 
@@ -532,7 +537,8 @@ final class StatusBarController: NSObject {
         if popover.isShown {
             popover.performClose(nil)
         } else {
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            guard let anchorView = positionPopoverAnchorWindow(under: button) else { return }
+            popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .minY)
 
             // Keep keyboard focus inside the popover while it is visible.
             if let window = popover.contentViewController?.view.window {
@@ -543,6 +549,44 @@ final class StatusBarController: NSObject {
             // Refresh data when popover opens
             Task { await viewModel.loadAll() }
         }
+    }
+
+    private func makePopoverAnchorWindow() -> NSWindow {
+        let anchorSize = NSSize(width: 2, height: 1)
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: anchorSize),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = NSView(frame: NSRect(origin: .zero, size: anchorSize))
+        window.backgroundColor = .clear
+        window.alphaValue = 0
+        window.isOpaque = false
+        window.hasShadow = false
+        window.ignoresMouseEvents = true
+        window.level = .statusBar
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle, .stationary]
+        window.isReleasedWhenClosed = false
+        return window
+    }
+
+    private func positionPopoverAnchorWindow(under button: NSStatusBarButton) -> NSView? {
+        guard let buttonWindow = button.window else { return nil }
+        let buttonRectInWindow = button.convert(button.bounds, to: nil)
+        let buttonRectOnScreen = buttonWindow.convertToScreen(buttonRectInWindow)
+        let anchorSize = NSSize(width: 2, height: 1)
+        let anchorFrame = NSRect(
+            x: buttonRectOnScreen.midX - anchorSize.width / 2,
+            y: buttonRectOnScreen.minY,
+            width: anchorSize.width,
+            height: anchorSize.height
+        )
+        let window = popoverAnchorWindow ?? makePopoverAnchorWindow()
+        popoverAnchorWindow = window
+        window.setFrame(anchorFrame, display: false)
+        window.orderFrontRegardless()
+        return window.contentView
     }
 
     // MARK: - Right-Click Menu
