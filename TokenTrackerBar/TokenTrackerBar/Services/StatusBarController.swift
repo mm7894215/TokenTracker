@@ -496,6 +496,11 @@ final class StatusBarController: NSObject {
         let rootView = DashboardView(viewModel: viewModel, serverManager: serverManager)
             .frame(width: 480, height: Self.popoverHeight)
 
+        // macOS 26+: keep the SwiftUI content transparent (see `PopoverSurfaceBackground`) so the
+        // system `NSPopover` chrome's automatic Liquid Glass (`NSGlassEffectView`, verified in the
+        // popover's view tree) shows through. Do NOT mount a glass/material backdrop in the content
+        // layer — HIG reserves Liquid Glass for the control/navigation layer, and a content-layer
+        // fill here only covers the real glass. Older systems keep classic `.regularMaterial`.
         popover.contentViewController = NSHostingController(rootView: rootView)
         popover.behavior = .transient
 

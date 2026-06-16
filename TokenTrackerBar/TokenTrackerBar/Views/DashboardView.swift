@@ -59,7 +59,7 @@ struct DashboardView: View {
             Divider()
             FooterView()
         }
-        .background(.regularMaterial)
+        .modifier(PopoverSurfaceBackground())
         .id(localization.revision)
     }
 
@@ -90,5 +90,19 @@ struct DashboardView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+/// Popover backdrop. On macOS 26+ the content stays transparent so the system
+/// `NSPopover` chrome's automatic Liquid Glass shows through (the popover hosts the
+/// content over `NSGlassEffectView` — see `StatusBarController.setupPopover`). Older
+/// systems keep the classic `.regularMaterial`.
+private struct PopoverSurfaceBackground: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            content
+        } else {
+            content.background(.regularMaterial)
+        }
     }
 }
