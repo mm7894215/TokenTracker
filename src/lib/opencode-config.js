@@ -32,7 +32,10 @@ function buildOpencodePlugin({ notifyPath }) {
     `      if (!event || event.type !== ${JSON.stringify(DEFAULT_EVENT)}) return;\n` +
     `      try {\n` +
     `        if (!notifyPath) return;\n` +
-    `        const proc = $\`/usr/bin/env node ${"${notifyPath}"} --source=opencode\`;\n` +
+    // `node` (not `/usr/bin/env node`): /usr/bin/env does not exist on Windows, so the Bun
+    // shell exec fails and its error leaks into the OpenCode TUI input box (issue #189).
+    // `.quiet()` keeps any subprocess output out of the TUI even on success/warnings.
+    `        const proc = $\`node ${"${notifyPath}"} --source=opencode\`.quiet();\n` +
     `        if (proc && typeof proc.catch === 'function') proc.catch(() => {});\n` +
     `      } catch (_) {}\n` +
     `    }\n` +
