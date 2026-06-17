@@ -46,8 +46,11 @@ OutputBaseFilename=TokenTracker-Setup-v{#MyAppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
-; Close a running tray instance before overwriting its files on upgrade.
+; Close a running tray instance (and its EmbeddedServer\node.exe child, which
+; holds a file lock) before overwriting its files on upgrade. We drive the
+; relaunch ourselves after a silent update, so don't let Restart Manager do it.
 CloseApplications=yes
+RestartApplications=no
 
 ; A language picker appears at setup start (Inno shows it automatically when more
 ; than one language is listed). English ships with Inno; the Chinese message files

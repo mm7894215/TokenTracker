@@ -180,9 +180,10 @@ internal sealed class UpdateChecker
             foreach (var asset in assets.EnumerateArray())
             {
                 var name = asset.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
-                // The release asset is "TokenTracker-Setup.exe" (see installer OutputBaseFilename).
-                if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
-                    && name.Contains("Setup", StringComparison.OrdinalIgnoreCase)
+                // The release uploads a stable, version-less "TokenTracker-Setup.exe"
+                // (release-windows.yml renames the versioned Inno output before upload).
+                // Match it exactly so a future co-released .exe can't be picked instead.
+                if (name.Equals("TokenTracker-Setup.exe", StringComparison.OrdinalIgnoreCase)
                     && asset.TryGetProperty("browser_download_url", out var u))
                 {
                     setupUrl = u.GetString();
