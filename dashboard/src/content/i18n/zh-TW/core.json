@@ -224,7 +224,7 @@
   "settings.account.signedOutHint": "登入後可管理雲同步和排行榜偏好。",
   "settings.section.menubar": "選單欄應用",
   "settings.menubar.showStats": "在選單欄中顯示統計資訊",
-  "settings.menubar.showStatsHint": "在選單欄圖示旁邊顯示今天的Token 數量和成本。",
+  "settings.menubar.showStatsHint": "在選單欄圖示旁邊顯示今天的 Token 數量和成本。",
   "settings.menubar.animatedIcon": "動畫圖示",
   "settings.menubar.animatedIconHint": "閃爍 Clawd 角色並在選單欄中播放同步動畫。",
   "settings.menubar.confettiOnReset": "額度重置時撒花",

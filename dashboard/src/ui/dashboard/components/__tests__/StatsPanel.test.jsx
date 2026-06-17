@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import { setCopyLocale } from "../../../../lib/copy";
 import { StatsPanel } from "../StatsPanel.jsx";
 
 function renderPanel(props = {}) {
@@ -33,4 +34,24 @@ it("uses the same compact conversations label across periods", () => {
   expect(screen.getByText("7")).toBeInTheDocument();
   expect(screen.getByText("convs")).toBeInTheDocument();
   expect(screen.queryByText("today")).not.toBeInTheDocument();
+});
+
+it("localizes compact rolling stats labels", () => {
+  const cases = [
+    ["en", ["7d", "30d", "avg", "convs"]],
+    ["zh-CN", ["7 天", "30 天", "平均", "对话"]],
+    ["zh-TW", ["7 天", "30 天", "平均", "對話"]],
+    ["ja", ["7 日", "30 日", "平均", "会話"]],
+    ["ko", ["7 일", "30 일", "평균", "대화"]],
+  ];
+
+  for (const [locale, labels] of cases) {
+    setCopyLocale(locale);
+    const view = renderPanel({ periodConversations: 42 });
+    for (const label of labels) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+    view.unmount();
+  }
+  setCopyLocale("en");
 });

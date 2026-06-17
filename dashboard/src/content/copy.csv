@@ -404,6 +404,9 @@ auth.callback.success,ui,*,NativeAuthCallbackPage,success,"Signed in successfull
 auth.callback.redirecting,ui,*,NativeAuthCallbackPage,redirecting,"Returning to TokenTracker…",,active
 auth.callback.failed,ui,*,NativeAuthCallbackPage,failed,"Sign-in incomplete. Please try again.",,active
 auth.callback.close,ui,*,NativeAuthCallbackPage,close,"Close this page",,active
+stats.period.last_7d,ui,DashboardPage,StatsPanel,period_last_7d,"7d",,active
+stats.period.last_30d,ui,DashboardPage,StatsPanel,period_last_30d,"30d",,active
+stats.period.avg,ui,DashboardPage,StatsPanel,period_avg,"avg",,active
 stats.period.convs,ui,DashboardPage,StatsPanel,period_convs,"convs",,active
 leaderboard.column.est_cost,ui,LeaderboardPage,LeaderboardPage,column_est_cost,"Est. Cost",,active
 leaderboard.signin_prompt,ui,LeaderboardPage,LeaderboardPage,signin_prompt,"Sign in to join the leaderboard",,active
