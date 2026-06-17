@@ -33,6 +33,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem _petSizeMedium;
     private readonly ToolStripMenuItem _petSizeLarge;
     private readonly ToolStripMenuItem _startupItem;
+    private readonly ToolStripMenuItem _checkUpdatesItem;
 
     // Right-click-the-pet context menu (separate ToolStrip items — an item can't
     // live in two menus at once).
@@ -55,6 +56,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
         TrayMenuRenderer.PaletteFor(NativeTheme.ResolveIsLight(NativeTheme.CurrentPreference));
     private Font? _menuFont;
     private Font? _summaryFont;
+
+    private readonly UpdateChecker _updateChecker = new();
+    private UpdateStrings _updateStrings = UpdateStrings.For(NativeLocalization.CurrentResolvedLocale);
+    private bool _updateBalloonShown;
 
     // Lightweight UI-thread tick so the tooltip follows a currency change within a
     // couple of seconds without needing a right-click. Cheap: it only touches the
@@ -116,6 +121,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _startupItem = CreateMenuItem("", OnToggleStartup);
         _startupItem.Checked = LaunchAtStartup.IsEnabled;
         _startupItem.CheckOnClick = false;
+        _checkUpdatesItem = CreateMenuItem("", (_, _) => OnCheckUpdatesClicked());
         _starItem = CreateMenuItem("", (_, _) => OpenInBrowser(Constants.GitHubUrl));
         _quitItem = CreateMenuItem("", (_, _) => Quit());
 
@@ -138,6 +144,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _menu.Items.Add(_petSizeItem);
         _menu.Items.Add(CreateSeparator());
         _menu.Items.Add(_startupItem);
+        _menu.Items.Add(_checkUpdatesItem);
         _menu.Items.Add(_starItem);
         _menu.Items.Add(CreateSeparator());
         _menu.Items.Add(_quitItem);
@@ -177,6 +184,13 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _syncTimer.Tick += (_, _) => TriggerBackgroundSync();
         _refreshTimer.Start();
         _ = _server.EnsureServerRunningAsync();
+
+        // Click-to-update: keep the menu item in sync with the checker, quit when it's
+        // ready to hand off to the installer, and run one quiet check on launch (the
+        // checker self-skips dev builds and only surfaces availability — never auto-installs).
+        _updateChecker.Changed += () => PostToUi(RefreshUpdateMenuItem);
+        _updateChecker.QuitRequested += () => PostToUi(Quit);
+        _ = _updateChecker.CheckAsync(silent: true);
 
         // The desktop pet is the app's visible presence now — the dashboard no longer
         // auto-opens. Show the pet on a normal launch, or whenever it was open last exit.
@@ -244,6 +258,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private void ApplyLocaleToMenu()
     {
         _strings = TrayStrings.For(NativeLocalization.ResolveLocale(_localePreference));
+        _updateStrings = UpdateStrings.For(NativeLocalization.ResolveLocale(_localePreference));
 
         _menuFont?.Dispose();
         _summaryFont?.Dispose();
@@ -273,6 +288,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _startupItem.Text = _strings.LaunchAtLogin;
         _starItem.Text = _strings.StarOnGitHub;
         _quitItem.Text = _strings.Quit;
+        RefreshUpdateMenuItem();
 
         ApplyThemeToMenu();
 
@@ -497,6 +513,89 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         LaunchAtStartup.Toggle();
         _startupItem.Checked = LaunchAtStartup.IsEnabled;
+    }
+
+    /// <summary>
+    /// Tray "Check for Updates" / "Update to vX". When a prior (silent) check already
+    /// found a version, the item IS the update action — go straight to download+install.
+    /// Otherwise run a manual check and report the outcome via a dialog.
+    /// </summary>
+    private void OnCheckUpdatesClicked()
+    {
+        switch (_updateChecker.State)
+        {
+            case UpdateChecker.UpdateState.UpdateAvailable:
+                _ = _updateChecker.DownloadAndInstallAsync();
+                break;
+            case UpdateChecker.UpdateState.Idle:
+                _ = RunManualCheckAsync();
+                break;
+            // Checking / Downloading / Installing: already busy — ignore the click.
+        }
+    }
+
+    private async Task RunManualCheckAsync()
+    {
+        var outcome = await _updateChecker.CheckAsync(silent: false);
+        switch (outcome)
+        {
+            case UpdateChecker.CheckOutcome.UpdateAvailable:
+                var confirm = MessageBox.Show(
+                    string.Format(_updateStrings.UpdateFoundPrompt, _updateChecker.LatestVersion, _updateChecker.CurrentVersion),
+                    _updateStrings.UpdateFoundTitle,
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+                if (confirm == DialogResult.Yes) _ = _updateChecker.DownloadAndInstallAsync();
+                break;
+            case UpdateChecker.CheckOutcome.UpToDate:
+                MessageBox.Show(
+                    string.Format(_updateStrings.UpToDateMessage, _updateChecker.CurrentVersion),
+                    _updateStrings.UpToDateTitle,
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                break;
+            case UpdateChecker.CheckOutcome.Failed:
+                MessageBox.Show(
+                    _updateStrings.ErrorMessage, _updateStrings.ErrorTitle,
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                break;
+            // Skipped: nothing to report.
+        }
+    }
+
+    /// <summary>Reflect the checker's state in the menu item label + enabled state, and
+    /// fire a one-time balloon when a background check surfaces a new version.</summary>
+    private void RefreshUpdateMenuItem()
+    {
+        switch (_updateChecker.State)
+        {
+            case UpdateChecker.UpdateState.Checking:
+                _checkUpdatesItem.Text = _updateStrings.Checking;
+                _checkUpdatesItem.Enabled = false;
+                break;
+            case UpdateChecker.UpdateState.UpdateAvailable:
+                _checkUpdatesItem.Text = string.Format(_updateStrings.UpdateNow, _updateChecker.LatestVersion);
+                _checkUpdatesItem.Enabled = true;
+                if (!_updateBalloonShown)
+                {
+                    _updateBalloonShown = true;
+                    _trayIcon.ShowBalloonTip(5000, Constants.AppDisplayName,
+                        string.Format(_updateStrings.NewVersionBalloon, _updateChecker.LatestVersion),
+                        ToolTipIcon.Info);
+                }
+                break;
+            case UpdateChecker.UpdateState.Downloading:
+                _checkUpdatesItem.Text = string.Format(_updateStrings.Downloading, _updateChecker.ProgressPercent);
+                _checkUpdatesItem.Enabled = false;
+                break;
+            case UpdateChecker.UpdateState.Installing:
+                _checkUpdatesItem.Text = _updateStrings.Installing;
+                _checkUpdatesItem.Enabled = false;
+                break;
+            default: // Idle
+                _checkUpdatesItem.Text = _updateStrings.CheckForUpdates;
+                _checkUpdatesItem.Enabled = true;
+                break;
+        }
+        _checkUpdatesItem.ForeColor = _checkUpdatesItem.Enabled ? _menuPalette.Text : _menuPalette.DisabledText;
     }
 
     private void OnServerStatusChanged(ServerManager.ServerStatus status)
