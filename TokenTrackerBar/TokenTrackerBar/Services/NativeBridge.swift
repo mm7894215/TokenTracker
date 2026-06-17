@@ -43,6 +43,11 @@ final class NativeBridge {
             .sink { [weak self] _ in self?.pushSettings() }
             .store(in: &cancellables)
 
+        NotificationCenter.default.publisher(for: .updateCheckerStatusDidChange)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.pushSettings() }
+            .store(in: &cancellables)
+
         // Mirror local limits preference changes (e.g. toggled in the
         // menu-bar popover) so the embedded dashboard reflects them without a
         // page reload.

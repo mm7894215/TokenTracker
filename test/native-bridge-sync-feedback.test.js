@@ -27,6 +27,26 @@ test("NativeBridge pushes settings when sync state changes", () => {
   );
 });
 
+test("NativeBridge pushes settings when update checker status changes", () => {
+  const source = fs.readFileSync(nativeBridgePath, "utf8");
+
+  assert.match(
+    source,
+    /"updateStatus":\s*UpdateChecker\.shared\.statusText\s*\?\?\s*NSNull\(\)/,
+    "settings payload should expose the current update checker status text",
+  );
+  assert.match(
+    source,
+    /"updateBusy":\s*UpdateChecker\.shared\.isBusy/,
+    "settings payload should expose whether the update checker is busy",
+  );
+  assert.match(
+    source,
+    /NotificationCenter\.default\.publisher\(for:\s*\.updateCheckerStatusDidChange\)[\s\S]*?\.sink\s*\{\s*\[weak self\]\s*_\s*in\s*self\?\.pushSettings\(\)\s*\}/,
+    "update checker status changes should be pushed to the dashboard settings UI",
+  );
+});
+
 test("NativeBridge settings fingerprint tracks available menu items", () => {
   const source = fs.readFileSync(nativeBridgePath, "utf8");
 

@@ -475,6 +475,7 @@ final class UpdateChecker {
     /// 更新提示必须压过菜单栏 Popover（NSPanel）；仅用 sheet 仍可能被 Popover 挡住，故统一 `runModal` 并把模态窗提到高层级。
     /// 注意：不要在这里 order front 仪表盘窗口——靠下方的 level bump 已足够置顶，强开仪表盘会打扰用户。
     private func presentAlert(_ alert: NSAlert, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+        let previousActivationPolicy = NSApp.activationPolicy()
         NSApp.setActivationPolicy(.regular)
         StatusBarController.prepareForSystemAlert()
         NSApp.activate(ignoringOtherApps: true)
@@ -499,7 +500,7 @@ final class UpdateChecker {
 
         let response = alert.runModal()
         bumpTimer?.invalidate()
-        NSApp.setActivationPolicy(.accessory)
+        NSApp.setActivationPolicy(previousActivationPolicy)
         completion(response)
     }
 
