@@ -46,7 +46,7 @@
   },
   "devDependencies": {
     "@sourcegraph/scip-typescript": "^0.4.0",
-    "esbuild": "0.28.0"
+    "esbuild": "0.28.1"
   },
   "repository": {
     "type": "git",
