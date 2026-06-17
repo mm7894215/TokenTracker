@@ -512,11 +512,13 @@ final class StatusBarController: NSObject {
             object: popover,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.popoverAnchorWindow?.orderOut(nil)
-                self?.updateStatsDisplay()
-            }
+            MainActor.assumeIsolated { self?.handlePopoverDidClose() }
         }
+    }
+
+    private func handlePopoverDidClose() {
+        popoverAnchorWindow?.orderOut(nil)
+        updateStatsDisplay()
     }
 
     // MARK: - Click Handling
@@ -535,20 +537,21 @@ final class StatusBarController: NSObject {
         guard let button = statusItem.button else { return }
 
         if popover.isShown {
-            popover.performClose(nil)
-        } else {
-            guard let anchorView = positionPopoverAnchorWindow(under: button) else { return }
-            popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .minY)
-
-            // Keep keyboard focus inside the popover while it is visible.
-            if let window = popover.contentViewController?.view.window {
-                NSApp.activate(ignoringOtherApps: true)
-                window.makeKey()
-            }
-
-            // Refresh data when popover opens
-            Task { await viewModel.loadAll() }
+            closePopoverIfShown()
+            return
         }
+
+        guard let anchorView = positionPopoverAnchorWindow(under: button) else { return }
+        popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .minY)
+
+        // Keep keyboard focus inside the popover while it is visible.
+        if let window = popover.contentViewController?.view.window {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKey()
+        }
+
+        // Refresh data when popover opens
+        Task { await viewModel.loadAll() }
     }
 
     private func makePopoverAnchorWindow() -> NSWindow {

@@ -18,6 +18,9 @@ function readStatusBarController() {
 
 test("menu-bar popover is anchored to an app-owned positioning window", () => {
   const source = readStatusBarController();
+  const didCloseStart = source.indexOf("forName: NSPopover.didCloseNotification");
+  const didCloseEnd = source.indexOf("// MARK: - Click Handling");
+  const didCloseObserver = source.slice(didCloseStart, didCloseEnd);
 
   assert.match(
     source,
@@ -46,7 +49,22 @@ test("menu-bar popover is anchored to an app-owned positioning window", () => {
   );
   assert.match(
     source,
-    /forName:\s*NSPopover\.didCloseNotification[\s\S]*object:\s*popover[\s\S]*\)\s*\{\s*\[weak self\]\s+_\s+in[\s\S]*Task\s*\{\s*@MainActor\s*\[weak self\]\s+in[\s\S]*self\?\.popoverAnchorWindow\?\.orderOut\(nil\)[\s\S]*self\?\.updateStatsDisplay\(\)/,
-    "The popover did-close observer should hide the app-owned anchor window before refreshing status display.",
+    /if\s+popover\.isShown\s*\{\s*closePopoverIfShown\(\)\s*return\s*\}/,
+    "Left-click toggling should use the same synchronous close cleanup path as other close triggers.",
+  );
+  assert.match(
+    didCloseObserver,
+    /queue:\s*\.main/,
+    "The did-close cleanup uses MainActor.assumeIsolated, so the observer must run on the main queue.",
+  );
+  assert.match(
+    source,
+    /forName:\s*NSPopover\.didCloseNotification[\s\S]*object:\s*popover[\s\S]*\)\s*\{\s*\[weak self\]\s+_\s+in\s*MainActor\.assumeIsolated\s*\{\s*self\?\.handlePopoverDidClose\(\)\s*\}/,
+    "The popover did-close observer should clean up synchronously on the main actor before the next open can reuse the anchor window.",
+  );
+  assert.doesNotMatch(
+    didCloseObserver,
+    /Task\s*\{\s*@MainActor/,
+    "The did-close cleanup must not be deferred through an unstructured MainActor task.",
   );
 });
