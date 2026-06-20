@@ -17,21 +17,33 @@ function warnSettingsAction(label, error) {
 
 function useCloudSyncControl(getAccessToken, enabled, signedIn) {
   const [cloudSyncOn, setCloudSyncOn] = useState(() => getCloudSyncEnabled());
+  const [cloudSyncBusy, setCloudSyncBusy] = useState(false);
   const showLocalCloudSync = enabled && signedIn && isLocalDashboardHost();
 
   const handleCloudSyncToggle = useCallback(async () => {
+    if (cloudSyncBusy) return;
     const next = !cloudSyncOn;
-    setCloudSyncEnabled(next);
-    setCloudSyncOn(next);
-    if (!next) return;
+    if (!next) {
+      setCloudSyncEnabled(false);
+      setCloudSyncOn(false);
+      return;
+    }
+
+    setCloudSyncBusy(true);
     try {
       await runCloudUsageSyncNow(() => getAccessToken());
+      setCloudSyncEnabled(true);
+      setCloudSyncOn(true);
     } catch (error) {
+      setCloudSyncEnabled(false);
+      setCloudSyncOn(false);
       warnSettingsAction("cloud sync", error);
+    } finally {
+      setCloudSyncBusy(false);
     }
-  }, [cloudSyncOn, getAccessToken]);
+  }, [cloudSyncBusy, cloudSyncOn, getAccessToken]);
 
-  return { cloudSyncOn, handleCloudSyncToggle, showLocalCloudSync };
+  return { cloudSyncOn, cloudSyncBusy, handleCloudSyncToggle, showLocalCloudSync };
 }
 
 function useProfileState(user) {

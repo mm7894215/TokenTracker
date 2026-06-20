@@ -11,6 +11,7 @@ import {
   normalizeAccessToken,
   resolveAuthAccessToken,
 } from "../lib/auth-token";
+import { runCloudUsageSyncNow } from "../lib/cloud-sync";
 import { copy } from "../lib/copy";
 import { useLocale } from "../hooks/useLocale.js";
 import { useCurrency } from "../hooks/useCurrency.js";
@@ -814,7 +815,9 @@ export function DashboardPage({
   const handleUsageRefresh = useCallback(async () => {
     setManualSyncLoading(true);
     try {
-      if (isLocalMode) {
+      if (accountView && effectiveAuthToken) {
+        await runCloudUsageSyncNow(() => resolveAuthAccessToken(effectiveAuthToken));
+      } else if (isLocalMode) {
         await triggerLocalSync();
       }
       await refreshAll();
@@ -823,7 +826,7 @@ export function DashboardPage({
     } finally {
       setManualSyncLoading(false);
     }
-  }, [isLocalMode, refreshAll]);
+  }, [accountView, effectiveAuthToken, isLocalMode, refreshAll]);
 
   const usageLoadingState =
     manualSyncLoading ||

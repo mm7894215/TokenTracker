@@ -1071,6 +1071,7 @@ async function cmdSync(argv) {
 
     let uploadResult = { inserted: 0, skipped: 0 };
     let uploadAttempted = false;
+    let uploadError = null;
 
     if (runtime.deviceToken && runtime.baseUrl) {
       uploadAttempted = true;
@@ -1089,8 +1090,8 @@ async function cmdSync(argv) {
           deviceToken: runtime.deviceToken,
           queuePath,
           queueStatePath,
-          maxBatches: opts.drain ? 100 : 5,
-          batchSize: 200,
+          maxBatches: opts.drain ? Number.MAX_SAFE_INTEGER : 5,
+          batchSize: opts.drain ? MAX_INGEST_BUCKETS : 200,
         });
         // Record success so the exponential backoff step resets — otherwise
         // a single past failure keeps us pessimistically throttled forever.
@@ -1104,6 +1105,7 @@ async function cmdSync(argv) {
         // of retrying immediately and making the rate-limit worse. The
         // throttle module already parses Retry-After when we surface it on
         // the error object (drainQueueToCloud stamps err.status + err.retryAfterMs).
+        uploadError = e;
         uploadThrottleState = recordUploadFailure({
           nowMs: Date.now(),
           state: uploadThrottleState,
@@ -1118,11 +1120,20 @@ async function cmdSync(argv) {
 
     const afterState = (await readJson(queueStatePath)) || { offset: 0 };
     const queueSize = await safeStatSize(queuePath);
+    const mainPendingBytes = Math.max(0, queueSize - Number(afterState.offset || 0));
     const projectAfterState = (await readJson(projectQueueStatePath)) || { offset: 0 };
     const projectQueueSize = await safeStatSize(projectQueuePath);
     const pendingBytes =
-      Math.max(0, queueSize - Number(afterState.offset || 0)) +
+      mainPendingBytes +
       Math.max(0, projectQueueSize - Number(projectAfterState.offset || 0));
+
+    let drainIncomplete = false;
+    if (opts.drain && uploadAttempted && !uploadError && mainPendingBytes > 0) {
+      drainIncomplete = true;
+      process.stderr.write(
+        `Upload incomplete: ${formatBytes(mainPendingBytes)} still pending after drain.\n`,
+      );
+    }
 
     if (pendingBytes <= 0) {
       await clearAutoRetry(trackerDir);
@@ -1207,6 +1218,15 @@ async function cmdSync(argv) {
           .filter(Boolean)
           .join("\n"),
       );
+    }
+
+    // `--drain` is used by dashboard cloud-sync actions as a correctness
+    // barrier before switching to account-wide cloud reads. If upload failed or
+    // did not actually drain the main queue, surface that as a non-zero exit so
+    // /functions/tokentracker-local-sync returns an error instead of letting
+    // the UI render stale cloud totals.
+    if (opts.drain && uploadAttempted && (uploadError || drainIncomplete)) {
+      process.exitCode = 1;
     }
   } finally {
     progress?.stop();

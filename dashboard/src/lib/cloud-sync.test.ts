@@ -96,4 +96,34 @@ describe("cloud usage sync", () => {
       insforgeBaseUrl: "https://cloud.example",
     });
   });
+
+  it("throws for manual sync without an access token", async () => {
+    const fetchMock = installFetchMock();
+
+    await expect(runCloudUsageSyncNow(async () => null)).rejects.toThrow(/signed-in session/);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps scheduled sync best-effort without an access token", async () => {
+    const fetchMock = installFetchMock();
+
+    await runCloudUsageSyncIfDue(async () => null);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("throws for manual sync when device session cannot be prepared", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/functions/tokentracker-machine-id") {
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(runCloudUsageSyncNow(async () => "access-token")).rejects.toThrow(/prepare this device/);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

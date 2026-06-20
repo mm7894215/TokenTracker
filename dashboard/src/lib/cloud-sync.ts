@@ -12,6 +12,11 @@ import { getLocalApiAuthHeaders } from "./local-api-auth";
 const MIN_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const DEVICE_TOKEN_ROTATE_AFTER_MS = 12 * 60 * 60 * 1000;
 
+type CloudUsageSyncOptions = {
+  drain?: boolean;
+  requireSync?: boolean;
+};
+
 function isRemoteHttpBase(baseUrl: string): boolean {
   return typeof baseUrl === "string" && /^https?:\/\//i.test(baseUrl.trim());
 }
@@ -175,13 +180,23 @@ async function resolveCloudDeviceSession(getAccessToken: () => Promise<string | 
 
 async function syncCloudUsageWithRecovery(
   getAccessToken: () => Promise<string | null>,
-  options: { drain?: boolean } = {},
+  options: CloudUsageSyncOptions = {},
 ): Promise<string | null> {
   let accessToken = await getAccessToken();
-  if (!accessToken) return null;
+  if (!accessToken) {
+    if (options.requireSync === true) {
+      throw new Error("Cloud sync requires a signed-in session.");
+    }
+    return null;
+  }
 
   let session = await resolveCloudDeviceSession(async () => accessToken);
-  if (!session) return accessToken;
+  if (!session) {
+    if (options.requireSync === true) {
+      throw new Error("Unable to prepare this device for cloud sync.");
+    }
+    return accessToken;
+  }
 
   try {
     await postLocalUsageSync({
@@ -221,7 +236,10 @@ export async function runCloudUsageSyncIfDue(getAccessToken: () => Promise<strin
 
 /** 用户打开「同步到云端」后立即尝试一次（忽略节流） */
 export async function runCloudUsageSyncNow(getAccessToken: () => Promise<string | null>): Promise<void> {
-  const accessToken = await syncCloudUsageWithRecovery(getAccessToken, { drain: true });
+  const accessToken = await syncCloudUsageWithRecovery(getAccessToken, {
+    drain: true,
+    requireSync: true,
+  });
   if (!accessToken) return;
   setLastCloudSyncTs(Date.now());
   await triggerLeaderboardRefresh(accessToken, "cloud-sync-now");

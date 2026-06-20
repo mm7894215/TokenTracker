@@ -91,6 +91,7 @@ function CloudSyncRow({ settings }) {
         <ToggleSwitch
           checked={settings.cloudSyncOn}
           onChange={settings.handleCloudSyncToggle}
+          disabled={settings.cloudSyncBusy}
           ariaLabel={copy("settings.account.cloudSync")}
         />
       }

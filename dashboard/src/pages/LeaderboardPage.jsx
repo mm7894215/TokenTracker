@@ -513,13 +513,15 @@ export function LeaderboardPage({
   const handleEnableSync = async () => {
     setSyncing(true);
     try {
+      await runCloudUsageSyncNow(() => resolveAuthAccessTokenWithRetry(effectiveAuthToken));
       setCloudSyncEnabled(true);
       setCloudSyncOn(true);
-      await runCloudUsageSyncNow(() => resolveAuthAccessTokenWithRetry(effectiveAuthToken));
       const token = await resolveAuthAccessTokenWithRetry(effectiveAuthToken);
       if (token) await refreshLeaderboard({ accessToken: token, period, source: "leaderboard-enable-sync" });
       setListReloadToken((v) => v + 1);
     } catch (e) {
+      setCloudSyncEnabled(false);
+      setCloudSyncOn(false);
       console.warn("[tokentracker] sync:", e);
     } finally {
       setSyncing(false);
