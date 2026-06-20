@@ -17,6 +17,22 @@ test("resolveRuntimeConfig prefers CLI flags over config and env", () => {
   assert.equal(result.sources.deviceToken, "config");
 });
 
+test("resolveRuntimeConfig can let env override config for sync subprocesses", () => {
+  const result = resolveRuntimeConfig({
+    config: { baseUrl: "https://config.example", deviceToken: "cfg" },
+    env: {
+      TOKENTRACKER_INSFORGE_BASE_URL: "https://env.example",
+      TOKENTRACKER_DEVICE_TOKEN: "env",
+    },
+    envOverridesConfig: true,
+  });
+
+  assert.equal(result.baseUrl, "https://env.example");
+  assert.equal(result.deviceToken, "env");
+  assert.equal(result.sources.baseUrl, "env");
+  assert.equal(result.sources.deviceToken, "env");
+});
+
 test("resolveRuntimeConfig ignores non-TOKENTRACKER env inputs", () => {
   const result = resolveRuntimeConfig({
     env: {

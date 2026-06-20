@@ -38,15 +38,20 @@ test("sync --drain exits non-zero when cloud upload fails", async () => {
 
   const trackerDir = path.join(tmp, ".tokentracker", "tracker");
   await fsp.mkdir(trackerDir, { recursive: true });
-  await fsp.writeFile(path.join(trackerDir, "config.json"), JSON.stringify({}), "utf8");
+  await fsp.writeFile(
+    path.join(trackerDir, "config.json"),
+    JSON.stringify({ baseUrl: "https://example.invalid", deviceToken: "stale-config-token" }),
+    "utf8",
+  );
   await fsp.writeFile(path.join(trackerDir, "cursors.json"), JSON.stringify({ version: 1, files: {} }), "utf8");
   await fsp.writeFile(path.join(trackerDir, "queue.state.json"), JSON.stringify({ offset: 0 }), "utf8");
   await fsp.writeFile(path.join(trackerDir, "queue.jsonl"), [JSON.stringify(SAMPLE_ROW), ""].join(os.EOL), "utf8");
 
   let fetchCalls = 0;
-  global.fetch = async (url) => {
+  global.fetch = async (url, init) => {
     fetchCalls += 1;
     assert.equal(String(url), "https://cloud.example/functions/tokentracker-ingest");
+    assert.equal(init?.headers?.Authorization, "Bearer device-token");
     return new Response("upstream unavailable", { status: 500 });
   };
 
