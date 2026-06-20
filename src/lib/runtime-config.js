@@ -10,76 +10,50 @@ const DEFAULT_HTTP_TIMEOUT_MS = 20_000;
 const DEFAULT_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3OC0xMjM0LTU2NzgtOTBhYi1jZGVmMTIzNDU2NzgiLCJlbWFpbCI6ImFub25AaW5zZm9yZ2UuY29tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExNDU5NDd9.T0auta_IrVIh0uXW1bob5QSnzvsnJmN28r5XkSGEuQY";
 
-function resolveRuntimeConfig({
-  cli = {},
-  config = {},
-  env = process.env,
-  defaults = {},
-  envOverridesConfig = false,
-} = {}) {
-  const baseUrl = pickRuntimeValue({
-    cliValue: cli.baseUrl,
-    configValue: config.baseUrl,
-    envValue: env?.TOKENTRACKER_INSFORGE_BASE_URL,
-    defaultValue: defaults.baseUrl,
-    hardDefaultValue: DEFAULT_BASE_URL,
-    normalize: normalizeString,
-    envOverridesConfig,
-  });
-  const anonKey = pickRuntimeValue({
-    cliValue: cli.anonKey,
-    configValue: config.anonKey,
-    envValue: env?.TOKENTRACKER_INSFORGE_ANON_KEY,
-    defaultValue: defaults.anonKey,
-    hardDefaultValue: DEFAULT_ANON_KEY,
-    normalize: normalizeString,
-    envOverridesConfig,
-  });
-  const dashboardUrl = pickRuntimeValue({
-    cliValue: cli.dashboardUrl,
-    configValue: config.dashboardUrl,
-    envValue: env?.TOKENTRACKER_DASHBOARD_URL,
-    defaultValue: defaults.dashboardUrl,
-    hardDefaultValue: DEFAULT_DASHBOARD_URL,
-    normalize: normalizeString,
-    envOverridesConfig,
-  });
-  const deviceToken = pickRuntimeValue({
-    cliValue: cli.deviceToken,
-    configValue: config.deviceToken,
-    envValue: env?.TOKENTRACKER_DEVICE_TOKEN,
-    defaultValue: defaults.deviceToken,
-    hardDefaultValue: null,
-    normalize: normalizeString,
-    envOverridesConfig,
-  });
-  const httpTimeoutMs = pickRuntimeValue({
-    cliValue: cli.httpTimeoutMs,
-    configValue: config.httpTimeoutMs,
-    envValue: env?.TOKENTRACKER_HTTP_TIMEOUT_MS,
-    defaultValue: defaults.httpTimeoutMs,
-    hardDefaultValue: DEFAULT_HTTP_TIMEOUT_MS,
-    normalize: normalizeHttpTimeoutMs,
-    envOverridesConfig,
-  });
-  const debug = pickRuntimeValue({
-    cliValue: cli.debug,
-    configValue: config.debug,
-    envValue: env?.TOKENTRACKER_DEBUG,
-    defaultValue: defaults.debug,
-    hardDefaultValue: false,
-    normalize: normalizeBoolean,
-    envOverridesConfig,
-  });
-  const autoRetryNoSpawn = pickRuntimeValue({
-    cliValue: cli.autoRetryNoSpawn,
-    configValue: config.autoRetryNoSpawn,
-    envValue: env?.TOKENTRACKER_AUTO_RETRY_NO_SPAWN,
-    defaultValue: defaults.autoRetryNoSpawn,
-    hardDefaultValue: false,
-    normalize: normalizeBoolean,
-    envOverridesConfig,
-  });
+function resolveRuntimeConfig({ cli = {}, config = {}, env = process.env, defaults = {} } = {}) {
+  const baseUrl = pickString(
+    cli.baseUrl,
+    config.baseUrl,
+    env?.TOKENTRACKER_INSFORGE_BASE_URL,
+    defaults.baseUrl,
+    DEFAULT_BASE_URL,
+  );
+  const anonKey = pickString(
+    cli.anonKey,
+    config.anonKey,
+    env?.TOKENTRACKER_INSFORGE_ANON_KEY,
+    defaults.anonKey,
+    DEFAULT_ANON_KEY,
+  );
+  const dashboardUrl = pickString(
+    cli.dashboardUrl,
+    config.dashboardUrl,
+    env?.TOKENTRACKER_DASHBOARD_URL,
+    defaults.dashboardUrl,
+    DEFAULT_DASHBOARD_URL,
+  );
+  const deviceToken = pickString(
+    cli.deviceToken,
+    config.deviceToken,
+    env?.TOKENTRACKER_DEVICE_TOKEN,
+    defaults.deviceToken,
+    null,
+  );
+  const httpTimeoutMs = pickHttpTimeoutMs(
+    cli.httpTimeoutMs,
+    config.httpTimeoutMs,
+    env?.TOKENTRACKER_HTTP_TIMEOUT_MS,
+    defaults.httpTimeoutMs,
+    DEFAULT_HTTP_TIMEOUT_MS,
+  );
+  const debug = pickBoolean(cli.debug, config.debug, env?.TOKENTRACKER_DEBUG, defaults.debug, false);
+  const autoRetryNoSpawn = pickBoolean(
+    cli.autoRetryNoSpawn,
+    config.autoRetryNoSpawn,
+    env?.TOKENTRACKER_AUTO_RETRY_NO_SPAWN,
+    defaults.autoRetryNoSpawn,
+    false,
+  );
 
   return {
     baseUrl: baseUrl.value,
@@ -101,29 +75,20 @@ function resolveRuntimeConfig({
   };
 }
 
-function pickRuntimeValue({
-  cliValue,
-  configValue,
-  envValue,
-  defaultValue,
-  hardDefaultValue,
-  normalize,
-  envOverridesConfig,
-}) {
-  const middleValues = envOverridesConfig
-    ? [envValue, configValue]
-    : [configValue, envValue];
-  const middleLabels = envOverridesConfig
-    ? ["env", "config"]
-    : ["config", "env"];
-  return pickValue(
-    [cliValue, ...middleValues, defaultValue, hardDefaultValue],
-    normalize,
-    ["cli", ...middleLabels, "default", "default"],
-  );
+function pickString(...candidates) {
+  return pickValue(candidates, normalizeString);
 }
 
-function pickValue(candidates, normalize, labels) {
+function pickBoolean(...candidates) {
+  return pickValue(candidates, normalizeBoolean);
+}
+
+function pickHttpTimeoutMs(...candidates) {
+  return pickValue(candidates, normalizeHttpTimeoutMs);
+}
+
+function pickValue(candidates, normalize) {
+  const labels = ["cli", "config", "env", "default", "default"];
   for (let i = 0; i < candidates.length; i += 1) {
     const value = normalize(candidates[i]);
     if (value !== undefined) {

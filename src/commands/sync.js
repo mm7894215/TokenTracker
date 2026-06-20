@@ -1067,13 +1067,7 @@ async function cmdSync(argv) {
 
     progress?.stop();
 
-    // Local dashboard sync passes per-request cloud URL/device token through env.
-    // Those must override stale persisted config values such as example.invalid.
-    const runtime = resolveRuntimeConfig({
-      config: config || {},
-      env: process.env,
-      envOverridesConfig: true,
-    });
+    const runtime = resolveRuntimeConfig({ config: config || {}, env: process.env });
 
     let uploadResult = { inserted: 0, skipped: 0 };
     let uploadAttempted = false;
