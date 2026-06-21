@@ -190,8 +190,8 @@ describe("UsageLimitsPanel Codex Reset Bank", () => {
     setCopyLocale(JA_LOCALE);
     const { unmount } = render(usageLimitsPanelElement(resetCredits));
     let codexGroup = within(screen.getByText("Codex").closest("[role='button']"));
-    expect(codexGroup.getByText("リセット")).toBeInTheDocument();
-    expect(codexGroup.getByText("リセット 1")).toBeInTheDocument();
+    expect(codexGroup.getByText(copy("limits.codex_reset_bank.title"))).toBeInTheDocument();
+    expect(codexGroup.getByText(copy("limits.codex_reset_bank.row_label", { index: 1 }))).toBeInTheDocument();
     expect(codexGroup.queryByText("Resets")).not.toBeInTheDocument();
     expect(codexGroup.queryByText("Reset 1")).not.toBeInTheDocument();
     unmount();
@@ -199,8 +199,8 @@ describe("UsageLimitsPanel Codex Reset Bank", () => {
     setCopyLocale(KO_LOCALE);
     render(usageLimitsPanelElement(resetCredits));
     codexGroup = within(screen.getByText("Codex").closest("[role='button']"));
-    expect(codexGroup.getByText("리셋")).toBeInTheDocument();
-    expect(codexGroup.getByText("리셋 1")).toBeInTheDocument();
+    expect(codexGroup.getByText(copy("limits.codex_reset_bank.title"))).toBeInTheDocument();
+    expect(codexGroup.getByText(copy("limits.codex_reset_bank.row_label", { index: 1 }))).toBeInTheDocument();
     expect(codexGroup.getByText(formatExpiry(resetCredits.credits[0].expires_at, KO_LOCALE))).toBeInTheDocument();
     expect(codexGroup.queryByText(/오전|오후/)).not.toBeInTheDocument();
     expect(codexGroup.queryByText("Resets")).not.toBeInTheDocument();
@@ -217,14 +217,14 @@ describe("UsageLimitsPanel Codex Reset Bank", () => {
     setCopyLocale(JA_LOCALE);
     const { unmount } = render(usageLimitsPanelElement(resetCredits));
     let codexGroup = within(screen.getByText("Codex").closest("[role='button']"));
-    expect(codexGroup.getByText("リセット：2 件利用可 · 有効期限不明")).toBeInTheDocument();
+    expect(codexGroup.getByText(copy("limits.codex_reset_bank.count_only", { count: 2 }))).toBeInTheDocument();
     expect(codexGroup.queryByText(/Reset Bank/)).not.toBeInTheDocument();
     unmount();
 
     setCopyLocale(KO_LOCALE);
     render(usageLimitsPanelElement(resetCredits));
     codexGroup = within(screen.getByText("Codex").closest("[role='button']"));
-    expect(codexGroup.getByText("리셋: 2회 사용 가능 · 만료 시간 확인 불가")).toBeInTheDocument();
+    expect(codexGroup.getByText(copy("limits.codex_reset_bank.count_only", { count: 2 }))).toBeInTheDocument();
     expect(codexGroup.queryByText(/Reset Bank/)).not.toBeInTheDocument();
   });
 
