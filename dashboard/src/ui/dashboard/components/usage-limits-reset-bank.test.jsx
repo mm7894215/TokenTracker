@@ -34,8 +34,8 @@ function renderCodex(resetCredits) {
   return within(group);
 }
 
-function formatExpiry(iso) {
-  return new Intl.DateTimeFormat(EN_LOCALE, {
+function formatExpiry(iso, locale = EN_LOCALE) {
+  return new Intl.DateTimeFormat(locale, {
     month: "numeric",
     day: "numeric",
     hour: "2-digit",
@@ -201,7 +201,7 @@ describe("UsageLimitsPanel Codex Reset Bank", () => {
     codexGroup = within(screen.getByText("Codex").closest("[role='button']"));
     expect(codexGroup.getByText("리셋")).toBeInTheDocument();
     expect(codexGroup.getByText("리셋 1")).toBeInTheDocument();
-    expect(codexGroup.getByText("1. 11. 18:45")).toBeInTheDocument();
+    expect(codexGroup.getByText(formatExpiry(resetCredits.credits[0].expires_at, KO_LOCALE))).toBeInTheDocument();
     expect(codexGroup.queryByText(/오전|오후/)).not.toBeInTheDocument();
     expect(codexGroup.queryByText("Resets")).not.toBeInTheDocument();
     expect(codexGroup.queryByText("Reset 1")).not.toBeInTheDocument();
