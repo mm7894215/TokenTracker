@@ -251,10 +251,7 @@ function ResetBankRow({ row }) {
   );
 }
 
-function ResetBankSection({ resetCredits }) {
-  const model = buildResetBankRows(resetCredits);
-  if (!model) return null;
-
+function ResetBankSection({ model }) {
   const passiveText = model.kind === "count_only"
     ? copy("limits.codex_reset_bank.count_only", { count: model.availableCount })
     : null;
@@ -275,7 +272,8 @@ function ResetBankSection({ resetCredits }) {
 
 function renderProviderExtra(kind, data) {
   if (kind === "codex_reset_bank") {
-    return <ResetBankSection resetCredits={data.reset_credits} />;
+    const model = buildResetBankRows(data.reset_credits);
+    return model ? <ResetBankSection model={model} /> : null;
   }
   if (kind === "kimi_parallel" && data.parallel_limit) {
     return <StatusLine>{copy("limits.label.kimi_parallel", { count: data.parallel_limit })}</StatusLine>;

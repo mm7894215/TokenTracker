@@ -76,7 +76,7 @@ enum Strings {
         t("Resets", "重置权益", "重置權益", "リセット", "리셋")
     }
     static func codexResetBankLabel(_ index: Int) -> String {
-        t("Reset \(index)", "Reset \(index)", "Reset \(index)", "Reset \(index)", "Reset \(index)")
+        t("Reset \(index)", "重置 \(index)", "重置 \(index)", "リセット \(index)", "리셋 \(index)")
     }
     static func codexResetBankPassiveStatus(_ resetCredits: CodexLimits.ResetCredits?) -> String? {
         guard let resetCredits else { return nil }
@@ -97,7 +97,7 @@ enum Strings {
     static func codexResetBankExpiryDateTime(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: loc)
-        formatter.setLocalizedDateFormatFromTemplate("Mdjm")
+        formatter.setLocalizedDateFormatFromTemplate("MdHm")
         return formatter.string(from: date)
     }
     static func resetCreditAccessibility(label: String, expiry: String) -> String {

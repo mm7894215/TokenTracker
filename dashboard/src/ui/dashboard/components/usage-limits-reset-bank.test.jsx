@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { copy, setCopyLocale } from "../../../lib/copy";
-import { EN_LOCALE } from "../../../lib/locale";
+import { EN_LOCALE, JA_LOCALE, KO_LOCALE } from "../../../lib/locale";
 import { UsageLimitsPanel } from "./UsageLimitsPanel.jsx";
 import { buildResetBankRows } from "./usage-limits-reset-bank.js";
 
@@ -40,6 +40,7 @@ function formatExpiry(iso) {
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
   }).format(new Date(iso));
 }
 
@@ -179,6 +180,33 @@ describe("UsageLimitsPanel Codex Reset Bank", () => {
     expect(codexGroup.queryByText(/\b2030\b/)).not.toBeInTheDocument();
   });
 
+  it("localizes Codex Reset Bank labels for Japanese and Korean users", () => {
+    const resetCredits = {
+      available_count: 1,
+      total_earned_count: 1,
+      credits: [credit("2030-01-01T10:45:00.000Z", "2030-01-11T10:45:00.000Z")],
+    };
+
+    setCopyLocale(JA_LOCALE);
+    const { unmount } = render(usageLimitsPanelElement(resetCredits));
+    let codexGroup = within(screen.getByText("Codex").closest("[role='button']"));
+    expect(codexGroup.getByText("リセット")).toBeInTheDocument();
+    expect(codexGroup.getByText("リセット 1")).toBeInTheDocument();
+    expect(codexGroup.queryByText("Resets")).not.toBeInTheDocument();
+    expect(codexGroup.queryByText("Reset 1")).not.toBeInTheDocument();
+    unmount();
+
+    setCopyLocale(KO_LOCALE);
+    render(usageLimitsPanelElement(resetCredits));
+    codexGroup = within(screen.getByText("Codex").closest("[role='button']"));
+    expect(codexGroup.getByText("리셋")).toBeInTheDocument();
+    expect(codexGroup.getByText("리셋 1")).toBeInTheDocument();
+    expect(codexGroup.getByText("1. 11. 18:45")).toBeInTheDocument();
+    expect(codexGroup.queryByText(/오전|오후/)).not.toBeInTheDocument();
+    expect(codexGroup.queryByText("Resets")).not.toBeInTheDocument();
+    expect(codexGroup.queryByText("Reset 1")).not.toBeInTheDocument();
+  });
+
   it("renders five credits as five rows instead of +N more", () => {
     const dates = [
       "2030-01-10T10:00:00.000Z",
@@ -220,6 +248,39 @@ describe("UsageLimitsPanel Codex Reset Bank", () => {
 
     expect(codexGroup.queryByText(copy("limits.codex_reset_bank.title"))).not.toBeInTheDocument();
     expect(codexGroup.queryByText(copy("limits.codex_reset_bank.row_label", { index: 1 }))).not.toBeInTheDocument();
+  });
+
+  it("shows Codex no-data fallback when Reset Bank has nothing displayable and no quota windows exist", () => {
+    const { rerender } = render(
+      createElement(UsageLimitsPanel, {
+        codex: {
+          configured: true,
+          error: null,
+          reset_credits: {
+            available_count: 0,
+            total_earned_count: 2,
+            credits: [credit("2030-01-01T10:45:00.000Z", "2030-01-11T10:45:00.000Z")],
+          },
+        },
+        order: ["codex"],
+      }),
+    );
+
+    expect(screen.getByText("Codex")).toBeInTheDocument();
+    expect(screen.getByText(copy("limits.status.no_data"))).toBeInTheDocument();
+
+    rerender(
+      createElement(UsageLimitsPanel, {
+        codex: {
+          configured: true,
+          error: null,
+          reset_credits: null,
+        },
+        order: ["codex"],
+      }),
+    );
+
+    expect(screen.getByText(copy("limits.status.no_data"))).toBeInTheDocument();
   });
 
   it("renders passive expiry-unavailable copy when count exists without usable expiry rows", () => {

@@ -106,7 +106,7 @@ test("Codex reset bank native rows supersede the old macOS footnote path", () =>
   assert.ok(strings.includes("codexResetBankExpiryDateTime"));
   assert.ok(strings.includes("resetCreditAccessibility"));
   assert.doesNotMatch(strings, /codexResetBankFootnote|codexResetBankWithDates|codexResetBankMoreDates/);
-  assert.match(strings, /static func codexResetBankExpiryDateTime\(_ date: Date\) -> String \{[\s\S]*?setLocalizedDateFormatFromTemplate\("Mdjm"\)/);
+  assert.match(strings, /static func codexResetBankExpiryDateTime\(_ date: Date\) -> String \{[\s\S]*?setLocalizedDateFormatFromTemplate\("MdHm"\)/);
   assert.doesNotMatch(strings, /codexResetBankExpiryDateTime\(_ date: Date\)[\s\S]*?dateStyle/s);
 
   assert.match(

@@ -105,6 +105,11 @@ func decodeResetCredits(_ resetCredits: Any?) throws -> CodexLimits.ResetCredits
 }
 
 do {
+    NativeLocalization.storePreference(NativeLocalization.englishLocale)
+    defer {
+        UserDefaults.standard.removeObject(forKey: NativeLocalization.preferenceKey)
+    }
+
     let date = ISO8601DateFormatter().date(from: "2026-07-01T02:13:21Z")!
     let expiry = Strings.codexResetBankExpiryDateTime(date)
     if expiry.range(of: #"\d{1,2}:13"#, options: .regularExpression) == nil {
@@ -113,9 +118,21 @@ do {
     if expiry.contains("2026") {
         fail("expiry should omit the year in the compact row label, got \(expiry)\n")
     }
+    if expiry.range(of: #"AM|PM|上午|下午|오전|오후"#, options: .regularExpression) != nil {
+        fail("expiry should use compact 24-hour time, got \(expiry)\n")
+    }
 
     requireEqual(Strings.codexResetBankLabel(1), "Reset 1", "first reset label")
     requireEqual(Strings.codexResetBankLabel(2), "Reset 2", "second reset label")
+    NativeLocalization.storePreference(NativeLocalization.chineseLocale)
+    requireEqual(Strings.codexResetBankLabel(1), "重置 1", "simplified Chinese reset label")
+    NativeLocalization.storePreference(NativeLocalization.traditionalChineseLocale)
+    requireEqual(Strings.codexResetBankLabel(1), "重置 1", "traditional Chinese reset label")
+    NativeLocalization.storePreference(NativeLocalization.japaneseLocale)
+    requireEqual(Strings.codexResetBankLabel(1), "リセット 1", "Japanese reset label")
+    NativeLocalization.storePreference(NativeLocalization.koreanLocale)
+    requireEqual(Strings.codexResetBankLabel(1), "리셋 1", "Korean reset label")
+    NativeLocalization.storePreference(NativeLocalization.englishLocale)
 
     let accessibility = Strings.resetCreditAccessibility(label: "Reset 1", expiry: expiry)
     if !accessibility.contains("Reset 1") || !accessibility.contains(expiry) {
@@ -160,7 +177,7 @@ test("native reset expiry uses compact locale-aware date and minute time without
   );
 
   assert.ok(formatterMatch, "codexResetBankExpiryDateTime formatter should exist");
-  assert.match(formatterMatch[0], /setLocalizedDateFormatFromTemplate\("Mdjm"\)/);
+  assert.match(formatterMatch[0], /setLocalizedDateFormatFromTemplate\("MdHm"\)/);
   assert.doesNotMatch(formatterMatch[0], /dateStyle/);
   assert.doesNotMatch(formatterMatch[0], /timeStyle/);
 });
