@@ -574,6 +574,9 @@ limits.label.codex_5h,ui,LimitsPage,UsageLimitsPanel,codex_5h,"5h",,active
 limits.label.codex_7d,ui,LimitsPage,UsageLimitsPanel,codex_7d,"7d",,active
 limits.label.codex_spark_5h,ui,LimitsPage,UsageLimitsPanel,codex_spark_5h,"Spark 5h",,active
 limits.label.codex_spark_7d,ui,LimitsPage,UsageLimitsPanel,codex_spark_7d,"Spark 7d",,active
+limits.codex_reset_bank.title,ui,LimitsPage,UsageLimitsPanel,codex_reset_bank_title,"Resets",,active
+limits.codex_reset_bank.row_label,ui,LimitsPage,UsageLimitsPanel,codex_reset_bank_row_label,"Reset {{index}}",,active
+limits.codex_reset_bank.count_only,ui,LimitsPage,UsageLimitsPanel,codex_reset_bank_count_only,"Reset Bank: {{count}} available · expiry unavailable",,active
 limits.label.gemini_pro,ui,LimitsPage,UsageLimitsPanel,gemini_pro,"Pro",,active
 limits.label.gemini_flash,ui,LimitsPage,UsageLimitsPanel,gemini_flash,"Flash",,active
 limits.label.gemini_lite,ui,LimitsPage,UsageLimitsPanel,gemini_lite,"Lite",,active

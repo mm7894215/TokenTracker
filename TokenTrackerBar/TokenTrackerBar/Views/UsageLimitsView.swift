@@ -14,6 +14,13 @@ struct UsageLimitsView: View {
     @State private var explainingProvider: String?
     let limits: UsageLimitsResponse?
 
+    private static let rowColumnSpacing: CGFloat = 5
+    private static let percentColumnWidth: CGFloat = 34
+    private static let relativeResetColumnWidth: CGFloat = 24
+    private static var resetExpiryColumnWidth: CGFloat {
+        percentColumnWidth + rowColumnSpacing + relativeResetColumnWidth
+    }
+
     /// At least one provider is configured and error-free.
     /// Delegates to the model helper (single source of truth for the predicate).
     private func hasAnyAvailable(_ limits: UsageLimitsResponse) -> Bool {
@@ -70,7 +77,8 @@ struct UsageLimitsView: View {
             case "claude" where limits.claude.configured && limits.claude.error == nil:
                 groups.append(AnyView(toolSection(id: id, title: planTitle("Claude", limits.claude.planLabel), assetName: "ClaudeLogo", toolName: "Claude", specs: claudeSpecs(limits.claude))))
             case "codex" where limits.codex.configured && limits.codex.error == nil:
-                groups.append(AnyView(toolSection(id: id, title: planTitle("Codex", limits.codex.planLabel), assetName: "CodexLogo", toolName: "Codex", specs: codexSpecs(limits.codex))))
+                let resetState = codexResetBankViewData(limits.codex.resetCredits)
+                groups.append(AnyView(toolSection(id: id, title: planTitle("Codex", limits.codex.planLabel), assetName: "CodexLogo", toolName: "Codex", specs: codexSpecs(limits.codex), resetRows: resetState.rows, resetStatus: resetState.statusText)))
             case "cursor" where limits.cursor.configured && limits.cursor.error == nil:
                 groups.append(AnyView(toolSection(id: id, title: planTitle("Cursor", limits.cursor.planLabel), assetName: "CursorLogo", toolName: "Cursor", specs: cursorSpecs(limits.cursor))))
             case "gemini" where limits.gemini.configured && limits.gemini.error == nil:
@@ -106,6 +114,8 @@ struct UsageLimitsView: View {
         assetName: String?,
         toolName: String,
         specs: [LimitWindowSpec],
+        resetRows: [CodexResetRowSpec] = [],
+        resetStatus: String? = nil,
         footnote: String? = nil
     ) -> some View {
         let isOpen = Binding(
@@ -126,6 +136,9 @@ struct UsageLimitsView: View {
                 ForEach(specs) { spec in
                     limitRow(label: spec.label, pct: spec.pct, reset: spec.resetText, toolName: toolName, windowSeconds: spec.windowSeconds, resetDate: spec.resetDate)
                 }
+            }
+            if !resetRows.isEmpty || resetStatus != nil {
+                resetSection(rows: resetRows, status: resetStatus)
             }
             if let footnote {
                 Text(footnote)
@@ -167,6 +180,36 @@ struct UsageLimitsView: View {
         if let w = c.sparkPrimaryWindow { s.append(makeSpec("Spark 5h", Double(w.usedPercent), windowSeconds: w.limitWindowSeconds.map(Double.init), epoch: w.resetAt)) }
         if let w = c.sparkSecondaryWindow { s.append(makeSpec("Spark 7d", Double(w.usedPercent), windowSeconds: w.limitWindowSeconds.map(Double.init), epoch: w.resetAt)) }
         return s
+    }
+
+    private func codexResetBankViewData(_ resetCredits: CodexLimits.ResetCredits?) -> (rows: [CodexResetRowSpec], statusText: String?) {
+        let rows = codexResetRows(resetCredits)
+        if !rows.isEmpty {
+            return (rows, nil)
+        }
+        return ([], Strings.codexResetBankPassiveStatus(resetCredits))
+    }
+
+    private func codexResetRows(_ resetCredits: CodexLimits.ResetCredits?) -> [CodexResetRowSpec] {
+        guard let resetCredits, resetCredits.availableCount != 0 else { return [] }
+
+        return resetCredits.credits
+            .filter { $0.status == "available" }
+            .enumerated()
+            .compactMap { index, credit in
+                guard let expiresAt = resetDate(iso: credit.expiresAt) else { return nil }
+                let label = Strings.codexResetBankLabel(index + 1)
+                let expiry = Strings.codexResetBankExpiryDateTime(expiresAt)
+                return CodexResetRowSpec(
+                    label: label,
+                    expiry: expiry,
+                    lifetimeRemainingPercent: resetLifetimeRemainingPercent(
+                        grantedAt: resetDate(iso: credit.grantedAt),
+                        expiresAt: expiresAt
+                    ),
+                    accessibilityLabel: Strings.resetCreditAccessibility(label: label, expiry: expiry)
+                )
+            }
     }
 
     private func cursorSpecs(_ c: CursorLimits) -> [LimitWindowSpec] {
@@ -265,7 +308,7 @@ struct UsageLimitsView: View {
             modeSuffix: settings.displayMode == .remaining ? Strings.limitSuffixRemaining : Strings.limitSuffixUsed
         )
 
-        return HStack(spacing: 5) {
+        return HStack(spacing: Self.rowColumnSpacing) {
             Text(label)
                 .font(.system(.caption, design: .default))
                 .foregroundStyle(.secondary)
@@ -287,17 +330,71 @@ struct UsageLimitsView: View {
                 .font(.system(.caption, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .frame(width: 34, alignment: .trailing)
+                .frame(width: Self.percentColumnWidth, alignment: .trailing)
 
             if let reset {
                 Text(reset)
                     .font(.system(.caption2, design: .default))
+                    .monospacedDigit()
                     .foregroundStyle(.tertiary)
-                    .frame(width: 24, alignment: .trailing)
+                    .frame(width: Self.relativeResetColumnWidth, alignment: .trailing)
             }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
+    }
+
+    private func resetSection(rows: [CodexResetRowSpec], status: String?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(Strings.codexResetBankSectionTitle)
+                .font(.system(.caption2, design: .default))
+                .modifier(FontWeightModifier(weight: .medium))
+                .foregroundStyle(.tertiary)
+
+            if rows.isEmpty, let status {
+                Text(status)
+                    .font(.system(.caption2, design: .default))
+                    .foregroundStyle(.tertiary)
+            } else {
+                VStack(spacing: 4) {
+                    ForEach(rows) { row in
+                        resetRow(row)
+                    }
+                }
+            }
+        }
+        .padding(.top, 1)
+    }
+
+    private func resetRow(_ row: CodexResetRowSpec) -> some View {
+        HStack(spacing: Self.rowColumnSpacing) {
+            Text(row.label)
+                .font(.system(.caption, design: .default))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .background(GeometryReader { proxy in
+                    Color.clear.preference(key: LimitLabelWidthKey.self, value: proxy.size.width)
+                })
+                .frame(width: labelColumnWidth > 0 ? labelColumnWidth : nil, alignment: .leading)
+
+            UsageLimitBar(
+                percent: row.lifetimeRemainingPercent,
+                fillColor: Color.limitBar(fraction: 0),
+                pacePercent: nil,
+                paceOver: false
+            )
+
+            Text(row.expiry)
+                .font(.system(.caption2, design: .default))
+                .monospacedDigit()
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(width: Self.resetExpiryColumnWidth, alignment: .trailing)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(row.accessibilityLabel)
     }
 
     private var displayModeTitle: String {
@@ -326,7 +423,13 @@ struct UsageLimitsView: View {
         fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let date = fmt.date(from: iso) { return date }
         fmt.formatOptions = [.withInternetDateTime]
-        return fmt.date(from: iso)
+        if let date = fmt.date(from: iso) { return date }
+
+        let microseconds = DateFormatter()
+        microseconds.locale = Locale(identifier: "en_US_POSIX")
+        microseconds.timeZone = TimeZone(secondsFromGMT: 0)
+        microseconds.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXXXX"
+        return microseconds.date(from: iso)
     }
 
     private func resetDate(epoch: Int?) -> Date? {
@@ -341,6 +444,14 @@ struct UsageLimitsView: View {
         if h > 24 { return "\(h / 24)d" }
         if h > 0 { return "\(h)h" }
         return "\(Int(s) / 60)m"
+    }
+
+    private func resetLifetimeRemainingPercent(grantedAt: Date?, expiresAt: Date) -> Double {
+        guard let grantedAt else { return 100 }
+        let total = expiresAt.timeIntervalSince(grantedAt)
+        guard total > 0 else { return 100 }
+        let remaining = expiresAt.timeIntervalSince(Date())
+        return min(100, max(0, remaining / total * 100))
     }
 
     @ViewBuilder
@@ -504,6 +615,14 @@ private struct LimitLabelWidthKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
     }
+}
+
+private struct CodexResetRowSpec: Identifiable {
+    var id: String { label }
+    let label: String
+    let expiry: String
+    let lifetimeRemainingPercent: Double
+    let accessibilityLabel: String
 }
 
 /// Makes a provider block read as clickable: a rounded hover/active highlight and

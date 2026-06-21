@@ -10,6 +10,7 @@ import {
 } from "../../../lib/limits-providers.js";
 import { computePace, resetToMs, resolveWindowSeconds } from "../../../lib/limit-pace.js";
 import { ProviderIcon } from "./ProviderIcon.jsx";
+import { buildResetBankRows } from "./usage-limits-reset-bank.js";
 import { PROVIDER_LIMIT_SPECS } from "./usage-limits-provider-specs.js";
 
 const LIMITS_PROVIDER_ICON_CLASS = "shrink-0 text-oai-black dark:text-oai-white";
@@ -226,7 +227,56 @@ function LimitWindowSection({ rows, mode, extra = null }) {
   );
 }
 
+function ResetBankRow({ row }) {
+  const widthPct = Math.max(0, Math.min(100, Number(row.percent) || 0));
+  return (
+    <div className="flex items-center gap-2" data-reset-bank-row="">
+      <span
+        data-limit-label=""
+        className="text-[11px] text-oai-gray-500 dark:text-oai-gray-400 shrink-0 whitespace-nowrap"
+        style={{ width: "var(--tt-limits-label-w)" }}
+      >
+        {row.label}
+      </span>
+      <div className="relative flex-1 bg-oai-gray-100 dark:bg-oai-gray-700/50 rounded-full h-1.5 overflow-hidden">
+        <div
+          className="bg-oai-gray-400 dark:bg-oai-gray-500 rounded-full h-full transition-[width] duration-500 ease-out"
+          style={{ width: `${widthPct}%`, minWidth: widthPct > 0 ? "3px" : 0 }}
+        />
+      </div>
+      <span className="text-[10px] tabular-nums text-oai-gray-400 dark:text-oai-gray-500 w-[4.25rem] text-right shrink-0 whitespace-nowrap">
+        {row.expiresAt}
+      </span>
+    </div>
+  );
+}
+
+function ResetBankSection({ resetCredits }) {
+  const model = buildResetBankRows(resetCredits);
+  if (!model) return null;
+
+  const passiveText = model.kind === "count_only"
+    ? copy("limits.codex_reset_bank.count_only", { count: model.availableCount })
+    : null;
+
+  return (
+    <div className="mt-1 flex flex-col gap-1" data-reset-bank-section={model.kind}>
+      <div className="text-[10.5px] font-medium uppercase tracking-wide text-oai-gray-400 dark:text-oai-gray-500">
+        {copy("limits.codex_reset_bank.title")}
+      </div>
+      {passiveText ? (
+        <div className="text-[11px] leading-snug text-oai-gray-500 dark:text-oai-gray-400">{passiveText}</div>
+      ) : (
+        model.rows.map((row) => <ResetBankRow key={row.key} row={row} />)
+      )}
+    </div>
+  );
+}
+
 function renderProviderExtra(kind, data) {
+  if (kind === "codex_reset_bank") {
+    return <ResetBankSection resetCredits={data.reset_credits} />;
+  }
   if (kind === "kimi_parallel" && data.parallel_limit) {
     return <StatusLine>{copy("limits.label.kimi_parallel", { count: data.parallel_limit })}</StatusLine>;
   }
@@ -324,8 +374,14 @@ function useWidestLabelWidth(containerRef) {
     if (!root) return;
     const labels = root.querySelectorAll("[data-limit-label]");
     let max = 0;
-    // jsdom has no canvas implementation; without it labels keep natural width.
-    const ctx = labels.length > 0 ? document.createElement("canvas").getContext("2d") : null;
+    let ctx = null;
+    if (labels.length > 0) {
+      try {
+        ctx = document.createElement("canvas").getContext("2d");
+      } catch (_e) {
+        ctx = null;
+      }
+    }
     if (ctx) {
       const style = window.getComputedStyle(labels[0]);
       ctx.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;

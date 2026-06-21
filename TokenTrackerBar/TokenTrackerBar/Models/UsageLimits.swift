@@ -69,6 +69,7 @@ struct CodexLimits: Codable, Equatable {
     let secondaryWindow: CodexWindow?
     let sparkPrimaryWindow: CodexWindow?
     let sparkSecondaryWindow: CodexWindow?
+    let resetCredits: ResetCredits?
 
     enum CodingKeys: String, CodingKey {
         case configured, error
@@ -77,6 +78,47 @@ struct CodexLimits: Codable, Equatable {
         case secondaryWindow = "secondary_window"
         case sparkPrimaryWindow = "spark_primary_window"
         case sparkSecondaryWindow = "spark_secondary_window"
+        case resetCredits = "reset_credits"
+    }
+
+    struct ResetCredits: Codable, Equatable {
+        let availableCount: Int?
+        let totalEarnedCount: Int?
+        let credits: [ResetCredit]
+
+        enum CodingKeys: String, CodingKey {
+            case availableCount = "available_count"
+            case totalEarnedCount = "total_earned_count"
+            case credits
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            availableCount = try container.decodeIfPresent(Int.self, forKey: .availableCount)
+            totalEarnedCount = try container.decodeIfPresent(Int.self, forKey: .totalEarnedCount)
+            credits = try container.decodeIfPresent([ResetCredit].self, forKey: .credits) ?? []
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeIfPresent(availableCount, forKey: .availableCount)
+            try container.encodeIfPresent(totalEarnedCount, forKey: .totalEarnedCount)
+            try container.encode(credits, forKey: .credits)
+        }
+    }
+
+    struct ResetCredit: Codable, Equatable {
+        let status: String
+        let resetType: String?
+        let grantedAt: String?
+        let expiresAt: String
+
+        enum CodingKeys: String, CodingKey {
+            case status
+            case resetType = "reset_type"
+            case grantedAt = "granted_at"
+            case expiresAt = "expires_at"
+        }
     }
 }
 

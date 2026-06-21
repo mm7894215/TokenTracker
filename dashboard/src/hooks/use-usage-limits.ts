@@ -2,10 +2,40 @@ import { useCallback, useEffect, useState } from "react";
 import { getUsageLimits } from "../lib/api";
 import { publishUsageLimitsPreloadState } from "../lib/dashboard-preload.js";
 
+type CodexLimitWindow = {
+  readonly used_percent: number;
+  readonly reset_at?: number;
+  readonly limit_window_seconds?: number;
+};
+
+type CodexResetCredit = {
+  readonly status: string;
+  readonly reset_type?: string;
+  readonly granted_at?: string;
+  readonly expires_at: string;
+};
+
+type CodexResetCredits = {
+  readonly available_count: number | null;
+  readonly total_earned_count: number | null;
+  readonly credits: readonly CodexResetCredit[];
+};
+
+type CodexUsageLimits = {
+  readonly configured: boolean;
+  readonly error?: string | null;
+  readonly plan_label?: string | null;
+  readonly primary_window?: CodexLimitWindow | null;
+  readonly secondary_window?: CodexLimitWindow | null;
+  readonly spark_primary_window?: CodexLimitWindow | null;
+  readonly spark_secondary_window?: CodexLimitWindow | null;
+  readonly reset_credits?: CodexResetCredits | null;
+};
+
 interface UsageLimitsData {
   fetched_at: string;
   claude: { configured: boolean; error?: string | null; plan_label?: string | null; five_hour?: { utilization: number; resets_at?: string }; seven_day?: { utilization: number; resets_at?: string }; seven_day_opus?: { utilization: number; resets_at?: string } | null; extra_usage?: { is_enabled: boolean; monthly_limit?: number | null; used_credits?: number | null; currency?: string | null } | null };
-  codex: { configured: boolean; error?: string | null; plan_label?: string | null; primary_window?: { used_percent: number; reset_at?: number; limit_window_seconds?: number } | null; secondary_window?: { used_percent: number; reset_at?: number; limit_window_seconds?: number } | null; spark_primary_window?: { used_percent: number; reset_at?: number; limit_window_seconds?: number } | null; spark_secondary_window?: { used_percent: number; reset_at?: number; limit_window_seconds?: number } | null };
+  codex: CodexUsageLimits;
   cursor: { configured: boolean; error?: string | null; plan_label?: string | null; membership_type?: string | null; primary_window?: { used_percent: number; reset_at?: string | null } | null; secondary_window?: { used_percent: number; reset_at?: string | null } | null; tertiary_window?: { used_percent: number; reset_at?: string | null } | null };
   gemini: { configured: boolean; error?: string | null; plan_label?: string | null; account_email?: string | null; account_plan?: string | null; primary_window?: { used_percent: number; reset_at?: string | null } | null; secondary_window?: { used_percent: number; reset_at?: string | null } | null; tertiary_window?: { used_percent: number; reset_at?: string | null } | null };
   kimi: { configured: boolean; error?: string | null; plan_label?: string | null; membership_level?: string | null; subscription_type?: string | null; parallel_limit?: number | null; primary_window?: { used_percent: number; reset_at?: string | null } | null; secondary_window?: { used_percent: number; reset_at?: string | null } | null; tertiary_window?: { used_percent: number; reset_at?: string | null } | null };

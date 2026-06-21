@@ -15,7 +15,21 @@ vi.mock("../lib/dashboard-preload.js", () => ({
 const existingLimits = {
   fetched_at: "2026-05-30T10:00:00.000Z",
   claude: { configured: false },
-  codex: { configured: false },
+  codex: {
+    configured: true,
+    reset_credits: {
+      available_count: 1,
+      total_earned_count: 2,
+      credits: [
+        {
+          status: "available",
+          reset_type: "codex_rate_limits",
+          granted_at: "2026-05-25T08:00:00.000Z",
+          expires_at: "2026-07-12T02:13:21.590541Z",
+        },
+      ],
+    },
+  },
   cursor: { configured: false },
   gemini: { configured: false },
   kimi: {
@@ -30,6 +44,27 @@ const existingLimits = {
 const freshLimits = {
   ...existingLimits,
   fetched_at: "2026-05-30T10:05:00.000Z",
+  codex: {
+    configured: true,
+    reset_credits: {
+      available_count: 2,
+      total_earned_count: 3,
+      credits: [
+        {
+          status: "available",
+          reset_type: "codex_rate_limits",
+          granted_at: "2026-05-25T08:00:00.000Z",
+          expires_at: "2026-07-12T02:13:21.590541Z",
+        },
+        {
+          status: "available",
+          reset_type: "codex_rate_limits",
+          granted_at: "2026-05-30T08:00:00.000Z",
+          expires_at: "2026-07-18T04:30:00.000000Z",
+        },
+      ],
+    },
+  },
   kimi: {
     configured: true,
     primary_window: { used_percent: 18, reset_at: "2026-05-30T12:30:00.000Z" },
@@ -60,7 +95,9 @@ describe("useUsageLimits", () => {
     await waitFor(() => expect(result.current.data).toEqual(freshLimits));
 
     // Mount fetch reads the server cache (no forced upstream refresh).
+    expect(getUsageLimits).toHaveBeenCalledTimes(1);
     expect(getUsageLimits).toHaveBeenCalledWith();
+    expect(result.current.data?.codex.reset_credits).toEqual(freshLimits.codex.reset_credits);
     expect(publishUsageLimitsPreloadState).toHaveBeenCalledWith(freshLimits, {
       source: "page-load",
     });
@@ -76,8 +113,10 @@ describe("useUsageLimits", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
+    expect(getUsageLimits).toHaveBeenCalledTimes(1);
     expect(getUsageLimits).toHaveBeenCalledWith();
     expect(result.current.data).toEqual(freshLimits);
+    expect(result.current.data?.codex.reset_credits).toEqual(freshLimits.codex.reset_credits);
     expect(result.current.error).toBeNull();
   });
 
@@ -114,6 +153,7 @@ describe("useUsageLimits", () => {
 
     await Promise.resolve();
     expect(getUsageLimits).not.toHaveBeenCalled();
+    expect(result.current.data?.codex.reset_credits).toEqual(existingLimits.codex.reset_credits);
 
     await act(async () => {
       await result.current.refresh();

@@ -5,6 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const http = require("node:http");
 const https = require("node:https");
+const { performance } = require("node:perf_hooks");
 
 const {
   detectClaudeCodeSubscriptionDetails,
@@ -174,6 +175,8 @@ async function fetchClaudeUsageLimits(accessToken, { fetchImpl = fetch, maxAttem
 // reading mislabels it as "5h". Aligned with steipete/CodexBar's rate-window normalizer.
 const CODEX_SESSION_WINDOW_SECONDS = 18000;
 const CODEX_WEEKLY_WINDOW_SECONDS = 604800;
+const CODEX_RESET_CREDIT_LIST_TIMEOUT_MS = 3000;
+const CODEX_RESET_CREDIT_LIST_TIMEOUT_GUARD_MS = 25;
 
 function classifyCodexWindow(window) {
   if (!window || typeof window !== "object") return null;
@@ -291,9 +294,103 @@ function normalizeCodexSparkRateWindows(additionalRateLimits) {
   };
 }
 
+function normalizeCodexResetCreditCount(value) {
+  return Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+function normalizeCodexResetCredit(row, nowMs) {
+  if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+  if (row.status !== "available") return null;
+
+  const hasResetType = row.reset_type !== undefined && row.reset_type !== null;
+  if (hasResetType && row.reset_type !== "codex_rate_limits") return null;
+
+  const expiresAt = row.expires_at;
+  if (typeof expiresAt !== "string") return null;
+  const expiresAtMs = Date.parse(expiresAt);
+  if (!Number.isFinite(expiresAtMs) || expiresAtMs < nowMs) return null;
+
+  const credit = {
+    status: row.status,
+    expires_at: expiresAt,
+  };
+  if (typeof row.reset_type === "string") {
+    credit.reset_type = row.reset_type;
+  }
+  if (typeof row.granted_at === "string") {
+    credit.granted_at = row.granted_at;
+  }
+  return { credit, expiresAtMs };
+}
+
+function normalizeCodexResetCredits(resetCredits, nowMs = Date.now()) {
+  if (!resetCredits || typeof resetCredits !== "object" || Array.isArray(resetCredits)) return null;
+
+  const availableCount = normalizeCodexResetCreditCount(resetCredits.available_count);
+  const totalEarnedCount = normalizeCodexResetCreditCount(resetCredits.total_earned_count);
+  const normalized = [];
+  if (Array.isArray(resetCredits.credits) && availableCount !== 0) {
+    for (const row of resetCredits.credits) {
+      const entry = normalizeCodexResetCredit(row, nowMs);
+      if (entry) normalized.push(entry);
+    }
+  }
+
+  const credits = normalized
+    .sort((a, b) => a.expiresAtMs - b.expiresAtMs)
+    .slice(0, 50)
+    .map((entry) => entry.credit);
+
+  if (availableCount === null && totalEarnedCount === null && credits.length === 0) {
+    return null;
+  }
+
+  return {
+    available_count: availableCount,
+    total_earned_count: totalEarnedCount,
+    credits: availableCount === 0 ? [] : credits,
+  };
+}
+
+function codexResetCreditListTimeoutMs(remainingProviderBudgetMs) {
+  if (!Number.isFinite(remainingProviderBudgetMs)) {
+    return CODEX_RESET_CREDIT_LIST_TIMEOUT_MS;
+  }
+  if (remainingProviderBudgetMs <= 0) return 0;
+  const guardedBudgetMs = Math.floor(remainingProviderBudgetMs - CODEX_RESET_CREDIT_LIST_TIMEOUT_GUARD_MS);
+  if (guardedBudgetMs <= 0) return 0;
+  return Math.min(CODEX_RESET_CREDIT_LIST_TIMEOUT_MS, guardedBudgetMs);
+}
+
+async function fetchCodexResetCreditList(fetchImpl, headers, timeoutMs = CODEX_RESET_CREDIT_LIST_TIMEOUT_MS) {
+  let timer = null;
+  try {
+    const request = Promise.resolve()
+      .then(() => fetchImpl("https://chatgpt.com/backend-api/wham/rate-limit-reset-credits", {
+        method: "GET",
+        headers,
+      }))
+      .then(async (res) => {
+        if (!res.ok) return null;
+        return normalizeCodexResetCredits(await res.json());
+      });
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      return await request;
+    }
+    const timeout = new Promise((resolve) => {
+      timer = setTimeout(() => resolve(null), timeoutMs);
+    });
+    return await Promise.race([request, timeout]);
+  } catch (_err) {
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function fetchCodexUsageLimits(
   accessToken,
-  { fetchImpl = fetch, accountId = null } = {},
+  { fetchImpl = fetch, accountId = null, providerTimeoutMs = DEFAULT_PROVIDER_TIMEOUT_MS } = {},
 ) {
   const headers = {
     Authorization: `Bearer ${accessToken}`,
@@ -305,27 +402,53 @@ async function fetchCodexUsageLimits(
     headers["ChatGPT-Account-Id"] = accountId;
   }
 
-  const res = await fetchImpl("https://chatgpt.com/backend-api/wham/usage", {
-    method: "GET",
-    headers,
-  });
-  // 401/403/404 from wham means "no usage data available for this auth state" — render
-  // a neutral empty state instead of a red "Fetch failed" error.
-  if (res.status === 401 || res.status === 403 || res.status === 404) {
+  const startedAtMs = performance.now();
+  const usage = await withProviderTimeout(Promise.resolve()
+    .then(() => fetchImpl("https://chatgpt.com/backend-api/wham/usage", {
+      method: "GET",
+      headers,
+    }))
+    .then(async (res) => {
+      // 401/403/404 from wham means "no usage data available for this auth state" — render
+      // a neutral empty state instead of a red "Fetch failed" error.
+      if (res.status === 401 || res.status === 403 || res.status === 404) {
+        return { body: null };
+      }
+      if (res.status !== 200) {
+        throw new Error(`Codex API returned ${res.status}`);
+      }
+      return { body: await res.json() };
+    }), "Codex", providerTimeoutMs);
+  if (!usage.body) {
     return {
       primary_window: null,
       secondary_window: null,
       spark_primary_window: null,
       spark_secondary_window: null,
+      reset_credits: null,
     };
   }
-  if (!res.ok) {
-    throw new Error(`Codex API returned ${res.status}`);
+  const body = usage.body;
+  let resetCredits = normalizeCodexResetCredits(body.rate_limit_reset_credits);
+  // This semi-private sibling endpoint is read-only; /wham/usage remains the stable count fallback.
+  const remainingProviderBudgetMs = Number.isFinite(providerTimeoutMs) && providerTimeoutMs > 0
+    ? providerTimeoutMs - (performance.now() - startedAtMs)
+    : CODEX_RESET_CREDIT_LIST_TIMEOUT_MS;
+  const resetCreditListTimeoutMs = codexResetCreditListTimeoutMs(remainingProviderBudgetMs);
+  if (resetCreditListTimeoutMs > 0) {
+    const resetCreditsList = await fetchCodexResetCreditList(
+      fetchImpl,
+      headers,
+      resetCreditListTimeoutMs,
+    );
+    if (resetCreditsList) {
+      resetCredits = resetCreditsList;
+    }
   }
-  const body = await res.json();
   return {
     ...normalizeCodexRateWindows(body.rate_limit || {}),
     ...normalizeCodexSparkRateWindows(body.additional_rate_limits),
+    reset_credits: resetCredits,
   };
 }
 
@@ -2174,11 +2297,11 @@ async function fetchUsageLimitsUncached({
         )
       : Promise.resolve(null),
     codexToken
-      ? withProviderTimeout(
-          fetchCodexUsageLimits(codexToken, { fetchImpl: providerFetch, accountId: codexAccountId }),
-          "Codex",
+      ? fetchCodexUsageLimits(codexToken, {
+          fetchImpl: providerFetch,
+          accountId: codexAccountId,
           providerTimeoutMs,
-        ).then(
+        }).then(
           (value) => ({ status: "fulfilled", value }),
           (reason) => ({ status: "rejected", reason }),
         )
@@ -2257,6 +2380,7 @@ async function fetchUsageLimitsUncached({
       secondary_window: codexResult.value.secondary_window,
       spark_primary_window: codexResult.value.spark_primary_window,
       spark_secondary_window: codexResult.value.spark_secondary_window,
+      reset_credits: codexResult.value.reset_credits,
     };
   }
 

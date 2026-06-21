@@ -72,6 +72,43 @@ enum Strings {
     static func kimiParallelLabel(_ count: Int) -> String {
         t("Parallel: \(count)", "并发：\(count)", "併發：\(count)", "並列：\(count)", "병렬: \(count)")
     }
+    static var codexResetBankSectionTitle: String {
+        t("Resets", "重置权益", "重置權益", "リセット", "리셋")
+    }
+    static func codexResetBankLabel(_ index: Int) -> String {
+        t("Reset \(index)", "Reset \(index)", "Reset \(index)", "Reset \(index)", "Reset \(index)")
+    }
+    static func codexResetBankPassiveStatus(_ resetCredits: CodexLimits.ResetCredits?) -> String? {
+        guard let resetCredits else { return nil }
+        let availableCredits = resetCredits.credits.filter { $0.status == "available" }
+        let displayCount = resetCredits.availableCount ?? (availableCredits.isEmpty ? nil : availableCredits.count)
+        guard let displayCount, displayCount > 0 else { return nil }
+        return codexResetBankCountOnly(displayCount)
+    }
+    static func codexResetBankCountOnly(_ count: Int) -> String {
+        t(
+            "Reset Bank: \(count) · expiry unavailable",
+            "Reset Bank：\(count) 次 · 过期时间不可用",
+            "Reset Bank：\(count) 次 · 過期時間不可用",
+            "Reset Bank: \(count) · 期限不明",
+            "Reset Bank: \(count)회 · 만료일 없음"
+        )
+    }
+    static func codexResetBankExpiryDateTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: loc)
+        formatter.setLocalizedDateFormatFromTemplate("Mdjm")
+        return formatter.string(from: date)
+    }
+    static func resetCreditAccessibility(label: String, expiry: String) -> String {
+        t(
+            "Reset credit \(label), expires \(expiry)",
+            "重置权益 \(label)，过期时间 \(expiry)",
+            "重置權益 \(label)，過期時間 \(expiry)",
+            "リセットクレジット \(label)、期限 \(expiry)",
+            "리셋 크레딧 \(label), 만료 \(expiry)"
+        )
+    }
 
     static var periodDayLabel: String { t("Day", "日", "日", "日", "일") }
     static var periodWeekLabel: String { t("Week", "周", "周", "週", "주") }

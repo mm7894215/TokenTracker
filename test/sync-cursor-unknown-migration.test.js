@@ -419,11 +419,15 @@ describe("repairGrokQueueFromSessionSnapshots", () => {
     const dir = await makeTempDir();
     const prevHome = process.env.HOME;
     const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
+    const prevCodexHome = process.env.CODEX_HOME;
+    const prevCodeHome = process.env.CODE_HOME;
     const prevGrokHome = process.env.GROK_HOME;
     const prevTrackerGrokHome = process.env.TOKENTRACKER_GROK_HOME;
     try {
       process.env.HOME = dir;
       delete process.env.TOKENTRACKER_DEVICE_TOKEN;
+      process.env.CODEX_HOME = path.join(dir, ".codex");
+      process.env.CODE_HOME = path.join(dir, ".code");
       delete process.env.GROK_HOME;
       process.env.TOKENTRACKER_GROK_HOME = path.join(dir, ".grok");
       const trackerDir = path.join(dir, ".tokentracker", "tracker");
@@ -471,6 +475,10 @@ describe("repairGrokQueueFromSessionSnapshots", () => {
       else process.env.HOME = prevHome;
       if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;
       else process.env.TOKENTRACKER_DEVICE_TOKEN = prevToken;
+      if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = prevCodexHome;
+      if (prevCodeHome === undefined) delete process.env.CODE_HOME;
+      else process.env.CODE_HOME = prevCodeHome;
       if (prevGrokHome === undefined) delete process.env.GROK_HOME;
       else process.env.GROK_HOME = prevGrokHome;
       if (prevTrackerGrokHome === undefined) delete process.env.TOKENTRACKER_GROK_HOME;

@@ -123,6 +123,26 @@ function inactiveRunner() {
   return { status: 1, stdout: "" };
 }
 
+const CODEX_WHAM_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
+const CODEX_RESET_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
+
+function isCodexResetCreditsUrl(url) {
+  return url === CODEX_RESET_CREDITS_URL;
+}
+
+function codexResetCreditsResponse(body = { available_count: null, total_earned_count: null, credits: [] }) {
+  return Promise.resolve({
+    ok: true,
+    status: 200,
+    json: async () => body,
+  });
+}
+
+function pendingUnlessCodexReset(url) {
+  if (isCodexResetCreditsUrl(url)) return codexResetCreditsResponse();
+  return new Promise(() => {});
+}
+
 describe("getUsageLimits", () => {
   it("classifies a 5h session window into primary regardless of slot position", async () => {
     resetUsageLimitsCache();
@@ -153,7 +173,7 @@ describe("getUsageLimits", () => {
           return { status: 1, stdout: "" };
         },
         fetchImpl(url, opts) {
-          if (typeof url === "string" && url.includes("chatgpt.com/backend-api/wham/usage")) {
+          if (url === CODEX_WHAM_USAGE_URL) {
             observedHeader = opts?.headers?.["ChatGPT-Account-Id"] || null;
             return Promise.resolve({
               ok: true,
@@ -167,7 +187,7 @@ describe("getUsageLimits", () => {
               }),
             });
           }
-          return new Promise(() => {});
+          return pendingUnlessCodexReset(url);
         },
       });
 
@@ -218,7 +238,7 @@ describe("getUsageLimits", () => {
           return { status: 1, stdout: "" };
         },
         fetchImpl(url) {
-          if (typeof url === "string" && url.includes("chatgpt.com/backend-api/wham/usage")) {
+          if (url === CODEX_WHAM_USAGE_URL) {
             // Free plans get a single 7-day window in the primary slot.
             return Promise.resolve({
               ok: true,
@@ -231,7 +251,7 @@ describe("getUsageLimits", () => {
               }),
             });
           }
-          return new Promise(() => {});
+          return pendingUnlessCodexReset(url);
         },
       });
 
@@ -285,7 +305,7 @@ describe("getUsageLimits", () => {
               }),
             });
           }
-          return new Promise(() => {});
+          return pendingUnlessCodexReset(url);
         },
       });
 
@@ -349,7 +369,7 @@ describe("getUsageLimits", () => {
               }),
             });
           }
-          return new Promise(() => {});
+          return pendingUnlessCodexReset(url);
         },
       });
 
@@ -404,7 +424,7 @@ describe("getUsageLimits", () => {
               }),
             });
           }
-          return new Promise(() => {});
+          return pendingUnlessCodexReset(url);
         },
       });
 
@@ -458,7 +478,7 @@ describe("getUsageLimits", () => {
               }),
             });
           }
-          return new Promise(() => {});
+          return pendingUnlessCodexReset(url);
         },
       });
 
@@ -508,7 +528,7 @@ describe("getUsageLimits", () => {
               }),
             });
           }
-          return new Promise(() => {});
+          return pendingUnlessCodexReset(url);
         },
       });
 
@@ -561,7 +581,7 @@ describe("getUsageLimits", () => {
               }),
             });
           }
-          return new Promise(() => {});
+          return pendingUnlessCodexReset(url);
         },
       });
 
@@ -614,7 +634,7 @@ describe("getUsageLimits", () => {
               }),
             });
           }
-          return new Promise(() => {});
+          return pendingUnlessCodexReset(url);
         },
       });
 
@@ -663,7 +683,7 @@ describe("getUsageLimits", () => {
               }),
             });
           }
-          return new Promise(() => {});
+          return pendingUnlessCodexReset(url);
         },
       });
 
@@ -724,7 +744,7 @@ describe("getUsageLimits", () => {
               }),
             });
           }
-          return new Promise(() => {});
+          return pendingUnlessCodexReset(url);
         },
       });
 
@@ -781,7 +801,7 @@ describe("getUsageLimits", () => {
               }),
             });
           }
-          return new Promise(() => {});
+          return pendingUnlessCodexReset(url);
         },
       });
 
@@ -803,7 +823,7 @@ describe("getUsageLimits", () => {
     }
   });
 
-  it("proactively refreshes a stale Codex token and persists the new one before calling wham", async () => {
+  it("uses fresh Codex token for usage and reset list after stale refresh", async () => {
     resetUsageLimitsCache();
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-codex-refresh-"));
     try {
@@ -827,6 +847,7 @@ describe("getUsageLimits", () => {
 
       let refreshCalled = false;
       let whamAuthHeader = null;
+      let listAuthHeader = null;
       const result = await getUsageLimits({
         home: tmp,
         platform: "linux",
@@ -863,12 +884,31 @@ describe("getUsageLimits", () => {
               }),
             });
           }
-          return new Promise(() => {});
+          if (typeof url === "string" && url.includes("chatgpt.com/backend-api/wham/rate-limit-reset-credits")) {
+            listAuthHeader = opts?.headers?.Authorization || null;
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                available_count: 1,
+                total_earned_count: 1,
+                credits: [
+                  {
+                    status: "available",
+                    reset_type: "codex_rate_limits",
+                    expires_at: "2099-02-01T00:00:00Z",
+                  },
+                ],
+              }),
+            });
+          }
+          return pendingUnlessCodexReset(url);
         },
       });
 
       assert.equal(refreshCalled, true, "refresh endpoint must be called when token is stale");
       assert.equal(whamAuthHeader, "Bearer fresh-access", "wham must use the new token");
+      assert.equal(listAuthHeader, "Bearer fresh-access", "reset list must use the new token");
       assert.equal(result.codex.configured, true);
       assert.equal(result.codex.error, null);
       assert.deepEqual(result.codex.primary_window, { used_percent: 1, limit_window_seconds: 18000, reset_at: 100 });
@@ -919,7 +959,7 @@ describe("getUsageLimits", () => {
               json: async () => ({ error: { code: "refresh_token_expired" } }),
             });
           }
-          return new Promise(() => {});
+          return pendingUnlessCodexReset(url);
         },
       });
 
@@ -933,7 +973,7 @@ describe("getUsageLimits", () => {
   });
 
   for (const status of [401, 403, 404]) {
-    it(`treats wham ${status} as no-data instead of a hard error`, async () => {
+    it(`Codex reset headers do not fetch reset list when wham ${status} returns no-data`, async () => {
       resetUsageLimitsCache();
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `tokentracker-limits-codex-${status}-`));
       try {
@@ -944,6 +984,7 @@ describe("getUsageLimits", () => {
           JSON.stringify({ tokens: { access_token: "opaque-token" } }),
         );
 
+        const calls = [];
         const result = await getUsageLimits({
           home: tmp,
           platform: "linux",
@@ -955,13 +996,20 @@ describe("getUsageLimits", () => {
             return { status: 1, stdout: "" };
           },
           fetchImpl(url) {
-            if (typeof url === "string" && url.includes("chatgpt.com/backend-api/wham/usage")) {
+            if (url === CODEX_WHAM_USAGE_URL) {
+              calls.push(url);
               return Promise.resolve({ ok: false, status, json: async () => ({}) });
             }
-            return new Promise(() => {});
+            if (url === CODEX_RESET_CREDITS_URL) {
+              calls.push(url);
+              throw new Error("reset list must not be called after wham no-data");
+            }
+            return pendingUnlessCodexReset(url);
           },
         });
 
+        assert.equal(calls.length, 1);
+        assert.equal(calls[0], CODEX_WHAM_USAGE_URL);
         assert.equal(result.codex.configured, true);
         assert.equal(result.codex.error, null);
         assert.equal(result.codex.primary_window, null);
@@ -1017,7 +1065,7 @@ describe("getUsageLimits", () => {
               }),
             });
           }
-          return new Promise(() => {});
+          return pendingUnlessCodexReset(url);
         },
       });
 
@@ -1074,7 +1122,7 @@ describe("getUsageLimits", () => {
               }),
             });
           }
-          return new Promise(() => {});
+          return pendingUnlessCodexReset(url);
         },
       });
 
@@ -1899,7 +1947,7 @@ describe("getUsageLimits plan_label", () => {
               }),
             });
           }
-          return new Promise(() => {});
+          return pendingUnlessCodexReset(url);
         },
       });
 
@@ -1950,7 +1998,7 @@ describe("getUsageLimits plan_label", () => {
               }),
             });
           }
-          return new Promise(() => {});
+          return pendingUnlessCodexReset(url);
         },
       });
 
@@ -1989,7 +2037,7 @@ describe("getUsageLimits Claude stale fallback", () => {
       },
       fetchImpl(url) {
         if (url === "https://api.anthropic.com/api/oauth/usage") return claudeResponder();
-        return new Promise(() => {});
+        return pendingUnlessCodexReset(url);
       },
     });
   }
