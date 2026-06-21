@@ -316,4 +316,107 @@ describe("repairDroidDuplicateSessionInflation (#204)", () => {
     assert.ok(cursors.migrations[DROID_DUP_SESSION_REPAIR_KEY], "sentinel written");
     assert.equal(await fs.readFile(queuePath, "utf8"), before, "queue untouched");
   });
+
+  it("preserves a clean session sharing a (model, half-hour) bucket; still repairs the exclusive bucket", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "tt-droidcollide-"));
+    const root = path.join(home, "sessions");
+    const queuePath = path.join(home, "queue.jsonl");
+    const queueStatePath = path.join(home, "queue.state.json");
+
+    const mtA = Date.UTC(2026, 4, 21, 14, 5, 0); // dup canonical -> 14:00
+    const mtB = Date.UTC(2026, 4, 21, 15, 10, 0); // stale dup -> 15:00 (exclusive)
+    const mtC = Date.UTC(2026, 4, 21, 14, 20, 0); // clean session -> 14:00 (SHARES dup bucket)
+
+    writeSettings(root, ".", "dup", MODEL_DUP, 9_000_000, mtA);
+    writeSettings(root, "proj", "dup", MODEL_DUP, 5_000_000, mtB);
+    const fileC = writeSettings(root, "cleandir", "clean", MODEL_DUP, 500_000, mtC);
+
+    const keyA = bucketFor(MODEL_DUP, mtA);
+    const keyB = bucketFor(MODEL_DUP, mtB);
+    assert.equal(bucketFor(MODEL_DUP, mtC), keyA, "setup: clean shares dup canonical bucket");
+    const hourA = toUtcHalfHourStart(new Date(mtA).toISOString());
+    const hourB = toUtcHalfHourStart(new Date(mtB).toISOString());
+
+    const SHARED = 9_500_000; // dup canonical (9M) + clean (0.5M), NOT inflated here
+    const cursors = {
+      hourly: {
+        version: 3,
+        buckets: {
+          [keyA]: { totals: totals(SHARED), queuedKey: null },
+          [keyB]: { totals: totals(10_000_000_000), queuedKey: null }, // exclusive, inflated
+        },
+        groupQueued: {},
+      },
+      droid: {
+        sessionTotals: {
+          dup: { input: 5_000_000, output: 0, cacheCreation: 0, cacheRead: 0, thinking: 0, mtimeMs: mtB },
+          clean: {
+            input: 500_000,
+            output: 0,
+            cacheCreation: 0,
+            cacheRead: 0,
+            thinking: 0,
+            mtimeMs: fssync.statSync(fileC).mtimeMs,
+          },
+        },
+      },
+      migrations: {},
+    };
+    await fs.writeFile(
+      queuePath,
+      [droidRow(MODEL_DUP, hourA, SHARED), droidRow(MODEL_DUP, hourB, 10_000_000_000)].join("\n") + "\n",
+      "utf8",
+    );
+    await fs.writeFile(queueStatePath, JSON.stringify({ offset: 5 }), "utf8");
+
+    const ret = await withDroidEnv(root, () =>
+      repairDroidDuplicateSessionInflation({ cursors, queuePath, queueStatePath }),
+    );
+    assert.equal(ret, true);
+    // Shared bucket left intact → the clean session's 0.5M is NOT destroyed.
+    assert.equal(cursors.hourly.buckets[keyA].totals.total_tokens, SHARED);
+    // Exclusive inflated bucket repaired (rebuild has nothing there → removed).
+    assert.equal(cursors.hourly.buckets[keyB], undefined);
+    const { rows } = await readQueueRows(queuePath);
+    assert.equal(
+      rows.filter((r) => r.source === "droid" && bucketKey("droid", r.model, r.hour_start) === keyA).length,
+      1,
+    );
+    assert.equal(
+      rows.filter((r) => r.source === "droid" && bucketKey("droid", r.model, r.hour_start) === keyB).length,
+      0,
+    );
+    const sentinel = cursors.migrations[DROID_DUP_SESSION_REPAIR_KEY];
+    assert.equal(sentinel.keysRepaired, 1);
+    assert.equal(sentinel.keysSkippedSharedWithCleanSession, 1);
+  });
+
+  it("pure collision (every dup bucket shared with a clean session): no-op, clean data intact", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "tt-droidcollide2-"));
+    const root = path.join(home, "sessions");
+    const queuePath = path.join(home, "queue.jsonl");
+    const queueStatePath = path.join(home, "queue.state.json");
+
+    const mtA = Date.UTC(2026, 4, 21, 14, 5, 0);
+    const mtB = Date.UTC(2026, 4, 21, 14, 12, 0); // both dup files -> 14:00
+    const mtC = Date.UTC(2026, 4, 21, 14, 25, 0); // clean -> 14:00 (shares)
+    writeSettings(root, ".", "dup", MODEL_DUP, 9_000_000, mtA);
+    writeSettings(root, "proj", "dup", MODEL_DUP, 5_000_000, mtB);
+    writeSettings(root, "cleandir", "clean", MODEL_DUP, 500_000, mtC);
+    const hourA = toUtcHalfHourStart(new Date(mtA).toISOString());
+    const cursors = {
+      hourly: { version: 3, buckets: { [bucketFor(MODEL_DUP, mtA)]: { totals: totals(9_500_000), queuedKey: null } }, groupQueued: {} },
+      droid: { sessionTotals: {} },
+      migrations: {},
+    };
+    await fs.writeFile(queuePath, droidRow(MODEL_DUP, hourA, 9_500_000) + "\n", "utf8");
+    const before = await fs.readFile(queuePath, "utf8");
+
+    const ret = await withDroidEnv(root, () =>
+      repairDroidDuplicateSessionInflation({ cursors, queuePath, queueStatePath }),
+    );
+    assert.equal(ret, false, "no exclusively-dup bucket → no repair");
+    assert.ok(cursors.migrations[DROID_DUP_SESSION_REPAIR_KEY], "sentinel set");
+    assert.equal(await fs.readFile(queuePath, "utf8"), before, "queue untouched (clean data safe)");
+  });
 });

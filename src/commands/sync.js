@@ -2385,39 +2385,58 @@ async function repairDroidDuplicateSessionInflation({ cursors, queuePath, queueS
     bySession.get(sid).push(fp);
   }
   const dupFiles = [];
+  const cleanFiles = [];
   for (const group of bySession.values()) {
     if (group.length > 1) dupFiles.push(...group);
+    else cleanFiles.push(...group);
   }
   if (dupFiles.length === 0) {
     migrations[DROID_DUP_SESSION_REPAIR_KEY] = new Date().toISOString();
     return false;
   }
 
-  // pollutedKeys = every (droid, model, half-hour) bucket the duplicate files map
-  // to under the parser's own keying — both the canonical file's bucket and each
-  // stale duplicate's (possibly different) half-hour bucket.
-  const pollutedKeys = new Set();
-  for (const fp of dupFiles) {
-    let mtimeMs = 0;
-    try {
-      mtimeMs = fssync.statSync(fp).mtimeMs;
-    } catch {
-      continue;
+  // Map on-disk settings files to the (droid, model, half-hour) bucket keys they
+  // emit under the parser's own keying (mirrors parseDroidIncremental).
+  const bucketKeysForFiles = (files) => {
+    const keys = new Set();
+    for (const fp of files) {
+      let mtimeMs = 0;
+      try {
+        mtimeMs = fssync.statSync(fp).mtimeMs;
+      } catch {
+        continue;
+      }
+      let settings;
+      try {
+        settings = JSON.parse(fssync.readFileSync(fp, "utf8"));
+      } catch {
+        continue;
+      }
+      if (!settings || typeof settings !== "object" || !settings.tokenUsage) continue;
+      const bucketStart = toUtcHalfHourStart(
+        new Date(mtimeMs || Date.now()).toISOString(),
+      );
+      if (!bucketStart) continue;
+      keys.add(bucketKey("droid", resolveDroidModel(settings, fp), bucketStart));
     }
-    let settings;
-    try {
-      settings = JSON.parse(fssync.readFileSync(fp, "utf8"));
-    } catch {
-      continue;
-    }
-    if (!settings || typeof settings !== "object" || !settings.tokenUsage) continue;
-    const bucketStart = toUtcHalfHourStart(
-      new Date(mtimeMs || Date.now()).toISOString(),
-    );
-    if (!bucketStart) continue;
-    pollutedKeys.add(bucketKey("droid", resolveDroidModel(settings, fp), bucketStart));
-  }
-  if (pollutedKeys.size === 0) {
+    return keys;
+  };
+
+  // A bucket key is (source, model, half-hour) — it carries NO session identity.
+  // pollutedKeys are the buckets the duplicate files emit to; cleanKeys are buckets
+  // a NON-duplicate on-disk session emits to. When a clean session resolves to the
+  // same (model, half-hour) as a duplicate file, they collide on one key. We must
+  // NOT delete-and-replace such a shared bucket: the rebuild runs over duplicate
+  // files only, so replacing the bucket would erase the clean session's tokens
+  // (silent data loss). So repair ONLY buckets owned exclusively by duplicate
+  // sessions; leave shared buckets intact. Residual inflation in a rare shared
+  // bucket is visible and recoverable; destroying real data is not (this is the
+  // dedup-needs-identity-proof rule).
+  const pollutedKeys = bucketKeysForFiles(dupFiles);
+  const cleanKeys = bucketKeysForFiles(cleanFiles);
+  const repairKeys = new Set();
+  for (const k of pollutedKeys) if (!cleanKeys.has(k)) repairKeys.add(k);
+  if (repairKeys.size === 0) {
     migrations[DROID_DUP_SESSION_REPAIR_KEY] = new Date().toISOString();
     return false;
   }
@@ -2457,12 +2476,13 @@ async function repairDroidDuplicateSessionInflation({ cursors, queuePath, queueS
     await fs.rm(tmpQueue, { force: true }).catch(() => {});
   }
 
-  // Inflation present? Compare live vs rebuilt totals over pollutedKeys only. Fire
-  // only on live > rebuilt (real inflation) — never on a fresh install (live 0).
+  // Inflation present? Compare live vs rebuilt totals over the repair-scoped keys
+  // only. Fire only on live > rebuilt (real inflation) — never on a fresh install
+  // (live 0).
   const liveBuckets = (cursors.hourly && cursors.hourly.buckets) || {};
   let liveScoped = 0;
   let rebuiltScoped = 0;
-  for (const key of pollutedKeys) {
+  for (const key of repairKeys) {
     liveScoped += Number(liveBuckets[key]?.totals?.total_tokens || 0);
     rebuiltScoped += Number(rebuilt.buckets[key]?.totals?.total_tokens || 0);
   }
@@ -2476,17 +2496,17 @@ async function repairDroidDuplicateSessionInflation({ cursors, queuePath, queueS
   await backupExistingFile(queuePath);
 
   // 1. queue.jsonl: keep every non-droid line verbatim (incl. unparseable) and
-  //    every droid row whose bucket key is NOT polluted (clean + deleted-session
-  //    history). Drop droid rows in pollutedKeys; append the rebuilt polluted rows.
+  //    every droid row whose bucket key is NOT in repairKeys (clean + shared +
+  //    deleted-session history). Drop droid rows in repairKeys; append rebuilt rows.
   let raw = "";
   try {
     raw = await fs.readFile(queuePath, "utf8");
   } catch (e) {
     if (e?.code !== "ENOENT") throw e;
   }
-  // A queue line is "polluted" if it's a droid row whose bucket is in pollutedKeys.
-  // Unparseable / non-droid / clean droid rows are not polluted (kept verbatim).
-  const isPollutedDroidRow = (line) => {
+  // A queue line is in scope if it's a droid row whose bucket is in repairKeys.
+  // Unparseable / non-droid / clean / shared droid rows are kept verbatim.
+  const isRepairDroidRow = (line) => {
     let row;
     try {
       row = JSON.parse(line);
@@ -2495,27 +2515,27 @@ async function repairDroidDuplicateSessionInflation({ cursors, queuePath, queueS
     }
     return (
       row?.source === "droid" &&
-      pollutedKeys.has(bucketKey("droid", row.model, row.hour_start))
+      repairKeys.has(bucketKey("droid", row.model, row.hour_start))
     );
   };
   const kept = raw
     .split("\n")
-    .filter((line) => line.trim() && !isPollutedDroidRow(line));
-  const rebuiltPollutedRows = rebuilt.queueRows.filter(isPollutedDroidRow);
+    .filter((line) => line.trim() && !isRepairDroidRow(line));
+  const rebuiltRepairRows = rebuilt.queueRows.filter(isRepairDroidRow);
   const tmp = `${queuePath}.tmp.${process.pid}.${Date.now()}`;
   await fs.writeFile(
     tmp,
-    kept.concat(rebuiltPollutedRows).join("\n") + "\n",
+    kept.concat(rebuiltRepairRows).join("\n") + "\n",
     "utf8",
   );
   await fs.rename(tmp, queuePath);
 
-  // 2. live hourly buckets: delete polluted droid keys, install the rebuilt buckets
-  //    for those keys. Other droid buckets untouched.
-  const hourly = (cursors.hourly ||= { buckets: {}, groupQueued: {} });
+  // 2. live hourly buckets: delete repair-scoped droid keys, install the rebuilt
+  //    buckets for those keys. Other droid buckets untouched.
+  const hourly = (cursors.hourly ||= { version: 3, buckets: {}, groupQueued: {} });
   hourly.buckets ||= {};
   hourly.groupQueued ||= {};
-  for (const key of pollutedKeys) {
+  for (const key of repairKeys) {
     delete hourly.buckets[key];
     if (rebuilt.buckets[key]) hourly.buckets[key] = rebuilt.buckets[key];
   }
@@ -2555,7 +2575,8 @@ async function repairDroidDuplicateSessionInflation({ cursors, queuePath, queueS
   migrations[DROID_DUP_SESSION_REPAIR_KEY] = {
     status: "done",
     at: new Date().toISOString(),
-    keysRepaired: pollutedKeys.size,
+    keysRepaired: repairKeys.size,
+    keysSkippedSharedWithCleanSession: pollutedKeys.size - repairKeys.size,
     liveBefore: liveScoped,
     rebuiltAfter: rebuiltScoped,
     deltaReclaimed: liveScoped - rebuiltScoped,
