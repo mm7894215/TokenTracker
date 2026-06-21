@@ -6283,6 +6283,101 @@ function droidSessionIdFromPath(filePath) {
   return base.slice(0, -".settings.json".length);
 }
 
+// Resolve a Droid bucket model id. ccusage's chain: settings.model → sidecar
+// <id>.jsonl scrape → `<provider>-unknown` derived from providerLock or inferred
+// from the model fragment. Extracted so the dup-session repair migration can
+// reproduce the exact same bucket key a settings file would have emitted under.
+function resolveDroidModel(settings, filePath) {
+  let model = normalizeDroidModelName(settings.model);
+  if (!model) model = extractDroidModelFromSidecarJsonl(filePath);
+  if (!model) {
+    let provider = normalizeDroidProvider(settings.providerLock);
+    if (provider === "unknown") {
+      provider = inferDroidProviderFromModel(settings.model || "");
+    }
+    model = defaultDroidModelForProvider(provider);
+  }
+  return model;
+}
+
+// When the SAME Droid session id (the basename, which is the cursor key) appears
+// in more than one folder under ~/.factory/sessions, every such file shares one
+// sessionTotals[sessionId] entry. Processing them in a single parse loop makes the
+// lower-count file look like a session reset and re-emit the full cumulative on
+// every sync — unbounded inflation (issue #204). De-dupe to ONE canonical file per
+// session id BEFORE the loop. Canonical = the most complete cumulative snapshot:
+// largest max(five-field sum, totalTokens) (applyDroidTotalFallback already spills
+// totalTokens into the five fields, so summing the filled fields IS that max);
+// ties go to the newest mtime, then the lexicographically smaller path. A session
+// id with a single file passes through untouched (no disk read).
+function dedupeDroidSettingsFilesBySession(files) {
+  const list = Array.isArray(files) ? files : [];
+  const groups = new Map();
+  for (const filePath of list) {
+    if (typeof filePath !== "string") continue;
+    const sessionId = droidSessionIdFromPath(filePath);
+    if (!sessionId) continue;
+    if (!groups.has(sessionId)) groups.set(sessionId, []);
+    groups.get(sessionId).push(filePath);
+  }
+  const out = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) {
+      out.push(group[0]);
+      continue;
+    }
+    let best = null;
+    let bestMetric = -1;
+    let bestMtime = -1;
+    for (const filePath of group) {
+      let mtimeMs = 0;
+      try {
+        mtimeMs = fssync.statSync(filePath).mtimeMs;
+      } catch {
+        continue;
+      }
+      let settings;
+      try {
+        settings = JSON.parse(fssync.readFileSync(filePath, "utf8"));
+      } catch {
+        continue;
+      }
+      const usage =
+        settings && typeof settings === "object" && settings.tokenUsage
+          ? settings.tokenUsage
+          : {};
+      const filled = applyDroidTotalFallback({
+        input: Math.max(0, Number(usage.inputTokens || 0)),
+        output: Math.max(0, Number(usage.outputTokens || 0)),
+        cacheCreation: Math.max(0, Number(usage.cacheCreationTokens || 0)),
+        cacheRead: Math.max(0, Number(usage.cacheReadTokens || 0)),
+        thinking: Math.max(0, Number(usage.thinkingTokens || 0)),
+        totalTokens: Math.max(0, Number(usage.totalTokens || 0)),
+      });
+      const metric =
+        filled.input +
+        filled.output +
+        filled.cacheCreation +
+        filled.cacheRead +
+        filled.thinking;
+      const better =
+        metric > bestMetric ||
+        (metric === bestMetric && mtimeMs > bestMtime) ||
+        (metric === bestMetric &&
+          mtimeMs === bestMtime &&
+          (best === null || filePath.localeCompare(best) < 0));
+      if (better) {
+        best = filePath;
+        bestMetric = metric;
+        bestMtime = mtimeMs;
+      }
+    }
+    out.push(best || group[0]);
+  }
+  out.sort((a, b) => a.localeCompare(b));
+  return out;
+}
+
 async function parseDroidIncremental({
   settingsFiles,
   cursors,
@@ -6304,9 +6399,11 @@ async function parseDroidIncremental({
       ? { ...droidState.sessionTotals }
       : {};
 
-  const files = Array.isArray(settingsFiles)
-    ? settingsFiles
-    : listDroidSettingsFiles(env || process.env);
+  const files = dedupeDroidSettingsFilesBySession(
+    Array.isArray(settingsFiles)
+      ? settingsFiles
+      : listDroidSettingsFiles(env || process.env),
+  );
 
   if (files.length === 0) {
     cursors.droid = {
@@ -6455,15 +6552,7 @@ async function parseDroidIncremental({
     // inferred from the model fragment we did find. Same fallback string set
     // (claude-unknown / gpt-unknown / gemini-unknown / grok-unknown) so
     // empty-model sessions bucket identically across both tools.
-    let model = normalizeDroidModelName(settings.model);
-    if (!model) model = extractDroidModelFromSidecarJsonl(filePath);
-    if (!model) {
-      let provider = normalizeDroidProvider(settings.providerLock);
-      if (provider === "unknown") {
-        provider = inferDroidProviderFromModel(settings.model || "");
-      }
-      model = defaultDroidModelForProvider(provider);
-    }
+    const model = resolveDroidModel(settings, filePath);
 
     // Token normalization: inputTokens already excludes cache reads (matches
     // Anthropic API convention), so cache columns slot in directly. Thinking
@@ -8699,6 +8788,8 @@ module.exports = {
   droidSessionIdFromPath,
   extractDroidModelFromSidecarJsonl,
   applyDroidTotalFallback,
+  resolveDroidModel,
+  dedupeDroidSettingsFilesBySession,
   parseDroidIncremental,
   resolvePiHome,
   resolvePiAgentDir,
@@ -8719,6 +8810,7 @@ module.exports = {
   // Exposed so the queue-repair migration can mutate cursors state in the
   // same key format sync uses elsewhere.
   bucketKey,
+  toUtcHalfHourStart,
   totalsKey,
   claudeMessageDedupKey,
   groupBucketKey,

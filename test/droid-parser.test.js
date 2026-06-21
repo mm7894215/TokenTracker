@@ -29,6 +29,7 @@ const {
   droidSessionIdFromPath,
   extractDroidModelFromSidecarJsonl,
   applyDroidTotalFallback,
+  dedupeDroidSettingsFilesBySession,
   parseDroidIncremental,
 } = require("../src/lib/rollout");
 
@@ -906,4 +907,136 @@ test("parseDroidIncremental: empty model falls back to 'unknown'", async () => {
   const rows = readQueue(queuePath).filter((r) => r.source === "droid");
   assert.equal(rows.length, 1);
   assert.equal(rows[0].model, "unknown");
+});
+
+// ── #204: same session id in two folders must not inflate ─────────────────────
+
+test("dedupeDroidSettingsFilesBySession keeps the largest-cumulative canonical file", () => {
+  const root = makeSessionsRoot();
+  const big = writeSettings(
+    root,
+    ".",
+    "dup",
+    {
+      tokenUsage: {
+        inputTokens: 900000,
+        outputTokens: 20000,
+        cacheCreationTokens: 4000000,
+        cacheReadTokens: 4000000,
+        thinkingTokens: 3000,
+      },
+    },
+    Date.UTC(2026, 4, 21, 14, 5, 0),
+  );
+  const small = writeSettings(
+    root,
+    "proj",
+    "dup",
+    {
+      tokenUsage: {
+        inputTokens: 20000,
+        outputTokens: 20000,
+        cacheCreationTokens: 4000000,
+        cacheReadTokens: 4000000,
+        thinkingTokens: 2000,
+      },
+    },
+    Date.UTC(2026, 4, 21, 15, 10, 0),
+  );
+  // Larger total wins despite the smaller copy having the newer mtime.
+  assert.deepEqual(dedupeDroidSettingsFilesBySession([small, big]), [big]);
+});
+
+test("dedupeDroidSettingsFilesBySession: tie on total → newest mtime wins", () => {
+  const root = makeSessionsRoot();
+  const usage = {
+    tokenUsage: {
+      inputTokens: 100,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      thinkingTokens: 0,
+    },
+  };
+  const older = writeSettings(root, "a", "dup", usage, Date.UTC(2026, 4, 21, 14, 0, 0));
+  const newer = writeSettings(root, "b", "dup", usage, Date.UTC(2026, 4, 21, 18, 0, 0));
+  assert.deepEqual(dedupeDroidSettingsFilesBySession([older, newer]), [newer]);
+});
+
+test("dedupeDroidSettingsFilesBySession: totalTokens-only file beats sparse-detail file", () => {
+  const root = makeSessionsRoot();
+  const detail = writeSettings(
+    root,
+    "a",
+    "dup",
+    {
+      tokenUsage: {
+        inputTokens: 1000,
+        outputTokens: 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+        thinkingTokens: 0,
+      },
+    },
+    Date.UTC(2026, 4, 21, 14, 0, 0),
+  );
+  const totalOnly = writeSettings(
+    root,
+    "b",
+    "dup",
+    { tokenUsage: { totalTokens: 50000 } },
+    Date.UTC(2026, 4, 21, 13, 0, 0), // older mtime, but the larger max(sum,total)
+  );
+  assert.deepEqual(dedupeDroidSettingsFilesBySession([detail, totalOnly]), [totalOnly]);
+});
+
+test("dedupeDroidSettingsFilesBySession: unique session ids pass through untouched", () => {
+  const root = makeSessionsRoot();
+  const a = writeSettings(root, "p", "s1", { tokenUsage: {} });
+  const b = writeSettings(root, "p", "s2", { tokenUsage: {} });
+  assert.equal(dedupeDroidSettingsFilesBySession([a, b]).length, 2);
+});
+
+test("parseDroidIncremental: duplicate session id across folders does NOT inflate (issue #204)", async () => {
+  const root = makeSessionsRoot();
+  const queuePath = path.join(root, "queue.jsonl");
+  const big = {
+    model: "claude-sonnet-4-5",
+    tokenUsage: {
+      inputTokens: 900000,
+      outputTokens: 20000,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      thinkingTokens: 0,
+    },
+  };
+  const small = {
+    model: "claude-sonnet-4-5",
+    tokenUsage: {
+      inputTokens: 20000,
+      outputTokens: 20000,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      thinkingTokens: 0,
+    },
+  };
+  writeSettings(root, ".", "dup", big, Date.UTC(2026, 4, 21, 14, 5, 0));
+  writeSettings(root, "proj", "dup", small, Date.UTC(2026, 4, 21, 15, 10, 0));
+
+  const cursors = {};
+  const env = { DROID_SESSIONS_DIR: root };
+  await parseDroidIncremental({ settingsFiles: listDroidSettingsFiles(env), cursors, queuePath, env });
+  // Pre-fix, this second sync re-emitted the full cumulative every run.
+  const res2 = await parseDroidIncremental({
+    settingsFiles: listDroidSettingsFiles(env),
+    cursors,
+    queuePath,
+    env,
+  });
+
+  assert.equal(res2.eventsAggregated, 0, "second sync must emit nothing (no re-inflation)");
+  const rows = readQueue(queuePath).filter((r) => r.source === "droid");
+  assert.equal(rows.length, 1, "only the canonical file emits a single row");
+  assert.equal(rows[0].total_tokens, 900000 + 20000, "counts the canonical (largest) file once");
+  assert.deepEqual(Object.keys(cursors.droid.sessionTotals), ["dup"]);
 });

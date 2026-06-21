@@ -58,7 +58,10 @@ const {
   parseGooseIncremental,
   listDroidSettingsFiles,
   parseDroidIncremental,
+  droidSessionIdFromPath,
+  resolveDroidModel,
   bucketKey,
+  toUtcHalfHourStart,
   totalsKey,
   claudeMessageDedupKey,
 } = require("../lib/rollout");
@@ -144,6 +147,7 @@ const CLOUD_CONVERSATIONS_BACKFILL_KEY = "cloudConversationsBackfill_2026_06";
 // ~/.codex/archived_sessions/ which sync does not scan) — clearing its bucket
 // would lose that history (ref the v6 ground-truth-repair data-loss incident).
 const CODEX_RESCAN_DEDUP_REPAIR_KEY = "codexRescanDedupRepair_2026_06";
+const DROID_DUP_SESSION_REPAIR_KEY = "droidDupSessionInflationRepair_2026_06";
 
 function warnProviderParseFailure(label, err, opts) {
   if (opts?.auto) return;
@@ -237,6 +241,7 @@ async function cmdSync(argv) {
 
     await migrateRolloutCumulativeDeltaBuckets({ cursors, queuePath, rolloutFiles });
     await repairCodexRescanInflation({ cursors, queuePath, queueStatePath, rolloutFiles });
+    await repairDroidDuplicateSessionInflation({ cursors, queuePath, queueStatePath });
 
     const openclawFiles = openclawSignal?.sessionFile
       ? [{ path: openclawSignal.sessionFile, source: "openclaw" }]
@@ -1242,12 +1247,14 @@ module.exports = {
   migrateCursorUnknownBuckets,
   migrateRolloutCumulativeDeltaBuckets,
   repairCodexRescanInflation,
+  repairDroidDuplicateSessionInflation,
   reincludeClaudeMemObserverFiles,
   repairGrokQueueFromSessionSnapshots,
   applyCloudConversationsBackfill,
   CURSOR_UNKNOWN_MIGRATION_KEY,
   ROLLOUT_CUMULATIVE_DELTA_MIGRATION_KEY,
   CODEX_RESCAN_DEDUP_REPAIR_KEY,
+  DROID_DUP_SESSION_REPAIR_KEY,
   CLAUDE_MEM_OBSERVER_REINCLUDE_KEY,
   GROK_APPEND_ONLY_REPAIR_MIGRATION_KEY,
   CLOUD_CONVERSATIONS_BACKFILL_KEY,
@@ -2297,6 +2304,228 @@ async function repairCodexRescanInflation({ cursors, queuePath, queueStatePath, 
   }
 
   migrations[CODEX_RESCAN_DEDUP_REPAIR_KEY] = new Date().toISOString();
+  return true;
+}
+
+// One-time repair (#204): when the SAME Droid session id existed in two folders
+// under ~/.factory/sessions, parseDroidIncremental's cumulative-delta loop made the
+// lower-count file look like a reset and re-emitted each duplicate's full total on
+// EVERY sync, inflating one (droid, model, hour) bucket without bound (a real ~10M
+// session showed as 40.06B). The forward fix is dedupeDroidSettingsFilesBySession
+// inside the parser; this migration repairs already-polluted installs.
+//
+// SCOPE — strictly the duplicate sessions' buckets, and ONLY when duplicate files
+// still exist on disk:
+//   * A from-zero rebuild cannot reconstruct Droid's historical per-sync bucket
+//     distribution — settings.json carries only the CURRENT mtime, not per-turn
+//     timestamps like Codex's jsonl. So we rebuild over the DUPLICATE files only,
+//     and overwrite only the bucket keys those files map to (pollutedKeys) plus
+//     the duplicate sessions' cursor entries. Every other droid bucket and cursor
+//     — clean sessions AND deleted-session history — is left byte-for-byte intact,
+//     so healthy history is never collapsed into the current half-hour.
+//   * No session id has >1 file on disk → this bug never fired here: set the
+//     sentinel, touch nothing.
+//   * Fire only when live > rebuilt over pollutedKeys (actual inflation), so a
+//     fresh install (live empty) is left to the normal same-sync parse.
+// Droid has no project dimension, so project.queue.jsonl is never involved.
+async function repairDroidDuplicateSessionInflation({ cursors, queuePath, queueStatePath } = {}) {
+  if (!cursors || typeof cursors !== "object") return false;
+  const migrations = (cursors.migrations ||= {});
+  // Completed run → truthy non-skip sentinel (final). A {skipped:true} object would
+  // retry (codex skip-retry semantics; this repair only ever writes done/none).
+  const prior = migrations[DROID_DUP_SESSION_REPAIR_KEY];
+  if (prior && !(typeof prior === "object" && prior.skipped)) return false;
+
+  // Group current on-disk settings files by session id; collect duplicates.
+  let onDisk;
+  try {
+    onDisk = listDroidSettingsFiles(process.env);
+  } catch {
+    onDisk = [];
+  }
+  const bySession = new Map();
+  for (const fp of onDisk) {
+    const sid = droidSessionIdFromPath(fp);
+    if (!sid) continue;
+    if (!bySession.has(sid)) bySession.set(sid, []);
+    bySession.get(sid).push(fp);
+  }
+  const dupFiles = [];
+  for (const group of bySession.values()) {
+    if (group.length > 1) dupFiles.push(...group);
+  }
+  if (dupFiles.length === 0) {
+    migrations[DROID_DUP_SESSION_REPAIR_KEY] = new Date().toISOString();
+    return false;
+  }
+
+  // pollutedKeys = every (droid, model, half-hour) bucket the duplicate files map
+  // to under the parser's own keying — both the canonical file's bucket and each
+  // stale duplicate's (possibly different) half-hour bucket.
+  const pollutedKeys = new Set();
+  for (const fp of dupFiles) {
+    let mtimeMs = 0;
+    try {
+      mtimeMs = fssync.statSync(fp).mtimeMs;
+    } catch {
+      continue;
+    }
+    let settings;
+    try {
+      settings = JSON.parse(fssync.readFileSync(fp, "utf8"));
+    } catch {
+      continue;
+    }
+    if (!settings || typeof settings !== "object" || !settings.tokenUsage) continue;
+    const bucketStart = toUtcHalfHourStart(
+      new Date(mtimeMs || Date.now()).toISOString(),
+    );
+    if (!bucketStart) continue;
+    pollutedKeys.add(bucketKey("droid", resolveDroidModel(settings, fp), bucketStart));
+  }
+  if (pollutedKeys.size === 0) {
+    migrations[DROID_DUP_SESSION_REPAIR_KEY] = new Date().toISOString();
+    return false;
+  }
+
+  // Ground-truth rebuild into throwaway state over the DUPLICATE files only
+  // (parseDroidIncremental de-dupes its own input → canonical per session). On any
+  // throw, leave all state untouched and do NOT set the sentinel (retry next sync).
+  let rebuilt;
+  const tmpQueue = `${queuePath}.droidrebuild.${process.pid}.${Date.now()}`;
+  try {
+    const tmpCursors = { hourly: { buckets: {}, groupQueued: {} }, droid: {} };
+    await parseDroidIncremental({
+      settingsFiles: dupFiles,
+      cursors: tmpCursors,
+      queuePath: tmpQueue,
+      env: process.env,
+      prune: true,
+    });
+    let tmpRaw = "";
+    try {
+      tmpRaw = await fs.readFile(tmpQueue, "utf8");
+    } catch (e) {
+      if (e?.code !== "ENOENT") throw e;
+    }
+    rebuilt = {
+      buckets: tmpCursors.hourly.buckets || {},
+      sessionTotals: (tmpCursors.droid && tmpCursors.droid.sessionTotals) || {},
+      queueRows: tmpRaw.split("\n").filter((l) => l.trim()),
+    };
+  } catch (e) {
+    console.error(
+      "[sync] droid dup-session repair: rebuild failed, leaving all data untouched:",
+      e?.message || e,
+    );
+    return false;
+  } finally {
+    await fs.rm(tmpQueue, { force: true }).catch(() => {});
+  }
+
+  // Inflation present? Compare live vs rebuilt totals over pollutedKeys only. Fire
+  // only on live > rebuilt (real inflation) — never on a fresh install (live 0).
+  const liveBuckets = (cursors.hourly && cursors.hourly.buckets) || {};
+  let liveScoped = 0;
+  let rebuiltScoped = 0;
+  for (const key of pollutedKeys) {
+    liveScoped += Number(liveBuckets[key]?.totals?.total_tokens || 0);
+    rebuiltScoped += Number(rebuilt.buckets[key]?.totals?.total_tokens || 0);
+  }
+  if (liveScoped <= rebuiltScoped) {
+    migrations[DROID_DUP_SESSION_REPAIR_KEY] = new Date().toISOString();
+    return false;
+  }
+
+  // ── COMMIT (atomic) ──
+  await ensureDir(path.dirname(queuePath));
+  await backupExistingFile(queuePath);
+
+  // 1. queue.jsonl: keep every non-droid line verbatim (incl. unparseable) and
+  //    every droid row whose bucket key is NOT polluted (clean + deleted-session
+  //    history). Drop droid rows in pollutedKeys; append the rebuilt polluted rows.
+  let raw = "";
+  try {
+    raw = await fs.readFile(queuePath, "utf8");
+  } catch (e) {
+    if (e?.code !== "ENOENT") throw e;
+  }
+  // A queue line is "polluted" if it's a droid row whose bucket is in pollutedKeys.
+  // Unparseable / non-droid / clean droid rows are not polluted (kept verbatim).
+  const isPollutedDroidRow = (line) => {
+    let row;
+    try {
+      row = JSON.parse(line);
+    } catch {
+      return false;
+    }
+    return (
+      row?.source === "droid" &&
+      pollutedKeys.has(bucketKey("droid", row.model, row.hour_start))
+    );
+  };
+  const kept = raw
+    .split("\n")
+    .filter((line) => line.trim() && !isPollutedDroidRow(line));
+  const rebuiltPollutedRows = rebuilt.queueRows.filter(isPollutedDroidRow);
+  const tmp = `${queuePath}.tmp.${process.pid}.${Date.now()}`;
+  await fs.writeFile(
+    tmp,
+    kept.concat(rebuiltPollutedRows).join("\n") + "\n",
+    "utf8",
+  );
+  await fs.rename(tmp, queuePath);
+
+  // 2. live hourly buckets: delete polluted droid keys, install the rebuilt buckets
+  //    for those keys. Other droid buckets untouched.
+  const hourly = (cursors.hourly ||= { buckets: {}, groupQueued: {} });
+  hourly.buckets ||= {};
+  hourly.groupQueued ||= {};
+  for (const key of pollutedKeys) {
+    delete hourly.buckets[key];
+    if (rebuilt.buckets[key]) hourly.buckets[key] = rebuilt.buckets[key];
+  }
+  // Defensive: droid never uses the legacy aggregate path, but drop any stale droid
+  // group markers so a repaired hour can't re-emit as model=unknown.
+  for (const gk of Object.keys(hourly.groupQueued)) {
+    if (gk.startsWith("droid|")) delete hourly.groupQueued[gk];
+  }
+
+  // 3. session cursor: overwrite ONLY the duplicate sessions with the ground-truth
+  //    rebuild so the later same-sync droid parse short-circuits (mtime match) and
+  //    emits nothing. Clean sessions' cursor entries are correct already — leave
+  //    them, or the later parse would re-emit them from zero.
+  const droidState = (cursors.droid ||= {});
+  if (!droidState.sessionTotals || typeof droidState.sessionTotals !== "object") {
+    droidState.sessionTotals = {};
+  }
+  for (const sid of Object.keys(rebuilt.sessionTotals)) {
+    droidState.sessionTotals[sid] = rebuilt.sessionTotals[sid];
+  }
+  droidState.updatedAt = new Date().toISOString();
+
+  // 4. reset the cloud upload offset so corrected rows re-upload (idempotent upsert).
+  if (typeof queueStatePath === "string" && queueStatePath) {
+    let uploadState = {};
+    try {
+      uploadState = JSON.parse(await fs.readFile(queueStatePath, "utf8"));
+    } catch {
+      uploadState = {};
+    }
+    uploadState.offset = 0;
+    uploadState.updatedAt = new Date().toISOString();
+    uploadState.note = "reset_after_droid_dup_session_2026_06";
+    await fs.writeFile(queueStatePath, JSON.stringify(uploadState));
+  }
+
+  migrations[DROID_DUP_SESSION_REPAIR_KEY] = {
+    status: "done",
+    at: new Date().toISOString(),
+    keysRepaired: pollutedKeys.size,
+    liveBefore: liveScoped,
+    rebuiltAfter: rebuiltScoped,
+    deltaReclaimed: liveScoped - rebuiltScoped,
+  };
   return true;
 }
 
