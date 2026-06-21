@@ -147,6 +147,15 @@ do {
 
     let countOnly = try decodeResetCredits(["available_count": 2, "credits": []])
     requireEqual(Strings.codexResetBankPassiveStatus(countOnly), Strings.codexResetBankCountOnly(2), "count-only reset credits")
+    NativeLocalization.storePreference(NativeLocalization.chineseLocale)
+    requireEqual(Strings.codexResetBankCountOnly(2), "重置权益：2 次 · 过期时间不可用", "simplified Chinese count-only reset credits")
+    NativeLocalization.storePreference(NativeLocalization.traditionalChineseLocale)
+    requireEqual(Strings.codexResetBankCountOnly(2), "重置權益：2 次 · 過期時間不可用", "traditional Chinese count-only reset credits")
+    NativeLocalization.storePreference(NativeLocalization.japaneseLocale)
+    requireEqual(Strings.codexResetBankCountOnly(2), "リセット：2 件 · 期限不明", "Japanese count-only reset credits")
+    NativeLocalization.storePreference(NativeLocalization.koreanLocale)
+    requireEqual(Strings.codexResetBankCountOnly(2), "리셋: 2회 · 만료일 없음", "Korean count-only reset credits")
+    NativeLocalization.storePreference(NativeLocalization.englishLocale)
 } catch {
     fail("Swift behavior harness failed: \(error)\n")
 }

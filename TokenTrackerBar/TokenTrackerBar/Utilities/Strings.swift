@@ -88,10 +88,10 @@ enum Strings {
     static func codexResetBankCountOnly(_ count: Int) -> String {
         t(
             "Reset Bank: \(count) · expiry unavailable",
-            "Reset Bank：\(count) 次 · 过期时间不可用",
-            "Reset Bank：\(count) 次 · 過期時間不可用",
-            "Reset Bank: \(count) · 期限不明",
-            "Reset Bank: \(count)회 · 만료일 없음"
+            "重置权益：\(count) 次 · 过期时间不可用",
+            "重置權益：\(count) 次 · 過期時間不可用",
+            "リセット：\(count) 件 · 期限不明",
+            "리셋: \(count)회 · 만료일 없음"
         )
     }
     static func codexResetBankExpiryDateTime(_ date: Date) -> String {

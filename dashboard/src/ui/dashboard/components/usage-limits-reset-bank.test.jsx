@@ -207,6 +207,27 @@ describe("UsageLimitsPanel Codex Reset Bank", () => {
     expect(codexGroup.queryByText("Reset 1")).not.toBeInTheDocument();
   });
 
+  it("localizes Codex Reset Bank count-only fallback for Japanese and Korean users", () => {
+    const resetCredits = {
+      available_count: 2,
+      total_earned_count: 2,
+      credits: [credit("2030-01-01T10:45:00.000Z", "not-a-date")],
+    };
+
+    setCopyLocale(JA_LOCALE);
+    const { unmount } = render(usageLimitsPanelElement(resetCredits));
+    let codexGroup = within(screen.getByText("Codex").closest("[role='button']"));
+    expect(codexGroup.getByText("リセット：2 件利用可 · 有効期限不明")).toBeInTheDocument();
+    expect(codexGroup.queryByText(/Reset Bank/)).not.toBeInTheDocument();
+    unmount();
+
+    setCopyLocale(KO_LOCALE);
+    render(usageLimitsPanelElement(resetCredits));
+    codexGroup = within(screen.getByText("Codex").closest("[role='button']"));
+    expect(codexGroup.getByText("리셋: 2회 사용 가능 · 만료 시간 확인 불가")).toBeInTheDocument();
+    expect(codexGroup.queryByText(/Reset Bank/)).not.toBeInTheDocument();
+  });
+
   it("renders five credits as five rows instead of +N more", () => {
     const dates = [
       "2030-01-10T10:00:00.000Z",

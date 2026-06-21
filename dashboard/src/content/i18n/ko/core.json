@@ -155,7 +155,7 @@
   "limits.label.codex_spark_7d": "Spark 7d",
   "limits.codex_reset_bank.title": "리셋",
   "limits.codex_reset_bank.row_label": "리셋 {{index}}",
-  "limits.codex_reset_bank.count_only": "Reset Bank: {{count}}개 사용 가능 · 만료 시간 확인 불가",
+  "limits.codex_reset_bank.count_only": "리셋: {{count}}회 사용 가능 · 만료 시간 확인 불가",
   "limits.label.gemini_pro": "Pro",
   "limits.label.gemini_flash": "Flash",
   "limits.label.gemini_lite": "Lite",
