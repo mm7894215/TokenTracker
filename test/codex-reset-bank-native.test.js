@@ -51,7 +51,17 @@ test("Codex reset row accessibility is reset-specific and does not announce quot
   assert.doesNotMatch(resetRowSource, /percent:\s*Int/);
 });
 
-test("native reset strings support labelled rows, minute expiry, and passive states", () => {
+test("native reset strings support labelled rows, minute expiry, and passive states", (t) => {
+  if (process.platform !== "darwin") {
+    t.skip("requires xcrun swiftc on macOS");
+    return;
+  }
+  const swiftc = spawnSync("xcrun", ["--find", "swiftc"], { encoding: "utf8" });
+  if (swiftc.status !== 0) {
+    t.skip("requires xcrun swiftc");
+    return;
+  }
+
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-reset-bank-native-"));
   const harnessPath = path.join(tempDir, "main.swift");
   const binaryPath = path.join(tempDir, "reset-bank-native");
