@@ -239,6 +239,11 @@ async function cmdStatus(argv = []) {
   const kiloDbPath = path.join(kiloHome, "kilo.db");
   const kiloInstalled = fssync.existsSync(kiloDbPath);
 
+  // Mimo (mimocode — OpenCode-fork SQLite) — passive scan of mimocode.db.
+  const mimoHome = process.env.MIMO_HOME || path.join(xdgDataHome, "mimocode");
+  const mimoDbPath = path.join(mimoHome, "mimocode.db");
+  const mimoInstalled = fssync.existsSync(mimoDbPath);
+
   // Kilo Code VS Code extension — passive scan of all VS Code-family
   // globalStorage/kilocode.kilo-code/tasks/ ui_messages.json files.
   const kilocodeTaskFiles = resolveKilocodeTaskFiles(process.env);
@@ -357,6 +362,9 @@ async function cmdStatus(argv = []) {
         kilo_cli: kiloInstalled
           ? { installed: true, detail: kiloDbPath }
           : { installed: false },
+        mimo: mimoInstalled
+          ? { installed: true, detail: mimoDbPath }
+          : { installed: false },
         kilocode: kilocodeInstalled
           ? { installed: true, files: kilocodeTaskFiles.length }
           : { installed: false },
@@ -444,6 +452,9 @@ async function cmdStatus(argv = []) {
         : null,
       kiloInstalled
         ? `- Kilo CLI: passive reader (${kiloDbPath})`
+        : null,
+      mimoInstalled
+        ? `- Mimo: passive reader (${mimoDbPath})`
         : null,
       kilocodeInstalled
         ? `- Kilo Code (VS Code extension): passive reader (${kilocodeTaskFiles.length} task${kilocodeTaskFiles.length !== 1 ? "s" : ""} across ${new Set(kilocodeTaskFiles.map((t) => t.ide)).size} IDE${new Set(kilocodeTaskFiles.map((t) => t.ide)).size !== 1 ? "s" : ""})`

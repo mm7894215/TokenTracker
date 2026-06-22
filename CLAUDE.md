@@ -152,6 +152,7 @@ After `SMAppService.mainApp.register/unregister` from the bridge (not via `Launc
 - **Parser dedup**: use `claudeMessageDedupKey()`. Bare `if (msgId && reqId)` fails open on DeepSeek/Kimi/Mimo/MiniMax/Claude sub-agents (no `reqId`) and over-counts 1.6–3.7×.
 - **Don't trust `input_tokens` semantics blindly** when adding a new provider. Codex/every-code's `input` includes cached tokens — naive copy inflates cost 6–7×. Verify with raw usage + provider billing dashboard before shipping.
 - **`contextTokensUsed`-style fields are usually snapshots, not cumulative.** PR #74 (Grok) shipped on that bad assumption.
+- **Mimo (mimocode) imports your Claude Code history into its own DB.** It's an OpenCode-fork SQLite (`~/.local/share/mimocode/mimocode.db`), but `claude_import` rows copy `~/.claude/projects/*.jsonl` sessions in — 99%+ of rows are imported Claude data the Claude parser already counts. `readMimoDbMessages()` excludes any message id listed in `claude_import.message_ids`; only native mimo turns count. Counting the whole DB double-counts Claude usage (2.2B tokens on the dev's box) and mislabels it `source=mimo`.
 - **Data-migration releases**: stress-test `sync` twice consecutively after touching `sync.js` / cursor schema — second run exposes state pollution the first hides.
 
 ### False-positive validators to ignore

@@ -108,6 +108,7 @@ const SUPPORTED_PROVIDERS = [
   "Grok Build",
   "Kilo CLI",
   "Kilo Code",
+  "Mimo",
 ];
 
 async function cmdInit(argv) {
@@ -553,6 +554,18 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
     const kiloDbPath = path.join(kiloHome, "kilo.db");
     if (fssync.existsSync(kiloDbPath)) {
       summary.push({ label: "Kilo CLI", status: "detected", detail: "Passive reader (no hook needed)" });
+    }
+  }
+
+  // Mimo (mimocode): passive reader — no hook installation needed. Reuses the
+  // OpenCode-fork SQLite schema at ~/.local/share/mimocode/mimocode.db
+  // (override via MIMO_HOME).
+  {
+    const xdgDataHome = process.env.XDG_DATA_HOME || path.join(home, ".local", "share");
+    const mimoHome = process.env.MIMO_HOME || path.join(xdgDataHome, "mimocode");
+    const mimoDbPath = path.join(mimoHome, "mimocode.db");
+    if (fssync.existsSync(mimoDbPath)) {
+      summary.push({ label: "Mimo", status: "detected", detail: "Passive reader (no hook needed)" });
     }
   }
 

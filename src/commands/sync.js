@@ -14,6 +14,7 @@ const {
   listGeminiSessionFiles,
   listOpencodeMessageFiles,
   readOpencodeDbMessages,
+  readMimoDbMessages,
   resolveKiroDbPath,
   resolveKiroJsonlPath,
   resolveHermesPath,
@@ -208,6 +209,7 @@ async function cmdSync(argv) {
     const opencodeHome = process.env.OPENCODE_HOME || path.join(xdgDataHome, "opencode");
     const opencodeStorageDir = path.join(opencodeHome, "storage");
     const kiloHome = process.env.KILO_HOME || path.join(xdgDataHome, "kilo");
+    const mimoHome = process.env.MIMO_HOME || path.join(xdgDataHome, "mimocode");
 
     // OpenClaw hook integration: allow a hook to request incremental parsing for a single session jsonl.
     // We still parse all regular sources so model/source attribution stays complete (e.g. Kimi sessions).
@@ -504,6 +506,46 @@ async function cmdSync(argv) {
         });
       } catch (err) {
         warnProviderParseFailure("Kilo CLI", err, opts);
+      }
+    }
+
+    // ── Mimo (mimocode — OpenCode-fork SQLite) ──
+    // Xiaomi's Mimo code CLI is an OpenCode fork that stores assistant
+    // messages in the exact same `message` table schema (mimocode.db). Reuse
+    // the OpenCode parser with a dedicated cursor namespace so the message
+    // indexes don't collide. readMimoDbMessages returns NATIVE mimo turns only
+    // — it drops the Claude Code history mimocode imports into its own DB
+    // (already counted as source=claude). Tokens carry real model ids, so
+    // per-model pricing applies as-is.
+    const mimoDbPath = path.join(mimoHome, "mimocode.db");
+    let mimoResult = { messagesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    const mimoDbMessages = readMimoDbMessages(mimoDbPath);
+    if (mimoDbMessages.length > 0) {
+      if (progress?.enabled) {
+        progress.start(
+          `Parsing Mimo ${renderBar(0)} 0/${formatNumber(mimoDbMessages.length)} msgs | buckets 0`,
+        );
+      }
+      try {
+        mimoResult = await parseOpencodeDbIncremental({
+          dbMessages: mimoDbMessages,
+          cursors,
+          queuePath,
+          projectQueuePath,
+          onProgress: (p) => {
+            if (!progress?.enabled) return;
+            const pct = p.total > 0 ? p.index / p.total : 1;
+            progress.update(
+              `Parsing Mimo ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(
+                p.total,
+              )} msgs | buckets ${formatNumber(p.bucketsQueued)}`,
+            );
+          },
+          source: "mimo",
+          cursorKey: "mimo",
+        });
+      } catch (err) {
+        warnProviderParseFailure("Mimo", err, opts);
       }
     }
 
@@ -1199,6 +1241,7 @@ async function cmdSync(argv) {
         grokResult.recordsProcessed +
         copilotResult.recordsProcessed +
         kiloResult.messagesProcessed +
+        mimoResult.messagesProcessed +
         kilocodeResult.recordsProcessed +
         roocodeResult.recordsProcessed +
         zedResult.recordsProcessed +
@@ -1225,6 +1268,7 @@ async function cmdSync(argv) {
         grokResult.bucketsQueued +
         copilotResult.bucketsQueued +
         kiloResult.bucketsQueued +
+        mimoResult.bucketsQueued +
         kilocodeResult.bucketsQueued +
         roocodeResult.bucketsQueued +
         zedResult.bucketsQueued +
