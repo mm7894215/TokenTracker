@@ -6,7 +6,7 @@
 
 ### AI に使ったコストを正確に把握 — すべての CLI を横断して
 
-**22 種類の AI コーディングツール**からトークン数を自動収集し、ローカルで集計、美しいダッシュボードで本当のコスト推移を可視化します。クラウドアカウント不要、API キー不要、セットアップ不要 — コマンド 1 つで完了です。
+**24 種類の AI コーディングツール**からトークン数を自動収集し、ローカルで集計、美しいダッシュボードで本当のコスト推移を可視化します。クラウドアカウント不要、API キー不要、セットアップ不要 — コマンド 1 つで完了です。
 
 [![npm version](https://img.shields.io/npm/v/tokentracker-cli.svg?color=blue)](https://www.npmjs.com/package/tokentracker-cli)
 [![npm downloads](https://img.shields.io/npm/dm/tokentracker-cli.svg?color=brightgreen)](https://www.npmjs.com/package/tokentracker-cli)
@@ -197,7 +197,7 @@ brew install mm7894215/tokentracker/tokentracker
 
 |                          | **TokenTracker** | ccusage     | Cursor stats |
 |--------------------------|:---:|:---:|:---:|
-| **対応 AI ツール数**     | **22**           | 1 (Claude)  | 1 (Cursor)   |
+| **対応 AI ツール数**     | **24**           | 1 (Claude)  | 1 (Cursor)   |
 | **ローカルファースト、アカウント不要** | ✅            | ✅           | ❌            |
 | **ネイティブデスクトップアプリ** | ✅ macOS + Windows | ❌          | ❌            |
 | **デスクトップウィジェット** | ✅ 4 種類      | ❌           | ❌            |
@@ -209,7 +209,7 @@ brew install mm7894215/tokentracker/tokentracker
 
 ```mermaid
 flowchart LR
-    A["AI CLI Tools<br/>Claude Code · Codex · Cursor · Gemini · Kiro<br/>OpenCode · OpenClaw · Every Code · Hermes · Copilot<br/>Kimi Code · CodeBuddy · Grok Build · Kilo CLI · Kilo Code · <br/>Antigravity · oh-my-pi · pi · Craft Agents · Roo Code · Zed · Goose"]
+    A["AI CLI Tools<br/>Claude Code · Codex · Cursor · Gemini · Kiro<br/>OpenCode · OpenClaw · Every Code · Hermes · Copilot<br/>Kimi Code · CodeBuddy · WorkBuddy · Grok Build · Kilo CLI · Kilo Code · <br/>Antigravity · oh-my-pi · pi · Craft Agents · Roo Code · Zed · Goose · Mimo"]
     A -->|hooks trigger| B[Token Tracker]
     B -->|parse logs<br/>30-min UTC buckets| C[(Local SQLite)]
     C --> D[Web Dashboard]

@@ -6,7 +6,7 @@
 
 ### Know exactly what you're spending on AI — across every CLI
 
-Auto-collect token counts from **22 AI coding tools**, aggregate them locally, and see real cost trends in a beautiful dashboard. No cloud account, no API keys, no setup — just one command.
+Auto-collect token counts from **24 AI coding tools**, aggregate them locally, and see real cost trends in a beautiful dashboard. No cloud account, no API keys, no setup — just one command.
 
 [![npm version](https://img.shields.io/npm/v/tokentracker-cli.svg?color=blue)](https://www.npmjs.com/package/tokentracker-cli)
 [![npm downloads](https://img.shields.io/npm/dm/tokentracker-cli.svg?color=brightgreen)](https://www.npmjs.com/package/tokentracker-cli)
@@ -199,11 +199,11 @@ Missing your tool? [Open an issue](https://github.com/mm7894215/TokenTracker/iss
 
 ## 🆚 Why TokenTracker? <a id="ccusage-alternative"></a>
 
-> **Looking for a ccusage alternative with a GUI?** TokenTracker covers 22 tools (not just Claude Code), adds a native macOS menu bar app + desktop widgets, and de-duplicates token records correctly across providers — so your numbers match the providers' own billing.
+> **Looking for a ccusage alternative with a GUI?** TokenTracker covers 24 tools (not just Claude Code), adds a native macOS menu bar app + desktop widgets, and de-duplicates token records correctly across providers — so your numbers match the providers' own billing.
 
 |                          | **TokenTracker** | ccusage     | Cursor stats |
 |--------------------------|:---:|:---:|:---:|
-| **AI tools supported**   | **22**           | 1 (Claude)  | 1 (Cursor)   |
+| **AI tools supported**   | **24**           | 1 (Claude)  | 1 (Cursor)   |
 | **Local-first, no account** | ✅            | ✅           | ❌            |
 | **Native desktop app**   | ✅ macOS + Windows | ❌           | ❌            |
 | **Desktop widgets**      | ✅ 4 widgets      | ❌           | ❌            |
@@ -218,7 +218,7 @@ Missing your tool? [Open an issue](https://github.com/mm7894215/TokenTracker/iss
 
 ```mermaid
 flowchart LR
-    A["AI CLI Tools<br/>Claude Code · Codex · Cursor · Gemini · Kiro<br/>OpenCode · OpenClaw · Every Code · Hermes · Copilot<br/>Kimi Code · CodeBuddy · Grok Build · Kilo CLI · Kilo Code · <br/>Antigravity · oh-my-pi · pi · Craft Agents · Roo Code · Zed · Goose"]
+    A["AI CLI Tools<br/>Claude Code · Codex · Cursor · Gemini · Kiro<br/>OpenCode · OpenClaw · Every Code · Hermes · Copilot<br/>Kimi Code · CodeBuddy · WorkBuddy · Grok Build · Kilo CLI · Kilo Code · <br/>Antigravity · oh-my-pi · pi · Craft Agents · Roo Code · Zed · Goose · Mimo"]
     A -->|hooks trigger| B[Token Tracker]
     B -->|parse logs<br/>30-min UTC buckets| C[(Local SQLite)]
     C --> D[Web Dashboard]
