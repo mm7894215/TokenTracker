@@ -1,13 +1,13 @@
 {
-  "generatedAt": "2026-06-14T02:50:00.831Z",
+  "generatedAt": "2026-06-24T13:00:11.778Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
     "rawText": "JSX text nodes containing letters or digits"
   },
   "totals": {
-    "colors": 269,
-    "rawText": 163
+    "colors": 271,
+    "rawText": 161
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -273,12 +273,9 @@
     },
     "dashboard/src/ui/dashboard/components/StatsPanel.jsx": {
       "colors": 0,
-      "rawText": 5,
+      "rawText": 2,
       "rawTextTokens": [
-        "0 && (",
-        "30d",
-        "7d",
-        "avg"
+        "0 && ("
       ]
     },
     "dashboard/src/ui/dashboard/components/TrendMonitor.jsx": {
@@ -312,8 +309,9 @@
     },
     "dashboard/src/ui/dashboard/components/UsageLimitsPanel.test.jsx": {
       "colors": 0,
-      "rawText": 1,
+      "rawText": 2,
       "rawTextTokens": [
+        ", ); // Brand name only — no plan_label suffix to avoid \"OpenCode Go Go\". expect(screen.getByText(\"OpenCode Go\")).toBeInTheDocument(); expect(screen.getByText(\"5h\")).toBeInTheDocument(); expect(screen.getByText(\"Weekly\")).toBeInTheDocument(); expect(screen.getByText(\"Monthly\")).toBeInTheDocument(); expect(screen.getByText(\"12%\")).toBeInTheDocument(); expect(screen.getByText(\"30%\")).toBeInTheDocument(); expect(screen.getByText(\"60%\")).toBeInTheDocument(); // Not-configured fallback. rerender(",
         ", ); expect(screen.getByText(\"Cursor\")).toBeInTheDocument(); rerender("
       ]
     },

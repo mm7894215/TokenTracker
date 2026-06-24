@@ -103,6 +103,10 @@ struct UsageLimitsView: View {
                 if let zcode = limits.zcode, zcode.configured, zcode.error == nil {
                     groups.append(AnyView(toolSection(id: id, title: planTitle("ZCode", zcode.planLabel), assetName: "ZcodeLogo", toolName: "ZCode", specs: zcodeSpecs(zcode))))
                 }
+            case "opencodeGo":
+                if let opencodeGo = limits.opencodeGo, opencodeGo.configured, opencodeGo.error == nil {
+                    groups.append(AnyView(toolSection(id: id, title: planTitle("OpenCode Go", opencodeGo.planLabel), assetName: "OpenCodeLogo", toolName: "OpenCode Go", specs: opencodeGoSpecs(opencodeGo))))
+                }
             default:
                 break
             }
@@ -258,6 +262,14 @@ struct UsageLimitsView: View {
         var s: [LimitWindowSpec] = []
         if let w = z.primaryWindow { s.append(makeSpec("GLM-5.2", w.usedPercent, iso: w.resetAt)) }
         if let w = z.secondaryWindow { s.append(makeSpec("GLM-5-Turbo", w.usedPercent, iso: w.resetAt)) }
+        return s
+    }
+
+    private func opencodeGoSpecs(_ o: OpencodeGoLimits) -> [LimitWindowSpec] {
+        var s: [LimitWindowSpec] = []
+        if let w = o.primaryWindow { s.append(makeSpec("5h", w.usedPercent, iso: w.resetAt)) }
+        if let w = o.secondaryWindow { s.append(makeSpec("Weekly", w.usedPercent, iso: w.resetAt)) }
+        if let w = o.tertiaryWindow { s.append(makeSpec("Monthly", w.usedPercent, iso: w.resetAt)) }
         return s
     }
 
@@ -468,7 +480,7 @@ struct UsageLimitsView: View {
     @ViewBuilder
     private func brandIcon(_ name: String) -> some View {
         switch name {
-        case "CursorLogo", "KimiLogo", "KiroLogo", "GrokLogo", "CopilotLogo", "ZcodeLogo":
+        case "CursorLogo", "KimiLogo", "KiroLogo", "GrokLogo", "CopilotLogo", "ZcodeLogo", "OpenCodeLogo":
             let filename: String = {
                 switch name {
                 case "CursorLogo": return "cursor.svg"
@@ -476,6 +488,7 @@ struct UsageLimitsView: View {
                 case "KiroLogo": return "kiro.svg"
                 case "GrokLogo": return "grok.svg"
                 case "ZcodeLogo": return "zcode.svg"
+                case "OpenCodeLogo": return "opencode.svg"
                 default: return "copilot.svg"
                 }
             }()

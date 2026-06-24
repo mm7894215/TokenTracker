@@ -25,6 +25,7 @@ const {
 } = require("./cursor-config");
 const { fetchGrokLimits } = require("./grok-limits");
 const { fetchZcodeLimits } = require("./zcode-limits");
+const { fetchOpencodeGoLimits } = require("./opencode-go-limits");
 const { readSqliteJsonRows } = require("./sqlite-reader");
 
 // 2-minute in-memory cache
@@ -2290,7 +2291,7 @@ async function fetchUsageLimitsUncached({
   const freshClaudeCache = claudeToken ? readFreshClaudeLimitsCache({ home, nowMs }) : null;
 
   const providerFetch = withFetchTimeout(fetchImpl, providerTimeoutMs);
-  const [claudeResult, codexResult, cursor, kimi, gemini, kiro, antigravity, copilot, grok, zcode] = await Promise.all([
+  const [claudeResult, codexResult, cursor, kimi, gemini, kiro, antigravity, copilot, grok, zcode, opencodeGo] = await Promise.all([
     claudeToken && !freshClaudeCache && !claudeRetryAtMs
       ? withProviderTimeout(fetchClaudeUsageLimits(claudeToken, { fetchImpl: providerFetch, maxAttempts: 1 }), "Claude", providerTimeoutMs).then(
           (value) => ({ status: "fulfilled", value }),
@@ -2320,6 +2321,11 @@ async function fetchUsageLimitsUncached({
     withProviderTimeout(fetchGrokLimits({ home, env, fetchImpl: providerFetch }), "Grok Build", providerTimeoutMs)
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
     withProviderTimeout(fetchZcodeLimits({ home, env, fetchImpl: providerFetch }), "ZCode", providerTimeoutMs)
+      .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
+    // OpenCode Go scrapes the workspace dashboard (no public REST API yet,
+    // tracked at anomalyco/opencode#16017). Auth is via two env vars, see
+    // src/lib/opencode-go-limits.js for the exact endpoint + cookie shape.
+    withProviderTimeout(fetchOpencodeGoLimits({ env, fetchImpl: providerFetch }), "OpenCode Go", providerTimeoutMs)
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
   ]);
 
@@ -2403,6 +2409,7 @@ async function fetchUsageLimitsUncached({
     copilot: withPlanLabel(copilot, copilot.plan_name, "Copilot"),
     grok: withPlanLabel(grok, null, "Grok"),
     zcode: withPlanLabel(zcode, zcode.plan_label, "ZCode"),
+    opencodeGo: withPlanLabel(opencodeGo, opencodeGo?.plan_label, "OpenCode Go"),
   };
 
   cache = { data, fetchedAt: nowMs };
@@ -2435,4 +2442,5 @@ module.exports = {
   describeCopilotOtelStatus,
   fetchGrokLimits,
   fetchZcodeLimits,
+  fetchOpencodeGoLimits,
 };

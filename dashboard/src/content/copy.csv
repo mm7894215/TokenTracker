@@ -976,3 +976,7 @@ skills.usage.months_ago,ui,SkillsPage,SkillDetailPanel,usage_months_ago,"{{month
 skills.usage.unknown,ui,SkillsPage,SkillDetailPanel,usage_unknown,"Unknown",,active
 skills.usage.unused,ui,SkillsPage,SkillDetailPanel,usage_unused,"Not invoked yet. Possible dead weight if you never use it.",,active
 skills.usage.disclaimer,ui,SkillsPage,SkillDetailPanel,usage_disclaimer,"Counts from Claude transcripts. Cost is the approximate spend of turns that invoked this skill.",,active
+limits.provider.opencode_go,ui,LimitsPage,UsageLimitsPanel,provider_opencode_go,"OpenCode Go",,active
+limits.label.opencode_go_5h,ui,LimitsPage,UsageLimitsPanel,opencode_go_5h,"5h",,active
+limits.label.opencode_go_weekly,ui,LimitsPage,UsageLimitsPanel,opencode_go_weekly,"Weekly",,active
+limits.label.opencode_go_monthly,ui,LimitsPage,UsageLimitsPanel,opencode_go_monthly,"Monthly",,active

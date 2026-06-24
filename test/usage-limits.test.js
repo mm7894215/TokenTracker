@@ -1202,7 +1202,7 @@ describe("getUsageLimits", () => {
     resetUsageLimitsCache();
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-429-"));
     try {
-      let calls = 0;
+      const urls = [];
       const result = await getUsageLimits({
         home: tmp,
         platform: "darwin",
@@ -1216,8 +1216,8 @@ describe("getUsageLimits", () => {
         commandRunner() {
           return { status: 1, stdout: "" };
         },
-        fetchImpl() {
-          calls += 1;
+        fetchImpl(url) {
+          urls.push(url);
           return Promise.resolve({
             status: 429,
             ok: false,
@@ -1226,7 +1226,12 @@ describe("getUsageLimits", () => {
         },
       });
 
-      assert.equal(calls, 1);
+      // Claude is the only provider this test cares about; the rest of the
+      // fetchImpl calls come from other providers that get scheduled in
+      // parallel (notably OpenCode Go when OPENCODE_GO_WORKSPACE_ID is set
+      // in the test env, e.g. the dev's local .env.local).
+      const claudeCalls = urls.filter((u) => typeof u === "string" && u.includes("anthropic.com"));
+      assert.equal(claudeCalls.length, 1);
       assert.equal(result.claude.configured, true);
       assert.match(result.claude.error, /rate limited/);
     } finally {
@@ -1331,10 +1336,15 @@ describe("getUsageLimits", () => {
         },
       });
 
-      assert.equal(calls[0].url, "https://auth.kimi.com/api/oauth/token");
-      assert.match(calls[0].body, /grant_type=refresh_token/);
-      assert.match(calls[0].body, /refresh_token=refresh-kimi-token/);
-      assert.equal(calls[1].authorization, "Bearer fresh-kimi-token");
+      // Other providers (e.g. OpenCode Go when OPENCODE_GO_WORKSPACE_ID is
+      // set in the test process env) may schedule their own fetchImpl calls
+      // in parallel; pick the Kimi ones by URL so the assertions don't
+      // depend on Promise.all slot order.
+      const kimiCalls = calls.filter((c) => typeof c.url === "string" && c.url.includes("kimi.com"));
+      assert.equal(kimiCalls[0].url, "https://auth.kimi.com/api/oauth/token");
+      assert.match(kimiCalls[0].body, /grant_type=refresh_token/);
+      assert.match(kimiCalls[0].body, /refresh_token=refresh-kimi-token/);
+      assert.equal(kimiCalls[1].authorization, "Bearer fresh-kimi-token");
       assert.equal(result.kimi.error, null);
       assert.equal(result.kimi.primary_window.used_percent, 40);
 

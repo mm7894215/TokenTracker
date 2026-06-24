@@ -12,10 +12,12 @@ struct UsageLimitsResponse: Codable, Equatable {
     let antigravity: AntigravityLimits
     let copilot: CopilotLimits?
     let zcode: ZcodeLimits?
+    let opencodeGo: OpencodeGoLimits?
 
     enum CodingKeys: String, CodingKey {
         case fetchedAt = "fetched_at"
         case claude, codex, cursor, gemini, kimi, kiro, grok, antigravity, copilot, zcode
+        case opencodeGo = "opencodeGo"
     }
 }
 
@@ -272,6 +274,26 @@ struct ZcodeLimits: Codable, Equatable {
     }
 }
 
+// OpenCode Go: $12/5h + $30/week + $60/month rolling usage scraped from
+// https://opencode.ai/workspace/<id>/go. No public REST API yet (tracked at
+// anomalyco/opencode#16017), so the backend HTML-parses the workspace page.
+struct OpencodeGoLimits: Codable, Equatable {
+    let configured: Bool
+    let error: String?
+    let planLabel: String?
+    let primaryWindow: GenericLimitWindow?
+    let secondaryWindow: GenericLimitWindow?
+    let tertiaryWindow: GenericLimitWindow?
+
+    enum CodingKeys: String, CodingKey {
+        case configured, error
+        case planLabel = "plan_label"
+        case primaryWindow = "primary_window"
+        case secondaryWindow = "secondary_window"
+        case tertiaryWindow = "tertiary_window"
+    }
+}
+
 struct AntigravityLimits: Codable, Equatable {
     let configured: Bool
     let error: String?
@@ -310,6 +332,7 @@ extension UsageLimitsResponse {
             (antigravity.configured, antigravity.error),
             (copilot?.configured ?? false, copilot?.error),
             (zcode?.configured ?? false, zcode?.error),
+            (opencodeGo?.configured ?? false, opencodeGo?.error),
         ]
         return providers.contains { $0.0 && $0.1 == nil }
     }

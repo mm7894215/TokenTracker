@@ -40,6 +40,7 @@ const existingLimits = {
   grok: { configured: false },
   antigravity: { configured: false },
   zcode: { configured: false },
+  opencodeGo: { configured: false },
 };
 
 const freshLimits = {

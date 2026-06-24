@@ -93,6 +93,19 @@ export const PROVIDER_LIMIT_SPECS = {
       ];
     },
   },
+  opencodeGo: {
+    // OpenCode Go: $12/5h + $30/week + $60/month rolling windows. Window
+    // lengths are server-defined (no client-trusted window length to pace
+    // against), so we leave `windowSeconds` unset — paceForSpec reads
+    // `expectedPercent` and skips the projection copy.
+    windows(data) {
+      return [
+        { key: "5h", labelKey: "limits.label.opencode_go_5h", window: data.primary_window },
+        { key: "weekly", labelKey: "limits.label.opencode_go_weekly", window: data.secondary_window },
+        { key: "monthly", labelKey: "limits.label.opencode_go_monthly", window: data.tertiary_window },
+      ];
+    },
+  },
 };
 
 /** Static copy() anchors for validate:copy — labels resolve at runtime via spec.labelKey. */
@@ -126,5 +139,8 @@ export function usageLimitsLabelCopyAnchor() {
     copy("limits.label.copilot_chat"),
     copy("limits.label.zcode_glm52"),
     copy("limits.label.zcode_glm5t"),
+    copy("limits.label.opencode_go_5h"),
+    copy("limits.label.opencode_go_weekly"),
+    copy("limits.label.opencode_go_monthly"),
   ];
 }

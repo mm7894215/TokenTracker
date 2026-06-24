@@ -89,6 +89,52 @@ describe("UsageLimitsPanel", () => {
     expect(screen.getByText("Not connected")).toBeInTheDocument();
   });
 
+  it("renders OpenCode Go 5h / Weekly / Monthly windows", () => {
+    const { rerender } = render(
+      <UsageLimitsPanel
+        opencodeGo={{
+          configured: true,
+          error: null,
+          primary_window: { used_percent: 12, reset_at: "2026-06-24T20:00:00.000Z" },
+          secondary_window: { used_percent: 30, reset_at: "2026-06-28T00:00:00.000Z" },
+          tertiary_window: { used_percent: 60, reset_at: "2026-07-01T00:00:00.000Z" },
+        }}
+        order={["opencodeGo"]}
+      />,
+    );
+
+    // Brand name only — no plan_label suffix to avoid "OpenCode Go Go".
+    expect(screen.getByText("OpenCode Go")).toBeInTheDocument();
+    expect(screen.getByText("5h")).toBeInTheDocument();
+    expect(screen.getByText("Weekly")).toBeInTheDocument();
+    expect(screen.getByText("Monthly")).toBeInTheDocument();
+    expect(screen.getByText("12%")).toBeInTheDocument();
+    expect(screen.getByText("30%")).toBeInTheDocument();
+    expect(screen.getByText("60%")).toBeInTheDocument();
+
+    // Not-configured fallback.
+    rerender(<UsageLimitsPanel opencodeGo={{ configured: false }} order={["opencodeGo"]} />);
+    expect(screen.getByText("OpenCode Go")).toBeInTheDocument();
+    expect(screen.getByText("Not connected")).toBeInTheDocument();
+  });
+
+  it("surfaces a configured OpenCode Go error instead of rendering bars", () => {
+    render(
+      <UsageLimitsPanel
+        opencodeGo={{
+          configured: true,
+          error: "Could not parse any known OpenCode Go dashboard usage windows",
+        }}
+        order={["opencodeGo"]}
+      />,
+    );
+
+    expect(screen.getByText("OpenCode Go")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Could not parse any known OpenCode Go dashboard usage windows/),
+    ).toBeInTheDocument();
+  });
+
   it("appends plan_label to the provider title when present", () => {
     render(
       <UsageLimitsPanel

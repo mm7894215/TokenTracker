@@ -42,6 +42,13 @@ describe("getUsageLimits single-flight", () => {
   it("shares one upstream fetch round across concurrent cache misses", async () => {
     resetUsageLimitsCache();
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-singleflight-"));
+    // Clear provider env so the OpenCode Go scraper doesn't fetch in this test.
+    const savedEnv = {
+      OPENCODE_GO_WORKSPACE_ID: process.env.OPENCODE_GO_WORKSPACE_ID,
+      OPENCODE_GO_AUTH_COOKIE: process.env.OPENCODE_GO_AUTH_COOKIE,
+    };
+    delete process.env.OPENCODE_GO_WORKSPACE_ID;
+    delete process.env.OPENCODE_GO_AUTH_COOKIE;
     try {
       const { commandCalls, countFetchCalls, options } = makeCountingDeps();
       const opts = { home: tmp, ...options };
@@ -61,6 +68,12 @@ describe("getUsageLimits single-flight", () => {
       );
       assert.equal(countFetchCalls(), 0, "no provider is configured, so no HTTP fetch expected");
     } finally {
+      if (savedEnv.OPENCODE_GO_WORKSPACE_ID !== undefined) {
+        process.env.OPENCODE_GO_WORKSPACE_ID = savedEnv.OPENCODE_GO_WORKSPACE_ID;
+      }
+      if (savedEnv.OPENCODE_GO_AUTH_COOKIE !== undefined) {
+        process.env.OPENCODE_GO_AUTH_COOKIE = savedEnv.OPENCODE_GO_AUTH_COOKIE;
+      }
       resetUsageLimitsCache();
       fs.rmSync(tmp, { recursive: true, force: true });
     }

@@ -12,6 +12,7 @@ export const LIMIT_PROVIDER_IDS = [
   "copilot",
   "antigravity",
   "zcode",
+  "opencodeGo",
 ];
 
 /** Keys for ProviderIcon — mono logos use inline SVG; colored logos use /brand-logos/. */
@@ -26,6 +27,9 @@ export const LIMIT_PROVIDER_ICON_KEYS = {
   copilot: "COPILOT",
   antigravity: "ANTIGRAVITY",
   zcode: "ZCODE",
+  // Reuse the existing OpenCode brand mark — same vendor, separate product
+  // (Go is a paid subscription tracked via dashboard scrape).
+  opencodeGo: "OPENCODE",
 };
 
 export function limitProviderIconKey(id) {
@@ -54,6 +58,8 @@ export function limitProviderName(id) {
       return copy("limits.provider.antigravity");
     case "zcode":
       return copy("limits.provider.zcode");
+    case "opencodeGo":
+      return copy("limits.provider.opencode_go");
     default:
       return String(id || "");
   }
