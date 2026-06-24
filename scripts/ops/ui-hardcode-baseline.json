@@ -1,13 +1,13 @@
 {
-  "generatedAt": "2026-06-14T02:50:00.831Z",
+  "generatedAt": "2026-06-24T18:32:51.215Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
     "rawText": "JSX text nodes containing letters or digits"
   },
   "totals": {
-    "colors": 269,
-    "rawText": 163
+    "colors": 271,
+    "rawText": 167
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -259,6 +259,24 @@
         "1 ? ("
       ]
     },
+    "dashboard/src/ui/dashboard/components/DeviceUsageCard.jsx": {
+      "colors": 0,
+      "rawText": 5,
+      "rawTextTokens": [
+        "0 ? ((tokens / total) * 100).toFixed(1) : \"0.0\"; const isSelected = selectedDeviceId === d.id; const name = d.device_name || copy(\"dashboard.device_card.unnamed\"); return (",
+        "; if (p.includes(\"linux\")) return",
+        "; if (p.includes(\"win\")) return",
+        "; return",
+        "sum + (Number(d.total_tokens) || 0), 0); return ("
+      ]
+    },
+    "dashboard/src/ui/dashboard/components/DeviceUsageCard.test.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        ", ); await userEvent.click(screen.getByText(\"MacBook Pro\")); expect(onSelectDevice).toHaveBeenCalledWith(\"d1\"); rerender("
+      ]
+    },
     "dashboard/src/ui/dashboard/components/LikeButton.jsx": {
       "colors": 6,
       "rawText": 1,
@@ -273,12 +291,9 @@
     },
     "dashboard/src/ui/dashboard/components/StatsPanel.jsx": {
       "colors": 0,
-      "rawText": 5,
+      "rawText": 2,
       "rawTextTokens": [
-        "0 && (",
-        "30d",
-        "7d",
-        "avg"
+        "0 && ("
       ]
     },
     "dashboard/src/ui/dashboard/components/TrendMonitor.jsx": {
@@ -319,10 +334,11 @@
     },
     "dashboard/src/ui/dashboard/components/UsageOverview.jsx": {
       "colors": 13,
-      "rawText": 2,
+      "rawText": 3,
       "rawTextTokens": [
         "0 && (",
-        "0); return ("
+        "0); return (",
+        "1 ? ("
       ]
     },
     "dashboard/src/ui/dashboard/components/__tests__/ActivityHeatmap3D.test.jsx": {
