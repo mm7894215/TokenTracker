@@ -25,8 +25,8 @@
    - Returns one of:
      - `{ configured: false }` — env vars missing
      - `{ configured: true, error: "…" }` — fetch/parse error
-     - `{ configured: true, plan_label: "Go", primary_window, secondary_window, tertiary_window }` where each window is `{ used_percent, reset_at: <ISO from resetInSec> }` — mirrors the existing `zcode` / `kimi` / `antigravity` shape so the dashboard spec works without any spec changes.
-2. **`src/lib/usage-limits.js`** — add `import { fetchOpencodeGoLimits }` and a `Promise.all` slot for it next to the existing 10 providers; merge with `withPlanLabel(opencodeGo, "Go", "OpenCode Go")` in the returned `data` object.
+     - `{ configured: true, primary_window, secondary_window, tertiary_window }` where each window is `{ used_percent, reset_at: <ISO from resetInSec> }` — mirrors the existing `zcode` / `kimi` / `antigravity` shape so the dashboard spec works without any spec changes. No `plan_label` is set; the brand "OpenCode Go" is the row title and any plan tier would just duplicate it.
+2. **`src/lib/usage-limits.js`** — add `import { fetchOpencodeGoLimits }` and a `Promise.all` slot for it next to the existing 10 providers; merge with `withPlanLabel(opencodeGo, opencodeGo?.plan_label, "OpenCode Go")` in the returned `data` object. `normalizePlanLabel(null, ...)` returns `null` so the rendered title stays "OpenCode Go" (the brand), not "OpenCode Go OpenCode Go".
 3. **`src/lib/local-api.js`** — no changes (the new provider is just another key on the JSON the existing `/functions/tokentracker-usage-limits` endpoint already returns).
 4. **`test/opencode-go-limits.test.js` (new)** — node:test, fixtures:
    - missing env → `{ configured: false }`
@@ -47,7 +47,7 @@
 ### Docs / env
 
 12. **`.env.example`** — append:
-    ```
+    ```dotenv
     # OpenCode Go (https://opencode.ai/workspace/<id>/go) — optional, enables dashboard scrape
     OPENCODE_GO_WORKSPACE_ID=
     OPENCODE_GO_AUTH_COOKIE=

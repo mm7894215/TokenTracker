@@ -151,11 +151,16 @@ function extractWindows(html, nowMs) {
   let rolling = parseWindowUsage(html, RE_ROLLING_PCT_FIRST, RE_ROLLING_RESET_FIRST);
   let weekly = parseWindowUsage(html, RE_WEEKLY_PCT_FIRST, RE_WEEKLY_RESET_FIRST);
   let monthly = parseWindowUsage(html, RE_MONTHLY_PCT_FIRST, RE_MONTHLY_RESET_FIRST);
-  if (!rolling && !weekly && !monthly) {
+  // Fill any *individual* missing window from the data-slot HTML fallback.
+  // Running the fallback only when all three fail loses the case where SSR
+  // hydration exposes e.g. rollingUsage but drops weeklyUsage — we'd return
+  // `null` for that window even though parseDataSlotFormat() could still
+  // recover it from the rendered HTML.
+  if (!rolling || !weekly || !monthly) {
     const fallback = parseDataSlotFormat(html);
-    rolling = fallback.rolling || null;
-    weekly = fallback.weekly || null;
-    monthly = fallback.monthly || null;
+    rolling = rolling || fallback.rolling || null;
+    weekly = weekly || fallback.weekly || null;
+    monthly = monthly || fallback.monthly || null;
   }
   return {
     rolling: rolling ? buildWindow({ ...rolling, nowMs }) : null,

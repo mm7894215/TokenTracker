@@ -240,6 +240,41 @@ describe("fetchOpencodeGoLimits", () => {
     assert.equal(out.tertiary_window?.used_percent, 7);
   });
 
+  it("fills each missing window from the HTML fallback (per-window, not all-or-nothing)", async () => {
+    // SSR exposes rolling + weekly but drops monthly; the rendered HTML still
+    // carries all three data-slot items. The fallback must recover monthly
+    // without clobbering the two SSR values.
+    const partial = `
+      <html><body>
+      <script>self.__next_f.push([1,"rollingUsage:$R[3]={usagePercent:42,resetInSec:60}"])</script>
+      <script>self.__next_f.push([1,"weeklyUsage:$R[4]={usagePercent:18,resetInSec:600}"])</script>
+      <div data-slot="usage-item">
+        <span data-slot="usage-label">Rolling Usage</span>
+        <span data-slot="usage-value">99%</span>
+        <span data-slot="reset-time">Resets in 1 hours</span>
+      </div>
+      <div data-slot="usage-item">
+        <span data-slot="usage-label">Weekly Usage</span>
+        <span data-slot="usage-value">99%</span>
+        <span data-slot="reset-time">Resets in 1 hours</span>
+      </div>
+      <div data-slot="usage-item">
+        <span data-slot="usage-label">Monthly Usage</span>
+        <span data-slot="usage-value">77%</span>
+        <span data-slot="reset-time">Resets in 1 hours</span>
+      </div>
+      </body></html>
+    `;
+    const fetchImpl = async () => jsonResponse(200, partial);
+    const out = await fetchOpencodeGoLimits({ env: cfg, fetchImpl, nowMs: 1_700_000_000_000 });
+    assert.equal(out.configured, true);
+    // SSR values preserved (42, 18) even though the data-slot block would say 99%.
+    assert.equal(out.primary_window?.used_percent, 42);
+    assert.equal(out.secondary_window?.used_percent, 18);
+    // Monthly recovered from the HTML fallback.
+    assert.equal(out.tertiary_window?.used_percent, 77);
+  });
+
   it("surfaces 401/403 as a re-auth error", async () => {
     const fetchImpl = async () => jsonResponse(401, "login");
     const out = await fetchOpencodeGoLimits({ env: cfg, fetchImpl });
