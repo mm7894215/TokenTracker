@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="TokenTracker">
+  <defs>
+    <linearGradient id="bg" x1="24" y1="16" x2="104" y2="112" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <rect x="12" y="12" width="104" height="104" rx="28" fill="url(#bg)"/>
+  <path d="M38 78c8 12 20 18 36 18 10 0 18-2 24-6" fill="none" stroke="#ffffff" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="48" cy="52" r="8" fill="#ffffff"/>
+  <circle cx="80" cy="52" r="8" fill="#ffffff"/>
+  <path d="M64 24v18" stroke="#ffffff" stroke-width="8" stroke-linecap="round"/>
+</svg>
