@@ -144,3 +144,11 @@ skills-lock.json
 .serena/
 openspec/
 plans/
+
+# TokenTrackerLinux build artifacts
+TokenTrackerLinux/EmbeddedServer/
+TokenTrackerLinux/src-tauri/target/
+TokenTrackerLinux/packaging/arch/tokentracker-linux/pkg/
+TokenTrackerLinux/packaging/arch/tokentracker-linux/src/
+TokenTrackerLinux/packaging/arch/tokentracker-linux/*.pkg.tar.*
+TokenTrackerLinux/packaging/arch/tokentracker-linux/*.log
