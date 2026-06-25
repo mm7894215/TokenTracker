@@ -1,5 +1,6 @@
 mod paths;
 mod server;
+mod tray;
 
 use std::sync::Mutex;
 
@@ -11,6 +12,7 @@ static SERVER: Lazy<Mutex<Option<TokenTrackerServer>>> = Lazy::new(|| Mutex::new
 
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
     }
@@ -30,6 +32,8 @@ fn main() {
             show_main_window(app);
         }))
         .setup(|app| {
+            tray::install(app)?;
+
             let runtime_paths = paths::resolve_runtime_paths()?;
             let server = TokenTrackerServer::start(runtime_paths)?;
             let dashboard_url = server.url().to_string();
@@ -45,7 +49,8 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if matches!(event, WindowEvent::CloseRequested { .. }) {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
                 let _ = window.hide();
             }
         })
