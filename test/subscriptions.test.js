@@ -474,7 +474,10 @@ test("collectLocalSubscriptions includes OpenClaw when session plugin is configu
     await writeJson(path.join(home, ".openclaw", "openclaw.json"), {
       plugins: {
         entries: {
-          "openclaw-session-sync": { enabled: true },
+          "openclaw-session-sync": {
+            enabled: true,
+            hooks: { allowConversationAccess: true },
+          },
         },
         load: {
           paths: [pluginEntryDir],

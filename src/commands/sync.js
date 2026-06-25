@@ -218,7 +218,7 @@ async function cmdSync(argv) {
     const mimoHome = process.env.MIMO_HOME || path.join(xdgDataHome, "mimocode");
     const zcodeHome = process.env.ZCODE_HOME || path.join(home, ".zcode");
 
-    // OpenClaw hook integration: allow a hook to request incremental parsing for a single session jsonl.
+    // OpenClaw session plugin integration: allow the plugin to request incremental parsing for a single session jsonl.
     // We still parse all regular sources so model/source attribution stays complete (e.g. Kimi sessions).
     const openclawSignal = opts.fromOpenclaw
       ? resolveOpenclawSignal({ home, env: process.env })
@@ -294,7 +294,7 @@ async function cmdSync(argv) {
 
     let openclawResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (openclawFiles.length > 0) {
-      // Only runs when explicitly triggered by OpenClaw hooks.
+      // Only runs when explicitly triggered by the OpenClaw session plugin.
       try {
         openclawResult = await parseOpenclawIncremental({
           sessionFiles: openclawFiles,

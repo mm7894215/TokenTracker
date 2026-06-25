@@ -337,6 +337,9 @@ async function cmdStatus(argv = []) {
         gemini: geminiHookConfigured,
         opencode_plugin: opencodePluginConfigured,
         openclaw_session_plugin: Boolean(openclawSessionPluginState?.configured),
+        openclaw_session_plugin_conversation_access: Boolean(
+          openclawSessionPluginState?.conversationAccess,
+        ),
         openclaw_legacy: Boolean(openclawHookState?.configured),
         codebuddy: codebuddyInstalled ? Boolean(codebuddyHookConfigured) : null,
         workbuddy: workbuddyInstalled ? Boolean(workbuddyHookConfigured) : null,
@@ -436,6 +439,7 @@ async function cmdStatus(argv = []) {
       `- Gemini hooks: ${geminiHookConfigured ? "set" : "unset"}`,
       `- Opencode plugin: ${opencodePluginConfigured ? "set" : "unset"}`,
       `- OpenClaw session plugin: ${openclawSessionPluginState?.configured ? "set" : "unset"}`,
+      `- OpenClaw session plugin conversation access: ${openclawSessionPluginState?.conversationAccess ? "set" : "unset"}`,
       `- OpenClaw hook (legacy): ${openclawHookState?.configured ? "set" : "unset"}`,
       kimiInstalled || kimiCodeInstalled
         ? `- Kimi Code: passive reader (${kimiWireFiles.length + kimiCodeWireFiles.length} wire.jsonl file${(kimiWireFiles.length + kimiCodeWireFiles.length) !== 1 ? "s" : ""} found)`

@@ -11,7 +11,7 @@ You do **not** need to download, copy, or drag any plugin into OpenClaw. Running
 TokenTracker ships a small OpenClaw session plugin (`openclaw-session-sync`) inside the `tokentracker-cli` npm package. It lives at:
 
 ```
-~/.tokentracker/app/openclaw-plugin/openclaw-session-sync/
+~/.tokentracker/tracker/openclaw-plugin/openclaw-session-sync/
 ├── package.json
 ├── openclaw.plugin.json
 └── index.js
@@ -22,9 +22,12 @@ During `tokentracker init`, TokenTracker:
 1. Writes the plugin files to the path above.
 2. Calls OpenClaw's own CLI: `openclaw plugins install --link <that path>`.
 3. Calls `openclaw plugins enable openclaw-session-sync`.
-4. The plugin registers a session listener inside OpenClaw. After you restart the OpenClaw gateway, every completed session gets a token-usage record that TokenTracker reads during `sync`.
+4. Ensures `plugins.entries.openclaw-session-sync.hooks.allowConversationAccess` is `true` in OpenClaw's config.
+5. The plugin registers a session listener inside OpenClaw. After you restart the OpenClaw gateway, every completed session gets a token-usage record that TokenTracker reads during `sync`.
 
-The plugin only emits token counts and timestamps. It never reads or transmits prompt or response content.
+OpenClaw requires `allowConversationAccess` before non-bundled plugins can register session lifecycle hooks such as `agent_end`. TokenTracker needs that event to know when a session has finished and a sync should run.
+
+The plugin only passes session identifiers, model names, timestamps, and token counters into TokenTracker. It never reads or transmits prompt or response content.
 
 ## Verifying the install
 
@@ -41,6 +44,8 @@ Look for the `OpenClaw Session Plugin` row. Expected states:
 | `installed` | Plugin is linked and enabled. Restart the OpenClaw gateway once so it loads. |
 | `set` | Plugin is already active in the running OpenClaw process. |
 | `skipped` | Something prevented the install. See the `detail` column. |
+
+For deeper checks, `tokentracker status --json` and `tokentracker diagnostics` expose `openclaw_session_plugin_conversation_access`. A linked and enabled plugin without conversation access is not considered fully configured, because OpenClaw will block the `agent_end` hook that triggers automatic sync.
 
 ## Troubleshooting
 
@@ -67,8 +72,25 @@ OpenClaw's own CLI rejected the `plugins install --link` command. The `detail` i
 **Fix:** try the command manually to reproduce it:
 
 ```bash
-openclaw plugins install --link ~/.tokentracker/app/openclaw-plugin/openclaw-session-sync
+openclaw plugins install --link ~/.tokentracker/tracker/openclaw-plugin/openclaw-session-sync
 openclaw plugins enable openclaw-session-sync
+```
+
+Then make sure `~/.openclaw/openclaw.json` includes:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "openclaw-session-sync": {
+        "enabled": true,
+        "hooks": {
+          "allowConversationAccess": true
+        }
+      }
+    }
+  }
+}
 ```
 
 If that surfaces a clearer error (e.g. version mismatch, locked config file), resolve it there, then re-run `tokentracker init`.

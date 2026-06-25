@@ -190,6 +190,9 @@ async function collectTrackerDiagnostics({
       openclaw_session_plugin_configured: Boolean(openclawSessionPluginState?.configured),
       openclaw_session_plugin_linked: Boolean(openclawSessionPluginState?.linked),
       openclaw_session_plugin_enabled: Boolean(openclawSessionPluginState?.enabled),
+      openclaw_session_plugin_conversation_access: Boolean(
+        openclawSessionPluginState?.conversationAccess,
+      ),
       openclaw_hook_configured: Boolean(openclawHookState?.configured),
       openclaw_hook_linked: Boolean(openclawHookState?.linked),
       openclaw_hook_enabled: Boolean(openclawHookState?.enabled),

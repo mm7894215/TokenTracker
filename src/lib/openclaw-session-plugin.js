@@ -67,13 +67,15 @@ async function installOpenclawSessionPlugin({
     };
   }
 
+  const policyResult = await ensureOpenclawSessionPluginPolicy(paths);
   const state = await probeOpenclawSessionPluginState({ home, trackerDir, env });
   return {
     configured: state.configured,
     changed:
       /Linked plugin path:/i.test(installResult.stdout || "") ||
       /Enabled plugin/i.test(enableResult.stdout || "") ||
-      /already enabled/i.test(enableResult.stdout || ""),
+      /already enabled/i.test(enableResult.stdout || "") ||
+      policyResult.changed,
     ...paths,
     stdout: `${installResult.stdout || ""}\n${enableResult.stdout || ""}`.trim(),
     stderr: `${installResult.stderr || ""}\n${enableResult.stderr || ""}`.trim(),
@@ -151,6 +153,7 @@ async function probeOpenclawSessionPluginState({
 
   const pluginEntry = cfg?.plugins?.entries?.[pluginId];
   const enabled = pluginEntry ? pluginEntry.enabled !== false : false;
+  const conversationAccess = pluginEntry?.hooks?.allowConversationAccess === true;
 
   const loadPaths = Array.isArray(cfg?.plugins?.load?.paths) ? cfg.plugins.load.paths : [];
   const normalizedPluginEntryDir = path.resolve(pluginEntryDir);
@@ -164,13 +167,59 @@ async function probeOpenclawSessionPluginState({
   const installed = Boolean(installEntry);
 
   return {
-    configured: enabled && linked && pluginFilesReady,
+    configured: enabled && linked && pluginFilesReady && conversationAccess,
     enabled,
     linked,
     installed,
     pluginFilesReady,
+    conversationAccess,
     ...paths,
   };
+}
+
+async function ensureOpenclawSessionPluginPolicy({ openclawConfigPath, pluginId } = {}) {
+  if (!openclawConfigPath || !pluginId) {
+    throw new Error("openclawConfigPath and pluginId are required");
+  }
+
+  const cfg = JSON.parse(await fs.readFile(openclawConfigPath, "utf8"));
+  if (!cfg.plugins || typeof cfg.plugins !== "object" || Array.isArray(cfg.plugins)) {
+    cfg.plugins = {};
+  }
+  if (
+    !cfg.plugins.entries ||
+    typeof cfg.plugins.entries !== "object" ||
+    Array.isArray(cfg.plugins.entries)
+  ) {
+    cfg.plugins.entries = {};
+  }
+
+  const existingEntry = cfg.plugins.entries[pluginId];
+  const entry =
+    existingEntry && typeof existingEntry === "object" && !Array.isArray(existingEntry)
+      ? existingEntry
+      : {};
+  cfg.plugins.entries[pluginId] = entry;
+
+  let changed = existingEntry !== entry;
+  if (entry.enabled === false) {
+    entry.enabled = true;
+    changed = true;
+  }
+  if (!entry.hooks || typeof entry.hooks !== "object" || Array.isArray(entry.hooks)) {
+    entry.hooks = {};
+    changed = true;
+  }
+
+  if (entry.hooks.allowConversationAccess === true) {
+    if (!changed) return { changed: false };
+  } else {
+    entry.hooks.allowConversationAccess = true;
+    changed = true;
+  }
+
+  await fs.writeFile(openclawConfigPath, `${JSON.stringify(cfg, null, 2)}\n`, "utf8");
+  return { changed: true };
 }
 
 async function removeOpenclawSessionPluginConfig({
