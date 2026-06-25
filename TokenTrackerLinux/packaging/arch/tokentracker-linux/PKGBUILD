@@ -1,0 +1,58 @@
+# Maintainer: local
+pkgname=tokentracker-linux
+pkgver=0.59.0
+pkgrel=1
+pkgdesc='Local TokenTracker Linux desktop client for Arch KDE'
+arch=('x86_64')
+url='https://github.com/mm7894215/TokenTracker'
+license=('MIT')
+depends=(
+  'webkit2gtk-4.1'
+  'gtk3'
+  'libayatana-appindicator'
+  'librsvg'
+  'xdg-utils'
+)
+makedepends=(
+  'nodejs'
+  'npm'
+  'rust'
+  'cargo'
+  'pkgconf'
+  'base-devel'
+)
+install='tokentracker-linux.install'
+source=()
+sha256sums=()
+
+_repo_root="${startdir}/../../../.."
+_linux_dir="${_repo_root}/TokenTrackerLinux"
+
+build() {
+  cd "${_repo_root}"
+  npm ci
+  npm --prefix dashboard ci
+  npm run dashboard:build
+  npm --prefix TokenTrackerLinux install
+  npm --prefix TokenTrackerLinux run bundle:node
+  npm --prefix TokenTrackerLinux run build
+}
+
+package() {
+  cd "${_repo_root}"
+
+  install -Dm755 "TokenTrackerLinux/src-tauri/target/release/tokentracker-linux" \
+    "${pkgdir}/usr/bin/tokentracker-linux"
+
+  install -dm755 "${pkgdir}/usr/lib/tokentracker-linux"
+  cp -a "TokenTrackerLinux/EmbeddedServer/." "${pkgdir}/usr/lib/tokentracker-linux/"
+  chmod 755 "${pkgdir}/usr/lib/tokentracker-linux/node"
+
+  install -Dm644 "TokenTrackerLinux/packaging/arch/tokentracker-linux/tokentracker-linux.desktop" \
+    "${pkgdir}/usr/share/applications/tokentracker-linux.desktop"
+
+  install -Dm644 "TokenTrackerLinux/icons/tokentracker-linux.svg" \
+    "${pkgdir}/usr/share/icons/hicolor/scalable/apps/tokentracker-linux.svg"
+
+  install -Dm644 "LICENSE" "${pkgdir}/usr/share/licenses/tokentracker-linux/LICENSE"
+}
