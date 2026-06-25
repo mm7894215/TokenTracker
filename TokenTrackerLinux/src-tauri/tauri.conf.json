@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TokenTracker",
+  "version": "0.59.0",
+  "identifier": "cc.tokentracker.linux",
+  "build": {
+    "beforeDevCommand": "",
+    "beforeBuildCommand": "",
+    "frontendDist": "../src"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "TokenTracker",
+        "width": 1180,
+        "height": 820,
+        "minWidth": 960,
+        "minHeight": 640,
+        "url": "index.html",
+        "visible": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false,
+    "targets": []
+  }
+}
