@@ -86,6 +86,17 @@ brew install mm7894215/tokentracker/tokentracker
 
 Upgrade with `brew upgrade --cask mm7894215/tokentracker/tokentracker`. The tap auto-bumps within an hour of every new release.
 
+### 🐧 Local Arch/KDE Linux client
+
+This repository also includes a local-use Linux desktop client for Arch Linux + KDE Plasma. It is built from source and installed as a local pacman package:
+
+```bash
+cd TokenTrackerLinux/packaging/arch/tokentracker-linux
+makepkg -si
+```
+
+See [`TokenTrackerLinux/README.md`](TokenTrackerLinux/README.md). This is not a public AUR package or release asset.
+
 ---
 
 
