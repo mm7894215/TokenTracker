@@ -11,6 +11,11 @@ pub fn install(app: &App) -> tauri::Result<()> {
     let menu = Menu::with_items(app, &[&open, &quit])?;
 
     TrayIconBuilder::with_id("main-tray")
+        .icon(
+            app.default_window_icon()
+                .expect("missing default window icon")
+                .clone(),
+        )
         .tooltip("TokenTracker")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {

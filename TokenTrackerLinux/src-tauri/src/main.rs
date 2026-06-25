@@ -43,7 +43,11 @@ fn main() {
             }
 
             if let Some(window) = app.get_webview_window("main") {
-                window.navigate(dashboard_url.parse::<tauri::Url>().map_err(|error| error.to_string())?)?;
+                window.navigate(
+                    dashboard_url
+                        .parse::<tauri::Url>()
+                        .map_err(|error| error.to_string())?,
+                )?;
             }
 
             Ok(())

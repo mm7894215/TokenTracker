@@ -53,7 +53,10 @@ mod tests {
     #[test]
     fn installed_runtime_paths_use_usr_lib_layout() {
         let paths = installed_runtime_paths(Path::new("/usr/lib/tokentracker-linux"));
-        assert_eq!(paths.node, PathBuf::from("/usr/lib/tokentracker-linux/node"));
+        assert_eq!(
+            paths.node,
+            PathBuf::from("/usr/lib/tokentracker-linux/node")
+        );
         assert_eq!(
             paths.tracker,
             PathBuf::from("/usr/lib/tokentracker-linux/tokentracker/bin/tracker.js")
@@ -63,7 +66,10 @@ mod tests {
     #[test]
     fn development_runtime_paths_use_embedded_server_layout() {
         let paths = development_runtime_paths(Path::new("/repo/TokenTrackerLinux"));
-        assert_eq!(paths.node, PathBuf::from("/repo/TokenTrackerLinux/EmbeddedServer/node"));
+        assert_eq!(
+            paths.node,
+            PathBuf::from("/repo/TokenTrackerLinux/EmbeddedServer/node")
+        );
         assert_eq!(
             paths.tracker,
             PathBuf::from("/repo/TokenTrackerLinux/EmbeddedServer/tokentracker/bin/tracker.js")

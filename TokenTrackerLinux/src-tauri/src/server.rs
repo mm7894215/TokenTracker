@@ -1,4 +1,6 @@
+use std::ffi::OsString;
 use std::net::TcpListener;
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -16,12 +18,9 @@ impl TokenTrackerServer {
         let port = pick_available_port()?;
         let url = dashboard_url(port);
 
+        let args = serve_args(&paths.tracker, port);
         let mut child = Command::new(&paths.node)
-            .arg(&paths.tracker)
-            .arg("serve")
-            .arg("--port")
-            .arg(port.to_string())
-            .arg("--no-open")
+            .args(&args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -76,6 +75,17 @@ pub fn pick_available_port() -> Result<u16, String> {
     Ok(port)
 }
 
+pub fn serve_args(tracker: &Path, port: u16) -> Vec<OsString> {
+    vec![
+        tracker.as_os_str().to_os_string(),
+        OsString::from("serve"),
+        OsString::from("--port"),
+        OsString::from(port.to_string()),
+        OsString::from("--no-open"),
+        OsString::from("--no-sync"),
+    ]
+}
+
 fn wait_for_server(port: u16, timeout: Duration) -> Result<(), String> {
     let start = Instant::now();
     while start.elapsed() < timeout {
@@ -84,7 +94,9 @@ fn wait_for_server(port: u16, timeout: Duration) -> Result<(), String> {
         }
         thread::sleep(Duration::from_millis(100));
     }
-    Err(format!("TokenTracker server did not listen on port {port} within {timeout:?}"))
+    Err(format!(
+        "TokenTracker server did not listen on port {port} within {timeout:?}"
+    ))
 }
 
 #[cfg(test)]
@@ -97,9 +109,26 @@ mod tests {
     }
 
     #[test]
+    fn serve_args_disable_browser_and_startup_sync() {
+        let args = serve_args(Path::new("/opt/tokentracker/bin/tracker.js"), 34567);
+        assert_eq!(
+            args,
+            vec![
+                OsString::from("/opt/tokentracker/bin/tracker.js"),
+                OsString::from("serve"),
+                OsString::from("--port"),
+                OsString::from("34567"),
+                OsString::from("--no-open"),
+                OsString::from("--no-sync"),
+            ],
+        );
+    }
+
+    #[test]
     fn pick_available_port_returns_bindable_port() {
         let port = pick_available_port().expect("port should be available");
         assert!(port > 0);
-        TcpListener::bind(("127.0.0.1", port)).expect("returned port should be bindable immediately");
+        TcpListener::bind(("127.0.0.1", port))
+            .expect("returned port should be bindable immediately");
     }
 }
