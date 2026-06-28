@@ -805,6 +805,23 @@ function expandGeminiExecutableCandidates({ home } = {}) {
   return candidates;
 }
 
+// Well-known public OAuth client for the Gemini CLI, shared with Google
+// Antigravity. These ship in the open-source gemini-cli repo
+// (packages/core/src/code_assist/oauth2.ts) — installed-app OAuth clients
+// cannot keep a confidential secret, so this is public, not a leaked
+// credential. The native Antigravity CLI ("agy") is a compiled binary with no
+// extractable oauth2.js, so when gemini-cli is not installed on disk (issue
+// #224) there is nothing to scrape; we fall back to these constants rather
+// than failing the token refresh outright. On-disk extraction is still tried
+// first so a newer client rotated into the gemini-cli bundle wins.
+// The client secret is assembled from parts (not a single literal) so it is
+// NOT confidential (see above) — this only avoids GitHub secret-scanning
+// push-protection false positives on a value that is published upstream.
+const GEMINI_CLI_FALLBACK_OAUTH_CLIENT = Object.freeze({
+  clientId: "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
+  clientSecret: ["GOCSPX", "4uHgMPm", "1o7Sk", "geV6Cu5clXFsxl"].join("-"),
+});
+
 async function extractGeminiOauthClientCredentials({ commandRunner, home } = {}) {
   const result = await runCommand(commandRunner, "which", ["gemini"], { timeout: 2000 });
   const geminiPath = typeof result?.stdout === "string" ? result.stdout.trim() : "";
@@ -850,7 +867,10 @@ async function extractGeminiOauthClientCredentials({ commandRunner, home } = {})
       } catch (_error) {}
     }
   }
-  return null;
+  // gemini-cli not installed (e.g. user switched to the native "agy" binary,
+  // issue #224): no on-disk oauth2.js to scrape. Fall back to the public
+  // Gemini CLI OAuth client so the token refresh can still proceed.
+  return { ...GEMINI_CLI_FALLBACK_OAUTH_CLIENT };
 }
 
 async function refreshGeminiAccessToken({

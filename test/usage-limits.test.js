@@ -106,6 +106,36 @@ describe("extractGeminiOauthClientCredentials", () => {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  it("falls back to the public Gemini CLI OAuth client when gemini-cli is not installed (issue #224)", async () => {
+    // Reproduces the native-Antigravity ("agy") case: no `gemini` on PATH and
+    // no gemini-cli bundle under home. Previously this returned null and the
+    // token refresh threw "Could not find Gemini CLI OAuth configuration".
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-gemini-none-"));
+    try {
+      const home = path.join(tmp, "home");
+      fs.mkdirSync(home, { recursive: true });
+
+      const result = await extractGeminiOauthClientCredentials({
+        home,
+        commandRunner() {
+          return { status: 1, stdout: "" };
+        },
+      });
+
+      assert.ok(result, "expected a fallback credential, not null");
+      assert.equal(
+        result.clientId,
+        "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
+      );
+      assert.ok(
+        typeof result.clientSecret === "string" && result.clientSecret.length > 0,
+        "expected a non-empty client secret",
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 });
 
 function makeFakeCodexJwt(planType) {
