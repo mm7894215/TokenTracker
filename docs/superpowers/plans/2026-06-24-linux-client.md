@@ -330,6 +330,7 @@ Expected: commit succeeds.
 Create `TokenTrackerLinux/src-tauri/src/paths.rs` with tests first:
 
 ```rust
+use std::env;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -357,24 +358,29 @@ pub fn development_runtime_paths(project_dir: &Path) -> RuntimePaths {
 }
 
 pub fn resolve_runtime_paths() -> Result<RuntimePaths, String> {
-    let installed = installed_runtime_paths(Path::new("/usr/lib/tokentracker-linux"));
-    if installed.node.exists() && installed.tracker.exists() {
-        return Ok(installed);
-    }
-
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let project_dir = manifest_dir
         .parent()
         .ok_or_else(|| "failed to resolve TokenTrackerLinux directory".to_string())?;
     let development = development_runtime_paths(project_dir);
-    if development.node.exists() && development.tracker.exists() {
+    let installed = installed_runtime_paths(Path::new("/usr/lib/tokentracker-linux"));
+
+    let running_from_repo = env::current_exe()
+        .ok()
+        .is_some_and(|exe| exe.starts_with(project_dir));
+
+    if running_from_repo && development.node.exists() && development.tracker.exists() {
         return Ok(development);
+    }
+
+    if installed.node.exists() && installed.tracker.exists() {
+        return Ok(installed);
     }
 
     Err(format!(
         "TokenTracker runtime not found. Checked {} and {}",
-        installed.node.display(),
-        development.node.display()
+        development.node.display(),
+        installed.node.display()
     ))
 }
 
@@ -978,7 +984,7 @@ Expected: commit succeeds.
 
 **Interfaces:**
 - Consumes: Tauri release binary at `TokenTrackerLinux/src-tauri/target/release/tokentracker-linux` and bundled runtime at `TokenTrackerLinux/EmbeddedServer/`.
-- Produces: a pacman-installable local package named `tokentracker-linux` with `/usr/bin/tokentracker-linux`, `/usr/lib/tokentracker-linux`, desktop entry, and icon.
+- Produces: a pacman-installable local package named `tokentracker-linux` with `/usr/bin/tokentracker-linux`, `/usr/lib/tokentracker-linux/{node,tokentracker/...}`, desktop entry, and icon.
 
 - [ ] **Step 1: Create scalable icon**
 
@@ -1182,7 +1188,7 @@ Expected: commit succeeds.
 
 Create `TokenTrackerLinux/README.md`:
 
-```markdown
+````markdown
 # TokenTracker Linux Client
 
 This is a local Arch Linux + KDE Plasma desktop client for TokenTracker. It is intended for personal local use from this repository, not public release distribution.
@@ -1215,7 +1221,7 @@ The app starts a bundled local TokenTracker server, opens the existing dashboard
 ```bash
 sudo pacman -R tokentracker-linux
 ```
-```
+````
 
 - [ ] **Step 2: Add a short root README note**
 

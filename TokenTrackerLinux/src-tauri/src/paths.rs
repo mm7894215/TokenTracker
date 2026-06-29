@@ -1,3 +1,4 @@
+use std::env;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,24 +26,29 @@ pub fn development_runtime_paths(project_dir: &Path) -> RuntimePaths {
 }
 
 pub fn resolve_runtime_paths() -> Result<RuntimePaths, String> {
-    let installed = installed_runtime_paths(Path::new("/usr/lib/tokentracker-linux"));
-    if installed.node.exists() && installed.tracker.exists() {
-        return Ok(installed);
-    }
-
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let project_dir = manifest_dir
         .parent()
         .ok_or_else(|| "failed to resolve TokenTrackerLinux directory".to_string())?;
     let development = development_runtime_paths(project_dir);
-    if development.node.exists() && development.tracker.exists() {
+    let installed = installed_runtime_paths(Path::new("/usr/lib/tokentracker-linux"));
+
+    let running_from_repo = env::current_exe()
+        .ok()
+        .is_some_and(|exe| exe.starts_with(project_dir));
+
+    if running_from_repo && development.node.exists() && development.tracker.exists() {
         return Ok(development);
+    }
+
+    if installed.node.exists() && installed.tracker.exists() {
+        return Ok(installed);
     }
 
     Err(format!(
         "TokenTracker runtime not found. Checked {} and {}",
-        installed.node.display(),
-        development.node.display()
+        development.node.display(),
+        installed.node.display()
     ))
 }
 

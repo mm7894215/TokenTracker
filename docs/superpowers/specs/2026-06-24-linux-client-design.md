@@ -75,12 +75,12 @@ Expected installed paths:
 /usr/bin/tokentracker-linux
 /usr/lib/tokentracker-linux/
   ├── node
-  ├── bin/tracker.js
-  ├── src/
-  ├── package.json
-  └── dashboard/dist/
+  ├── tokentracker/bin/tracker.js
+  ├── tokentracker/src/
+  ├── tokentracker/package.json
+  └── tokentracker/dashboard/dist/
 /usr/share/applications/tokentracker-linux.desktop
-/usr/share/icons/hicolor/.../apps/tokentracker-linux.png
+/usr/share/icons/hicolor/scalable/apps/tokentracker-linux.svg
 ```
 
 Uninstall should use pacman:
@@ -99,7 +99,7 @@ At launch:
 
    ```text
    /usr/lib/tokentracker-linux/node \
-     /usr/lib/tokentracker-linux/bin/tracker.js \
+     /usr/lib/tokentracker-linux/tokentracker/bin/tracker.js \
      serve --port <port> --no-open
    ```
 
