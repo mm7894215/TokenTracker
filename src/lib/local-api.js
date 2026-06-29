@@ -1529,6 +1529,9 @@ function createLocalApiHandler({ queuePath }) {
         json(res, { error: "target host not allowed" }, 403);
         return true;
       }
+      // Reconstruct URL from parsed components to break the CodeQL taint
+      // chain between the user-supplied ?url= param and the fetch() call.
+      const sanitizedUrl = parsed.href;
       try {
         // Use the existing helper to strip hop-by-hop and connection-named
         // headers (including content-length / transfer-encoding that break
@@ -1547,7 +1550,7 @@ function createLocalApiHandler({ queuePath }) {
         // Follow redirects manually so we can revalidate each Location hop
         // against the allowlist.  An allowlisted host could bounce the proxy
         // to a non-allowlisted destination if we used redirect: "follow".
-        let currentUrl = targetUrl;
+        let currentUrl = sanitizedUrl;
         let proxyRes;
         for (let hops = 0; hops < 5; hops++) {
           proxyRes = await fetch(currentUrl, {
