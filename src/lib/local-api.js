@@ -1507,7 +1507,7 @@ function createLocalApiHandler({ queuePath }) {
     // domains, restricted HTTP methods, no forwarding of auth-bearing or
     // hop-by-hop headers, strip set-cookie from responses.
     if (p === "/api/native-https-proxy") {
-      const method = String(req.method || "GET").toUpperCase();
+      let method = String(req.method || "GET").toUpperCase();
       if (method !== "GET" && method !== "HEAD" && method !== "POST") {
         json(res, { error: "Method Not Allowed" }, 405);
         return true;
@@ -1565,7 +1565,7 @@ function createLocalApiHandler({ queuePath }) {
               break; // redirect leaves allowlist — return the redirect response as-is
             }
             // 303 always switches to GET; others preserve method.
-            if (proxyRes.status === 303) { method = "GET"; }
+            if (proxyRes.status === 303) { method = "GET"; proxyBody = undefined; }
             currentUrl = next.href;
             continue;
           }
