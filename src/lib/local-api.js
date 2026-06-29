@@ -1263,6 +1263,42 @@ function createLocalApiHandler({ queuePath }) {
       return true;
     }
 
+    // --- native-app HTTPS proxy ---
+    // WebKitGTK on some Linux setups cannot make HTTPS requests (TLS handshake
+    // failure).  The Tauri client rewrites external HTTPS fetch URLs to
+    // /api/native-https-proxy/<encoded-url> so the local Node server — which
+    // has no TLS issues — can forward them.
+    if (p === "/api/native-https-proxy") {
+      const targetUrl = url.searchParams.get("url");
+      if (!targetUrl || !targetUrl.startsWith("https://")) {
+        json(res, { error: "missing or invalid url param" }, 400);
+        return true;
+      }
+      try {
+        const proxyHeaders = {};
+        for (const [k, v] of Object.entries(req.headers)) {
+          if (["host", "connection", "origin", "referer"].includes(k.toLowerCase())) continue;
+          proxyHeaders[k] = v;
+        }
+        const bodyChunks = [];
+        for await (const chunk of req) bodyChunks.push(chunk);
+        const proxyRes = await fetch(targetUrl, {
+          method: req.method || "GET",
+          headers: proxyHeaders,
+          body: bodyChunks.length > 0 ? Buffer.concat(bodyChunks) : undefined,
+          redirect: "follow",
+        });
+        const resBody = Buffer.from(await proxyRes.arrayBuffer());
+        const responseHeaders = [...proxyRes.headers.entries()]
+          .filter(([k]) => !["transfer-encoding", "connection"].includes(k.toLowerCase()));
+        res.writeHead(proxyRes.status, Object.fromEntries(responseHeaders));
+        res.end(resBody);
+      } catch (e) {
+        json(res, { error: `HTTPS proxy error: ${e?.message || e}` }, 502);
+      }
+      return true;
+    }
+
     // --- ip-check proxy: reverse-proxy ip.net.coffee (issue #81) ---
     // Lock-down: GET/HEAD only, restricted path prefixes, do not forward
     // browser credentials or fingerprintable headers. Without these limits

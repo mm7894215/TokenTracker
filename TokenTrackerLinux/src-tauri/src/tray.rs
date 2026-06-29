@@ -1,3 +1,4 @@
+use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{App, AppHandle, Manager};
@@ -10,12 +11,7 @@ pub fn install(app: &App) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &quit])?;
 
-    TrayIconBuilder::with_id("main-tray")
-        .icon(
-            app.default_window_icon()
-                .expect("missing default window icon")
-                .clone(),
-        )
+    let mut builder = TrayIconBuilder::with_id("main-tray")
         .tooltip("TokenTracker")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -32,8 +28,13 @@ pub fn install(app: &App) -> tauri::Result<()> {
             {
                 show_main_window(tray.app_handle());
             }
-        })
-        .build(app)?;
+        });
+
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(Image::from(icon.clone()));
+    }
+
+    builder.build(app)?;
 
     Ok(())
 }

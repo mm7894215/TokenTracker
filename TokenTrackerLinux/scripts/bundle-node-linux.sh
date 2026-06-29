@@ -44,7 +44,7 @@ tar -xzf "$TMPDIR_BUNDLE/$NODE_TAR" -C "$TMPDIR_BUNDLE" "node-v${NODE_VERSION}-$
 cp "$TMPDIR_BUNDLE/node-v${NODE_VERSION}-${NODE_PLATFORM}/bin/node" "$EMBED_DIR/node"
 chmod +x "$EMBED_DIR/node"
 
-BUNDLED_NODE_VERSION="$($EMBED_DIR/node -p 'process.versions.node')"
+BUNDLED_NODE_VERSION="$("$EMBED_DIR/node" -p 'process.versions.node')"
 if [[ "$BUNDLED_NODE_VERSION" != "$EXPECTED_NODE_VERSION" ]]; then
   echo "Bundled Node drifted: expected $EXPECTED_NODE_VERSION, got $BUNDLED_NODE_VERSION" >&2
   exit 1
@@ -55,6 +55,7 @@ mkdir -p "$TT_DIR/bin"
 cp "$REPO_ROOT/bin/tracker.js" "$TT_DIR/bin/"
 cp -R "$REPO_ROOT/src" "$TT_DIR/src"
 cp "$REPO_ROOT/package.json" "$TT_DIR/"
+cp "$REPO_ROOT/package-lock.json" "$TT_DIR/"
 
 if [[ ! -d "$REPO_ROOT/dashboard/dist" ]]; then
   echo "dashboard/dist not found. Run npm run dashboard:build first." >&2
@@ -65,17 +66,13 @@ cp -R "$REPO_ROOT/dashboard/dist" "$TT_DIR/dashboard/dist"
 
 (
   cd "$TT_DIR"
-  npm install --omit=dev --no-optional --ignore-scripts
+  npm ci --omit=dev --no-optional --ignore-scripts
 )
 
 find "$TT_DIR/node_modules" -type f \( \
-  -name "*.md" -o \
-  -name "*.txt" -o \
   -name "*.map" -o \
   -name "*.ts" -o \
   -name "*.d.ts" -o \
-  -iname "LICENSE*" -o \
-  -iname "LICENCE*" -o \
   -iname "CHANGELOG*" -o \
   -iname "CHANGES*" -o \
   -iname "HISTORY*" -o \
@@ -92,7 +89,6 @@ find "$TT_DIR/node_modules" -type d \( \
   -name "__tests__" -o \
   -name "examples" -o \
   -name "example" -o \
-  -name "docs" -o \
   -name ".github" \
 \) -exec rm -rf {} + 2>/dev/null || true
 
