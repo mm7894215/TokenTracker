@@ -1520,18 +1520,21 @@ function createLocalApiHandler({ queuePath }) {
       let parsed;
       try { parsed = new URL(targetUrl); } catch { parsed = null; }
       if (!parsed) { json(res, { error: "invalid url" }, 400); return true; }
-      const NATIVE_PROXY_ALLOWED_HOSTS = new Set([
-        "srctyff5.us-east.insforge.app",
-        "api.github.com",
-        "www.tokentracker.cc",
-      ]);
-      if (!NATIVE_PROXY_ALLOWED_HOSTS.has(parsed.hostname)) {
+      // Map of allowed proxy targets.  Values are constant base URLs so
+      // CodeQL's taint tracker sees the fetch() target as originating from
+      // a compile-time source, not from the user-supplied ?url= param.
+      const NATIVE_PROXY_BASE_URLS = {
+        "srctyff5.us-east.insforge.app": "https://srctyff5.us-east.insforge.app",
+        "api.github.com": "https://api.github.com",
+        "www.tokentracker.cc": "https://www.tokentracker.cc",
+      };
+      const baseUrl = NATIVE_PROXY_BASE_URLS[parsed.hostname];
+      if (!baseUrl) {
         json(res, { error: "target host not allowed" }, 403);
         return true;
       }
-      // Reconstruct URL from parsed components to break the CodeQL taint
-      // chain between the user-supplied ?url= param and the fetch() call.
-      const sanitizedUrl = parsed.href;
+      // Reconstruct URL from the constant base + user-supplied path/search.
+      const safeUrl = `${baseUrl}${parsed.pathname}${parsed.search}${parsed.hash}`;
       try {
         // Use the existing helper to strip hop-by-hop and connection-named
         // headers (including content-length / transfer-encoding that break
@@ -1550,7 +1553,7 @@ function createLocalApiHandler({ queuePath }) {
         // Follow redirects manually so we can revalidate each Location hop
         // against the allowlist.  An allowlisted host could bounce the proxy
         // to a non-allowlisted destination if we used redirect: "follow".
-        let currentUrl = sanitizedUrl;
+        let currentUrl = safeUrl;
         let proxyRes;
         for (let hops = 0; hops < 5; hops++) {
           proxyRes = await fetch(currentUrl, {
@@ -1564,12 +1567,13 @@ function createLocalApiHandler({ queuePath }) {
             if (!location) break;
             let next;
             try { next = new URL(location, currentUrl); } catch { break; }
-            if (!NATIVE_PROXY_ALLOWED_HOSTS.has(next.hostname) || next.protocol !== "https:") {
+            const nextBase = NATIVE_PROXY_BASE_URLS[next.hostname];
+            if (!nextBase || next.protocol !== "https:") {
               break; // redirect leaves allowlist — return the redirect response as-is
             }
             // 303 always switches to GET; others preserve method.
             if (proxyRes.status === 303) { method = "GET"; proxyBody = undefined; }
-            currentUrl = next.href;
+            currentUrl = `${nextBase}${next.pathname}${next.search}${next.hash}`;
             continue;
           }
           break;
