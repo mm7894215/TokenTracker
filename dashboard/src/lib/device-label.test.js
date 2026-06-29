@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDeviceLabel, isAutoDeviceName } from "./device-label";
+import { formatDeviceLabel } from "./device-label";
 
 describe("formatDeviceLabel", () => {
   it("turns the auto name with a machine-id suffix into '<platform> · <shortid>'", () => {
@@ -29,15 +29,5 @@ describe("formatDeviceLabel", () => {
   it("returns null when there is nothing to show", () => {
     expect(formatDeviceLabel({ id: "", device_name: "" })).toBeNull();
     expect(formatDeviceLabel(null)).toBeNull();
-  });
-});
-
-describe("isAutoDeviceName", () => {
-  it("detects the auto-generated name (with or without suffix)", () => {
-    expect(isAutoDeviceName({ device_name: "Token Tracker (dashboard) #32fda7ee" })).toBe(true);
-    expect(isAutoDeviceName({ device_name: "Token Tracker (dashboard)" })).toBe(true);
-  });
-  it("treats a custom name as not-auto", () => {
-    expect(isAutoDeviceName({ device_name: "Work laptop" })).toBe(false);
   });
 });

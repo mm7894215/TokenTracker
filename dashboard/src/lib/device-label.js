@@ -32,10 +32,3 @@ export function formatDeviceLabel(device) {
   const shortId = (auto[1] || String(device.id || "")).slice(0, 8).toLowerCase();
   return shortId ? `${platformLabel(device.platform)} · ${shortId}` : platformLabel(device.platform);
 }
-
-// True when the device still carries the auto-generated name (i.e. the user has
-// not renamed it). Lets the UI hint that a custom name is worth setting.
-export function isAutoDeviceName(device) {
-  const raw = device && typeof device.device_name === "string" ? device.device_name.trim() : "";
-  return AUTO_NAME_RE.test(raw);
-}

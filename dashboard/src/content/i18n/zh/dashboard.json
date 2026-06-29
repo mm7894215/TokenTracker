@@ -332,6 +332,5 @@
   "dashboard.device_card.rename_save": "保存",
   "dashboard.device_card.rename_cancel": "取消",
   "dashboard.device_card.rename_error": "重命名失败 — 该名称可能已被占用。",
-  "dashboard.device_card.empty": "未发现活跃设备",
-  "dashboard.device_card.tokens": "tokens"
+  "dashboard.device_card.empty": "未发现活跃设备"
 }

@@ -987,4 +987,3 @@ dashboard.device_card.rename_cancel,dashboard,DashboardPage,DeviceUsageCard,rena
 dashboard.device_card.rename_error,dashboard,DashboardPage,DeviceUsageCard,rename_error,"Couldn't rename — that name may already be in use.",,active
 dashboard.device_card.clear,dashboard,DashboardPage,DeviceUsageCard,clear,"Clear",,active
 dashboard.device_card.empty,dashboard,DashboardPage,DeviceUsageCard,empty,"No active devices found",,active
-dashboard.device_card.tokens,dashboard,DashboardPage,DeviceUsageCard,tokens,"tokens",,active
