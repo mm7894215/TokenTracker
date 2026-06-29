@@ -1266,31 +1266,62 @@ function createLocalApiHandler({ queuePath }) {
     // --- native-app HTTPS proxy ---
     // WebKitGTK on some Linux setups cannot make HTTPS requests (TLS handshake
     // failure).  The Tauri client rewrites external HTTPS fetch URLs to
-    // /api/native-https-proxy/<encoded-url> so the local Node server — which
-    // has no TLS issues — can forward them.
+    // /api/native-https-proxy?url=... so the local Node server — which has no
+    // TLS issues — can forward them.
+    //
+    // Lock-down (mirrors the ip-check proxy below): allowlist of target
+    // domains, restricted HTTP methods, no forwarding of auth-bearing or
+    // hop-by-hop headers, strip set-cookie from responses.
     if (p === "/api/native-https-proxy") {
+      const method = String(req.method || "GET").toUpperCase();
+      if (method !== "GET" && method !== "HEAD" && method !== "POST") {
+        json(res, { error: "Method Not Allowed" }, 405);
+        return true;
+      }
       const targetUrl = url.searchParams.get("url");
       if (!targetUrl || !targetUrl.startsWith("https://")) {
         json(res, { error: "missing or invalid url param" }, 400);
         return true;
       }
+      let parsed;
+      try { parsed = new URL(targetUrl); } catch { parsed = null; }
+      if (!parsed) { json(res, { error: "invalid url" }, 400); return true; }
+      const NATIVE_PROXY_ALLOWED_HOSTS = new Set([
+        "srctyff5.us-east.insforge.app",
+        "api.github.com",
+        "www.tokentracker.cc",
+      ]);
+      if (!NATIVE_PROXY_ALLOWED_HOSTS.has(parsed.hostname)) {
+        json(res, { error: "target host not allowed" }, 403);
+        return true;
+      }
       try {
-        const proxyHeaders = {};
-        for (const [k, v] of Object.entries(req.headers)) {
-          if (["host", "connection", "origin", "referer"].includes(k.toLowerCase())) continue;
-          proxyHeaders[k] = v;
-        }
+        // Use the existing helper to strip hop-by-hop and connection-named
+        // headers (including content-length / transfer-encoding that break
+        // undici 6.24.1).  Then remove auth-bearing headers so credentials
+        // on the 127.0.0.1 origin are never forwarded to external services.
+        const proxyHeaders = buildProxyHeaders(req.headers);
+        delete proxyHeaders["authorization"];
+        delete proxyHeaders["cookie"];
+        delete proxyHeaders["x-api-key"];
         const bodyChunks = [];
         for await (const chunk of req) bodyChunks.push(chunk);
         const proxyRes = await fetch(targetUrl, {
-          method: req.method || "GET",
+          method,
           headers: proxyHeaders,
-          body: bodyChunks.length > 0 ? Buffer.concat(bodyChunks) : undefined,
+          body: method !== "GET" && method !== "HEAD" && bodyChunks.length > 0
+            ? Buffer.concat(bodyChunks)
+            : undefined,
           redirect: "follow",
         });
         const resBody = Buffer.from(await proxyRes.arrayBuffer());
+        // Strip set-cookie from upstream responses to prevent cookie planting
+        // on the 127.0.0.1 origin.
         const responseHeaders = [...proxyRes.headers.entries()]
-          .filter(([k]) => !["transfer-encoding", "connection"].includes(k.toLowerCase()));
+          .filter(([k]) => {
+            const lk = k.toLowerCase();
+            return lk !== "transfer-encoding" && lk !== "connection" && lk !== "set-cookie";
+          });
         res.writeHead(proxyRes.status, Object.fromEntries(responseHeaders));
         res.end(resBody);
       } catch (e) {

@@ -10,14 +10,6 @@ use tauri::{Manager, WindowEvent};
 
 static SERVER: Lazy<Mutex<Option<TokenTrackerServer>>> = Lazy::new(|| Mutex::new(None));
 
-fn show_main_window(app: &tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
-}
-
 fn stop_server() {
     if let Ok(mut guard) = SERVER.lock() {
         if let Some(mut server) = guard.take() {
@@ -27,18 +19,9 @@ fn stop_server() {
 }
 
 fn main() {
-    // WebKitGTK on some Arch setups cannot find the system CA bundle for TLS.
-    // Set the GIO TLS database path before any WebView is created so
-    // libsoup/glib-networking picks up the correct certificates.
-    if std::env::var("GIO_TLS_CA_FILE").is_err() {
-        let ca = "/etc/ssl/certs/ca-certificates.crt";
-        if std::path::Path::new(ca).exists() {
-            std::env::set_var("GIO_TLS_CA_FILE", ca);
-        }
-    }
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            show_main_window(app);
+            tray::show_main_window(app);
         }))
         .setup(|app| {
             tray::install(app)?;
@@ -74,9 +57,6 @@ fn main() {
                       };
                     })();
                 "#);
-            }
-
-            if let Some(window) = app.get_webview_window("main") {
                 window.navigate(
                     dashboard_url
                         .parse::<tauri::Url>()
