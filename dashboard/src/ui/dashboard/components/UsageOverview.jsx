@@ -278,7 +278,7 @@ export function UsageOverview({
                 options={deviceOptions}
                 ariaLabel={copy("dashboard.device_filter.aria")}
                 matchTriggerWidth
-                className="h-8 px-2.5 text-xs"
+                className="h-8 px-3 text-xs font-medium rounded-md border-oai-gray-300 dark:border-oai-gray-700 bg-oai-white dark:bg-oai-gray-900 text-oai-black dark:text-oai-white hover:border-oai-brand hover:text-oai-brand hover:[&_svg]:text-oai-brand transition-colors duration-200"
               />
             ) : null}
             {onOpenShare ? (

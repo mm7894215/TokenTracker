@@ -35,8 +35,9 @@ describe("useTrendData", () => {
     scopeKey = "local",
     day = "2026-05-29",
     timeZone = "UTC",
+    deviceScope = "all",
   } = {}) {
-    return `tokentracker.trend.${cacheKey}.${scopeKey}.localhost:7680.hourly.${day}.tz:${timeZone}`;
+    return `tokentracker.trend.${cacheKey}.${scopeKey}.localhost:7680.hourly.${day}.tz:${timeZone}.${deviceScope}`;
   }
 
   it("treats elapsed hourly slots with no usage rows as real zero observations", async () => {

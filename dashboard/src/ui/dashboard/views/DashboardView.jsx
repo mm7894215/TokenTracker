@@ -265,12 +265,6 @@ export function DashboardView(props) {
                   />
                 </FadeIn>
 
-                {deviceUsageBlock ? (
-                  <FadeIn delay={nextLeft()}>
-                    {deviceUsageBlock}
-                  </FadeIn>
-                ) : null}
-
                 {isLocalMode ? <WidgetOnboardingCard enterDelay={nextLeft()} /> : null}
 
                 {shouldShowInstall ? (
@@ -302,6 +296,12 @@ export function DashboardView(props) {
                     {activityHeatmapBlock}
                   </FadeIn>
                 )}
+
+                {deviceUsageBlock ? (
+                  <FadeIn delay={nextLeft()}>
+                    {deviceUsageBlock}
+                  </FadeIn>
+                ) : null}
 
                 {!screenshotMode ? (
                   <FadeIn delay={nextLeft()}>

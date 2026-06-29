@@ -728,3 +728,40 @@ export async function fetchAccountDevices({
   const tzParams = buildTimeZoneParams({ timeZone, tzOffsetMinutes });
   return fetchAccountFunction(ACCOUNT_PATHS.devices, { from, to, ...tzParams }, accessToken);
 }
+
+// Rename one of the signed-in account's own devices. The edge function verifies
+// the JWT and scopes the UPDATE to (id, user_id), so a user can only rename a
+// device they own; a name colliding with another active device → HTTP 409.
+export async function renameAccountDevice({ deviceId, name, accessToken }: AnyRecord = {}) {
+  if (!accessToken || !isValidJwtShape(accessToken)) {
+    const err: any = new Error("Account view requires a signed-in user");
+    err.status = 401;
+    throw err;
+  }
+  const baseUrl = getInsforgeRemoteUrl();
+  if (!baseUrl) {
+    const err: any = new Error("InsForge base URL not configured");
+    err.status = 0;
+    throw err;
+  }
+  const root = baseUrl.replace(/\/$/, "");
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${accessToken}`,
+  };
+  const anonKey = getInsforgeAnonKey();
+  if (anonKey) headers.apikey = anonKey;
+  const response = await fetch(`${root}/functions/tokentracker-device-rename`, {
+    method: "POST",
+    headers,
+    cache: "no-store",
+    body: JSON.stringify({ device_id: deviceId, device_name: name }),
+  });
+  if (!response.ok) {
+    const err: any = new Error(`Request failed with HTTP ${response.status}`);
+    err.status = response.status;
+    throw err;
+  }
+  return response.json();
+}

@@ -39,12 +39,14 @@ import {
 import {
   getUserStatus,
   triggerLocalSync,
+  renameAccountDevice,
 } from "../lib/api";
 import { ActivityHeatmap } from "../ui/dashboard/components/ActivityHeatmap.jsx";
 import { ProjectUsagePanel } from "../ui/dashboard/components/ProjectUsagePanel.jsx";
 import { DashboardView } from "../ui/dashboard/views/DashboardView.jsx";
 import { useAccountDevices } from "../hooks/use-account-devices.js";
 import { DeviceUsageCard } from "../ui/dashboard/components/DeviceUsageCard.jsx";
+import { formatDeviceLabel } from "../lib/device-label.js";
 import { ShareModal } from "../ui/share/ShareModal";
 import { useShareCardData } from "../ui/share/use-share-card-data";
 
@@ -406,7 +408,7 @@ export function DashboardPage({
   const to = range.to;
 
   const [selectedDevice, setSelectedDevice] = useState(null);
-  const { devices: accountDevices } = useAccountDevices({
+  const { devices: accountDevices, refresh: refreshAccountDevices } = useAccountDevices({
     from,
     to,
     timeZone,
@@ -435,7 +437,7 @@ export function DashboardPage({
       { value: "", label: copy("dashboard.device_filter.all") },
       ...accountDevices.map((d) => ({
         value: d.id,
-        label: d.device_name || copy("dashboard.device_card.unnamed"),
+        label: formatDeviceLabel(d) || copy("dashboard.device_card.unnamed"),
       })),
     ];
   }, [showDeviceFilter, accountDevices, resolvedLocale]);
@@ -445,6 +447,11 @@ export function DashboardPage({
       devices={accountDevices}
       selectedDeviceId={selectedDevice || ""}
       onSelectDevice={(id) => setSelectedDevice(id || null)}
+      onRenameDevice={async (id, name) => {
+        const token = await resolveAuthAccessToken(accountAccessToken);
+        await renameAccountDevice({ deviceId: id, name, accessToken: token });
+        await refreshAccountDevices();
+      }}
     />
   ) : null;
 

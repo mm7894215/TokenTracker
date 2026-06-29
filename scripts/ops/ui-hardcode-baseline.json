@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-24T18:32:51.215Z",
+  "generatedAt": "2026-06-29T15:28:59.163Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
@@ -263,11 +263,11 @@
       "colors": 0,
       "rawText": 5,
       "rawTextTokens": [
-        "0 ? ((tokens / total) * 100).toFixed(1) : \"0.0\"; const isSelected = selectedDeviceId === d.id; const name = d.device_name || copy(\"dashboard.device_card.unnamed\"); return (",
+        ") : ( /* 3. 正常/展示状态（无绿字绿底，仅通过灰色暗底与失焦虚化对比聚焦，极致素雅） */",
+        "0 ? ((tokens / total) * 100).toFixed(1) : \"0.0\"; const isSelected = selectedDeviceId === d.id; const name = formatDeviceLabel(d) || copy(\"dashboard.device_card.unnamed\"); const isEditing = editingId === d.id; const fillClass = isSelected ? \"bg-oai-brand\" : anySelected ? \"bg-oai-gray-300 dark:bg-oai-gray-600\" : \"bg-oai-brand/50\"; // UX 深度思考：未选中项整体降低透明度（失焦虚化），选中项 100% 实体高亮 const itemOpacity = anySelected && !isSelected ? \"opacity-40 hover:opacity-80\" : \"opacity-100\"; return (",
         "; if (p.includes(\"linux\")) return",
         "; if (p.includes(\"win\")) return",
-        "; return",
-        "sum + (Number(d.total_tokens) || 0), 0); return ("
+        "; return"
       ]
     },
     "dashboard/src/ui/dashboard/components/DeviceUsageCard.test.jsx": {
