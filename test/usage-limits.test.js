@@ -1856,7 +1856,7 @@ lang      123 me    23u  IPv4 0x124                0t0  TCP 127.0.0.1:51235 (LIS
   it("detects arch-suffixed language_server (macos_x64)", async () => {
     const commandRunner = () => ({
       stdout: `
-101 /Applications/Antigravity.app/Contents/MacOS/language_server_macos_x64 --app_data_dir antigravity --csrf_token ghi789
+ 101 /Applications/Antigravity.app/Contents/MacOS/language_server_macos_x64 --app_data_dir antigravity --csrf_token ghi789
 `,
       status: 0,
     });
@@ -1866,6 +1866,61 @@ lang      123 me    23u  IPv4 0x124                0t0  TCP 127.0.0.1:51235 (LIS
     assert.equal(result.configured, true);
     assert.equal(result.pid, 101);
     assert.equal(result.csrfToken, "ghi789");
+  });
+
+  it("does NOT detect Windsurf language_server as Antigravity", async () => {
+    // Windsurf shares the Codeium language_server binary name but uses a
+    // different app_data_dir. The Antigravity-specific markers must gate detection.
+    const commandRunner = () => ({
+      stdout: `
+ 321 /Applications/Windsurf.app/Contents/MacOS/language_server_macos_arm --app_data_dir windsurf --csrf_token windsurf-token
+`,
+      status: 0,
+    });
+
+    const result = await detectAntigravityProcess({ commandRunner });
+
+    assert.equal(result.configured, false);
+  });
+
+  it("detects agy CLI from absolute path", async () => {
+    const commandRunner = () => ({
+      stdout: `
+ 555 /usr/local/bin/agy
+`,
+      status: 0,
+    });
+
+    const result = await detectAntigravityProcess({ commandRunner });
+
+    assert.equal(result.configured, true);
+    assert.equal(result.pid, 555);
+  });
+
+  it("does NOT detect agy when it only appears as a command argument", async () => {
+    const commandRunner = () => ({
+      stdout: `
+ 556 vim /tmp/agy
+`,
+      status: 0,
+    });
+
+    const result = await detectAntigravityProcess({ commandRunner });
+
+    assert.equal(result.configured, false);
+  });
+
+  it("does NOT detect language_server when it only appears as a command argument", async () => {
+    const commandRunner = () => ({
+      stdout: `
+ 557 node /tmp/language_server --app_data_dir antigravity --csrf_token fake
+`,
+      status: 0,
+    });
+
+    const result = await detectAntigravityProcess({ commandRunner });
+
+    assert.equal(result.configured, false);
   });
 
   it("persists live Antigravity quota for use after the process exits", async () => {
@@ -2031,6 +2086,9 @@ lang 123 me 22u IPv4 0x123 0t0 TCP 127.0.0.1:51234 (LISTEN)
   it("does not use cached Antigravity quota after all cached windows reset", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-antigravity-cache-expired-"));
     try {
+      // Create evidence dir so the "not running" message is surfaced
+      // (without evidence hasAntigravityInstallEvidence returns configured:false)
+      fs.mkdirSync(path.join(tmp, ".gemini", "antigravity"), { recursive: true });
       const trackerDir = path.join(tmp, ".tokentracker", "tracker");
       fs.mkdirSync(trackerDir, { recursive: true });
       fs.writeFileSync(
@@ -2046,6 +2104,44 @@ lang 123 me 22u IPv4 0x123 0t0 TCP 127.0.0.1:51234 (LISTEN)
         }),
         "utf8",
       );
+      const commandRunner = () => ({ stdout: "", stderr: "", status: 1 });
+
+      const result = await fetchAntigravityLimits({
+        home: tmp,
+        commandRunner,
+        nowMs: Date.parse("2026-05-21T01:00:00.000Z"),
+      });
+
+      assert.equal(result.configured, true);
+      assert.ok(result.error.includes("not running"), `expected "not running" message, got: ${result.error}`);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("returns configured:false when no Antigravity install evidence exists", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-antigravity-no-evidence-"));
+    try {
+      const commandRunner = () => ({ stdout: "", stderr: "", status: 1 });
+
+      const result = await fetchAntigravityLimits({
+        home: tmp,
+        commandRunner,
+        nowMs: Date.parse("2026-05-21T01:00:00.000Z"),
+      });
+
+      assert.equal(result.configured, false);
+      assert.equal(result.error, undefined);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("returns 'not running' when install evidence exists but no process", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-antigravity-evidence-noprocess-"));
+    try {
+      // Create evidence dir
+      fs.mkdirSync(path.join(tmp, ".gemini", "antigravity-cli"), { recursive: true });
       const commandRunner = () => ({ stdout: "", stderr: "", status: 1 });
 
       const result = await fetchAntigravityLimits({

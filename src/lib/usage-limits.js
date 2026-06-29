@@ -1596,19 +1596,38 @@ function parseProcessLine(line) {
   };
 }
 
+function firstCommandToken(command) {
+  const trimmed = String(command || "").trimStart();
+  const quote = trimmed[0];
+  if (quote === '"' || quote === "'") {
+    const end = trimmed.indexOf(quote, 1);
+    return end >= 0 ? trimmed.slice(1, end) : trimmed.slice(1);
+  }
+  return trimmed.split(/\s+/, 1)[0] || "";
+}
+
 function isAntigravityCommandLine(command) {
-  const lower = String(command || "").toLowerCase();
-  // The agy CLI binary itself runs as a server with Connect-RPC endpoints
-  if (/^agy(\s|$)/.test(lower)) return true;
-  // IDE language_server with arch suffixes (_macos_arm, _macos_x64, .exe)
-  if (/language_server(?:_macos(?:_(?:arm|x64))?|\.exe)?\b/i.test(command)) return true;
-  return lower.includes("language_server")
-    && (
-      (lower.includes("--app_data_dir") && lower.includes("antigravity"))
-      || lower.includes("/antigravity/")
-      || lower.includes("\\antigravity\\")
-      || lower.includes("--override_ide_name antigravity")
-    );
+  const raw = String(command || "");
+  const lower = raw.toLowerCase();
+  const executable = firstCommandToken(raw).split(/[\\/]/).pop() || "";
+
+  // The agy CLI binary itself runs as a server with Connect-RPC endpoints.
+  // Match only the executable token's basename so absolute paths work without
+  // treating arbitrary arguments like `vim /tmp/agy` as an Antigravity server.
+  if (/^agy(?:\.exe)?$/i.test(executable)) return true;
+
+  // IDE language_server — only return true when accompanied by Antigravity-specific
+  // markers so sibling Codeium products (Windsurf, etc.) are not misidentified.
+  const hasLangServerBinary = /^language_server(?:_[a-z0-9]+)*(?:\.exe)?$/i.test(executable);
+
+  const hasAntigravityMarker =
+    (lower.includes("--app_data_dir") && lower.includes("antigravity")) ||
+    lower.includes("/antigravity/") ||
+    lower.includes("/antigravity.app/") ||
+    lower.includes("\\antigravity\\") ||
+    /--override_ide_name(?:=|\s+)["']?antigravity\b/i.test(raw);
+
+  return hasLangServerBinary && hasAntigravityMarker;
 }
 
 function extractCommandFlag(command, flag) {
@@ -2143,6 +2162,18 @@ async function probeAntigravityPort(port, csrfToken, { timeoutMs, requestFn, sch
   }
 }
 
+function hasAntigravityInstallEvidence({ home } = {}) {
+  const geminiHome = path.join(home || os.homedir(), ".gemini");
+  return ["antigravity", "antigravity-ide", "antigravity-cli"]
+    .some((name) => {
+      try {
+        return fs.statSync(path.join(geminiHome, name)).isDirectory();
+      } catch {
+        return false;
+      }
+    });
+}
+
 async function fetchAntigravityLimits({ home, commandRunner, requestFn, fetchImpl = fetch, timeoutMs = 8000, nowMs = Date.now() } = {}) {
   const finalize = (payload, normalizeOptions) => {
     const result = {
@@ -2169,6 +2200,11 @@ async function fetchAntigravityLimits({ home, commandRunner, requestFn, fetchImp
     if (!processInfo.configured) {
       const cached = readAntigravityLimitsCache({ home, nowMs });
       if (cached) return cached;
+      // No install evidence → user likely doesn't have Antigravity at all.
+      // Return configured:false so the card stays neutral (like other providers).
+      if (!hasAntigravityInstallEvidence({ home })) {
+        return { configured: false };
+      }
       return { configured: true, error: "Antigravity IDE is not running. Launch Antigravity to see usage limits." };
     }
     if (processInfo.error) {
