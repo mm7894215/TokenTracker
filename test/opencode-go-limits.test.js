@@ -9,6 +9,9 @@ const {
   buildWindow,
   extractWindows,
   fetchOpencodeGoLimits,
+  resolveWorkspaceId,
+  parseWorkspaceIds,
+  looksSignedOut,
 } = require("../src/lib/opencode-go-limits");
 
 // Real SolidStart hydration snippet shape captured from
@@ -56,11 +59,16 @@ function dataSlotHtml() {
 }
 
 describe("readConfig", () => {
-  it("returns null when env is missing one of the two vars", () => {
+  it("returns null when env has no auth cookie", () => {
     assert.equal(readConfig({ OPENCODE_GO_WORKSPACE_ID: "wrk_1" }), null);
-    assert.equal(readConfig({ OPENCODE_GO_AUTH_COOKIE: "cookie" }), null);
     assert.equal(readConfig({}), null);
     assert.equal(readConfig(null), null);
+  });
+  it("returns config with empty workspaceId when only auth cookie is present", () => {
+    const out = readConfig({
+      OPENCODE_GO_AUTH_COOKIE: "  cookie  ",
+    });
+    assert.deepEqual(out, { workspaceId: "", authCookie: "cookie" });
   });
   it("returns the trimmed values when both vars are present", () => {
     const out = readConfig({
@@ -69,9 +77,9 @@ describe("readConfig", () => {
     });
     assert.deepEqual(out, { workspaceId: "wrk_1", authCookie: "cookie" });
   });
-  it("ignores non-string values", () => {
+  it("ignores non-string values for auth cookie", () => {
     assert.equal(
-      readConfig({ OPENCODE_GO_WORKSPACE_ID: 123, OPENCODE_GO_AUTH_COOKIE: "c" }),
+      readConfig({ OPENCODE_GO_WORKSPACE_ID: "wrk_1", OPENCODE_GO_AUTH_COOKIE: 123 }),
       null,
     );
   });
@@ -115,6 +123,12 @@ describe("parseWindowUsage", () => {
       '{rollingUsage:{usagePercent:2,resetInSec:100},weeklyUsage:{usagePercent:17,resetInSec:200}}';
     assert.deepEqual(parseWindowUsage(html, "rollingUsage"), { usagePercent: 2, resetInSec: 100 });
     assert.deepEqual(parseWindowUsage(html, "weeklyUsage"), { usagePercent: 17, resetInSec: 200 });
+  });
+  it("parses assignment with equal sign (= or :=)", () => {
+    const html1 = '{rollingUsage:{usagePercent=42,resetInSec=100}}';
+    const html2 = 'weeklyUsage:= {usagePercent:= 15, resetInSec:=200}';
+    assert.deepEqual(parseWindowUsage(html1, "rollingUsage"), { usagePercent: 42, resetInSec: 100 });
+    assert.deepEqual(parseWindowUsage(html2, "weeklyUsage"), { usagePercent: 15, resetInSec: 200 });
   });
 });
 
@@ -305,5 +319,132 @@ describe("fetchOpencodeGoLimits", () => {
     const out = await fetchOpencodeGoLimits({ env: cfg, fetchImpl });
     assert.equal(out.configured, true);
     assert.match(out.error, /ECONNRESET/);
+  });
+
+  it("auto-resolves workspace ID from cookie when not configured in env (GET path)", async () => {
+    let workspaceResolved = false;
+    let dashboardFetched = false;
+    const fetchImpl = async (url, init) => {
+      if (url.includes("_server") && init.method === "GET") {
+        workspaceResolved = true;
+        return jsonResponse(200, 'self.__next_f.push([1,"id=\\"wrk_auto_01\\""])');
+      }
+      if (url.includes("/workspace/wrk_auto_01/go")) {
+        dashboardFetched = true;
+        return jsonResponse(200, ssrHtml());
+      }
+      return jsonResponse(404, "not found");
+    };
+
+    const out = await fetchOpencodeGoLimits({
+      env: { OPENCODE_GO_AUTH_COOKIE: "cookie" },
+      fetchImpl,
+      nowMs: 1_700_000_000_000,
+    });
+
+    assert.equal(out.configured, true);
+    assert.equal(out.error, null);
+    assert.equal(workspaceResolved, true);
+    assert.equal(dashboardFetched, true);
+    assert.equal(out.primary_window?.used_percent, 42);
+  });
+
+  it("auto-resolves workspace ID from cookie when not configured in env (POST path fallback)", async () => {
+    let getCalled = false;
+    let postCalled = false;
+    let dashboardFetched = false;
+    const fetchImpl = async (url, init) => {
+      if (url.includes("_server") && init.method === "GET") {
+        getCalled = true;
+        return jsonResponse(200, "null"); // GET yields no workspaces
+      }
+      if (url.includes("_server") && init.method === "POST") {
+        postCalled = true;
+        return jsonResponse(200, '[{"id":"wrk_auto_02"}]'); // POST returns JSON array
+      }
+      if (url.includes("/workspace/wrk_auto_02/go")) {
+        dashboardFetched = true;
+        return jsonResponse(200, ssrHtml());
+      }
+      return jsonResponse(404, "not found");
+    };
+
+    const out = await fetchOpencodeGoLimits({
+      env: { OPENCODE_GO_AUTH_COOKIE: "cookie" },
+      fetchImpl,
+      nowMs: 1_700_000_000_000,
+    });
+
+    assert.equal(out.configured, true);
+    assert.equal(out.error, null);
+    assert.equal(getCalled, true);
+    assert.equal(postCalled, true);
+    assert.equal(dashboardFetched, true);
+    assert.equal(out.primary_window?.used_percent, 42);
+  });
+
+  it("surfaces errors when auto-resolution fails due to invalid session (401)", async () => {
+    const fetchImpl = async (url, init) => {
+      if (url.includes("_server")) {
+        return jsonResponse(401, "unauthorized");
+      }
+      return jsonResponse(404, "not found");
+    };
+    const out = await fetchOpencodeGoLimits({
+      env: { OPENCODE_GO_AUTH_COOKIE: "cookie" },
+      fetchImpl,
+    });
+    assert.equal(out.configured, true);
+    assert.match(out.error, /Failed to resolve Workspace ID/);
+  });
+
+  it("surfaces errors when no workspaces can be found", async () => {
+    const fetchImpl = async (url, init) => {
+      if (url.includes("_server")) {
+        return jsonResponse(200, "null");
+      }
+      return jsonResponse(404, "not found");
+    };
+    const out = await fetchOpencodeGoLimits({
+      env: { OPENCODE_GO_AUTH_COOKIE: "cookie" },
+      fetchImpl,
+    });
+    assert.equal(out.configured, true);
+    assert.match(out.error, /Could not auto-resolve OpenCode Workspace ID/);
+  });
+});
+
+describe("looksSignedOut", () => {
+  it("detects real sign-out / auth-required responses", () => {
+    assert.equal(looksSignedOut('actor of type "public" is not associated'), true);
+    assert.equal(looksSignedOut('not associated with an account'), true);
+    assert.equal(looksSignedOut('Please log in to continue'), true);
+    assert.equal(looksSignedOut('Sign in to your account'), true);
+    assert.equal(looksSignedOut('redirect to auth/authorize'), true);
+  });
+  it("does NOT false-positive on workspace names containing common words", () => {
+    assert.equal(looksSignedOut('{"id":"wrk_loginServiceApp"}'), false);
+    assert.equal(looksSignedOut('workspace login_page'), false);
+    assert.equal(looksSignedOut('wrk_sign_in_helper'), false);
+    assert.equal(looksSignedOut('[{"name":"MyLoginTool"}]'), false);
+  });
+});
+
+describe("parseWorkspaceIds", () => {
+  it("extracts from SSR escaped-quote format", () => {
+    assert.deepEqual(parseWorkspaceIds('id=\\"wrk_abc\\"'), ["wrk_abc"]);
+  });
+  it("extracts from JSON via walk fallback", () => {
+    assert.deepEqual(parseWorkspaceIds('{"id":"wrk_json01"}'), ["wrk_json01"]);
+  });
+  it("extracts from nested JSON arrays", () => {
+    assert.deepEqual(parseWorkspaceIds('[{"id":"wrk_a"},{"id":"wrk_b"}]'), ["wrk_a", "wrk_b"]);
+  });
+  it("returns empty array for content with no workspace IDs", () => {
+    assert.deepEqual(parseWorkspaceIds('no ids here'), []);
+    assert.deepEqual(parseWorkspaceIds('{"name":"hello"}'), []);
+  });
+  it("deduplicates IDs", () => {
+    assert.deepEqual(parseWorkspaceIds('[{"id":"wrk_dup"},{"id":"wrk_dup"}]'), ["wrk_dup"]);
   });
 });

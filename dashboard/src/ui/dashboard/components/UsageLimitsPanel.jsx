@@ -388,8 +388,8 @@ function ExternalArrow() {
 function OpenCodeGoSetupHint() {
   const [copied, setCopied] = useState(false);
   const snippet = [
-    'export OPENCODE_GO_WORKSPACE_ID="wrk_..."',
     'export OPENCODE_GO_AUTH_COOKIE="..."',
+    '# Optional: export OPENCODE_GO_WORKSPACE_ID="wrk_..." (Only if auto-discovery fails)',
   ].join("\n");
 
   const onCopy = async (e) => {

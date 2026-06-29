@@ -995,10 +995,10 @@ limits.opencodeGo.setupHint.title,ui,LimitsPage,UsageLimitsPanel,opencode_go_hin
 limits.opencodeGo.setupHint.subtitle,ui,LimitsPage,UsageLimitsPanel,opencode_go_hint_subtitle,"Limits read from your signed-in opencode.ai session (no public API).",,active
 limits.opencodeGo.setupHint.step1,ui,LimitsPage,UsageLimitsPanel,opencode_go_hint_step1,"Sign in and open your Go workspace.",,active
 limits.opencodeGo.setupHint.cta,ui,LimitsPage,UsageLimitsPanel,opencode_go_hint_cta,"Open opencode.ai",,active
-limits.opencodeGo.setupHint.step2,ui,LimitsPage,UsageLimitsPanel,opencode_go_hint_step2,"Copy two values from that page:",,active
-limits.opencodeGo.setupHint.step2_workspace,ui,LimitsPage,UsageLimitsPanel,opencode_go_hint_step2_workspace,"Workspace ID: the wrk_… segment in the page URL.",,active
-limits.opencodeGo.setupHint.step2_cookie,ui,LimitsPage,UsageLimitsPanel,opencode_go_hint_step2_cookie,"auth cookie: DevTools ▸ Application ▸ Cookies ▸ opencode.ai ▸ auth.",,active
-limits.opencodeGo.setupHint.step3,ui,LimitsPage,UsageLimitsPanel,opencode_go_hint_step3,"Add them to your shell profile, then restart the tracker:",,active
-limits.opencodeGo.setupHint.note_app,ui,LimitsPage,UsageLimitsPanel,opencode_go_hint_note_app,"macOS app: set both with launchctl setenv, then reopen the app.",,active
+limits.opencodeGo.setupHint.step2,ui,LimitsPage,UsageLimitsPanel,opencode_go_hint_step2,"Copy the auth cookie (and optionally workspace ID) from that page:",,active
+limits.opencodeGo.setupHint.step2_workspace,ui,LimitsPage,UsageLimitsPanel,opencode_go_hint_step2_workspace,"Workspace ID (optional): the wrk_… segment in the page URL.",,active
+limits.opencodeGo.setupHint.step2_cookie,ui,LimitsPage,UsageLimitsPanel,opencode_go_hint_step2_cookie,"auth cookie (required): DevTools ▸ Application ▸ Cookies ▸ opencode.ai ▸ auth.",,active
+limits.opencodeGo.setupHint.step3,ui,LimitsPage,UsageLimitsPanel,opencode_go_hint_step3,"Add to your shell profile, then restart the tracker:",,active
+limits.opencodeGo.setupHint.note_app,ui,LimitsPage,UsageLimitsPanel,opencode_go_hint_note_app,"macOS app: set with launchctl setenv, then reopen the app.",,active
 limits.opencodeGo.setupHint.copy,ui,LimitsPage,UsageLimitsPanel,opencode_go_hint_copy,"Copy",,active
 limits.opencodeGo.setupHint.copied,ui,LimitsPage,UsageLimitsPanel,opencode_go_hint_copied,"Copied",,active

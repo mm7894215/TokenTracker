@@ -1,3 +1,5 @@
+const crypto = require("node:crypto");
+
 // OpenCode Go usage limits.
 //
 // Scrapes the OpenCode Go workspace dashboard
@@ -26,7 +28,7 @@ const SCRAPED_NUMBER_PATTERN = "([0-9]+(?:\\.[0-9]+)?)";
 // inside that window's own object, and `"?` tolerates both the unquoted SSR
 // form (`usagePercent:2`) and a quoted JSON form (`"usagePercent":2`).
 function windowFieldRegex(windowKey, field) {
-  return new RegExp(`${windowKey}[^}]*?${field}"?\\s*:\\s*${SCRAPED_NUMBER_PATTERN}`);
+  return new RegExp(`${windowKey}[^}]*?${field}"?\\s*[:=]+\\s*${SCRAPED_NUMBER_PATTERN}`);
 }
 
 const DASHBOARD_URL_PREFIX = "https://opencode.ai/workspace/";
@@ -45,7 +47,7 @@ function readConfig(env = process.env) {
     typeof env.OPENCODE_GO_AUTH_COOKIE === "string"
       ? env.OPENCODE_GO_AUTH_COOKIE.trim()
       : "";
-  if (!workspaceId || !authCookie) return null;
+  if (!authCookie) return null;
   return { workspaceId, authCookie };
 }
 
@@ -174,6 +176,101 @@ function withTimeout(fetchImpl, timeoutMs) {
   };
 }
 
+// TanStack server-function ID for the "list workspaces" query. Generated at
+// build time by OpenCode's SolidStart bundler. To update: open opencode.ai
+// with DevTools → Network, filter "_server", trigger any workspace load,
+// and copy the `id` query parameter from the request URL.
+const WORKSPACES_SERVER_ID =
+  "def39973159c7f0483d8793a822b8dbb10d067e12c65455fcb4608459ba0234f";
+
+async function resolveWorkspaceId(authCookie, fetchImpl, timeoutMs) {
+  const serverId = WORKSPACES_SERVER_ID;
+  const instanceId = `server-fn:${crypto.randomUUID()}`;
+
+  const headers = {
+    "Cookie": `auth=${authCookie}`,
+    "X-Server-Id": serverId,
+    "X-Server-Instance": instanceId,
+    "User-Agent": USER_AGENT,
+    "Origin": "https://opencode.ai",
+    "Referer": "https://opencode.ai",
+    "Accept": "text/javascript, application/json;q=0.9, */*;q=0.8"
+  };
+
+  const getUrl = `https://opencode.ai/_server?id=${serverId}`;
+  let response;
+  try {
+    response = await withTimeout(fetchImpl, timeoutMs)(getUrl, {
+      method: "GET",
+      headers,
+    });
+  } catch (err) {
+    throw new Error(`GET _server failed: ${err.message}`);
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    throw new Error("Unauthorized or forbidden (401/403)");
+  }
+
+  let text = await response.text();
+  let ids = parseWorkspaceIds(text);
+
+  if (ids.length === 0 && !looksSignedOut(text)) {
+    const postUrl = "https://opencode.ai/_server";
+    const postHeaders = {
+      ...headers,
+      "Content-Type": "application/json",
+    };
+    try {
+      response = await withTimeout(fetchImpl, timeoutMs)(postUrl, {
+        method: "POST",
+        headers: postHeaders,
+        body: "[]"
+      });
+      text = await response.text();
+      ids = parseWorkspaceIds(text);
+    } catch (postErr) {
+      // GET returned content but no workspace IDs; POST also failed.
+      // Wrap both signals so the caller can surface a useful diagnostic.
+      throw new Error(`GET returned no workspace IDs and POST fallback failed: ${postErr.message}`);
+    }
+  }
+
+  return ids.length > 0 ? ids[0] : null;
+}
+
+function parseWorkspaceIds(text) {
+  const ids = new Set();
+  const re = /id\s*[:=]+\s*\\?"(wrk_[^\\"]+)\\"?/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    ids.add(m[1]);
+  }
+  if (ids.size === 0) {
+    try {
+      const walk = (o) => {
+        if (typeof o === "string" && o.startsWith("wrk_")) {
+          ids.add(o);
+        } else if (Array.isArray(o)) {
+          o.forEach(walk);
+        } else if (o && typeof o === "object") {
+          Object.values(o).forEach(walk);
+        }
+      };
+      walk(JSON.parse(text));
+    } catch (_) {}
+  }
+  return Array.from(ids);
+}
+
+function looksSignedOut(text) {
+  const l = String(text).toLowerCase();
+  // Use specific phrases to avoid false positives on workspace names containing
+  // common words like "login" (e.g. a workspace named "loginServiceApp").
+  return l.includes("please log in") || l.includes("sign in to") || l.includes("auth/authorize")
+    || l.includes("not associated with an account") || l.includes('actor of type "public"');
+}
+
 async function fetchOpencodeGoLimits({
   env = process.env,
   fetchImpl = fetch,
@@ -183,8 +280,20 @@ async function fetchOpencodeGoLimits({
   const cfg = readConfig(env);
   if (!cfg) return { configured: false };
 
+  let workspaceId = cfg.workspaceId;
+  if (!workspaceId) {
+    try {
+      workspaceId = await resolveWorkspaceId(cfg.authCookie, fetchImpl, timeoutMs);
+    } catch (err) {
+      return { configured: true, error: `Failed to resolve Workspace ID: ${sanitizeMessage(err?.message || err)}` };
+    }
+    if (!workspaceId) {
+      return { configured: true, error: "Could not auto-resolve OpenCode Workspace ID from cookie. Please set OPENCODE_GO_WORKSPACE_ID manually." };
+    }
+  }
+
   const url =
-    DASHBOARD_URL_PREFIX + encodeURIComponent(cfg.workspaceId) + DASHBOARD_URL_SUFFIX;
+    DASHBOARD_URL_PREFIX + encodeURIComponent(workspaceId) + DASHBOARD_URL_SUFFIX;
 
   let response;
   try {
@@ -248,4 +357,7 @@ module.exports = {
   parseDataSlotFormat,
   parseHumanReadableTime,
   buildWindow,
+  resolveWorkspaceId,
+  parseWorkspaceIds,
+  looksSignedOut,
 };
