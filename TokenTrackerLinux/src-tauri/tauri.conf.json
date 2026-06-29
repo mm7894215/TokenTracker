@@ -10,18 +10,7 @@
   },
   "app": {
     "withGlobalTauri": false,
-    "windows": [
-      {
-        "label": "main",
-        "title": "TokenTracker",
-        "width": 1180,
-        "height": 820,
-        "minWidth": 960,
-        "minHeight": 640,
-        "url": "index.html",
-        "visible": true
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }
