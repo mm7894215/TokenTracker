@@ -1306,14 +1306,38 @@ function createLocalApiHandler({ queuePath }) {
         delete proxyHeaders["x-api-key"];
         const bodyChunks = [];
         for await (const chunk of req) bodyChunks.push(chunk);
-        const proxyRes = await fetch(targetUrl, {
-          method,
-          headers: proxyHeaders,
-          body: method !== "GET" && method !== "HEAD" && bodyChunks.length > 0
-            ? Buffer.concat(bodyChunks)
-            : undefined,
-          redirect: "follow",
-        });
+        const proxyBody = method !== "GET" && method !== "HEAD" && bodyChunks.length > 0
+          ? Buffer.concat(bodyChunks)
+          : undefined;
+
+        // Follow redirects manually so we can revalidate each Location hop
+        // against the allowlist.  An allowlisted host could bounce the proxy
+        // to a non-allowlisted destination if we used redirect: "follow".
+        let currentUrl = targetUrl;
+        let proxyRes;
+        for (let hops = 0; hops < 5; hops++) {
+          proxyRes = await fetch(currentUrl, {
+            method,
+            headers: proxyHeaders,
+            body: proxyBody,
+            redirect: "manual",
+          });
+          if ([301, 302, 303, 307, 308].includes(proxyRes.status)) {
+            const location = proxyRes.headers.get("location");
+            if (!location) break;
+            let next;
+            try { next = new URL(location, currentUrl); } catch { break; }
+            if (!NATIVE_PROXY_ALLOWED_HOSTS.has(next.hostname) || next.protocol !== "https:") {
+              break; // redirect leaves allowlist — return the redirect response as-is
+            }
+            // 303 always switches to GET; others preserve method.
+            if (proxyRes.status === 303) { method = "GET"; }
+            currentUrl = next.href;
+            continue;
+          }
+          break;
+        }
+
         const resBody = Buffer.from(await proxyRes.arrayBuffer());
         // Strip set-cookie from upstream responses to prevent cookie planting
         // on the 127.0.0.1 origin.
