@@ -22,7 +22,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>assets\trayicon.ico</ApplicationIcon>
     <!-- Keep in sync with package.json / project.yml on release. -->
-    <Version>0.64.0</Version>
+    <Version>0.64.1</Version>
     <Product>TokenTracker</Product>
     <Company>TokenTracker</Company>
   </PropertyGroup>

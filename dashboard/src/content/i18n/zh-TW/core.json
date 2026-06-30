@@ -213,7 +213,7 @@
   "settings.labs.qpd.hint": "關聯 GitHub PR 歷史，分析各模型的平均交付成本與有效 Token。",
   "settings.labs.qpd.aria": "切換 PR 性價比分析",
   "qpd.card.title": "研發性價比與交付成本",
-  "qpd.card.badge": "實驗室",
+  "qpd.card.badge": "BETA",
   "qpd.card.subtitle": "基於已合併的 PR 歷史，估算不同模型的平均交付成本。",
   "qpd.card.updating": "更新中…",
   "qpd.card.best_value": "最省錢",

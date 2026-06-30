@@ -250,7 +250,7 @@ function GithubProfileField({ github }) {
             <div className="flex items-center gap-1.5">
               <span>{copy("settings.labs.qpd.label")}</span>
               <span className="px-1.5 py-0.5 text-[8px] font-semibold tracking-wider text-oai-gray-500 bg-oai-gray-100 dark:text-oai-gray-400 dark:bg-oai-gray-800/80 rounded uppercase scale-90 origin-left">
-                Beta
+                {copy("qpd.card.badge")}
               </span>
             </div>
           }

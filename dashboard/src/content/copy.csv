@@ -367,7 +367,7 @@ settings.labs.qpd.label,ui,SettingsPage,LabsSection,qpd_label,"Analyze PR cost-e
 settings.labs.qpd.hint,ui,SettingsPage,LabsSection,qpd_hint,"Link GitHub PR history to analyze average delivery costs and effective Tokens per model.",,active
 settings.labs.qpd.aria,ui,SettingsPage,LabsSection,qpd_aria,"Toggle PR cost-efficiency analysis",,active
 qpd.card.title,ui,DashboardView,QualityPerDollarCard,title,"Quality & Avg Cost/PR",,active
-qpd.card.badge,ui,DashboardView,QualityPerDollarCard,badge,"Labs",,active
+qpd.card.badge,ui,DashboardView,QualityPerDollarCard,badge,"BETA",,active
 qpd.card.subtitle,ui,DashboardView,QualityPerDollarCard,subtitle,"Avg token cost per merged PR based on your history.",,active
 qpd.card.updating,ui,DashboardView,QualityPerDollarCard,updating,"Updating…",,active
 qpd.card.best_value,ui,DashboardView,QualityPerDollarCard,best_value,"Best Value",,active
@@ -380,6 +380,7 @@ qpd.card.qpd_tooltip,ui,DashboardView,QualityPerDollarCard,qpd_tooltip,"Average 
 qpd.card.totals,ui,DashboardView,QualityPerDollarCard,totals,"Merged {{accepted}}/{{outcomes}} PRs · Cost {{cost}}",,active
 qpd.card.et,ui,DashboardView,QualityPerDollarCard,et,"Effective: {{tokens}} ({{rate}})",,active
 qpd.card.et_tooltip,ui,DashboardView,QualityPerDollarCard,et_tooltip,"Effective Tokens — the share of tokens that produced accepted work vs rework",,active
+qpd.card.sparse_notice,ui,DashboardView,QualityPerDollarCard,sparse_notice,"Tip: Sparse outcomes dataset might skew ratios. For precise metrics, select a narrower time window.",,active
 settings.appearance.theme.label,ui,SettingsPage,SettingsPage,theme_label,"Theme",,active
 settings.appearance.theme.hint,ui,SettingsPage,SettingsPage,theme_hint,"Choose how Token Tracker looks across the dashboard.",,active
 settings.appearance.theme.light,ui,SettingsPage,SettingsPage,theme_light,"Light",,active

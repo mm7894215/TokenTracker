@@ -72,7 +72,7 @@ export function QualityPerDollarCard({ from, to, deviceId = null }) {
       <div className="mb-2 flex items-center gap-2">
         <h3 className="text-sm font-medium text-oai-black dark:text-oai-white">{copy("qpd.card.title")}</h3>
         <span className="px-1.5 py-0.5 text-[9px] font-semibold tracking-wider text-oai-gray-500 bg-oai-gray-100 dark:text-oai-gray-400 dark:bg-oai-gray-800/80 rounded uppercase">
-          Beta
+          {copy("qpd.card.badge")}
         </span>
       </div>
       <p className="mb-3 text-xs text-oai-gray-500 dark:text-oai-gray-400">{subtitle}</p>
