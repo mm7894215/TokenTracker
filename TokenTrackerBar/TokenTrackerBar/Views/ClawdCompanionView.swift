@@ -326,7 +326,10 @@ struct ClawdCompanionView: View {
     }
 
     private var characterView: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { timeline in
+        TimelineView(.animation(
+            minimumInterval: characterFrameInterval,
+            paused: characterTimelinePaused
+        )) { timeline in
             Canvas { context, size in
                 let s = px
                 let yBase: CGFloat = 6
@@ -365,6 +368,28 @@ struct ClawdCompanionView: View {
                 case .miniSleep:       Self.drawMiniSleep(ctx: ctx, context: &context)
                 }
             }
+        }
+    }
+
+    private var characterTimelinePaused: Bool {
+        if layout == .floating, !petState.isWindowVisible {
+            return true
+        }
+        return clawdState == .miniIdle
+    }
+
+    private var characterFrameInterval: TimeInterval {
+        switch clawdState {
+        case .workingTyping, .workingThinking, .workingUltrathink, .error, .yawning, .waking:
+            return 1.0 / 15.0
+        case .disconnected, .miniAlert, .miniPeek, .miniHappy:
+            return 1.0 / 5.0
+        case .idleLiving, .idleLook:
+            return hoveringCharacter ? 1.0 / 8.0 : 1.0 / 3.0
+        case .idleDoze, .sleeping, .miniSleep:
+            return 1.0
+        case .miniIdle:
+            return 60.0
         }
     }
 

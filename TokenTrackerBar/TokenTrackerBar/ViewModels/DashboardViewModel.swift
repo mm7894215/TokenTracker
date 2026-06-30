@@ -58,6 +58,7 @@ class DashboardViewModel: ObservableObject {
     @Published private(set) var topModels: [TopModel] = []
 
     private var refreshTask: Task<Void, Never>?
+    private var lastBackgroundSyncAt: Date?
     private let resetDetector = WeeklyLimitResetDetector()
 
     // MARK: - Computed Properties
@@ -241,13 +242,19 @@ class DashboardViewModel: ObservableObject {
 
     /// Initial launch: sync data first, then load dashboard.
     func syncThenLoad() async {
+        guard !isSyncing else { return }
         isSyncing = true
+        defer { isSyncing = false }
+        var didSync = false
         do {
             _ = try await APIClient.shared.triggerSync()
+            didSync = true
         } catch {
             // Sync failure is non-fatal — proceed with whatever data exists
         }
-        isSyncing = false
+        if didSync {
+            lastBackgroundSyncAt = Date()
+        }
         await loadAll()
     }
 
@@ -256,6 +263,7 @@ class DashboardViewModel: ObservableObject {
         isSyncing = true
         do {
             _ = try await APIClient.shared.triggerSync(drain: true)
+            lastBackgroundSyncAt = Date()
             await loadAll()
         } catch {
             self.error = error.localizedDescription
@@ -265,13 +273,25 @@ class DashboardViewModel: ObservableObject {
 
     // MARK: - Auto Refresh
 
-    func startAutoRefresh(interval: TimeInterval = 300) {
+    func startAutoRefresh(
+        interval: TimeInterval = BackgroundRefreshPolicy.defaultRefreshInterval,
+        syncInterval: TimeInterval = BackgroundRefreshPolicy.defaultSyncInterval
+    ) {
         stopAutoRefresh()
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: UInt64(interval) * 1_000_000_000)
                 guard !Task.isCancelled, let self else { break }
-                await self.syncThenLoad()
+                let shouldSync = BackgroundRefreshPolicy.shouldRunSync(
+                    now: Date(),
+                    lastSyncAt: self.lastBackgroundSyncAt,
+                    syncInterval: syncInterval
+                )
+                if shouldSync {
+                    await self.syncThenLoad()
+                } else {
+                    await self.loadAll()
+                }
             }
         }
     }

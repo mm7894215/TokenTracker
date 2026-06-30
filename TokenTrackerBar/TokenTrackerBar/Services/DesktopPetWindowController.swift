@@ -75,6 +75,7 @@ final class DesktopPetWindowController: NSObject, NSWindowDelegate {
     func show() {
         let panel = panel ?? makePanel()
         self.panel = panel
+        uiState.isWindowVisible = true
         panel.orderFrontRegardless()
         UserDefaults.standard.set(true, forKey: Self.showDefaultsKey)
         keepActive()
@@ -82,6 +83,7 @@ final class DesktopPetWindowController: NSObject, NSWindowDelegate {
 
     func hide() {
         panel?.orderOut(nil)
+        uiState.isWindowVisible = false
         UserDefaults.standard.set(false, forKey: Self.showDefaultsKey)
         sleepTimer?.invalidate()
         sleepTimer = nil
@@ -478,6 +480,7 @@ private struct DesktopPetHost: View {
 final class PetWindowState: ObservableObject {
     static let alwaysAllowed = PetWindowState()
     @Published var bubbleAllowed = true
+    @Published var isWindowVisible = true
     @Published var isTucked = false
     @Published var isHovered = false
     @Published var isRightEdge = true

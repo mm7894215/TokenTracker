@@ -120,6 +120,7 @@ targets:
       - path: TokenTrackerBar/Models/UsageLimits.swift
       - path: TokenTrackerBar/Models/LimitPace.swift
       - path: TokenTrackerBar/Models/WeeklyLimitResetDetector.swift
+      - path: TokenTrackerBar/Models/BackgroundRefreshPolicy.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tokentracker.bar.tests

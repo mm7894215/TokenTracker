@@ -398,6 +398,181 @@ test("parseRolloutIncremental uses turn_context cwd to resolve project context",
   }
 });
 
+test("parseRolloutIncremental skips unchanged files when project state is disabled", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  try {
+    const sessionsDir = path.join(tmp, "sessions", "2026", "01", "26");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const rolloutPath = path.join(sessionsDir, "rollout-test.jsonl");
+    const usage = {
+      input_tokens: 2,
+      cached_input_tokens: 0,
+      output_tokens: 3,
+      reasoning_output_tokens: 0,
+      total_tokens: 5,
+    };
+    await fs.writeFile(
+      rolloutPath,
+      [
+        buildTurnContextLine({ model: "gpt-4" }),
+        buildTokenCountLine({ ts: "2026-01-26T00:10:00.000Z", last: usage, total: usage }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const first = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+    });
+    assert.equal(first.filesProcessed, 1);
+
+    const second = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+    });
+    assert.equal(second.filesProcessed, 0);
+    assert.equal(second.eventsAggregated, 0);
+    assert.equal(second.bucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseRolloutIncremental still processes unchanged files when project state is enabled", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  try {
+    const rolloutPath = path.join(tmp, "rollout-test.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const projectQueuePath = path.join(tmp, "project.queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    const usage = {
+      input_tokens: 2,
+      cached_input_tokens: 0,
+      output_tokens: 3,
+      reasoning_output_tokens: 0,
+      total_tokens: 5,
+    };
+    await fs.writeFile(
+      rolloutPath,
+      [
+        buildTurnContextLine({ model: "gpt-4" }),
+        buildTokenCountLine({ ts: "2026-01-26T00:10:00.000Z", last: usage, total: usage }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+
+    const first = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+      projectQueuePath,
+    });
+    assert.equal(first.filesProcessed, 1);
+
+    const second = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+      projectQueuePath,
+    });
+    assert.equal(second.filesProcessed, 1);
+    assert.equal(second.eventsAggregated, 0);
+    assert.equal(second.bucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseRolloutIncremental re-reads same-inode truncation when project state is disabled", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  try {
+    const rolloutPath = path.join(tmp, "rollout-test.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    const firstUsage = {
+      input_tokens: 20,
+      cached_input_tokens: 0,
+      output_tokens: 5,
+      reasoning_output_tokens: 0,
+      total_tokens: 25,
+    };
+    await fs.writeFile(
+      rolloutPath,
+      [
+        buildTurnContextLine({ model: "gpt-4" }),
+        buildTokenCountLine({
+          ts: "2026-01-26T00:10:00.000Z",
+          last: firstUsage,
+          total: firstUsage,
+        }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+
+    await parseRolloutIncremental({ rolloutFiles: [rolloutPath], cursors, queuePath });
+    const beforeOffset = cursors.files[rolloutPath].offset;
+
+    const secondUsage = {
+      input_tokens: 3,
+      cached_input_tokens: 0,
+      output_tokens: 4,
+      reasoning_output_tokens: 0,
+      total_tokens: 7,
+    };
+    const truncatedBody =
+      buildTokenCountLine({
+        ts: "2026-01-26T00:20:00.000Z",
+        last: secondUsage,
+        total: secondUsage,
+      }) + "\n";
+    const rewriteHandle = await fs.open(rolloutPath, "r+");
+    let beforeStat;
+    let afterStat;
+    let second;
+    try {
+      beforeStat = await rewriteHandle.stat();
+      await rewriteHandle.truncate(0);
+      await rewriteHandle.write(truncatedBody, 0, "utf8");
+      afterStat = await rewriteHandle.stat();
+
+      assert.equal(afterStat.ino, beforeStat.ino);
+      assert.ok(afterStat.size < beforeOffset);
+
+      second = await parseRolloutIncremental({ rolloutFiles: [rolloutPath], cursors, queuePath });
+      assert.equal(second.filesProcessed, 1);
+      assert.equal(second.eventsAggregated, 1);
+      assert.equal(cursors.files[rolloutPath].offset, afterStat.size);
+
+      const thirdUsage = {
+        input_tokens: 5,
+        cached_input_tokens: 0,
+        output_tokens: 5,
+        reasoning_output_tokens: 0,
+        total_tokens: 10,
+      };
+      const appendedBody =
+        buildTokenCountLine({
+          ts: "2026-01-26T00:30:00.000Z",
+          last: thirdUsage,
+          total: thirdUsage,
+        }) + "\n";
+      await rewriteHandle.write(appendedBody, afterStat.size, "utf8");
+    } finally {
+      await rewriteHandle.close();
+    }
+    const third = await parseRolloutIncremental({ rolloutFiles: [rolloutPath], cursors, queuePath });
+    assert.equal(third.filesProcessed, 1);
+    assert.equal(third.eventsAggregated, 1);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseRolloutIncremental uses session_meta cwd to resolve project context", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
   try {
@@ -2609,7 +2784,50 @@ test("parseClaudeIncremental aggregates usage into half-hour buckets", async () 
       cursors,
       queuePath,
     });
+    assert.equal(resAgain.filesProcessed, 0);
+    assert.equal(resAgain.eventsAggregated, 0);
     assert.equal(resAgain.bucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseClaudeIncremental still processes unchanged files when project state is enabled", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-claude-"));
+  try {
+    const claudePath = path.join(tmp, "agent-claude.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const projectQueuePath = path.join(tmp, "project.queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    const model = "claude-sonnet-4";
+    await fs.writeFile(
+      claudePath,
+      buildClaudeUsageLine({
+        ts: "2025-12-25T01:10:00.000Z",
+        input: 100,
+        output: 50,
+        model,
+      }) + "\n",
+      "utf8",
+    );
+
+    const first = await parseClaudeIncremental({
+      projectFiles: [{ path: claudePath, source: "claude" }],
+      cursors,
+      queuePath,
+      projectQueuePath,
+    });
+    assert.equal(first.filesProcessed, 1);
+
+    const second = await parseClaudeIncremental({
+      projectFiles: [{ path: claudePath, source: "claude" }],
+      cursors,
+      queuePath,
+      projectQueuePath,
+    });
+    assert.equal(second.filesProcessed, 1);
+    assert.equal(second.eventsAggregated, 0);
+    assert.equal(second.bucketsQueued, 0);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
