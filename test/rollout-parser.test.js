@@ -2948,9 +2948,11 @@ test("resolveHermesPath honors TOKENTRACKER_HERMES_HOME override", () => {
     path.join(override, "state.db"),
   );
   // Falls back to ~/.hermes when override is empty or absent.
-  const fallback = resolveHermesPath({ TOKENTRACKER_HERMES_HOME: "  " });
+  // Suppress the WSL probe so this assertion is deterministic on Windows (#87).
+  const noWsl = { runWsl: () => { throw new Error("no WSL"); } };
+  const fallback = resolveHermesPath({ TOKENTRACKER_HERMES_HOME: "  " }, noWsl);
   assert.equal(fallback, path.join(os.homedir(), ".hermes"));
-  assert.equal(resolveHermesPath({}), path.join(os.homedir(), ".hermes"));
+  assert.equal(resolveHermesPath({}, noWsl), path.join(os.homedir(), ".hermes"));
 });
 
 test("resolveHermesPath prefers %LOCALAPPDATA%\\hermes on Windows when present", async (t) => {
@@ -2965,15 +2967,17 @@ test("resolveHermesPath prefers %LOCALAPPDATA%\\hermes on Windows when present",
   });
 
   // LOCALAPPDATA points at a dir that does NOT contain `hermes` → fall back.
+  // Suppress WSL probe so fallback is deterministic on Windows (#87).
+  const noWsl = { runWsl: () => { throw new Error("no WSL"); } };
   assert.equal(
-    resolveHermesPath({ LOCALAPPDATA: tmp }),
+    resolveHermesPath({ LOCALAPPDATA: tmp }, noWsl),
     path.join(os.homedir(), ".hermes"),
   );
 
   // After we create LOCALAPPDATA\hermes the resolver should prefer it over ~/.hermes.
   const winNative = path.join(tmp, "hermes");
   await fs.mkdir(winNative, { recursive: true });
-  assert.equal(resolveHermesPath({ LOCALAPPDATA: tmp }), winNative);
+  assert.equal(resolveHermesPath({ LOCALAPPDATA: tmp }, noWsl), winNative);
 
   // Explicit TOKENTRACKER_HERMES_HOME still wins over LOCALAPPDATA auto-detect.
   assert.equal(

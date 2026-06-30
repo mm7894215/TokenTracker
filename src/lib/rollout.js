@@ -2985,22 +2985,22 @@ function resolveHermesPath(env = process.env, deps = {}) {
   }
   const home = require("node:os").homedir();
   const defaultPath = path.join(home, ".hermes");
-  // Hermes official Windows installer (install.ps1) writes state to
-  // %LOCALAPPDATA%\hermes, not ~/.hermes. Prefer it when present so native
-  // Windows users don't need to set TOKENTRACKER_HERMES_HOME manually.
+  // On Windows, scan BOTH the native install (%LOCALAPPDATA%\hermes) and
+  // any WSL distros running Hermes Agent. Each install has its own independent
+  // state.db with different sessions, so there is no double-counting risk.
+  // WSL is preferred when both exist because development happens in WSL (#87).
   if (process.platform === "win32") {
+    let nativePath = null;
     const localAppData = typeof env.LOCALAPPDATA === "string" ? env.LOCALAPPDATA.trim() : "";
     if (localAppData.length > 0) {
-      const winNative = path.join(localAppData, "hermes");
+      const candidate = path.join(localAppData, "hermes");
       try {
-        if (fssync.existsSync(winNative)) return winNative;
+        if (fssync.existsSync(candidate)) nativePath = candidate;
       } catch (_e) { }
     }
-    // No native Windows install — probe WSL distros so users running Hermes
-    // inside WSL get zero-config discovery instead of setting
-    // TOKENTRACKER_HERMES_HOME by hand (#87).
     const wslPath = discoverWslHermesHome(deps);
     if (wslPath) return wslPath;
+    if (nativePath) return nativePath;
   }
   return defaultPath;
 }
