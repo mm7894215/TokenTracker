@@ -533,41 +533,37 @@ test("parseRolloutIncremental re-reads same-inode truncation when project state 
     const rewriteHandle = await fs.open(rolloutPath, "r+");
     let beforeStat;
     let afterStat;
+    let second;
     try {
       beforeStat = await rewriteHandle.stat();
       await rewriteHandle.truncate(0);
       await rewriteHandle.write(truncatedBody, 0, "utf8");
       afterStat = await rewriteHandle.stat();
+
+      assert.equal(afterStat.ino, beforeStat.ino);
+      assert.ok(afterStat.size < beforeOffset);
+
+      second = await parseRolloutIncremental({ rolloutFiles: [rolloutPath], cursors, queuePath });
+      assert.equal(second.filesProcessed, 1);
+      assert.equal(second.eventsAggregated, 1);
+      assert.equal(cursors.files[rolloutPath].offset, afterStat.size);
+
+      const thirdUsage = {
+        input_tokens: 5,
+        cached_input_tokens: 0,
+        output_tokens: 5,
+        reasoning_output_tokens: 0,
+        total_tokens: 10,
+      };
+      const appendedBody =
+        buildTokenCountLine({
+          ts: "2026-01-26T00:30:00.000Z",
+          last: thirdUsage,
+          total: thirdUsage,
+        }) + "\n";
+      await rewriteHandle.write(appendedBody, afterStat.size, "utf8");
     } finally {
       await rewriteHandle.close();
-    }
-
-    assert.equal(afterStat.ino, beforeStat.ino);
-    assert.ok(afterStat.size < beforeOffset);
-
-    const second = await parseRolloutIncremental({ rolloutFiles: [rolloutPath], cursors, queuePath });
-    assert.equal(second.filesProcessed, 1);
-    assert.equal(second.eventsAggregated, 1);
-    assert.equal(cursors.files[rolloutPath].offset, afterStat.size);
-
-    const thirdUsage = {
-      input_tokens: 5,
-      cached_input_tokens: 0,
-      output_tokens: 5,
-      reasoning_output_tokens: 0,
-      total_tokens: 10,
-    };
-    const appendedBody =
-      buildTokenCountLine({
-        ts: "2026-01-26T00:30:00.000Z",
-        last: thirdUsage,
-        total: thirdUsage,
-      }) + "\n";
-    const appendHandle = await fs.open(rolloutPath, "a");
-    try {
-      await appendHandle.writeFile(appendedBody, "utf8");
-    } finally {
-      await appendHandle.close();
     }
     const third = await parseRolloutIncremental({ rolloutFiles: [rolloutPath], cursors, queuePath });
     assert.equal(third.filesProcessed, 1);
