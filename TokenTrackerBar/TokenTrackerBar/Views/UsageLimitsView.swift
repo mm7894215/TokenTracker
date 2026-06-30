@@ -670,6 +670,7 @@ private struct ProviderClickableStyle: ViewModifier {
                 self.hovering = hovering
                 if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
             }
+            .padding(.horizontal, -6)
     }
 }
 
