@@ -11,7 +11,11 @@ import jaMarketing from "../content/i18n/ja/marketing.json";
 import koCore from "../content/i18n/ko/core.json";
 import koDashboard from "../content/i18n/ko/dashboard.json";
 import koMarketing from "../content/i18n/ko/marketing.json";
+import deCore from "../content/i18n/de/core.json";
+import deDashboard from "../content/i18n/de/dashboard.json";
+import deMarketing from "../content/i18n/de/marketing.json";
 import {
+  DE_LOCALE,
   getInitialLocalePreference,
   normalizeResolvedLocale,
   resolvePreferredLocale,
@@ -42,6 +46,11 @@ const LOCALE_REGISTRIES: Record<string, TranslationRegistry> = {
     ...koCore,
     ...koDashboard,
     ...koMarketing,
+  },
+  [DE_LOCALE]: {
+    ...deCore,
+    ...deDashboard,
+    ...deMarketing,
   },
 };
 

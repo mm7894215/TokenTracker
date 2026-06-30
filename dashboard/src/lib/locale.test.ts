@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DE_LOCALE,
   EN_LOCALE,
   JA_LOCALE,
   KO_LOCALE,
@@ -35,17 +36,19 @@ describe("resolvePreferredLocale (system / Default)", () => {
     expect(resolvePreferredLocale(SYSTEM_LOCALE, [])).toBe(EN_LOCALE);
   });
 
-  it("uses Japanese or Korean when the primary preferred language is ja/ko", () => {
+  it("uses Japanese, Korean, or German when the primary preferred language is ja/ko/de", () => {
     expect(resolvePreferredLocale(SYSTEM_LOCALE, ["ja-JP", "en-US"])).toBe(JA_LOCALE);
     expect(resolvePreferredLocale(SYSTEM_LOCALE, ["ja"])).toBe(JA_LOCALE);
     expect(resolvePreferredLocale(SYSTEM_LOCALE, ["ko-KR"])).toBe(KO_LOCALE);
     expect(resolvePreferredLocale(SYSTEM_LOCALE, ["ko"])).toBe(KO_LOCALE);
+    expect(resolvePreferredLocale(SYSTEM_LOCALE, ["de-DE", "en-US"])).toBe(DE_LOCALE);
+    expect(resolvePreferredLocale(SYSTEM_LOCALE, ["de"])).toBe(DE_LOCALE);
+    expect(resolvePreferredLocale(SYSTEM_LOCALE, ["de-AT"])).toBe(DE_LOCALE);
   });
 
   it("uses English for any other unsupported primary language", () => {
     expect(resolvePreferredLocale(SYSTEM_LOCALE, ["fr-FR"])).toBe(EN_LOCALE);
     expect(resolvePreferredLocale(SYSTEM_LOCALE, ["it-IT"])).toBe(EN_LOCALE);
-    expect(resolvePreferredLocale(SYSTEM_LOCALE, ["de"])).toBe(EN_LOCALE);
   });
 
   it("ignores empty/whitespace primary entry and treats next as primary", () => {
@@ -68,6 +71,8 @@ describe("normalizeResolvedLocale", () => {
     expect(normalizeResolvedLocale("zh")).toBe(ZH_CN_LOCALE);
     expect(normalizeResolvedLocale("ja-JP")).toBe(JA_LOCALE);
     expect(normalizeResolvedLocale("ko")).toBe(KO_LOCALE);
+    expect(normalizeResolvedLocale("de-DE")).toBe(DE_LOCALE);
+    expect(normalizeResolvedLocale("de")).toBe(DE_LOCALE);
     expect(normalizeResolvedLocale("en")).toBe(EN_LOCALE);
     expect(normalizeResolvedLocale(null)).toBe(EN_LOCALE);
   });

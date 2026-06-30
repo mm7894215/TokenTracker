@@ -2,7 +2,7 @@
 
 # Token Tracker
 
-**English** · [简体中文](./README.zh-CN.md) · [日本語](./README.ja.md) · [한국어](./README.ko.md)
+**English** · [简体中文](./README.zh-CN.md) · [日本語](./README.ja.md) · [한국어](./README.ko.md) · [Deutsch](./README.de.md)
 
 ### Know exactly what you're spending on AI — across every CLI
 
