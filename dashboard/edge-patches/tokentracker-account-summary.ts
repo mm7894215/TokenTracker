@@ -199,6 +199,7 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   "kimi-k2.5": { input: 0.6, output: 2, cache_read: 0.15 },
   "kimi-k2.5-free": { input: 0, output: 0, cache_read: 0 },
   "kimi-k2.6": { input: 0.95, output: 4, cache_read: 0.16 },
+  "kimi-k2.7-code": { input: 0.95, output: 4, cache_read: 0.19 },
   // ── Z.ai GLM (mirrored from src/lib/pricing/curated-overrides.json).
   //    LiteLLM only keys these under provider prefixes like `zai/glm-5`,
   //    `openrouter/z-ai/glm-4.6`, etc. The reverse-substring fallback in the
@@ -221,6 +222,7 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   // ── MiniMax / DeepSeek ──
   "MiniMax-M2.7": { input: 0.3, output: 1.2, cache_read: 0.06, cache_write: 0.375 },
   "MiniMax-M2.7-highspeed": { input: 0.6, output: 2.4, cache_read: 0.06, cache_write: 0.375 },
+  "minimax-m3": { input: 0.3, output: 1.2, cache_read: 0.06, cache_write: 0 },
   "deepseek-v4-flash": { input: 0.14, output: 0.28, cache_read: 0.0028, cache_write: 0.14 },
   "deepseek-v4-pro": { input: 0.435, output: 0.87, cache_read: 0.003625, cache_write: 0.435 },
   "deepseek-chat": { input: 0.14, output: 0.28, cache_read: 0.0028, cache_write: 0.14 },
@@ -294,6 +296,7 @@ function getModelPricing(model: string) {
   if (lower.includes("gemini-3") && lower.includes("pro")) return MODEL_PRICING["gemini-3-pro-preview"];
   if (lower.includes("gemini-3")) return MODEL_PRICING["gemini-3-flash-preview"];
   if (lower.includes("gemini-2.5")) return MODEL_PRICING["gemini-2.5-pro"];
+  if (lower.includes("minimax-m3")) return MODEL_PRICING["minimax-m3"];
   if (lower.includes("minimax-m2.7-highspeed")) return MODEL_PRICING["MiniMax-M2.7-highspeed"];
   if (lower.includes("minimax-m2.7")) return MODEL_PRICING["MiniMax-M2.7"];
   if (lower.includes("deepseek-v4-flash")) return MODEL_PRICING["deepseek-v4-flash"];
@@ -310,6 +313,7 @@ function getModelPricing(model: string) {
   // of the $0.20/$0.50 MTok fast-tier rate (15x / 30x overestimate).
   if (lower.includes("grok-4-1-fast")) return MODEL_PRICING["grok-4-1-fast-non-reasoning"];
   if (lower.includes("grok-4")) return MODEL_PRICING["grok-4"];
+  if (lower.includes("kimi-k2.7-code")) return MODEL_PRICING["kimi-k2.7-code"];
   if (lower.includes("kimi-k2.6")) return MODEL_PRICING["kimi-k2.6"];
   if (lower.includes("kimi")) return MODEL_PRICING["kimi-k2.5"];
   // MiMo ordering: more specific suffixes first (mimo-v2.5-pro before
