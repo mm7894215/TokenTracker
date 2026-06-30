@@ -282,10 +282,10 @@ struct UsageLimitsView: View {
 
     private func antigravitySpecs(_ a: AntigravityLimits) -> [LimitWindowSpec] {
         var s: [LimitWindowSpec] = []
-        if let w = a.primaryWindow { s.append(makeSpec("Claude 7d", w.usedPercent, iso: w.resetAt)) }
-        if let w = a.secondaryWindow { s.append(makeSpec("Claude 5h", w.usedPercent, iso: w.resetAt)) }
-        if let w = a.tertiaryWindow { s.append(makeSpec("Gemini 7d", w.usedPercent, iso: w.resetAt)) }
-        if let w = a.quaternaryWindow { s.append(makeSpec("Gemini 5h", w.usedPercent, iso: w.resetAt)) }
+        if let w = a.primaryWindow { s.append(makeSpec("Cl 7d", w.usedPercent, iso: w.resetAt)) }
+        if let w = a.secondaryWindow { s.append(makeSpec("Cl 5h", w.usedPercent, iso: w.resetAt)) }
+        if let w = a.tertiaryWindow { s.append(makeSpec("Gm 7d", w.usedPercent, iso: w.resetAt)) }
+        if let w = a.quaternaryWindow { s.append(makeSpec("Gm 5h", w.usedPercent, iso: w.resetAt)) }
         return s
     }
 
