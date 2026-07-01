@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-01T11:53:46.041Z",
+  "generatedAt": "2026-07-01T12:00:56.354Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
@@ -7,7 +7,7 @@
   },
   "totals": {
     "colors": 275,
-    "rawText": 168
+    "rawText": 170
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -52,9 +52,11 @@
     },
     "dashboard/src/components/settings/MenuBarSection.jsx": {
       "colors": 0,
-      "rawText": 1,
+      "rawText": 3,
       "rawTextTokens": [
-        "GitHub"
+        "GitHub",
+        "curr) return true; if (late",
+        "v.replace(/^v/, \"\").split(\".\").map(Number); const currParts = parseParts(current); const lateParts = parseParts(latest); for (let i = 0; i"
       ]
     },
     "dashboard/src/contexts/LoginModalContext.jsx": {
