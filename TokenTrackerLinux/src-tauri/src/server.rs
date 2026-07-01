@@ -1,7 +1,8 @@
 use std::ffi::OsString;
+use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -10,11 +11,24 @@ use crate::paths::RuntimePaths;
 
 const READINESS_PATH: &str = "/functions/tokentracker-user-status";
 
+/// How often the health monitor probes the server.
+pub const HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(15);
+
+/// Consecutive failures before triggering a restart.
+pub const FAILURE_THRESHOLD: u32 = 3;
+
+/// Maximum consecutive restart attempts before the monitor backs off.
+pub const MAX_RESTARTS: u32 = 3;
+
+/// Back-off after exhausting `MAX_RESTARTS` before retrying.
+pub const RESTART_BACKOFF: Duration = Duration::from_secs(300);
+
 #[derive(Debug)]
 pub struct TokenTrackerServer {
     child: Child,
     url: String,
     port: u16,
+    paths: RuntimePaths,
 }
 
 impl TokenTrackerServer {
@@ -22,11 +36,12 @@ impl TokenTrackerServer {
         let port = pick_available_port()?;
         let url = dashboard_url(port);
 
+        let log_file = open_server_log();
         let args = serve_args(&paths.tracker, port);
         let mut child = Command::new(&paths.node)
             .args(&args)
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::from(log_file))
             .spawn()
             .map_err(|error| format!("failed to start TokenTracker server: {error}"))?;
 
@@ -36,7 +51,12 @@ impl TokenTrackerServer {
             error
         })?;
 
-        Ok(Self { child, url, port })
+        Ok(Self {
+            child,
+            url,
+            port,
+            paths,
+        })
     }
 
     pub fn url(&self) -> &str {
@@ -45,6 +65,50 @@ impl TokenTrackerServer {
 
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    /// Returns `true` if the child process is still alive AND the HTTP
+    /// endpoint responds to a readiness probe.
+    pub fn check_health(&mut self) -> bool {
+        if !self.is_process_alive() {
+            return false;
+        }
+        probe_server_http(self.port).is_ok()
+    }
+
+    /// Returns `true` if the child process has not exited yet.
+    fn is_process_alive(&mut self) -> bool {
+        match self.child.try_wait() {
+            Ok(Some(_)) => false,
+            Ok(None) => true,
+            Err(_) => false,
+        }
+    }
+
+    /// Kill the current server process and start a new one on the same port.
+    ///
+    /// The dashboard's JavaScript is already loaded and targeting this port, so
+    /// restarting on the same port lets existing in-flight requests resume
+    /// without a page reload.
+    pub fn restart(&mut self) -> Result<(), String> {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+
+        // Brief pause for the OS to release the port.
+        thread::sleep(Duration::from_millis(500));
+
+        let mut log_file = open_server_log();
+        let _ = writeln!(log_file, "\n--- server restart ---");
+
+        let args = serve_args(&self.paths.tracker, self.port);
+        self.child = Command::new(&self.paths.node)
+            .args(&args)
+            .stdout(Stdio::null())
+            .stderr(Stdio::from(log_file))
+            .spawn()
+            .map_err(|error| format!("failed to restart server: {error}"))?;
+
+        wait_for_server(self.port, Duration::from_secs(20))
     }
 
     pub fn stop(&mut self) {
@@ -66,6 +130,33 @@ impl Drop for TokenTrackerServer {
     fn drop(&mut self) {
         self.stop();
     }
+}
+
+/// Open (or create) a log file for the Node server's stderr output.
+///
+/// Prefers `$XDG_STATE_HOME/tokentracker/server.log`; falls back to
+/// `$HOME/.local/state/tokentracker/server.log`; ultimate fallback `/tmp`.
+fn open_server_log() -> std::fs::File {
+    let log_dir = std::env::var("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+            PathBuf::from(home).join(".local").join("state")
+        })
+        .join("tokentracker");
+    let _ = std::fs::create_dir_all(&log_dir);
+    let log_path = log_dir.join("server.log");
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .or_else(|_| {
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(PathBuf::from("/tmp").join("tokentracker-server.log"))
+        })
+        .expect("cannot open any server log file")
 }
 
 pub fn dashboard_url(port: u16) -> String {

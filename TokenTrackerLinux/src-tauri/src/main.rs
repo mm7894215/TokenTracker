@@ -18,6 +18,80 @@ fn stop_server() {
     }
 }
 
+/// Background thread that periodically health-checks the bundled Node server.
+///
+/// Mirrors the Windows `ServerManager.StartHealthLoop()` pattern: debounce
+/// transient failures with a consecutive-count threshold, then auto-restart
+/// the server on the same port (the dashboard JS is already loaded targeting
+/// that port, so no page reload is needed).  Caps consecutive restarts at
+/// `MAX_RESTARTS` to avoid an infinite crash loop.
+fn start_health_monitor() {
+    std::thread::spawn(|| {
+        let mut consecutive_failures: u32 = 0;
+        let mut total_restarts: u32 = 0;
+
+        loop {
+            std::thread::sleep(server::HEALTH_CHECK_INTERVAL);
+
+            let mut guard = match SERVER.lock() {
+                Ok(g) => g,
+                Err(_) => continue,
+            };
+
+            let server = match guard.as_mut() {
+                Some(s) => s,
+                None => continue,
+            };
+
+            if server.check_health() {
+                consecutive_failures = 0;
+                continue;
+            }
+
+            consecutive_failures += 1;
+            eprintln!(
+                "[TokenTracker] health check failed ({}/{})",
+                consecutive_failures,
+                server::FAILURE_THRESHOLD
+            );
+
+            if consecutive_failures < server::FAILURE_THRESHOLD {
+                continue;
+            }
+
+            if total_restarts >= server::MAX_RESTARTS {
+                eprintln!(
+                    "[TokenTracker] server restarted {} times, backing off for {:?}",
+                    total_restarts,
+                    server::RESTART_BACKOFF
+                );
+                // Drop the lock so stop_server() on app exit is not blocked.
+                drop(guard);
+                std::thread::sleep(server::RESTART_BACKOFF);
+                total_restarts = 0;
+                consecutive_failures = 0;
+                continue;
+            }
+
+            total_restarts += 1;
+            eprintln!(
+                "[TokenTracker] restarting server (attempt {}/{})...",
+                total_restarts,
+                server::MAX_RESTARTS
+            );
+            match server.restart() {
+                Ok(()) => {
+                    eprintln!("[TokenTracker] server restarted successfully");
+                    consecutive_failures = 0;
+                }
+                Err(e) => {
+                    eprintln!("[TokenTracker] server restart failed: {e}");
+                }
+            }
+        }
+    });
+}
+
 /// WebKitGTK on some Linux setups cannot make HTTPS requests (TLS handshake
 /// failure).  This initialization script intercepts all `fetch()` calls and
 /// rewrites external HTTPS URLs to go through the local Node server's proxy
@@ -60,6 +134,8 @@ fn main() {
             if let Ok(mut guard) = SERVER.lock() {
                 *guard = Some(server);
             }
+
+            start_health_monitor();
 
             // Create the window programmatically so we can attach the HTTPS
             // proxy initialization script.  The script runs before any page JS
