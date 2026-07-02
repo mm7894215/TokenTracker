@@ -3942,7 +3942,7 @@ test("parseClaudeIncremental skips re-walking git for an idle file whose cwd has
     });
     assert.equal(first.filesProcessed, 1);
     assert.equal(cursors.files[claudePath].claudeCwd, nonRepoDir);
-    assert.deepEqual(cursors.files[claudePath].projectFileContext, { absent: true });
+    assert.equal(cursors.files[claudePath].projectFileContext.absent, true);
 
     // Idle + already-confirmed-no-git-checkout must fully skip, not re-walk.
     const second = await parseClaudeIncremental({

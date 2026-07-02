@@ -566,7 +566,7 @@ async function parseClaudeIncremental({
       } else {
         projectRef = null;
         projectKey = null;
-        nextProjectFileContext = { absent: true };
+        nextProjectFileContext = buildProjectFileContext(null);
       }
     }
 
