@@ -728,7 +728,7 @@ async function cmdSync(argv) {
     // ── Goose (Block) — SQLite sessions with cumulative tokens per session ──
     const gooseDbPath = resolveGooseDbPath(process.env);
     let gooseResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    if (sourceAllowed("goose") && fssync.existsSync(gooseDbPath)) {
+    if (sourceAllowed("goose") && gooseDbPath && fssync.existsSync(gooseDbPath)) {
       if (progress?.enabled) {
         progress.start(`Parsing Goose ${renderBar(0)} 0 sessions | buckets 0`);
       }
@@ -788,7 +788,7 @@ async function cmdSync(argv) {
     // ── Zed Agent (all providers; cumulative-delta over SQLite threads) ──
     const zedDbPath = resolveZedDbPath(process.env);
     let zedResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    if (sourceAllowed("zed") && fssync.existsSync(zedDbPath)) {
+    if (sourceAllowed("zed") && zedDbPath && fssync.existsSync(zedDbPath)) {
       if (progress?.enabled) {
         progress.start(`Parsing Zed Agent ${renderBar(0)} 0 threads | buckets 0`);
       }
@@ -921,7 +921,7 @@ async function cmdSync(argv) {
     // ── Hermes Agent (SQLite-based) ──
     let hermesResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     const hermesPath = resolveHermesPath();
-    if (sourceAllowed("hermes") && fssync.existsSync(hermesPath)) {
+    if (sourceAllowed("hermes") && hermesPath && fssync.existsSync(hermesPath)) {
       if (progress?.enabled) {
         progress.start(`Parsing Hermes ${renderBar(0)} | buckets 0`);
       }

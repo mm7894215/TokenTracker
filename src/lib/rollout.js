@@ -6,6 +6,7 @@ const readline = require("node:readline");
 const crypto = require("node:crypto");
 const { ensureDir } = require("./fs");
 const { readSqliteJsonRows } = require("./sqlite-reader");
+const wsl = require("./wsl-probe");
 
 const DEFAULT_SOURCE = "codex";
 const DEFAULT_MODEL = "unknown";
@@ -3789,115 +3790,75 @@ function resolveHermesPath(env = process.env, deps = {}) {
   // On Windows, scan BOTH the native install (%LOCALAPPDATA%\hermes) and
   // any WSL distros running Hermes Agent. Each install has its own independent
   // state.db with different sessions, so there is no double-counting risk.
-  // WSL is preferred when both exist because development happens in WSL (#87).
+  // TOKENTRACKER_WSL_MODE controls which source takes priority.
   if (process.platform === "win32") {
     let nativePath = null;
-    const localAppData = typeof env.LOCALAPPDATA === "string" ? env.LOCALAPPDATA.trim() : "";
-    if (localAppData.length > 0) {
-      const candidate = path.join(localAppData, "hermes");
-      try {
-        if (fssync.existsSync(candidate)) nativePath = candidate;
-      } catch (_e) { }
+    if (wsl.shouldProbeNative(env)) {
+      const localAppData = typeof env.LOCALAPPDATA === "string" ? env.LOCALAPPDATA.trim() : "";
+      if (localAppData.length > 0) {
+        const candidate = path.join(localAppData, "hermes");
+        try {
+          if (fssync.existsSync(candidate)) nativePath = candidate;
+        } catch (_e) { }
+      }
     }
-    const wslPath = discoverWslHermesHome(deps);
-    if (wslPath) return wslPath;
-    if (nativePath) return nativePath;
+    const wslPath = wsl.shouldProbeWsl(env) ? discoverWslHermesHome(deps) : null;
+    const picked = wsl.pickWin32Path({ wslValue: wslPath, nativeValue: nativePath, env, platform: "win32" });
+    if (picked) return picked;
+    const mode = wsl.getWslMode(env);
+    if (mode === "wsl-only" || mode === "native-only") return null;
   }
   return defaultPath;
 }
 
-// ── WSL auto-discovery (Windows host, Hermes installed inside a distro) ──────
+// ── WSL auto-discovery (Windows host, tools inside a distro) ──────────────────
 // `wsl.exe -l -v` prints UTF-16LE; the per-distro `whoami` runs a Linux process
 // so its stdout is UTF-8. We capture buffers and decode per-call.
 function defaultRunWsl(args, { utf16 = false } = {}) {
-  const { execFileSync } = require("node:child_process");
-  const buf = execFileSync("wsl.exe", args, {
-    timeout: 5000,
-    windowsHide: true,
-    maxBuffer: 1024 * 1024,
-    stdio: ["ignore", "pipe", "ignore"],
-  });
-  return utf16 ? buf.toString("utf16le") : buf.toString("utf8");
+  return wsl.defaultRunWsl(args, { utf16 });
 }
 
 // Parse `wsl.exe -l -v` output into [{ name, version, isDefault }]. The default
 // distro is prefixed with `*`; the VERSION column (1 or 2) decides which UNC
 // alias to try first (simonlpaige, #87).
 function parseWslListVerbose(raw) {
-  if (typeof raw !== "string") return [];
-  const distros = [];
-  for (const line of raw.split(/\r?\n/)) {
-    const clean = line.replace(/ /g, "").replace(/﻿/g, "").trim();
-    if (!clean) continue;
-    const cells = clean.split(/\s+/);
-    let isDefault = false;
-    let idx = 0;
-    if (cells[0] === "*") {
-      isDefault = true;
-      idx = 1;
-    }
-    const name = cells[idx];
-    if (!name || name === "NAME") continue; // skip header row
-    const version = parseInt(cells[cells.length - 1], 10);
-    distros.push({
-      name,
-      version: Number.isFinite(version) ? version : null,
-      isDefault,
-    });
-  }
-  return distros;
+  return wsl.parseWslListVerbose(raw);
 }
 
 // Default distro first, then listed order — matches what a user expects when
 // they have one primary distro plus extras.
 function probeWslDistros(deps = {}) {
-  const runWsl = deps.runWsl || defaultRunWsl;
-  let raw;
-  try {
-    raw = runWsl(["-l", "-v"], { utf16: true });
-  } catch (_e) {
-    return [];
-  }
-  const distros = parseWslListVerbose(raw);
-  return distros.sort((a, b) => (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0));
+  return wsl.probeWslDistros(deps);
 }
 
 // Probe each WSL distro for ~/.hermes via UNC. The Linux username rarely equals
 // %USERNAME%, so we ask the distro directly with `whoami` rather than guessing
 // (simonlpaige, #87).
 function discoverWslHermesHome(deps = {}) {
-  const runWsl = deps.runWsl || defaultRunWsl;
-  const existsSync = deps.existsSync || fssync.existsSync;
-  const distros = probeWslDistros(deps);
-  for (const distro of distros) {
-    let user;
-    try {
-      user = String(runWsl(["-d", distro.name, "-e", "whoami"], { utf16: false }) || "").trim();
-    } catch (_e) {
-      user = "";
-    }
-    if (!user) continue;
-    // \\wsl$\ is the legacy alias, \\wsl.localhost\ the newer one. WSL1 distros
-    // sometimes only resolve via \\wsl.localhost\, so order by version.
-    const roots = distro.version === 1
-      ? ["\\\\wsl.localhost\\", "\\\\wsl$\\"]
-      : ["\\\\wsl$\\", "\\\\wsl.localhost\\"];
-    for (const root of roots) {
-      const candidate = `${root}${distro.name}\\home\\${user}\\.hermes`;
-      try {
-        if (existsSync(candidate)) return candidate;
-      } catch (_e) { }
-    }
-  }
-  return null;
+  return wsl.discoverWslHome(".hermes", deps);
+}
+
+function pickWin32ProviderPath({ env = process.env, nativeValue, wslProviderDir, wslValue }) {
+  const nativeCandidate = wsl.shouldProbeNative(env) ? nativeValue : null;
+  const wslCandidate = wslValue !== undefined
+    ? wslValue
+    : (wsl.shouldProbeWsl(env) ? wsl.discoverWslHome(wslProviderDir) : null);
+  return wsl.pickWin32Path({
+    wslValue: wslCandidate,
+    nativeValue: nativeCandidate,
+    env,
+    platform: "win32",
+  });
 }
 
 function resolveHermesDbPath(env = process.env) {
-  return path.join(resolveHermesPath(env), "state.db");
+  const hermesPath = resolveHermesPath(env);
+  return hermesPath ? path.join(hermesPath, "state.db") : null;
 }
 
 function resolveAllHermesDBPaths({ hermesPath, dbPath } = {}) {
   const hermesDir = hermesPath ?? (dbPath ? path.dirname(dbPath) : resolveHermesPath());
+  if (!hermesDir) return { default: null, profiles: {} };
   const defaultDbPath = dbPath ?? path.join(hermesDir, "state.db");
   const profilePaths = {};
   try {
@@ -3929,28 +3890,11 @@ function sqliteStringLiteral(value) {
 // / SMB bridge can't grant the locks SQLite asks for — even after `wsl
 // --shutdown`. Detect those paths so we can snapshot the DB locally first.
 function isUncPath(p) {
-  return typeof p === "string" && (p.startsWith("\\\\") || p.startsWith("//"));
+  return wsl.isUncPath(p);
 }
 
 function snapshotSqliteDb(dbPath) {
-  const tmpRoot = fssync.mkdtempSync(
-    path.join(require("node:os").tmpdir(), "tokentracker-hermes-snap-"),
-  );
-  const target = path.join(tmpRoot, path.basename(dbPath));
-  fssync.copyFileSync(dbPath, target);
-  // Best-effort copy of SQLite sidecars; missing -wal/-shm/-journal is fine.
-  for (const suffix of ["-wal", "-shm", "-journal"]) {
-    const src = dbPath + suffix;
-    try {
-      if (fssync.existsSync(src)) fssync.copyFileSync(src, target + suffix);
-    } catch (_e) { }
-  }
-  return {
-    path: target,
-    cleanup() {
-      try { fssync.rmSync(tmpRoot, { recursive: true, force: true }); } catch (_e) { }
-    },
-  };
+  return wsl.snapshotSqliteDb(dbPath);
 }
 
 function readHermesSessions(dbPath, lastCompletedEpoch, unfinishedSessionIds = [], sqliteOptions = {}) {
@@ -5251,11 +5195,21 @@ async function parseKimiIncremental({ wireFiles, cursors, queuePath, onProgress,
 function resolveKimiCodeHome(env = process.env) {
   const home = require("node:os").homedir();
   const explicit = typeof env?.KIMI_CODE_HOME === "string" ? env.KIMI_CODE_HOME.trim() : "";
-  return explicit ? path.resolve(explicit) : path.join(home, ".kimi-code");
+  if (explicit) return path.resolve(explicit);
+  if (process.platform === "win32") {
+    return pickWin32ProviderPath({
+      env,
+      nativeValue: path.join(home, ".kimi-code"),
+      wslProviderDir: ".kimi-code",
+    });
+  }
+  return path.join(home, ".kimi-code");
 }
 
 function resolveKimiCodeWireFiles(env = process.env) {
-  const sessionsDir = path.join(resolveKimiCodeHome(env), "sessions");
+  const kimiHome = resolveKimiCodeHome(env);
+  if (!kimiHome) return [];
+  const sessionsDir = path.join(kimiHome, "sessions");
   if (!fssync.existsSync(sessionsDir)) return [];
   const files = [];
   const walk = (dir, depth) => {
@@ -5275,7 +5229,9 @@ function resolveKimiCodeWireFiles(env = process.env) {
 function resolveKimiCodeDefaultModel(env = process.env) {
   const fallback = "kimi-for-coding";
   try {
-    const cfgPath = path.join(resolveKimiCodeHome(env), "config.toml");
+    const kimiHome = resolveKimiCodeHome(env);
+    if (!kimiHome) return fallback;
+    const cfgPath = path.join(kimiHome, "config.toml");
     const raw = fssync.readFileSync(cfgPath, "utf8");
     const m = raw.match(/^\s*default_model\s*=\s*"([^"]+)"/m);
     if (!m) return fallback;
@@ -5479,13 +5435,23 @@ async function parseKimiCodeIncremental({ wireFiles, cursors, queuePath, onProgr
 
 function resolveCodebuddyHome(env = process.env) {
   const home = env.HOME || require("node:os").homedir();
-  return env.CODEBUDDY_HOME || path.join(home, ".codebuddy");
+  if (env.CODEBUDDY_HOME) return env.CODEBUDDY_HOME;
+  if (process.platform === "win32") {
+    return pickWin32ProviderPath({
+      env,
+      nativeValue: path.join(home, ".codebuddy"),
+      wslProviderDir: ".codebuddy",
+    });
+  }
+  return path.join(home, ".codebuddy");
 }
 
 function resolveCodebuddyDefaultModel(env = process.env) {
   const fallback = "codebuddy-unknown";
   try {
-    const settingsPath = path.join(resolveCodebuddyHome(env), "settings.json");
+    const codebuddyHome = resolveCodebuddyHome(env);
+    if (!codebuddyHome) return fallback;
+    const settingsPath = path.join(codebuddyHome, "settings.json");
     const raw = fssync.readFileSync(settingsPath, "utf8");
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && typeof parsed.model === "string" && parsed.model.trim()) {
@@ -5498,7 +5464,9 @@ function resolveCodebuddyDefaultModel(env = process.env) {
 }
 
 function resolveCodebuddyProjectFiles(env = process.env) {
-  const projectsDir = path.join(resolveCodebuddyHome(env), "projects");
+  const codebuddyHome = resolveCodebuddyHome(env);
+  if (!codebuddyHome) return [];
+  const projectsDir = path.join(codebuddyHome, "projects");
   if (!fssync.existsSync(projectsDir)) return [];
   const files = [];
   try {
@@ -5773,13 +5741,23 @@ async function parseCodebuddyIncremental({
 
 function resolveWorkbuddyHome(env = process.env) {
   const home = env.HOME || require("node:os").homedir();
-  return env.WORKBUDDY_HOME || path.join(home, ".workbuddy");
+  if (env.WORKBUDDY_HOME) return env.WORKBUDDY_HOME;
+  if (process.platform === "win32") {
+    return pickWin32ProviderPath({
+      env,
+      nativeValue: path.join(home, ".workbuddy"),
+      wslProviderDir: ".workbuddy",
+    });
+  }
+  return path.join(home, ".workbuddy");
 }
 
 function resolveWorkbuddyDefaultModel(env = process.env) {
   const fallback = "auto";
   try {
-    const settingsPath = path.join(resolveWorkbuddyHome(env), "settings.json");
+    const workbuddyHome = resolveWorkbuddyHome(env);
+    if (!workbuddyHome) return fallback;
+    const settingsPath = path.join(workbuddyHome, "settings.json");
     const raw = fssync.readFileSync(settingsPath, "utf8");
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && typeof parsed.model === "string" && parsed.model.trim()) {
@@ -5795,7 +5773,9 @@ function resolveWorkbuddyDefaultModel(env = process.env) {
 // per-session conversation logs AND their nested subagents/agent-*.jsonl files
 // are both discovered. Non-.jsonl artefacts (tool-results/*.txt) are ignored.
 function resolveWorkbuddyProjectFiles(env = process.env) {
-  const projectsDir = path.join(resolveWorkbuddyHome(env), "projects");
+  const workbuddyHome = resolveWorkbuddyHome(env);
+  if (!workbuddyHome) return [];
+  const projectsDir = path.join(workbuddyHome, "projects");
   if (!fssync.existsSync(projectsDir)) return [];
   const files = [];
   const walk = (dir) => {
@@ -6069,6 +6049,13 @@ function resolveOmpHome(env = process.env) {
   // Honor TokenTracker override first, then oh-my-pi upstream env vars.
   if (env.OMP_HOME) return env.OMP_HOME;
   if (env.PI_CONFIG_DIR) return path.join(home, env.PI_CONFIG_DIR);
+  if (process.platform === "win32") {
+    return pickWin32ProviderPath({
+      env,
+      nativeValue: path.join(home, ".omp"),
+      wslProviderDir: ".omp",
+    });
+  }
   return path.join(home, ".omp");
 }
 
@@ -6106,11 +6093,14 @@ function resolveOmpAgentDir(env = process.env) {
   if (env.PI_CODING_AGENT_DIR && decidePiCodingAgentDirOwner(env) === "omp") {
     return expandHomePath(env.PI_CODING_AGENT_DIR, env);
   }
-  return path.join(resolveOmpHome(env), "agent");
+  const ompHome = resolveOmpHome(env);
+  return ompHome ? path.join(ompHome, "agent") : null;
 }
 
 function resolveOmpSessionFiles(env = process.env) {
-  const sessionsDir = path.join(resolveOmpAgentDir(env), "sessions");
+  const agentDir = resolveOmpAgentDir(env);
+  if (!agentDir) return [];
+  const sessionsDir = path.join(agentDir, "sessions");
   if (!fssync.existsSync(sessionsDir)) return [];
   const files = [];
   try {
@@ -6186,14 +6176,28 @@ function resolveKilocodeRoots(env = process.env) {
     );
   } else if (process.platform === "win32") {
     const appData = env.APPDATA || path.join(home, "AppData", "Roaming");
-    candidates.push(
+    const nativeRoots = [
       path.join(appData, "Code"),
       path.join(appData, "Code - Insiders"),
       path.join(appData, "Cursor"),
       path.join(appData, "CodeBuddy"),
       path.join(appData, "Windsurf"),
       path.join(appData, "VSCodium"),
-    );
+    ];
+    const wslRoots = [];
+    if (wsl.shouldProbeWsl(env)) {
+      for (const ide of ["Code", "Code - Insiders", "Cursor", "CodeBuddy", "Windsurf", "VSCodium"]) {
+        const wslDir = wsl.discoverWslHome(`.config/${ide}`, { env });
+        if (wslDir) wslRoots.push(wslDir);
+      }
+    }
+    const nativeCandidates = wsl.shouldProbeNative(env) ? nativeRoots : [];
+    const mode = wsl.getWslMode(env);
+    if (mode === "native-first" || mode === "native-only") {
+      candidates.push(...nativeCandidates, ...wslRoots);
+    } else {
+      candidates.push(...wslRoots, ...nativeCandidates);
+    }
   } else {
     const xdg = env.XDG_CONFIG_HOME || path.join(home, ".config");
     candidates.push(
@@ -6521,7 +6525,17 @@ function resolveZedDbPath(env = process.env) {
   }
   if (process.platform === "win32") {
     const local = env.LOCALAPPDATA || path.join(home, "AppData", "Local");
-    return path.join(local, "Zed", "threads", "threads.db");
+    const native = path.join(local, "Zed", "threads", "threads.db");
+    let nativeExists = null;
+    if (wsl.shouldProbeNative(env)) {
+      try { if (fssync.existsSync(native)) nativeExists = native; } catch (_e) { }
+    }
+    const wslDir = wsl.shouldProbeWsl(env) ? wsl.discoverWslHome(".local/share/zed/threads", { env }) : null;
+    const wslValue = wslDir ? path.join(wslDir, "threads.db") : null;
+    const picked = wsl.pickWin32Path({ wslValue, nativeValue: nativeExists, env, platform: "win32" });
+    if (picked) return picked;
+    const mode = wsl.getWslMode(env);
+    return mode === "wsl-only" || mode === "native-only" ? null : native;
   }
   const xdg = env.XDG_DATA_HOME || path.join(home, ".local", "share");
   return path.join(xdg, "zed", "threads", "threads.db");
@@ -6673,6 +6687,10 @@ async function parseZedIncremental({
 } = {}) {
   await ensureDir(path.dirname(queuePath));
   const resolvedDb = dbPath || resolveZedDbPath(env || process.env);
+  if (!resolvedDb) {
+    cursors.zed = { ...cursors.zed, updatedAt: new Date().toISOString() };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
   const zedState =
     cursors.zed && typeof cursors.zed === "object" ? cursors.zed : {};
   const threadTotals =
@@ -6890,7 +6908,20 @@ function resolveGooseDbPath(env = process.env) {
     );
   } else if (process.platform === "win32") {
     const appData = env.APPDATA || path.join(home, "AppData", "Roaming");
-    candidates.push(path.join(appData, "goose", "sessions", "sessions.db"));
+    const native = path.join(appData, "goose", "sessions", "sessions.db");
+    let nativeExists = null;
+    if (wsl.shouldProbeNative(env)) {
+      try { if (fssync.existsSync(native)) nativeExists = native; } catch (_e) { }
+    }
+    const wslDir = wsl.shouldProbeWsl(env) ? wsl.discoverWslHome(".local/share/goose/sessions", { env }) : null;
+    const wslValue = wslDir ? path.join(wslDir, "sessions.db") : null;
+    const picked = wsl.pickWin32Path({ wslValue, nativeValue: nativeExists, env, platform: "win32" });
+    if (picked) candidates.push(picked);
+    for (const c of candidates) {
+      if (fssync.existsSync(c)) return c;
+    }
+    const mode = wsl.getWslMode(env);
+    return mode === "wsl-only" || mode === "native-only" ? null : native;
   }
   const xdg = env.XDG_DATA_HOME || path.join(home, ".local", "share");
   candidates.push(
@@ -6902,7 +6933,7 @@ function resolveGooseDbPath(env = process.env) {
   for (const c of candidates) {
     if (fssync.existsSync(c)) return c;
   }
-  return candidates[0];
+  return candidates[0] || null;
 }
 
 function parseGooseModelName(modelConfigJson) {
@@ -6996,6 +7027,11 @@ async function parseGooseIncremental({
     gooseState.sessionTotals && typeof gooseState.sessionTotals === "object"
       ? { ...gooseState.sessionTotals }
       : {};
+
+  if (!resolvedDb) {
+    cursors.goose = { ...gooseState, sessionTotals, updatedAt: new Date().toISOString() };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
 
   const cursorDbMtime = Number.isFinite(gooseState.lastDbMtimeMs) ? gooseState.lastDbMtimeMs : 0;
   let currentMtime = 0;
@@ -7178,6 +7214,14 @@ function resolveDroidSessionsDirs(env = process.env) {
     return [path.join(expandHomePath(env.FACTORY_DIR.trim(), env), "sessions")];
   }
   const home = env.HOME || require("node:os").homedir();
+  if (process.platform === "win32") {
+    const picked = pickWin32ProviderPath({
+      env,
+      nativeValue: path.join(home, ".factory", "sessions"),
+      wslProviderDir: ".factory/sessions",
+    });
+    return picked ? [picked] : [];
+  }
   return [path.join(home, ".factory", "sessions")];
 }
 
@@ -8035,6 +8079,13 @@ async function parseOmpIncremental({
 
 function resolvePiHome(env = process.env) {
   const home = env.HOME || require("node:os").homedir();
+  if (process.platform === "win32") {
+    return pickWin32ProviderPath({
+      env,
+      nativeValue: path.join(home, ".pi"),
+      wslProviderDir: ".pi",
+    });
+  }
   return path.join(home, ".pi");
 }
 
@@ -8045,7 +8096,8 @@ function resolvePiAgentDir(env = process.env) {
   if (env.PI_CODING_AGENT_DIR && decidePiCodingAgentDirOwner(env) === "pi") {
     return expandHomePath(env.PI_CODING_AGENT_DIR, env);
   }
-  return path.join(resolvePiHome(env), "agent");
+  const piHome = resolvePiHome(env);
+  return piHome ? path.join(piHome, "agent") : null;
 }
 
 // Defense in depth for invariant 2 (no double-count). Two explicit overrides
@@ -8054,11 +8106,16 @@ function resolvePiAgentDir(env = process.env) {
 // the install-signal disambiguator and would otherwise have both providers scan
 // the same sessions directory under different `source` tags.
 function piAgentDirCollidesWithOmp(env = process.env) {
-  return path.resolve(resolvePiAgentDir(env)) === path.resolve(resolveOmpAgentDir(env));
+  const piAgentDir = resolvePiAgentDir(env);
+  const ompAgentDir = resolveOmpAgentDir(env);
+  if (!piAgentDir || !ompAgentDir) return false;
+  return path.resolve(piAgentDir) === path.resolve(ompAgentDir);
 }
 
 function resolvePiSessionFiles(env = process.env) {
-  const sessionsDir = path.join(resolvePiAgentDir(env), "sessions");
+  const agentDir = resolvePiAgentDir(env);
+  if (!agentDir) return [];
+  const sessionsDir = path.join(agentDir, "sessions");
   if (!fssync.existsSync(sessionsDir)) return [];
   const files = [];
   try {
@@ -8306,11 +8363,19 @@ async function parsePiIncremental({
 function resolveCraftConfigDir(env = process.env) {
   if (env.CRAFT_CONFIG_DIR) return env.CRAFT_CONFIG_DIR;
   const home = env.HOME || require("node:os").homedir();
+  if (process.platform === "win32") {
+    return pickWin32ProviderPath({
+      env,
+      nativeValue: path.join(home, ".craft-agent"),
+      wslProviderDir: ".craft-agent",
+    });
+  }
   return path.join(home, ".craft-agent");
 }
 
 function resolveCraftWorkspaceRoots(env = process.env) {
   const configDir = resolveCraftConfigDir(env);
+  if (!configDir) return [];
   const roots = new Set();
   // Always include the default workspaces directory so a fresh install (no
   // config.json yet) still gets discovered.
@@ -8604,13 +8669,22 @@ async function parseCraftIncremental({
 function resolveCopilotOtelPaths(env = process.env) {
   const home = env.HOME || require("node:os").homedir();
   const paths = new Set();
-  const defaultDir = path.join(home, ".copilot", "otel");
-  if (fssync.existsSync(defaultDir)) {
+  const scanDir = (dir) => {
+    if (!fssync.existsSync(dir)) return;
     try {
-      for (const entry of fssync.readdirSync(defaultDir)) {
-        if (entry.endsWith(".jsonl")) paths.add(path.join(defaultDir, entry));
+      for (const entry of fssync.readdirSync(dir)) {
+        if (entry.endsWith(".jsonl")) paths.add(path.join(dir, entry));
       }
     } catch (_e) {}
+  };
+  if (process.platform !== "win32" || wsl.shouldProbeNative(env)) {
+    scanDir(path.join(home, ".copilot", "otel"));
+  }
+  if (process.platform === "win32") {
+    if (wsl.shouldProbeWsl(env)) {
+      const wslDir = wsl.discoverWslHome(".copilot/otel", { env });
+      if (wslDir) scanDir(wslDir);
+    }
   }
   const explicit = env.COPILOT_OTEL_FILE_EXPORTER_PATH;
   if (typeof explicit === "string" && explicit.trim() && fssync.existsSync(explicit)) {
@@ -8933,15 +9007,21 @@ const GROK_ESTIMATED_INPUT_RATIO = 0.8;
 const GROK_CURSOR_VERSION = 3;
 
 function resolveGrokBuildHome(env = process.env) {
-  return (
-    env.TOKENTRACKER_GROK_HOME ||
-    env.GROK_HOME ||
-    path.join(require("node:os").homedir(), ".grok")
-  );
+  if (env.TOKENTRACKER_GROK_HOME) return env.TOKENTRACKER_GROK_HOME;
+  if (env.GROK_HOME) return env.GROK_HOME;
+  if (process.platform === "win32") {
+    return pickWin32ProviderPath({
+      env,
+      nativeValue: path.join(require("node:os").homedir(), ".grok"),
+      wslProviderDir: ".grok",
+    });
+  }
+  return path.join(require("node:os").homedir(), ".grok");
 }
 
 function resolveGrokBuildSessions(env = process.env) {
   const home = resolveGrokBuildHome(env);
+  if (!home) return [];
   const sessionsRoot = path.join(home, "sessions");
   if (!fssync.existsSync(sessionsRoot)) return [];
 

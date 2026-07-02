@@ -62,6 +62,7 @@ const {
   resolveHermesDbPath,
   probeWslDistros,
 } = require("../lib/rollout");
+const { getWslMode, isInvalidWslMode, shouldProbeWsl } = require("../lib/wsl-probe");
 const { probeGrokHookState, resolveGrokHome } = require("../lib/grok-hook");
 
 async function cmdStatus(argv = []) {
@@ -268,7 +269,7 @@ async function cmdStatus(argv = []) {
   // per thread we've surfaced usage for, so its size distinguishes "DB present
   // with usage" from "DB present but nothing counted yet" (fresh/undecodable).
   const zedDbPath = resolveZedDbPath(process.env);
-  const zedInstalled = fssync.existsSync(zedDbPath);
+  const zedInstalled = Boolean(zedDbPath && fssync.existsSync(zedDbPath));
   const zedThreadsCounted =
     cursors?.zed?.threadTotals && typeof cursors.zed.threadTotals === "object"
       ? Object.keys(cursors.zed.threadTotals).length
@@ -276,7 +277,7 @@ async function cmdStatus(argv = []) {
 
   // Goose (Block) — passive cumulative-delta read of sessions.db.
   const gooseDbPath = resolveGooseDbPath(process.env);
-  const gooseInstalled = fssync.existsSync(gooseDbPath);
+  const gooseInstalled = Boolean(gooseDbPath && fssync.existsSync(gooseDbPath));
 
   // Droid (Factory CLI) — passive cumulative-delta read of *.settings.json.
   const droidSessionsDir = resolveDroidSessionsDir(process.env);
@@ -296,8 +297,8 @@ async function cmdStatus(argv = []) {
   // without guessing the right UNC alias (#87).
   const hermesPath = resolveHermesPath();
   const hermesDbPath = resolveHermesDbPath();
-  const hermesInstalled = fssync.existsSync(hermesDbPath);
-  const hermesWslDistros = process.platform === "win32" ? probeWslDistros() : [];
+  const hermesInstalled = Boolean(hermesDbPath && fssync.existsSync(hermesDbPath));
+  const wslDistros = process.platform === "win32" && shouldProbeWsl(process.env) ? probeWslDistros() : [];
 
   const copilotToken = readCopilotOauthToken({ home });
   const copilotOtel = describeCopilotOtelStatus({ home, env: process.env });
@@ -413,9 +414,6 @@ async function cmdStatus(argv = []) {
         hermes: {
           installed: hermesInstalled,
           detail: hermesPath,
-          ...(hermesWslDistros.length
-            ? { wsl_distros: hermesWslDistros.map((d) => ({ name: d.name, version: d.version })) }
-            : {}),
         },
       },
       copilot: {
@@ -428,6 +426,13 @@ async function cmdStatus(argv = []) {
         active: isPassiveModeActive(passiveProviders),
         providers: passiveProviders,
       },
+      ...(process.platform === "win32"
+        ? {
+            wsl_mode: getWslMode(),
+            wsl_mode_invalid: isInvalidWslMode(),
+            wsl_distros: wslDistros.map((d) => ({ name: d.name, version: d.version })),
+          }
+        : {}),
       subscriptions,
     };
 
@@ -513,16 +518,8 @@ async function cmdStatus(argv = []) {
         ? `- Droid (Factory): passive reader (${droidSettingsFiles.length} session${droidSettingsFiles.length !== 1 ? "s" : ""} in ${droidSessionsDir}, cumulative-delta)`
         : null,
       ...(() => {
-        // Always surface Hermes when its state.db resolves; on Windows also show
-        // it when WSL distros are discovered so users can debug UNC resolution.
-        if (!hermesInstalled && hermesWslDistros.length === 0) return [];
-        const wslSuffix = hermesWslDistros.length
-          ? `; WSL distros: ${hermesWslDistros.map((d) => `${d.name} (v${d.version ?? "?"})`).join(", ")}`
-          : "";
-        const head = hermesInstalled
-          ? `- Hermes Agent: state.db found (${hermesPath})`
-          : `- Hermes Agent: state.db not found (resolved ${hermesPath})`;
-        return [`${head}${wslSuffix}`];
+        if (!hermesInstalled) return [];
+        return [`- Hermes Agent: state.db found (${hermesPath})`];
       })(),
       ...(() => {
         const passive = passiveProviders.filter((p) => p.passive);
@@ -535,6 +532,18 @@ async function cmdStatus(argv = []) {
         ? `- Grok Build (xAI): ${grokHookState.configured ? "hook installed" : "detected"} (${grokSessions.length} session${grokSessions.length !== 1 ? "s" : ""} found, hook: ${grokHookState.configured ? "yes" : "no"})`
         : null,
       ...copilotLines,
+      ...(process.platform === "win32" ? (() => {
+        const wslMode = getWslMode();
+        const modeInvalid = isInvalidWslMode();
+        const modeSuffix = modeInvalid ? ` (invalid TOKENTRACKER_WSL_MODE ignored)` : "";
+        const lines = [
+          `- WSL mode: ${wslMode}${modeSuffix}`,
+        ];
+        if (wslDistros.length > 0) {
+          lines.push(`  distros: ${wslDistros.map((d) => `${d.name} (v${d.version ?? "?"})`).join(", ")}`);
+        }
+        return lines;
+      })() : []),
       ...subscriptionLines,
       "",
     ]

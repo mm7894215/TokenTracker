@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const os = require("node:os");
 const path = require("node:path");
 const fs = require("node:fs/promises");
+const fssync = require("node:fs");
 const { test } = require("node:test");
 
 const cp = require("node:child_process");
@@ -44,14 +45,32 @@ const {
   listAntigravitySessionFiles,
   estimateAntigravityTokens,
   parseKimiCodeIncremental,
+  resolveKimiCodeHome,
   resolveKimiCodeWireFiles,
   resolveKimiCodeDefaultModel,
+  resolveKilocodeRoots,
+  resolveZedDbPath,
+  resolveGooseDbPath,
   listRolloutFilesDeep,
   filterColdCodexRolloutFiles,
 } = require("../src/lib/rollout");
 const { purgeProjectUsage } = require("../src/lib/project-usage-purge");
 
+const { mockPlatform, mockMethod } = require("./helpers/mock");
+
 const antigravityTestTokens = (text) => estimateAntigravityTokens(text || "");
+
+function mockWsl(t, { distro = "Ubuntu", user = "dev" } = {}) {
+  mockMethod(t, cp, "execFileSync", (_cmd, args) => {
+    if (args[0] === "-l" && args[1] === "-v") {
+      return Buffer.from(`  NAME    STATE    VERSION\n* ${distro}  Running  2\n`, "utf16le");
+    }
+    if (args[0] === "-d" && args[1] === distro && args.includes("whoami")) {
+      return Buffer.from(`${user}\n`, "utf8");
+    }
+    throw new Error(`unexpected wsl args: ${args.join(" ")}`);
+  });
+}
 
 test("parseRolloutIncremental ignores repeated token_count records with unchanged totals", async () => {
   // Codex can repeat the same token_count record in a rollout. The cumulative
@@ -4730,6 +4749,86 @@ test("resolveHermesPath prefers %LOCALAPPDATA%\\hermes on Windows when present",
     resolveHermesPath({ LOCALAPPDATA: tmp, TOKENTRACKER_HERMES_HOME: "/custom/hermes" }),
     "/custom/hermes",
   );
+});
+
+test("Zed wsl-only does not return or stat native Windows DB", (t) => {
+  mockPlatform(t, "win32");
+  mockMethod(t, cp, "execFileSync", () => { throw new Error("wsl unavailable"); });
+  mockMethod(t, fssync, "existsSync", (candidate) => {
+    assert.ok(!String(candidate).includes("AppData"), `native path was probed: ${candidate}`);
+    return false;
+  });
+
+  const dbPath = resolveZedDbPath({
+    HOME: "C:\\Users\\me",
+    LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local",
+    TOKENTRACKER_WSL_MODE: "wsl-only",
+  });
+
+  assert.equal(dbPath, null);
+});
+
+test("Goose wsl-only does not return or stat native Windows candidates", (t) => {
+  mockPlatform(t, "win32");
+  mockMethod(t, cp, "execFileSync", () => { throw new Error("wsl unavailable"); });
+  mockMethod(t, fssync, "existsSync", (candidate) => {
+    assert.ok(!String(candidate).includes("AppData"), `native path was probed: ${candidate}`);
+    return false;
+  });
+
+  const dbPath = resolveGooseDbPath({
+    HOME: "C:\\Users\\me",
+    APPDATA: "C:\\Users\\me\\AppData\\Roaming",
+    XDG_DATA_HOME: "C:\\Users\\me\\AppData\\Roaming",
+    TOKENTRACKER_WSL_MODE: "wsl-only",
+  });
+
+  assert.equal(dbPath, null);
+});
+
+test("Kimi Code native-first prefers native home when WSL also exists", (t) => {
+  mockPlatform(t, "win32");
+  mockWsl(t);
+  mockMethod(t, fssync, "existsSync", (candidate) => (
+    candidate === "\\\\wsl$\\Ubuntu\\home\\dev\\.kimi-code" ||
+    candidate === path.join(os.homedir(), ".kimi-code")
+  ));
+
+  const home = resolveKimiCodeHome({
+    HOME: "C:\\Users\\me",
+    TOKENTRACKER_WSL_MODE: "native-first",
+  });
+
+  assert.equal(home, path.join(os.homedir(), ".kimi-code"));
+});
+
+test("Kimi Code wsl-first prefers WSL home when both sides exist", (t) => {
+  mockPlatform(t, "win32");
+  mockWsl(t);
+  mockMethod(t, fssync, "existsSync", (candidate) => (
+    candidate === "\\\\wsl$\\Ubuntu\\home\\dev\\.kimi-code" ||
+    candidate === path.join("C:\\Users\\me", ".kimi-code")
+  ));
+
+  const home = resolveKimiCodeHome({
+    HOME: "C:\\Users\\me",
+    TOKENTRACKER_WSL_MODE: "wsl-first",
+  });
+
+  assert.equal(home, "\\\\wsl$\\Ubuntu\\home\\dev\\.kimi-code");
+});
+
+test("Kilocode roots pass resolver env to WSL discovery", (t) => {
+  mockPlatform(t, "win32");
+  mockMethod(t, cp, "execFileSync", () => { throw new Error("WSL discovery should not be called"); });
+
+  const roots = resolveKilocodeRoots({
+    HOME: "C:\\Users\\me",
+    APPDATA: "C:\\Users\\me\\AppData\\Roaming",
+    TOKENTRACKER_WSL_MODE: "native-only",
+  });
+
+  assert.ok(roots.some((root) => root.includes("AppData")));
 });
 
 test("parseWslListVerbose parses distros, default marker and version column", () => {
