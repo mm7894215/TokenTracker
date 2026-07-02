@@ -1,0 +1,16 @@
+{
+  "name": "tokentracker-linux",
+  "version": "0.59.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "bundle:node": "bash scripts/bundle-node-linux.sh",
+    "package:local": "bash scripts/build-local-package.sh"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}
