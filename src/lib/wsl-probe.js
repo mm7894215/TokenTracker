@@ -4,9 +4,11 @@ const path = require("node:path");
 const DEFAULT_EXEC_OPTS = { timeout: 15000, windowsHide: true, maxBuffer: 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] };
 
 let _cachedDistros = null;
+const _cachedWslUsers = new Map();
 
 function resetWslProbeCache() {
   _cachedDistros = null;
+  _cachedWslUsers.clear();
 }
 
 const WSL_MODES = new Set([
@@ -51,6 +53,7 @@ function probeWslDistros(deps = {}) {
   try {
     raw = runWsl(["-l", "-v"], { utf16: true });
   } catch (_e) {
+    if (!hasDeps) _cachedDistros = [];
     return [];
   }
   const distros = parseWslListVerbose(raw);
@@ -102,19 +105,27 @@ function pickWin32Path({
   return wslValue ?? nativeValue ?? null;
 }
 
+function lookupWslUser(distroName, runWsl, useCache) {
+  if (useCache && _cachedWslUsers.has(distroName)) {
+    return _cachedWslUsers.get(distroName);
+  }
+  let user = "";
+  try {
+    user = String(runWsl(["-d", distroName, "-e", "whoami"], { utf16: false }) || "").trim();
+  } catch (_e) { }
+  if (useCache) _cachedWslUsers.set(distroName, user);
+  return user;
+}
+
 function discoverWslHome(providerDir, deps = {}) {
   if (!shouldProbeWsl(deps.env)) return null;
 
   const runWsl = deps.runWsl || defaultRunWsl;
   const existsSync = deps.existsSync || fssync.existsSync;
   const distros = deps.runWsl ? probeWslDistros({ runWsl: deps.runWsl }) : probeWslDistros();
+  const useCache = !deps.runWsl;
   for (const distro of distros) {
-    let user;
-    try {
-      user = String(runWsl(["-d", distro.name, "-e", "whoami"], { utf16: false }) || "").trim();
-    } catch (_e) {
-      user = "";
-    }
+    const user = lookupWslUser(distro.name, runWsl, useCache);
     if (!user) continue;
     const roots = distro.version === 1
       ? ["\\\\wsl.localhost\\", "\\\\wsl$\\"]
