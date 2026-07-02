@@ -117,6 +117,73 @@ landing.v2.models.agent.opencode,landing,LandingPage,MarketingLanding,agent_open
 landing.v2.models.agent.openclaw,landing,LandingPage,MarketingLanding,agent_openclaw,"OPENCLAW",,active
 landing.v2.cta.primary,landing,LandingPage,MarketingLanding,cta_primary,"Dashboard",,active
 landing.v2.hero.subtagline,landing,LandingPage,MarketingLanding,hero_subtagline,"Automatically monitor token usage across Claude Code, Cursor, Codex, and more. Local-first, privacy-focused, and zero manual configuration.",,active
+landing.v3.brand,landing,LinearLandingPage,LinearLanding,brand,"Token Tracker",,active
+landing.v3.nav.product,landing,LinearLandingPage,LinearLanding,nav_product,"Product",,active
+landing.v3.nav.workflow,landing,LinearLandingPage,LinearLanding,nav_workflow,"Workflow",,active
+landing.v3.nav.privacy,landing,LinearLandingPage,LinearLanding,nav_privacy,"Privacy",,active
+landing.v3.nav.status,landing,LinearLandingPage,LinearLanding,nav_status,"Status",,active
+landing.v3.hero.badge,landing,LinearLandingPage,LinearLanding,hero_badge,"Local-first usage intelligence for AI coding",,active
+landing.v3.hero.title,landing,LinearLandingPage,LinearLanding,hero_title,"The token usage system for AI coding agents",,active
+landing.v3.hero.subtitle,landing,LinearLandingPage,LinearLanding,hero_subtitle,"The token usage system for developers and agent-heavy teams. Track every AI CLI, understand cost and limits, and keep prompts and code on your machine.",,active
+landing.v3.cta.dashboard,landing,LinearLandingPage,LinearLanding,cta_dashboard,"Open dashboard",,active
+landing.v3.cta.download,landing,LinearLandingPage,LinearLanding,cta_download,"Download desktop app",,active
+landing.v3.cta.download_macos,landing,LinearLandingPage,LinearLanding,cta_download_macos,"Download for macOS",,active
+landing.v3.cta.download_windows,landing,LinearLandingPage,LinearLanding,cta_download_windows,"Download for Windows",,active
+landing.v3.tools.kicker,landing,LinearLandingPage,LinearLanding,tools_kicker,"Built for the agent stack developers actually use",,active
+landing.v3.tool.1,landing,LinearLandingPage,LinearLanding,tool_1,"Claude Code",,active
+landing.v3.tool.2,landing,LinearLandingPage,LinearLanding,tool_2,"Codex",,active
+landing.v3.tool.3,landing,LinearLandingPage,LinearLanding,tool_3,"Cursor",,active
+landing.v3.tool.4,landing,LinearLandingPage,LinearLanding,tool_4,"Gemini",,active
+landing.v3.tool.5,landing,LinearLandingPage,LinearLanding,tool_5,"OpenCode",,active
+landing.v3.tool.6,landing,LinearLandingPage,LinearLanding,tool_6,"OpenClaw",,active
+landing.v3.tool.7,landing,LinearLandingPage,LinearLanding,tool_7,"Kiro",,active
+landing.v3.tool.8,landing,LinearLandingPage,LinearLanding,tool_8,"Copilot",,active
+landing.v3.features.kicker,landing,LinearLandingPage,LinearLanding,features_kicker,"Purpose-built for AI usage operations",,active
+landing.v3.features.title,landing,LinearLandingPage,LinearLanding,features_title,"Everything a developer needs to understand agent spend.",,active
+landing.v3.feature.1.title,landing,LinearLandingPage,LinearLanding,feature_1_title,"Local-first by default",,active
+landing.v3.feature.1.body,landing,LinearLandingPage,LinearLanding,feature_1_body,"Usage is parsed from local files and served from a local dashboard. Prompts, messages, and code are not collected.",,active
+landing.v3.feature.2.title,landing,LinearLandingPage,LinearLanding,feature_2_title,"Every CLI in one view",,active
+landing.v3.feature.2.body,landing,LinearLandingPage,LinearLanding,feature_2_body,"Claude Code, Codex, Cursor, Gemini, Kiro, OpenCode, Copilot, Kimi, and more roll into one normalized model ledger.",,active
+landing.v3.feature.3.title,landing,LinearLandingPage,LinearLanding,feature_3_title,"Native where you work",,active
+landing.v3.feature.3.body,landing,LinearLandingPage,LinearLanding,feature_3_body,"Run the dashboard locally, install the macOS menu bar app, or use the Windows tray app with the same embedded runtime.",,active
+landing.v3.feature.4.title,landing,LinearLandingPage,LinearLanding,feature_4_title,"Costs, limits, and trends",,active
+landing.v3.feature.4.body,landing,LinearLandingPage,LinearLanding,feature_4_body,"Inspect token totals, cached input, reasoning output, estimated cost, rate-limit progress, project usage, and activity streaks.",,active
+landing.v3.workflow.kicker,landing,LinearLandingPage,LinearLanding,workflow_kicker,"From hidden logs to operating rhythm",,active
+landing.v3.workflow.title,landing,LinearLandingPage,LinearLanding,workflow_title,"A calmer system for fast AI development.",,active
+landing.v3.workflow.body,landing,LinearLandingPage,LinearLanding,workflow_body,"Treat AI token usage as an operating loop: capture the local signal, normalize every provider, then review the pattern without exposing the work itself.",,active
+landing.v3.workflow.1.step,landing,LinearLandingPage,LinearLanding,workflow_1_step,"1.0 Capture",,active
+landing.v3.workflow.1.title,landing,LinearLandingPage,LinearLanding,workflow_1_title,"Hooks collect usage events",,active
+landing.v3.workflow.1.body,landing,LinearLandingPage,LinearLanding,workflow_1_body,"Agent CLIs write local logs; Token Tracker turns those records into append-only usage entries.",,active
+landing.v3.workflow.1.tag,landing,LinearLandingPage,LinearLanding,workflow_1_tag,"local",,active
+landing.v3.workflow.2.step,landing,LinearLandingPage,LinearLanding,workflow_2_step,"2.0 Normalize",,active
+landing.v3.workflow.2.title,landing,LinearLandingPage,LinearLanding,workflow_2_title,"Token columns stay comparable",,active
+landing.v3.workflow.2.body,landing,LinearLandingPage,LinearLanding,workflow_2_body,"Input, output, cached input, cache creation, and reasoning tokens are kept separate so costs stay explainable.",,active
+landing.v3.workflow.2.tag,landing,LinearLandingPage,LinearLanding,workflow_2_tag,"ledger",,active
+landing.v3.workflow.3.step,landing,LinearLandingPage,LinearLanding,workflow_3_step,"3.0 Review",,active
+landing.v3.workflow.3.title,landing,LinearLandingPage,LinearLanding,workflow_3_title,"Dashboards reveal the pattern",,active
+landing.v3.workflow.3.body,landing,LinearLandingPage,LinearLanding,workflow_3_body,"Trend charts, heatmaps, provider breakdowns, limits, and leaderboard opt-in turn raw usage into decisions.",,active
+landing.v3.workflow.3.tag,landing,LinearLandingPage,LinearLanding,workflow_3_tag,"insight",,active
+landing.v3.intelligence.kicker,landing,LinearLandingPage,LinearLanding,intelligence_kicker,"Privacy is the architecture",,active
+landing.v3.intelligence.title,landing,LinearLandingPage,LinearLanding,intelligence_title,"Built to show usage without seeing the work.",,active
+landing.v3.intelligence.body,landing,LinearLandingPage,LinearLanding,intelligence_body,"Token Tracker only needs counts and metadata. Cloud sync and leaderboard participation are optional, while the core product keeps working locally.",,active
+landing.v3.intelligence.table.metric,landing,LinearLandingPage,LinearLanding,intelligence_table_metric,"Signal",,active
+landing.v3.intelligence.table.state,landing,LinearLandingPage,LinearLanding,intelligence_table_state,"State",,active
+landing.v3.intelligence.row1.title,landing,LinearLandingPage,LinearLanding,intelligence_row1_title,"Prompt and message bodies",,active
+landing.v3.intelligence.row1.body,landing,LinearLandingPage,LinearLanding,intelligence_row1_body,"Excluded from the usage pipeline",,active
+landing.v3.intelligence.row1.state,landing,LinearLandingPage,LinearLanding,intelligence_row1_state,"never read",,active
+landing.v3.intelligence.row2.title,landing,LinearLandingPage,LinearLanding,intelligence_row2_title,"Local dashboard",,active
+landing.v3.intelligence.row2.body,landing,LinearLandingPage,LinearLanding,intelligence_row2_body,"Served from the CLI on localhost",,active
+landing.v3.intelligence.row2.state,landing,LinearLandingPage,LinearLanding,intelligence_row2_state,"default",,active
+landing.v3.intelligence.row3.title,landing,LinearLandingPage,LinearLanding,intelligence_row3_title,"Cloud leaderboard",,active
+landing.v3.intelligence.row3.body,landing,LinearLandingPage,LinearLanding,intelligence_row3_body,"Anonymous sync is opt-in",,active
+landing.v3.intelligence.row3.state,landing,LinearLandingPage,LinearLanding,intelligence_row3_state,"optional",,active
+landing.v3.intelligence.row4.title,landing,LinearLandingPage,LinearLanding,intelligence_row4_title,"Desktop apps",,active
+landing.v3.intelligence.row4.body,landing,LinearLandingPage,LinearLanding,intelligence_row4_body,"macOS and Windows bundle the dashboard runtime",,active
+landing.v3.intelligence.row4.state,landing,LinearLandingPage,LinearLanding,intelligence_row4_state,"native",,active
+landing.v3.final.title,landing,LinearLandingPage,LinearLanding,final_title,"Know what your agents are spending.",,active
+landing.v3.final.body,landing,LinearLandingPage,LinearLanding,final_body,"Install once, keep using your favorite AI CLIs, and let Token Tracker turn usage metadata into a private operating dashboard.",,active
+landing.v3.footer.line,landing,LinearLandingPage,LinearLanding,footer_line,"Token Tracker — local-first usage intelligence for AI coding.",,active
+landing.v3.footer.legacy,landing,LinearLandingPage,LinearLanding,footer_legacy,"Legacy landing",,active
 
 
 
