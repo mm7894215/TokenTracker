@@ -14,6 +14,26 @@ const DEFAULT_PORT = 7680;
 const DEFAULT_MAX_PORT_ATTEMPTS = 20;
 const NPM_PACKAGE_NAME = "tokentracker-cli";
 const LOCAL_BIND_HOST = "127.0.0.1";
+const STATIC_ASSET_EXTENSIONS = new Set([
+  ".css",
+  ".gif",
+  ".html",
+  ".ico",
+  ".jpeg",
+  ".jpg",
+  ".js",
+  ".json",
+  ".mjs",
+  ".png",
+  ".svg",
+  ".ttf",
+  ".txt",
+  ".webmanifest",
+  ".webp",
+  ".woff",
+  ".woff2",
+  ".xml",
+]);
 
 function buildPortInUseHint(port) {
   return `Port ${port} is still in use after cleanup. Try: npx ${NPM_PACKAGE_NAME} serve --port ${port + 1}\n`;
@@ -123,7 +143,12 @@ async function cmdServe(argv) {
       if (served) return;
 
       // SPA fallback
-      await serveStaticFile(dashboardDir, "/index.html", res);
+      if (shouldServeSpaFallback(req, url)) {
+        await serveStaticFile(dashboardDir, "/index.html", res);
+        return;
+      }
+
+      sendNotFound(res);
     } catch (e) {
       if (!res.headersSent) {
         res.writeHead(500, { "Content-Type": "text/plain" });
@@ -230,6 +255,38 @@ async function ensurePortFree(port) {
     } catch (_e) {}
   }
   await new Promise((r) => setTimeout(r, 500));
+}
+
+function isApiPath(pathname) {
+  return (
+    pathname.startsWith("/api/")
+    || pathname.startsWith("/functions/")
+    || pathname.startsWith("/proxy/")
+  );
+}
+
+function isStaticAssetPath(pathname) {
+  if (pathname.startsWith("/assets/")) return true;
+  return STATIC_ASSET_EXTENSIONS.has(path.posix.extname(pathname).toLowerCase());
+}
+
+function shouldServeSpaFallback(req, url) {
+  const method = String(req.method || "GET").toUpperCase();
+  if (method !== "GET" && method !== "HEAD") return false;
+
+  const pathname = url.pathname || "/";
+  if (isApiPath(pathname) || isStaticAssetPath(pathname)) return false;
+
+  const accept = String(req.headers?.accept || "");
+  return !accept || accept.includes("text/html") || accept.includes("*/*");
+}
+
+function sendNotFound(res) {
+  res.writeHead(404, {
+    "Content-Type": "text/plain; charset=utf-8",
+    "Cache-Control": "no-store",
+  });
+  res.end("Not Found");
 }
 
 function listenOnce(server, port, host) {
@@ -346,4 +403,5 @@ module.exports = {
   listenOnAvailablePort,
   getLocalServerUrl,
   parseArgs,
+  shouldServeSpaFallback,
 };

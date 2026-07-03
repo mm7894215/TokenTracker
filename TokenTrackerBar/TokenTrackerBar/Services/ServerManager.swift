@@ -177,7 +177,7 @@ final class ServerManager: ObservableObject {
     private func launchServer(nodePath: String, entryPath: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: nodePath)
-        process.arguments = [entryPath, "serve", "--no-sync", "--no-open"]
+        process.arguments = [entryPath, "serve", "--port", "\(Constants.serverPort)", "--no-sync", "--no-open"]
         process.currentDirectoryURL = FileManager.default.temporaryDirectory
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
@@ -209,7 +209,7 @@ final class ServerManager: ObservableObject {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         // Use login shell so Node.js/npm PATH is available
-        process.arguments = ["-lc", "\(binaryPath) serve --no-sync"]
+        process.arguments = ["-lc", "\(binaryPath) serve --port \(Constants.serverPort) --no-sync"]
         process.currentDirectoryURL = FileManager.default.temporaryDirectory
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
