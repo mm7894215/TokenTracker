@@ -5,6 +5,7 @@ import { copy } from "../../../lib/copy";
 import { formatCompactNumber } from "../../../lib/format";
 import { getUsageCategoryBreakdown } from "../../../lib/api";
 import { getBrowserTimeZone, getBrowserTimeZoneOffsetMinutes } from "../../../lib/timezone";
+import { oklchColor } from "../../../lib/oklch-fallback";
 
 // We collapse the 7 raw categories from the API into 5 display groups that
 // mirror Claude Code's in-CLI /context vocabulary (System prompt / Messages
@@ -36,13 +37,13 @@ const BUCKET_RAMP = {
 function bucketColor(key, source) {
   const hue = SOURCE_HUE[source] ?? SOURCE_HUE.claude;
   const ramp = BUCKET_RAMP[key] || BUCKET_RAMP.system_prompt;
-  return `oklch(${ramp.l} ${ramp.c} ${hue})`;
+  return oklchColor(ramp.l, ramp.c, hue);
 }
 
 function bucketColorAlpha(key, source, alpha) {
   const hue = SOURCE_HUE[source] ?? SOURCE_HUE.claude;
   const ramp = BUCKET_RAMP[key] || BUCKET_RAMP.system_prompt;
-  return `oklch(${ramp.l} ${ramp.c} ${hue} / ${alpha})`;
+  return oklchColor(ramp.l, ramp.c, hue, alpha);
 }
 
 const DISPLAY_GROUPS = [

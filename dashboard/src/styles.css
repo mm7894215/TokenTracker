@@ -13,18 +13,21 @@
   --oai-black: #0a0a0a;
   --oai-white: #fafafa;
 
-  /* Colors - Warm-tinted Neutrals (subtle green tint for cohesion) */
-  --oai-gray-50: oklch(98% 0.005 145);
-  --oai-gray-100: oklch(96% 0.01 145);
-  --oai-gray-200: oklch(90% 0.015 145);
-  --oai-gray-300: oklch(83% 0.02 145);
-  --oai-gray-400: oklch(70% 0.025 145);
-  --oai-gray-500: oklch(55% 0.03 145);
-  --oai-gray-600: oklch(45% 0.025 145);
-  --oai-gray-700: oklch(35% 0.02 145);
-  --oai-gray-800: oklch(25% 0.015 145);
-  --oai-gray-900: oklch(18% 0.01 145);
-  --oai-gray-950: oklch(12% 0.005 145);
+  /* Colors - Warm-tinted Neutrals (subtle green tint for cohesion)
+     sRGB hex fallbacks for browsers without oklch() support (Chromium <111,
+     e.g. older WebView2). The @supports block at the end of this file restores
+     the original oklch() values on modern engines, so nothing changes there. */
+  --oai-gray-50: #f6f9f6;
+  --oai-gray-100: #eef4ee;
+  --oai-gray-200: #d8e1d8;
+  --oai-gray-300: #c0cbbf;
+  --oai-gray-400: #95a395;
+  --oai-gray-500: #677667;
+  --oai-gray-600: #4d594d;
+  --oai-gray-700: #343d34;
+  --oai-gray-800: #1d241d;
+  --oai-gray-900: #0f130f;
+  --oai-gray-950: #050605;
 
   /* Brand Color - Muted Forest Green (适合白色背景)
      使用更柔和的深绿色，而非刺眼的荧光绿
@@ -113,18 +116,19 @@
   --oai-black: #fafafa;
   --oai-white: #0a0a0a;
 
-  /* Colors - Warm-tinted Neutrals (hue 145 matches brand green for cohesion) */
-  --oai-gray-50: oklch(20% 0.002 145);
-  --oai-gray-100: oklch(24% 0.003 145);
-  --oai-gray-200: oklch(30% 0.004 145);
-  --oai-gray-300: oklch(40% 0.005 145);
-  --oai-gray-400: oklch(55% 0.006 145);
-  --oai-gray-500: oklch(65% 0.005 145);
-  --oai-gray-600: oklch(75% 0.004 145);
-  --oai-gray-700: oklch(85% 0.003 145);
-  --oai-gray-800: oklch(92% 0.002 145);
-  --oai-gray-900: oklch(96% 0.001 145);
-  --oai-gray-950: oklch(98% 0.001 145);
+  /* Colors - Warm-tinted Neutrals (hue 145 matches brand green for cohesion)
+     sRGB hex fallbacks; oklch() restored via the @supports block at EOF. */
+  --oai-gray-50: #151615;
+  --oai-gray-100: #1e201e;
+  --oai-gray-200: #2d2e2d;
+  --oai-gray-300: #464846;
+  --oai-gray-400: #6f726f;
+  --oai-gray-500: #8d908d;
+  --oai-gray-600: #acafac;
+  --oai-gray-700: #cccecc;
+  --oai-gray-800: #e4e5e4;
+  --oai-gray-900: #f1f2f1;
+  --oai-gray-950: #f8f8f8;
 
   /* Brand colors remain the same but may need adjustment for dark bg */
   --brand-primary: #10b981;
@@ -382,17 +386,17 @@ html.native-windows-app .tt-native-glass-shell aside[aria-label] {
      ======================================== */
 
   :root.dark .oai-panel {
-    background: linear-gradient(180deg, oklch(22% 0.003 145) 0%, oklch(20% 0.002 145) 100%);
+    background: linear-gradient(180deg, #1a1b1a 0%, #151615 100%);
     border-color: var(--oai-gray-800);
   }
 
   :root.dark .oai-panel--strong {
-    background: linear-gradient(180deg, oklch(28% 0.004 145) 0%, oklch(24% 0.003 145) 100%);
+    background: linear-gradient(180deg, #282928 0%, #1e201e 100%);
     border-color: var(--oai-gray-700);
   }
 
   :root.dark .oai-card {
-    background: linear-gradient(180deg, oklch(22% 0.003 145) 0%, oklch(20% 0.002 145) 100%);
+    background: linear-gradient(180deg, #1a1b1a 0%, #151615 100%);
     border-color: var(--oai-gray-800);
   }
 
@@ -401,7 +405,7 @@ html.native-windows-app .tt-native-glass-shell aside[aria-label] {
   }
 
   :root.dark .oai-card--accent {
-    background: linear-gradient(180deg, oklch(28% 0.004 145) 0%, oklch(24% 0.003 145) 100%);
+    background: linear-gradient(180deg, #282928 0%, #1e201e 100%);
     border-color: var(--oai-gray-700);
   }
 
@@ -832,4 +836,53 @@ html.native-windows-app .tt-native-glass-shell aside[aria-label] {
 /* Navigation chevron arrows — dark mode */
 :root.dark .rdp-oai svg.rdp-chevron {
   fill: var(--oai-gray-400);
+}
+
+/* ========================================
+   Progressive enhancement: restore OKLCH on engines that support it.
+   The base declarations above use sRGB hex so older Chromium/WebView2
+   (<111, no oklch() parsing → transparent custom properties, issue #252)
+   render correctly. Modern engines fall into this block and get the
+   original perceptually-uniform OKLCH values back — visuals unchanged.
+   Custom properties are not parse-time validated, so a same-block hex→oklch
+   fallback would NOT work; the @supports gate is required.
+   ======================================== */
+@supports (color: oklch(0% 0 0)) {
+  :root {
+    --oai-gray-50: oklch(98% 0.005 145);
+    --oai-gray-100: oklch(96% 0.01 145);
+    --oai-gray-200: oklch(90% 0.015 145);
+    --oai-gray-300: oklch(83% 0.02 145);
+    --oai-gray-400: oklch(70% 0.025 145);
+    --oai-gray-500: oklch(55% 0.03 145);
+    --oai-gray-600: oklch(45% 0.025 145);
+    --oai-gray-700: oklch(35% 0.02 145);
+    --oai-gray-800: oklch(25% 0.015 145);
+    --oai-gray-900: oklch(18% 0.01 145);
+    --oai-gray-950: oklch(12% 0.005 145);
+  }
+
+  :root.dark {
+    --oai-gray-50: oklch(20% 0.002 145);
+    --oai-gray-100: oklch(24% 0.003 145);
+    --oai-gray-200: oklch(30% 0.004 145);
+    --oai-gray-300: oklch(40% 0.005 145);
+    --oai-gray-400: oklch(55% 0.006 145);
+    --oai-gray-500: oklch(65% 0.005 145);
+    --oai-gray-600: oklch(75% 0.004 145);
+    --oai-gray-700: oklch(85% 0.003 145);
+    --oai-gray-800: oklch(92% 0.002 145);
+    --oai-gray-900: oklch(96% 0.001 145);
+    --oai-gray-950: oklch(98% 0.001 145);
+  }
+
+  :root.dark .oai-panel,
+  :root.dark .oai-card {
+    background: linear-gradient(180deg, oklch(22% 0.003 145) 0%, oklch(20% 0.002 145) 100%);
+  }
+
+  :root.dark .oai-panel--strong,
+  :root.dark .oai-card--accent {
+    background: linear-gradient(180deg, oklch(28% 0.004 145) 0%, oklch(24% 0.003 145) 100%);
+  }
 }

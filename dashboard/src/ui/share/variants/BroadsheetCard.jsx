@@ -9,16 +9,17 @@ import {
   buildShareHook,
 } from "../build-share-card-data";
 import { HeatmapStrip } from "../HeatmapStrip.jsx";
+import { oklchLiteral } from "../../../lib/oklch-fallback";
 
 // Broadsheet — editorial magazine cover aesthetic.
 // Ivory paper, warm black ink, single vermillion accent.
 // Instrument Serif display + Inter Tight body. Asymmetric grid.
 
-const PAPER = "oklch(0.97 0.01 85)";
-const INK = "oklch(0.18 0.02 85)";
-const INK_SOFT = "oklch(0.38 0.015 85)";
-const RULE = "oklch(0.55 0.012 85)";
-const VERMILLION = "oklch(0.55 0.22 25)";
+const PAPER = oklchLiteral("oklch(0.97 0.01 85)");
+const INK = oklchLiteral("oklch(0.18 0.02 85)");
+const INK_SOFT = oklchLiteral("oklch(0.38 0.015 85)");
+const RULE = oklchLiteral("oklch(0.55 0.012 85)");
+const VERMILLION = oklchLiteral("oklch(0.55 0.22 25)");
 
 const FONT_DISPLAY = '"Instrument Serif", "Times New Roman", Georgia, serif';
 const FONT_BODY = '"Inter Tight", "Helvetica Neue", Arial, sans-serif';
@@ -30,7 +31,7 @@ const HEATMAP_PALETTE = [
   "oklch(0.78 0.09 45)",
   "oklch(0.67 0.16 35)",
   "oklch(0.55 0.22 25)",
-];
+].map(oklchLiteral);
 
 export function BroadsheetCard({ data }) {
   const issueLabel = formatIssueLabel(data);
