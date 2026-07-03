@@ -16,7 +16,10 @@ const WSL_MODES = new Set([
   "native-first",
   "wsl-only",
   "native-only",
+  "both",
 ]);
+
+const WSL_PREFER_MODES = new Set(["native", "wsl"]);
 
 function defaultRunWsl(args, { utf16 = false } = {}) {
   const { execFileSync } = require("node:child_process");
@@ -74,6 +77,12 @@ function getWslMode(env = process.env) {
   return WSL_MODES.has(raw) ? raw : "wsl-first";
 }
 
+function getWslPrefer(env = process.env) {
+  const raw = normalizeWslMode(env.TOKENTRACKER_WSL_PREFER);
+  if (!raw) return null;
+  return WSL_PREFER_MODES.has(raw) ? raw : null;
+}
+
 function isInvalidWslMode(env = process.env) {
   const value = env.TOKENTRACKER_WSL_MODE;
   if (value == null || String(value).trim() === "") return false;
@@ -98,11 +107,30 @@ function pickWin32Path({
 
   const mode = getWslMode(env);
 
+  if (mode === "both") return wslValue ?? nativeValue ?? null;
   if (mode === "wsl-only") return wslValue ?? null;
   if (mode === "native-only") return nativeValue ?? null;
   if (mode === "native-first") return nativeValue ?? wslValue ?? null;
 
   return wslValue ?? nativeValue ?? null;
+}
+
+function resolveAllWin32Paths({
+  nativeValue,
+  wslValue,
+  env = process.env,
+  platform = process.platform,
+}) {
+  if (platform !== "win32") return { native: null, wsl: null };
+
+  const mode = getWslMode(env);
+
+  if (mode === "both") {
+    return { native: nativeValue ?? null, wsl: wslValue ?? null };
+  }
+
+  const single = pickWin32Path({ wslValue, nativeValue, env, platform });
+  return { native: single, wsl: null };
 }
 
 function lookupWslUser(distroName, runWsl, useCache) {
@@ -173,9 +201,11 @@ module.exports = {
   isUncPath,
   snapshotSqliteDb,
   getWslMode,
+  getWslPrefer,
   isInvalidWslMode,
   shouldProbeWsl,
   shouldProbeNative,
   pickWin32Path,
+  resolveAllWin32Paths,
   normalizeWslMode,
 };

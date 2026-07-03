@@ -5,6 +5,9 @@ const fssync = require("node:fs");
 const cp = require("node:child_process");
 const readline = require("node:readline");
 
+const { resolveInstallPaths, ensureFlatCursor } = require("../lib/install-resolver");
+const { multiInstallParse, mergeBothFileSources } = require("../lib/multi-install-parser");
+const wsl = require("../lib/wsl-probe");
 const { ensureDir, readJson, writeJson, openLock } = require("../lib/fs");
 const {
   listRolloutFiles,
@@ -697,7 +700,9 @@ async function cmdSync(argv) {
     }
 
     // ── Kilo Code VS Code extension (Cline-style ui_messages.json) ──
-    const kilocodeTaskFiles = sourceAllowed("kilocode") ? resolveKilocodeTaskFiles(process.env) : [];
+    const kilocodeTaskFiles = sourceAllowed("kilocode")
+      ? mergeBothFileSources({ resolveFiles: resolveKilocodeTaskFiles, env: process.env })
+      : [];
     let kilocodeResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (kilocodeTaskFiles.length > 0) {
       if (progress?.enabled) {
@@ -728,32 +733,39 @@ async function cmdSync(argv) {
     // ── Goose (Block) — SQLite sessions with cumulative tokens per session ──
     const gooseDbPath = resolveGooseDbPath(process.env);
     let gooseResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    if (sourceAllowed("goose") && gooseDbPath && fssync.existsSync(gooseDbPath)) {
-      if (progress?.enabled) {
-        progress.start(`Parsing Goose ${renderBar(0)} 0 sessions | buckets 0`);
-      }
-      try {
-        gooseResult = await parseGooseIncremental({
-          dbPath: gooseDbPath,
-          cursors,
-          queuePath,
-          onProgress: (p) => {
-            if (!progress?.enabled) return;
-            const pct = p.total > 0 ? p.index / p.total : 1;
-            progress.update(
-              `Parsing Goose ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(
-                p.total,
-              )} sessions | buckets ${formatNumber(p.bucketsQueued)}`,
-            );
-          },
-        });
-      } catch (err) {
-        warnProviderParseFailure("Goose", err, opts);
+    if (sourceAllowed("goose")) {
+      const gooseMode = wsl.getWslMode(process.env);
+      if (gooseMode === "both" && process.platform === "win32") {
+        const home = os.homedir();
+        const appData = process.env.APPDATA || path.join(home, "AppData", "Roaming");
+        const nativeDb = path.join(appData, "goose", "sessions", "sessions.db");
+        const wslDir = wsl.shouldProbeWsl(process.env) ? wsl.discoverWslHome(".local/share/goose/sessions") : null;
+        const wslDb = wslDir ? path.join(wslDir, "sessions.db") : null;
+        const goosePaths = resolveInstallPaths("goose", { nativeValue: nativeDb, wslValue: wslDb });
+        if (goosePaths.native || goosePaths.wsl) {
+          if (progress?.enabled) progress.start(`Parsing Goose ${renderBar(0)} 0 sessions | buckets 0`);
+          try {
+            gooseResult = await multiInstallParse({
+              paths: goosePaths, parserFn: parseGooseIncremental, providerName: "goose",
+              cursors, getParams: (p) => ({ dbPath: p }), queuePath, onProgress: gooseOnProgress,
+            });
+          } catch (err) { warnProviderParseFailure("Goose", err, opts); }
+        }
+      } else if (gooseDbPath && fssync.existsSync(gooseDbPath)) {
+        if (progress?.enabled) progress.start(`Parsing Goose ${renderBar(0)} 0 sessions | buckets 0`);
+        ensureFlatCursor(cursors, "goose");
+        try {
+          gooseResult = await parseGooseIncremental({
+            dbPath: gooseDbPath, cursors, queuePath, onProgress: gooseOnProgress,
+          });
+        } catch (err) { warnProviderParseFailure("Goose", err, opts); }
       }
     }
 
     // ── Droid (Factory CLI) — passive reader for ~/.factory/sessions/*.settings.json ──
-    const droidSettingsFiles = sourceAllowed("droid") ? listDroidSettingsFiles(process.env) : [];
+    const droidSettingsFiles = sourceAllowed("droid")
+      ? mergeBothFileSources({ resolveFiles: listDroidSettingsFiles, env: process.env })
+      : [];
     let droidResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (droidSettingsFiles.length > 0) {
       if (progress?.enabled) {
@@ -788,27 +800,32 @@ async function cmdSync(argv) {
     // ── Zed Agent (all providers; cumulative-delta over SQLite threads) ──
     const zedDbPath = resolveZedDbPath(process.env);
     let zedResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    if (sourceAllowed("zed") && zedDbPath && fssync.existsSync(zedDbPath)) {
-      if (progress?.enabled) {
-        progress.start(`Parsing Zed Agent ${renderBar(0)} 0 threads | buckets 0`);
-      }
-      try {
-        zedResult = await parseZedIncremental({
-          dbPath: zedDbPath,
-          cursors,
-          queuePath,
-          onProgress: (p) => {
-            if (!progress?.enabled) return;
-            const pct = p.total > 0 ? p.index / p.total : 1;
-            progress.update(
-              `Parsing Zed Agent ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(
-                p.total,
-              )} threads | buckets ${formatNumber(p.bucketsQueued)}`,
-            );
-          },
-        });
-      } catch (err) {
-        warnProviderParseFailure("Zed Agent", err, opts);
+    if (sourceAllowed("zed")) {
+      const zedMode = wsl.getWslMode(process.env);
+      if (zedMode === "both" && process.platform === "win32") {
+        const home = os.homedir();
+        const local = process.env.LOCALAPPDATA || path.join(home, "AppData", "Local");
+        const nativeDb = path.join(local, "Zed", "threads", "threads.db");
+        const wslThreadsDir = wsl.shouldProbeWsl(process.env) ? wsl.discoverWslHome(".local/share/zed/threads") : null;
+        const wslDb = wslThreadsDir ? path.join(wslThreadsDir, "threads.db") : null;
+        const zedPaths = resolveInstallPaths("zed", { nativeValue: nativeDb, wslValue: wslDb });
+        if (zedPaths.native || zedPaths.wsl) {
+          if (progress?.enabled) progress.start(`Parsing Zed Agent ${renderBar(0)} 0 threads | buckets 0`);
+          try {
+            zedResult = await multiInstallParse({
+              paths: zedPaths, parserFn: parseZedIncremental, providerName: "zed",
+              cursors, getParams: (p) => ({ dbPath: p }), queuePath, onProgress: zedOnProgress,
+            });
+          } catch (err) { warnProviderParseFailure("Zed Agent", err, opts); }
+        }
+      } else if (zedDbPath && fssync.existsSync(zedDbPath)) {
+        if (progress?.enabled) progress.start(`Parsing Zed Agent ${renderBar(0)} 0 threads | buckets 0`);
+        ensureFlatCursor(cursors, "zed");
+        try {
+          zedResult = await parseZedIncremental({
+            dbPath: zedDbPath, cursors, queuePath, onProgress: zedOnProgress,
+          });
+        } catch (err) { warnProviderParseFailure("Zed Agent", err, opts); }
       }
     }
 
@@ -920,27 +937,75 @@ async function cmdSync(argv) {
 
     // ── Hermes Agent (SQLite-based) ──
     let hermesResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const hermesPath = resolveHermesPath();
-    if (sourceAllowed("hermes") && hermesPath && fssync.existsSync(hermesPath)) {
-      if (progress?.enabled) {
-        progress.start(`Parsing Hermes ${renderBar(0)} | buckets 0`);
+    if (sourceAllowed("hermes")) {
+      const override = process.env.TOKENTRACKER_HERMES_HOME;
+      const overridePath = typeof override === "string" && override.trim().length > 0 ? override.trim() : null;
+      if (overridePath) {
+        if (fssync.existsSync(overridePath)) {
+          if (progress?.enabled) {
+            progress.start(`Parsing Hermes ${renderBar(0)} | buckets 0`);
+          }
+          ensureFlatCursor(cursors, "hermes");
+          try {
+            hermesResult = await parseHermesIncremental({
+              hermesPath: overridePath,
+              cursors,
+              queuePath,
+              onProgress: hermesOnProgress,
+            });
+          } catch (err) {
+            warnProviderParseFailure("Hermes", err, opts);
+          }
+        }
+      } else {
+        const home = os.homedir();
+        const defaultPath = path.join(home, ".hermes");
+        const nativeValue = process.platform === "win32" && typeof process.env.LOCALAPPDATA === "string"
+          ? path.join(process.env.LOCALAPPDATA.trim(), "hermes") : defaultPath;
+        const hermesPaths = resolveInstallPaths("hermes", { nativeValue, wslDir: ".hermes" });
+        if (hermesPaths.native || hermesPaths.wsl) {
+          if (progress?.enabled) {
+            progress.start(`Parsing Hermes ${renderBar(0)} | buckets 0`);
+          }
+          try {
+            hermesResult = await multiInstallParse({
+              paths: hermesPaths,
+              parserFn: parseHermesIncremental,
+              providerName: "hermes",
+              cursors,
+              getParams: (path) => ({ hermesPath: path }),
+              queuePath,
+              onProgress: hermesOnProgress,
+            });
+          } catch (err) {
+            warnProviderParseFailure("Hermes", err, opts);
+          }
+        }
       }
-      try {
-        hermesResult = await parseHermesIncremental({
-          hermesPath,
-          cursors,
-          queuePath,
-          onProgress: (p) => {
-            if (!progress?.enabled) return;
-            const pct = p.total > 0 ? p.index / p.total : 1;
-            progress.update(
-              `Parsing Hermes ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} sessions | buckets ${formatNumber(p.bucketsQueued)}`,
-            );
-          },
-        });
-      } catch (err) {
-        warnProviderParseFailure("Hermes", err, opts);
-      }
+    }
+
+    function hermesOnProgress(p) {
+      if (!progress?.enabled) return;
+      const pct = p.total > 0 ? p.index / p.total : 1;
+      progress.update(
+        `Parsing Hermes ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} sessions | buckets ${formatNumber(p.bucketsQueued)}`,
+      );
+    }
+
+    function gooseOnProgress(p) {
+      if (!progress?.enabled) return;
+      const pct = p.total > 0 ? p.index / p.total : 1;
+      progress.update(
+        `Parsing Goose ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} sessions | buckets ${formatNumber(p.bucketsQueued)}`,
+      );
+    }
+
+    function zedOnProgress(p) {
+      if (!progress?.enabled) return;
+      const pct = p.total > 0 ? p.index / p.total : 1;
+      progress.update(
+        `Parsing Zed Agent ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} threads | buckets ${formatNumber(p.bucketsQueued)}`,
+      );
     }
 
     // ── Kiro CLI (reads ~/Library/Application Support/kiro-cli/data.sqlite3
@@ -1005,7 +1070,9 @@ async function cmdSync(argv) {
 
     // ── Kimi Code official (@moonshot-ai/kimi-code, ~/.kimi-code) ──
     let kimiCodeResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const kimiCodeWireFiles = sourceAllowed("kimi-code") ? resolveKimiCodeWireFiles(process.env) : [];
+    const kimiCodeWireFiles = sourceAllowed("kimi-code")
+      ? mergeBothFileSources({ resolveFiles: resolveKimiCodeWireFiles, env: process.env })
+      : [];
     if (kimiCodeWireFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing Kimi Code (official) ${renderBar(0)} | buckets 0`);
@@ -1033,7 +1100,9 @@ async function cmdSync(argv) {
     // Tencent's CodeBuddy CLI is a Claude Code clone; no hook system, so we
     // tail the per-session JSONL conversation logs incrementally on each sync.
     let codebuddyResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const codebuddyFiles = sourceAllowed("codebuddy") ? resolveCodebuddyProjectFiles(process.env) : [];
+    const codebuddyFiles = sourceAllowed("codebuddy")
+      ? mergeBothFileSources({ resolveFiles: resolveCodebuddyProjectFiles, env: process.env })
+      : [];
     if (codebuddyFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing CodeBuddy ${renderBar(0)} | buckets 0`);
@@ -1063,7 +1132,9 @@ async function cmdSync(argv) {
     // sub-agent logs nest one level deeper, so the resolver recurses. See the
     // parser comment in rollout.js for the cache-aware token math.
     let workbuddyResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const workbuddyFiles = sourceAllowed("workbuddy") ? resolveWorkbuddyProjectFiles(process.env) : [];
+    const workbuddyFiles = sourceAllowed("workbuddy")
+      ? mergeBothFileSources({ resolveFiles: resolveWorkbuddyProjectFiles, env: process.env })
+      : [];
     if (workbuddyFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing WorkBuddy ${renderBar(0)} | buckets 0`);
@@ -1089,7 +1160,9 @@ async function cmdSync(argv) {
 
     // ── oh-my-pi (passive ~/.omp/agent/sessions/**/*.jsonl reader) ──
     let ompResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const ompFiles = sourceAllowed("omp") ? resolveOmpSessionFiles(process.env) : [];
+    const ompFiles = sourceAllowed("omp")
+      ? mergeBothFileSources({ resolveFiles: resolveOmpSessionFiles, env: process.env })
+      : [];
     if (ompFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing oh-my-pi ${renderBar(0)} | buckets 0`);
@@ -1120,7 +1193,7 @@ async function cmdSync(argv) {
     let piResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     const piFiles = !sourceAllowed("pi") || piAgentDirCollidesWithOmp(process.env)
       ? []
-      : resolvePiSessionFiles(process.env);
+      : mergeBothFileSources({ resolveFiles: resolvePiSessionFiles, env: process.env });
     if (piFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing pi ${renderBar(0)} | buckets 0`);
@@ -1146,7 +1219,9 @@ async function cmdSync(argv) {
 
     // ── Craft Agents (passive ~/.craft-agent + workspaces session.jsonl reader) ──
     let craftResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const craftFiles = sourceAllowed("craft") ? resolveCraftSessionFiles(process.env) : [];
+    const craftFiles = sourceAllowed("craft")
+      ? mergeBothFileSources({ resolveFiles: resolveCraftSessionFiles, env: process.env })
+      : [];
     if (craftFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing Craft ${renderBar(0)} | buckets 0`);

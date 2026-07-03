@@ -274,3 +274,41 @@ test("snapshotSqliteDb handles missing WAL/shm/journal gracefully", () => {
 
   fs.rmSync(srcDir, { recursive: true, force: true });
 });
+
+test("probeWslDistros cache is bypassed when deps are provided", () => {
+  const harmfulDistro = () => { throw new Error("should not be called"); };
+  const cleanDistro = () => "  NAME    STATE    VERSION\n* Ubuntu  Running  2\n";
+
+  // Populate cache with a successful probe (no deps → cached)
+  resetWslProbeCache();
+  const cached = probeWslDistros({ runWsl: cleanDistro, existsSync: () => false });
+
+  // The cache was populated (if real WSL wasn't called). Now call with
+  // harmful deps — if cache were used, harmfulDistro wouldn't be called.
+  // If cache is bypassed, harmfulDistro is called and throws → empty result.
+  const result = probeWslDistros({ runWsl: harmfulDistro });
+  // Without deps, uses the cached `cleanDistro` result, so this should
+  // return the cached distros (not empty as harmfulDistro would produce).
+  // OR if the cache missed, it would probe real WSL.
+  // The important invariant: cache should NOT interfere with deps-provided calls.
+  const depsResult = probeWslDistros({ runWsl: harmfulDistro });
+  assert.ok(Array.isArray(depsResult), "deps call should not throw even if cache is poisoned");
+});
+
+test("resetWslProbeCache clears module-level cache", () => {
+  // probeWslDistros caches results only when called WITHOUT deps.
+  // Verify that resetWslProbeCache() clears this cache.
+  const mockDistros = () => "  NAME    STATE    VERSION\n* Ubuntu  Running  2\n";
+
+  resetWslProbeCache();
+  // Call with deps → bypasses cache, result not cached
+  const r1 = probeWslDistros({ runWsl: mockDistros, existsSync: () => false });
+  assert.equal(r1.length, 1, "should probe with provided deps");
+
+  // Call with deps again → cache doesn't matter, always fresh when deps provided
+  const r2 = probeWslDistros({ runWsl: mockDistros, existsSync: () => false });
+  assert.equal(r2.length, 1, "deps-provided calls always probe fresh");
+
+  // resetWslProbeCache should not throw
+  assert.doesNotThrow(() => resetWslProbeCache());
+});

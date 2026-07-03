@@ -7,6 +7,7 @@ const crypto = require("node:crypto");
 const { ensureDir } = require("./fs");
 const { readSqliteJsonRows } = require("./sqlite-reader");
 const wsl = require("./wsl-probe");
+const { resolveInstallPaths } = require("./install-resolver");
 
 const DEFAULT_SOURCE = "codex";
 const DEFAULT_MODEL = "unknown";
@@ -3787,23 +3788,11 @@ function resolveHermesPath(env = process.env, deps = {}) {
   }
   const home = require("node:os").homedir();
   const defaultPath = path.join(home, ".hermes");
-  // On Windows, scan BOTH the native install (%LOCALAPPDATA%\hermes) and
-  // any WSL distros running Hermes Agent. Each install has its own independent
-  // state.db with different sessions, so there is no double-counting risk.
-  // TOKENTRACKER_WSL_MODE controls which source takes priority.
   if (process.platform === "win32") {
-    let nativePath = null;
-    if (wsl.shouldProbeNative(env)) {
-      const localAppData = typeof env.LOCALAPPDATA === "string" ? env.LOCALAPPDATA.trim() : "";
-      if (localAppData.length > 0) {
-        const candidate = path.join(localAppData, "hermes");
-        try {
-          if (fssync.existsSync(candidate)) nativePath = candidate;
-        } catch (_e) { }
-      }
-    }
-    const wslPath = wsl.shouldProbeWsl(env) ? discoverWslHermesHome(deps) : null;
-    const picked = wsl.pickWin32Path({ wslValue: wslPath, nativeValue: nativePath, env, platform: "win32" });
+    const localAppData = typeof env.LOCALAPPDATA === "string" ? env.LOCALAPPDATA.trim() : "";
+    const nativeValue = localAppData.length > 0 ? path.join(localAppData, "hermes") : null;
+    const paths = resolveInstallPaths("hermes", { nativeValue, wslDir: ".hermes" }, env, deps);
+    const picked = paths.native || paths.wsl;
     if (picked) return picked;
     const mode = wsl.getWslMode(env);
     if (mode === "wsl-only" || mode === "native-only") return null;
@@ -3839,16 +3828,12 @@ function discoverWslHermesHome(deps = {}) {
 }
 
 function pickWin32ProviderPath({ env = process.env, nativeValue, wslProviderDir, wslValue }) {
-  const nativeCandidate = wsl.shouldProbeNative(env) ? nativeValue : null;
-  const wslCandidate = wslValue !== undefined
-    ? wslValue
-    : (wsl.shouldProbeWsl(env) ? wsl.discoverWslHome(wslProviderDir) : null);
-  return wsl.pickWin32Path({
-    wslValue: wslCandidate,
-    nativeValue: nativeCandidate,
-    env,
-    platform: "win32",
-  });
+  const paths = resolveInstallPaths("_", { nativeValue, wslDir: wslProviderDir, wslValue }, env);
+  return paths.native || paths.wsl;
+}
+
+function resolveAllWin32ProviderPaths({ env = process.env, nativeValue, wslProviderDir, wslValue }) {
+  return resolveInstallPaths("_", { nativeValue, wslDir: wslProviderDir, wslValue }, env);
 }
 
 function resolveHermesDbPath(env = process.env) {
@@ -6526,13 +6511,10 @@ function resolveZedDbPath(env = process.env) {
   if (process.platform === "win32") {
     const local = env.LOCALAPPDATA || path.join(home, "AppData", "Local");
     const native = path.join(local, "Zed", "threads", "threads.db");
-    let nativeExists = null;
-    if (wsl.shouldProbeNative(env)) {
-      try { if (fssync.existsSync(native)) nativeExists = native; } catch (_e) { }
-    }
-    const wslDir = wsl.shouldProbeWsl(env) ? wsl.discoverWslHome(".local/share/zed/threads", { env }) : null;
-    const wslValue = wslDir ? path.join(wslDir, "threads.db") : null;
-    const picked = wsl.pickWin32Path({ wslValue, nativeValue: nativeExists, env, platform: "win32" });
+    const wslThreadsDir = wsl.shouldProbeWsl(env) ? wsl.discoverWslHome(".local/share/zed/threads", { env }) : null;
+    const wslDbPath = wslThreadsDir ? path.join(wslThreadsDir, "threads.db") : null;
+    const paths = resolveInstallPaths("zed", { nativeValue: native, wslValue: wslDbPath }, env);
+    const picked = paths.native || paths.wsl;
     if (picked) return picked;
     const mode = wsl.getWslMode(env);
     return mode === "wsl-only" || mode === "native-only" ? null : native;
@@ -6909,13 +6891,10 @@ function resolveGooseDbPath(env = process.env) {
   } else if (process.platform === "win32") {
     const appData = env.APPDATA || path.join(home, "AppData", "Roaming");
     const native = path.join(appData, "goose", "sessions", "sessions.db");
-    let nativeExists = null;
-    if (wsl.shouldProbeNative(env)) {
-      try { if (fssync.existsSync(native)) nativeExists = native; } catch (_e) { }
-    }
     const wslDir = wsl.shouldProbeWsl(env) ? wsl.discoverWslHome(".local/share/goose/sessions", { env }) : null;
     const wslValue = wslDir ? path.join(wslDir, "sessions.db") : null;
-    const picked = wsl.pickWin32Path({ wslValue, nativeValue: nativeExists, env, platform: "win32" });
+    const paths = resolveInstallPaths("goose", { nativeValue: native, wslValue }, env);
+    const picked = paths.native || paths.wsl;
     if (picked) candidates.push(picked);
     for (const c of candidates) {
       if (fssync.existsSync(c)) return c;
