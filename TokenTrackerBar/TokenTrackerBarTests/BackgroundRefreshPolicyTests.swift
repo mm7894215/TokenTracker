@@ -33,4 +33,56 @@ final class BackgroundRefreshPolicyTests: XCTestCase {
             true
         )
     }
+
+    func testRunsCatchUpSyncWhenNoPreviousSyncExists() {
+        XCTAssertEqual(
+            BackgroundRefreshPolicy.shouldRunCatchUpSync(
+                now: Date(timeIntervalSince1970: 1_000),
+                lastSyncAt: nil,
+                staleInterval: 300
+            ),
+            true
+        )
+    }
+
+    func testSkipsCatchUpSyncWhenPreviousSyncIsFresh() {
+        XCTAssertEqual(
+            BackgroundRefreshPolicy.shouldRunCatchUpSync(
+                now: Date(timeIntervalSince1970: 1_000),
+                lastSyncAt: Date(timeIntervalSince1970: 800),
+                staleInterval: 300
+            ),
+            false
+        )
+    }
+
+    func testRunsCatchUpSyncAtStaleBoundary() {
+        XCTAssertEqual(
+            BackgroundRefreshPolicy.shouldRunCatchUpSync(
+                now: Date(timeIntervalSince1970: 1_000),
+                lastSyncAt: Date(timeIntervalSince1970: 700),
+                staleInterval: 300
+            ),
+            true
+        )
+    }
+
+    func testSkipsCatchUpSyncForNonPositiveInterval() {
+        XCTAssertEqual(
+            BackgroundRefreshPolicy.shouldRunCatchUpSync(
+                now: Date(timeIntervalSince1970: 1_000),
+                lastSyncAt: nil,
+                staleInterval: 0
+            ),
+            false
+        )
+        XCTAssertEqual(
+            BackgroundRefreshPolicy.shouldRunCatchUpSync(
+                now: Date(timeIntervalSince1970: 1_000),
+                lastSyncAt: nil,
+                staleInterval: -1
+            ),
+            false
+        )
+    }
 }

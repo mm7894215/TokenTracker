@@ -258,6 +258,18 @@ class DashboardViewModel: ObservableObject {
         await loadAll()
     }
 
+    func catchUpAfterWakeOrSessionActive(now: Date = Date()) async {
+        let shouldSync = BackgroundRefreshPolicy.shouldRunCatchUpSync(
+            now: now,
+            lastSyncAt: lastBackgroundSyncAt
+        )
+        if shouldSync {
+            await syncThenLoad()
+        } else {
+            await loadAll()
+        }
+    }
+
     func triggerSync() async {
         guard !isSyncing else { return }
         isSyncing = true

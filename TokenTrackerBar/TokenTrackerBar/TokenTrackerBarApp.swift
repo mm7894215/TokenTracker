@@ -13,11 +13,13 @@ struct TokenTrackerBarApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusBarController: StatusBarController?
+    private var lastWakeCatchUpAttemptAt: Date?
     private let viewModel = DashboardViewModel()
     private let serverManager = ServerManager()
     private let launchAtLoginManager = LaunchAtLoginManager()
     private lazy var desktopPetController = DesktopPetWindowController(viewModel: viewModel)
     private static var userInitiatedQuit = false
+    private static let wakeCatchUpDebounceInterval: TimeInterval = 60
 
     /// Real quit path: popover/Footer Quit buttons, NativeBridge "quit", UpdateChecker relaunch.
     /// Cmd+Q from the dashboard window goes through `applicationShouldTerminate` and is downgraded
@@ -53,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             viewModel: viewModel,
             launchAtLoginManager: launchAtLoginManager
         )
+        registerWakeCatchUpObservers()
 
         Task { @MainActor in
             await serverManager.ensureServerRunning()
@@ -68,7 +71,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
         serverManager.stopServer()
+    }
+
+    private func registerWakeCatchUpObservers() {
+        let notificationCenter = NSWorkspace.shared.notificationCenter
+        notificationCenter.addObserver(
+            self,
+            selector: #selector(scheduleWakeCatchUp(_:)),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+        notificationCenter.addObserver(
+            self,
+            selector: #selector(scheduleWakeCatchUp(_:)),
+            name: NSWorkspace.sessionDidBecomeActiveNotification,
+            object: nil
+        )
+    }
+
+    @objc private func scheduleWakeCatchUp(_ notification: Notification) {
+        let now = Date()
+        if let lastWakeCatchUpAttemptAt,
+           now.timeIntervalSince(lastWakeCatchUpAttemptAt) < Self.wakeCatchUpDebounceInterval {
+            return
+        }
+        lastWakeCatchUpAttemptAt = now
+
+        Task { @MainActor in
+            await serverManager.ensureServerRunning()
+            await viewModel.catchUpAfterWakeOrSessionActive(now: now)
+        }
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
