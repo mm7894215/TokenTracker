@@ -347,3 +347,5 @@ module.exports = {
   getLocalServerUrl,
   parseArgs,
 };
+const { parseClaudeIncremental } = require("../lib/rollout.js");
+
