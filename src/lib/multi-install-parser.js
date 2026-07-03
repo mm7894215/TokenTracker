@@ -34,10 +34,16 @@ async function multiInstallParse({ paths, parserFn, providerName, cursors, getPa
     const secondKey = prefer === "wsl" ? "native" : "wsl";
 
     cursors[providerName] = ns[firstKey];
-    const firstResult = await parserFn({
-      ...getParams(paths[firstKey], firstKey), ...shared, cursors,
-      onProgress: wrapProgress(onProgress, firstKey),
-    });
+    let firstResult;
+    try {
+      firstResult = await parserFn({
+        ...getParams(paths[firstKey], firstKey), ...shared, cursors,
+        onProgress: wrapProgress(onProgress, firstKey),
+      });
+    } catch (parseErr) {
+      cursors[providerName] = ns;
+      throw parseErr;
+    }
     ns[firstKey] = cursors[providerName];
     recordsProcessed += firstResult.recordsProcessed || 0;
     eventsAggregated += firstResult.eventsAggregated || 0;

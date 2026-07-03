@@ -753,7 +753,7 @@ async function cmdSync(argv) {
         }
       } else if (gooseDbPath && fssync.existsSync(gooseDbPath)) {
         if (progress?.enabled) progress.start(`Parsing Goose ${renderBar(0)} 0 sessions | buckets 0`);
-        ensureFlatCursor(cursors, "goose");
+        ensureFlatCursor(cursors, "goose", process.env);
         try {
           gooseResult = await parseGooseIncremental({
             dbPath: gooseDbPath, cursors, queuePath, onProgress: gooseOnProgress,
@@ -820,7 +820,7 @@ async function cmdSync(argv) {
         }
       } else if (zedDbPath && fssync.existsSync(zedDbPath)) {
         if (progress?.enabled) progress.start(`Parsing Zed Agent ${renderBar(0)} 0 threads | buckets 0`);
-        ensureFlatCursor(cursors, "zed");
+        ensureFlatCursor(cursors, "zed", process.env);
         try {
           zedResult = await parseZedIncremental({
             dbPath: zedDbPath, cursors, queuePath, onProgress: zedOnProgress,
@@ -945,7 +945,7 @@ async function cmdSync(argv) {
           if (progress?.enabled) {
             progress.start(`Parsing Hermes ${renderBar(0)} | buckets 0`);
           }
-          ensureFlatCursor(cursors, "hermes");
+          ensureFlatCursor(cursors, "hermes", process.env);
           try {
             hermesResult = await parseHermesIncremental({
               hermesPath: overridePath,

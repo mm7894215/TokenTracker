@@ -28,7 +28,7 @@ test("flat cursor migrates to both namespaces", () => {
   assert.deepEqual(ns.wsl.snapshots, { s1: { in: 50, out: 25 } });
 });
 
-test("ensureFlatCursor merges namespaces back to flat", () => {
+test("ensureFlatCursor merges namespaces with wsl-first default", () => {
   const cursors = {
     hermes: {
       native: { lastCompletedStartedAt: 50, snapshots: {} },
@@ -36,11 +36,24 @@ test("ensureFlatCursor merges namespaces back to flat", () => {
     },
   };
 
-  ensureFlatCursor(cursors, "hermes");
+  ensureFlatCursor(cursors, "hermes", { TOKENTRACKER_WSL_MODE: "wsl-first" });
 
   assert.equal(cursors.hermes.native, undefined, "native key should be removed");
   assert.equal(cursors.hermes.wsl, undefined, "wsl key should be removed");
-  assert.equal(cursors.hermes.lastCompletedStartedAt, 50, "native value should win on conflict");
+  assert.equal(cursors.hermes.lastCompletedStartedAt, 100, "wsl value should win in wsl-first mode");
+});
+
+test("ensureFlatCursor respects native-first mode", () => {
+  const cursors = {
+    hermes: {
+      native: { lastCompletedStartedAt: 50, snapshots: {} },
+      wsl: { lastCompletedStartedAt: 100, snapshots: {} },
+    },
+  };
+
+  ensureFlatCursor(cursors, "hermes", { TOKENTRACKER_WSL_MODE: "native-first" });
+
+  assert.equal(cursors.hermes.lastCompletedStartedAt, 50, "native value should win in native-first mode");
 });
 
 test("ensureFlatCursor no-ops on already-flat cursor", () => {

@@ -31,17 +31,19 @@ function ensureNamespacedCursors(cursors, providerName) {
     return state;
   }
 
-  const flat = { ...state };
+  const flat = JSON.parse(JSON.stringify(state));
   cursors[providerName] = { native: { ...flat }, wsl: { ...flat } };
   return cursors[providerName];
 }
 
-function ensureFlatCursor(cursors, providerName) {
+function ensureFlatCursor(cursors, providerName, env) {
   const state = cursors[providerName];
   if (!state || typeof state !== "object") return;
   if (state.native === undefined && state.wsl === undefined) return;
 
-  const merged = { ...state.wsl, ...state.native };
+  const mode = wsl.getWslMode(env || process.env);
+  const preferWsl = mode === "wsl-first" || mode === "wsl-only";
+  const merged = preferWsl ? { ...state.native, ...state.wsl } : { ...state.wsl, ...state.native };
   cursors[providerName] = merged;
 }
 
