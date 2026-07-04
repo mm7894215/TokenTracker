@@ -19,8 +19,6 @@ const WSL_MODES = new Set([
   "both",
 ]);
 
-const WSL_PREFER_MODES = new Set(["native", "wsl"]);
-
 function defaultRunWsl(args, { utf16 = false } = {}) {
   const { execFileSync } = require("node:child_process");
   const buf = execFileSync("wsl.exe", args, DEFAULT_EXEC_OPTS);
@@ -75,12 +73,6 @@ function normalizeWslMode(value) {
 function getWslMode(env = process.env) {
   const raw = normalizeWslMode(env.TOKENTRACKER_WSL_MODE);
   return WSL_MODES.has(raw) ? raw : "wsl-first";
-}
-
-function getWslPrefer(env = process.env) {
-  const raw = normalizeWslMode(env.TOKENTRACKER_WSL_PREFER);
-  if (!raw) return null;
-  return WSL_PREFER_MODES.has(raw) ? raw : null;
 }
 
 function isInvalidWslMode(env = process.env) {
@@ -201,7 +193,6 @@ module.exports = {
   isUncPath,
   snapshotSqliteDb,
   getWslMode,
-  getWslPrefer,
   isInvalidWslMode,
   shouldProbeWsl,
   shouldProbeNative,

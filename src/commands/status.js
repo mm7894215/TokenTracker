@@ -62,7 +62,7 @@ const {
   resolveHermesDbPath,
   probeWslDistros,
 } = require("../lib/rollout");
-const { getWslMode, getWslPrefer, isInvalidWslMode, shouldProbeWsl } = require("../lib/wsl-probe");
+const { getWslMode, isInvalidWslMode, shouldProbeWsl } = require("../lib/wsl-probe");
 const { probeGrokHookState, resolveGrokHome } = require("../lib/grok-hook");
 
 async function cmdStatus(argv = []) {
@@ -429,7 +429,6 @@ async function cmdStatus(argv = []) {
       ...(process.platform === "win32"
         ? {
             wsl_mode: getWslMode(),
-            wsl_prefer: getWslMode() === "both" ? getWslPrefer() : undefined,
             wsl_mode_invalid: isInvalidWslMode(),
             wsl_distros: wslDistros.map((d) => ({ name: d.name, version: d.version })),
           }
@@ -540,9 +539,6 @@ async function cmdStatus(argv = []) {
         const lines = [
           `- WSL mode: ${wslMode}${modeSuffix}`,
         ];
-        if (wslMode === "both") {
-          lines.push(`  prefer: ${getWslPrefer()}`);
-        }
         if (wslDistros.length > 0) {
           lines.push(`  distros: ${wslDistros.map((d) => `${d.name} (v${d.version ?? "?"})`).join(", ")}`);
         }
