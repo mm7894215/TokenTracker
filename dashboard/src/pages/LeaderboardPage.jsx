@@ -632,10 +632,15 @@ export function LeaderboardPage({
                       rowClickable && "cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500/60",
                     )}
                   >
+                    {/* No position class on this td: cn() is tailwind-merge, so
+                        e.g. `relative` would silently drop lbStickyTdRank's
+                        `sticky` and this cell would scroll away on horizontal
+                        drag (issue 265). The sticky td is already positioned, which
+                        is all the pin stripe's before:absolute needs. */}
                     <td
                       className={cn(
                         lbStickyTdRank(true),
-                        "relative font-semibold text-oai-brand-600 dark:text-oai-brand-400",
+                        "font-semibold text-oai-brand-600 dark:text-oai-brand-400",
                         isPinned && "before:absolute before:left-0 before:top-[15%] before:h-[70%] before:w-[3px] before:rounded-r before:bg-oai-brand-500 dark:before:bg-oai-brand-400"
                       )}
                     >

@@ -125,6 +125,36 @@ describe("LeaderboardPage window-session cache reuse", () => {
     });
   });
 
+  it("keeps the pinned me-row rank cell sticky (twMerge must not drop it, issue 265)", () => {
+    const contextKey = getLeaderboardPreloadContextKey({
+      accessMode: "cloud",
+      baseUrl: "https://edge.example",
+      mockEnabled: false,
+      userId: "user-1",
+    });
+    publishLeaderboardPreloadState(
+      {
+        ...preloadedData,
+        me: {
+          rank: 227,
+          user_id: "user-1",
+          display_name: "Me User",
+          total_tokens: "999",
+          estimated_cost_usd: 1,
+        },
+      },
+      { contextKey },
+    );
+    getLeaderboard.mockReturnValue(new Promise(() => {}));
+
+    renderLeaderboard("/leaderboard", { auth: () => Promise.resolve("test-token") });
+
+    const rankCell = screen.getByText("227").closest("td");
+    expect(rankCell).not.toBeNull();
+    expect(rankCell.className).toMatch(/\bsticky\b/);
+    expect(rankCell.className).not.toMatch(/\brelative\b/);
+  });
+
   it("keeps matching cache visible under React StrictMode without render-time consumption", () => {
     const contextKey = getLeaderboardPreloadContextKey({
       accessMode: "cloud",
