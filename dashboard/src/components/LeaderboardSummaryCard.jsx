@@ -4,6 +4,11 @@ import { copy } from "../lib/copy";
 import { cn } from "../lib/cn";
 import { LeaderboardAvatar } from "./LeaderboardAvatar.jsx";
 
+// "Top n%" only reads as an achievement in the upper half of the board —
+// "Top 90%" is just a slower way of saying "bottom 10%". Past this cutoff
+// the chip shows the plain rank with no percentile badge.
+const PERCENTILE_BADGE_MAX = 50;
+
 function computePercentile(rank, total) {
   const r = Number(rank);
   const t = Number(total);
@@ -85,7 +90,7 @@ export function LeaderboardMeChip({
       <span className="text-xs font-bold tabular-nums text-oai-gray-800 dark:text-white">
         #{rank.toLocaleString()}
       </span>
-      {percentile != null && (
+      {percentile != null && percentile <= PERCENTILE_BADGE_MAX && (
         <span
           className={cn(
             "hidden sm:inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-extrabold tracking-wider tabular-nums uppercase transition-colors duration-300 ring-1",
