@@ -22,6 +22,83 @@ function logRefreshEvent(event: Record<string, unknown>) {
   console.log(JSON.stringify({ scope: "leaderboard-refresh", ...event }));
 }
 
+function b64urlToBytes(s: string): Uint8Array<ArrayBuffer> {
+  const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
+  const bin = atob(s.replace(/-/g, "+").replace(/_/g, "/") + pad);
+  const out = new Uint8Array(new ArrayBuffer(bin.length));
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// Constant-time compare so a secret/key check can't be probed byte-by-byte via timing.
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const ea = new TextEncoder().encode(a);
+  const eb = new TextEncoder().encode(b);
+  if (ea.length !== eb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ea.length; i++) diff |= ea[i] ^ eb[i];
+  return diff === 0;
+}
+
+// Verify HS256 JWT against JWT_SECRET; return {sub, role} or null. Mirrors the
+// account-* helper. NOTE: the PUBLIC anon key is itself a validly-signed JWT
+// (role="anon"), so callers must reject role==="anon" to require a real user.
+async function verifiedClaimsFromJwt(
+  authHeader: string | null,
+): Promise<{ sub: string; role: string } | null> {
+  if (!authHeader) return null;
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  if (!token) return null;
+  const secret = Deno.env.get("JWT_SECRET");
+  if (!secret) return null;
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  try {
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"],
+    );
+    const data = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
+    const ok = await crypto.subtle.verify("HMAC", key, b64urlToBytes(parts[2]), data);
+    if (!ok) return null;
+    const payload = JSON.parse(new TextDecoder().decode(b64urlToBytes(parts[1]))) as Record<string, unknown>;
+    if (typeof payload.exp === "number" && Date.now() / 1000 > payload.exp) return null;
+    const sub = typeof payload.sub === "string" && payload.sub
+      ? payload.sub
+      : (typeof payload.user_id === "string" ? payload.user_id : "");
+    const role = typeof payload.role === "string" ? payload.role : "";
+    if (!sub) return null;
+    return { sub, role };
+  } catch {
+    return null;
+  }
+}
+
+// Refresh is a heavy write path. Until 2026-07-04 it was unauthenticated —
+// anyone could POST and trigger a full snapshot rebuild, the lever behind the
+// 2026-06-21 meltdown. Accept only: the cron/ops shared secret
+// (LEADERBOARD_REFRESH_SECRET, sent by the pg_cron schedule), the service-role
+// key (manual ops), or a SIGNED-IN user (the dashboard's per-sync week refresh).
+// The public anon key is a validly-signed JWT with role="anon" and must NOT pass.
+async function authorizeRefresh(req: Request): Promise<boolean> {
+  const secret = Deno.env.get("LEADERBOARD_REFRESH_SECRET");
+  const provided = req.headers.get("x-refresh-secret");
+  if (secret && provided && timingSafeEqualStr(provided, secret)) return true;
+
+  const auth = req.headers.get("Authorization");
+  const bearer = auth ? auth.replace(/^Bearer\s+/i, "").trim() : "";
+  const serviceKey = Deno.env.get("INSFORGE_SERVICE_ROLE_KEY");
+  if (bearer && serviceKey && timingSafeEqualStr(bearer, serviceKey)) return true;
+
+  const claims = await verifiedClaimsFromJwt(auth);
+  if (claims && claims.role !== "anon" && claims.sub) return true;
+
+  return false;
+}
+
 type Period = "week" | "month" | "total";
 const ALL_PERIODS: Period[] = ["week", "month", "total"];
 const BLOCKED_LEADERBOARD_USER_IDS = new Set(
@@ -367,6 +444,7 @@ export default async function (req: Request): Promise<Response> {
   if (req.method === "OPTIONS")
     return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  if (!(await authorizeRefresh(req))) return json({ error: "unauthorized" }, 401);
   const requestStartedAt = Date.now();
 
   const baseUrl = Deno.env.get("INSFORGE_BASE_URL")!;
@@ -404,20 +482,21 @@ export default async function (req: Request): Promise<Response> {
     const periodStartedAt = Date.now();
     const { from_day, to_day } = computeDateRange(period);
 
-    // --- Rate limit: skip if generated_at within last 30s ---
-    const { data: recentSnap } = await client.database
-      .from("tokentracker_leaderboard_snapshots")
-      .select("generated_at")
-      .eq("period", period)
-      .eq("from_day", from_day)
-      .eq("to_day", to_day)
-      .order("generated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (recentSnap?.generated_at) {
-      const elapsed = Date.now() - new Date(recentSnap.generated_at as string).getTime();
-      if (elapsed < 30_000) {
+    // --- Fail-closed throttle + concurrency guard ---
+    // Atomic claim on last_attempt_at, which advances on EVERY attempt (success
+    // OR failure). The old throttle read snapshots.generated_at, which only
+    // advances on success — so once the RPC started timing out it opened
+    // permanently and every cron tick re-ran the full refresh concurrently
+    // (the 2026-06-21 meltdown). The single-statement claim also serializes
+    // concurrent callers (only one wins each 30s window). Fail-OPEN only on a
+    // claim-infra error, never on a throttle hit — a lock fault must not be
+    // able to freeze refreshes (safe now that the RPC is fast, issue #263).
+    try {
+      const { data: claimed, error: claimErr } = await client.database.rpc(
+        "leaderboard_refresh_try_claim",
+        { p_period: period, p_min_interval_s: 30 },
+      );
+      if (!claimErr && claimed !== true) {
         results[period] = { upserted: 0, skipped: true };
         logRefreshEvent({
           event: "period_skipped",
@@ -428,11 +507,13 @@ export default async function (req: Request): Promise<Response> {
           to_day,
           upserted: 0,
           skipped: true,
+          reason: "throttled",
           duration_ms: Date.now() - periodStartedAt,
-          recent_snapshot_age_ms: elapsed,
         });
         continue;
       }
+    } catch (_e) {
+      // fail-open: proceed with refresh rather than block on a lock fault
     }
 
     // --- Aggregate via server-side RPC ---

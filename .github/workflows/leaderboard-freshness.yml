@@ -1,0 +1,101 @@
+name: leaderboard freshness
+
+# External black-box watchdog for the leaderboard refresh pipeline.
+#
+# Why this exists: the leaderboard total snapshot silently froze for 10 days
+# (issue #263) and again during the 2026-06-21 meltdown, both discovered only
+# when a user filed an issue. The scheduled refresh's failures are invisible in
+# the obvious places — pg_cron's job_run_details shows "succeeded" because the
+# InsForge schedule wrapper swallows the HTTP error, and the real 500s live in
+# schedules.job_logs (7-day retention, never surfaced). This workflow watches
+# the ONLY signal that actually reflects user-visible health: the public API's
+# generated_at timestamp. If a period's snapshot goes stale past its refresh
+# cadence, it opens (or updates) a GitHub issue.
+#
+# Read-only: hits the public leaderboard endpoint with no credentials. No prod
+# DB access, no secrets beyond the default GITHUB_TOKEN used to file the alert.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: leaderboard-freshness
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    env:
+      API: https://srctyff5.us-east.insforge.app/functions/tokentracker-leaderboard
+      # Staleness budgets (hours). Each period's cron cadence + generous slack:
+      #   total  — hourly cron, alert if > 25h stale
+      #   month  — every 2h cron, alert if > 6h stale
+      #   week   — no cron (read-path self-heal), lenient 30h
+      TOTAL_MAX_H: "25"
+      MONTH_MAX_H: "6"
+      WEEK_MAX_H: "30"
+    steps:
+      - name: Probe generated_at per period
+        id: probe
+        run: |
+          set -euo pipefail
+          stale=""
+          check() {
+            local period="$1" budget_h="$2"
+            local gen
+            gen=$(curl -sS --max-time 20 "$API?period=$period&limit=1" | jq -r '.generated_at // empty')
+            if [ -z "$gen" ]; then
+              stale="${stale}- \`$period\`: no generated_at in response (endpoint error?)\n"
+              return
+            fi
+            local age_h
+            age_h=$(( ( $(date -u +%s) - $(date -u -d "$gen" +%s) ) / 3600 ))
+            echo "$period: generated_at=$gen age=${age_h}h budget=${budget_h}h"
+            if [ "$age_h" -gt "$budget_h" ]; then
+              stale="${stale}- \`$period\`: ${age_h}h stale (budget ${budget_h}h, last refresh $gen)\n"
+            fi
+          }
+          check total "$TOTAL_MAX_H"
+          check month "$MONTH_MAX_H"
+          check week  "$WEEK_MAX_H"
+          if [ -n "$stale" ]; then
+            {
+              echo "stale<<EOF"
+              echo -e "$stale"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open or update alert issue
+        if: steps.probe.outputs.stale != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BODY: ${{ steps.probe.outputs.stale }}
+        run: |
+          set -euo pipefail
+          title="⚠️ Leaderboard snapshot stale"
+          existing=$(gh issue list --state open --search "$title in:title" --json number --jq '.[0].number // empty')
+          body=$(printf 'The leaderboard freshness watchdog detected stale snapshot(s):\n\n%b\nRun: %s/%s/actions/runs/%s\n\n_This is auto-generated. It closes itself once freshness recovers._' \
+            "$BODY" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body" --label bug
+          fi
+
+      - name: Auto-close alert when healthy
+        if: steps.probe.outputs.stale == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          title="⚠️ Leaderboard snapshot stale"
+          gh issue list --state open --search "$title in:title" --json number --jq '.[].number' | while read -r n; do
+            [ -n "$n" ] && gh issue close "$n" --comment "Freshness recovered — all periods within budget. Auto-closing."
+          done

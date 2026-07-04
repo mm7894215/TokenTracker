@@ -75,3 +75,11 @@ SELECT src AS device_id, min(dst::text) AS machine_cluster_id
 FROM reach GROUP BY src;
 
 ALTER TABLE tokentracker_device_machine ADD PRIMARY KEY (device_id);
+
+-- Internal table: only account_usage_grouped (service-role) reads it, only this
+-- ops script (project_admin) writes it. RLS on + zero policy + no browser-role
+-- grants, matching every other internal table. CREATE TABLE AS does NOT inherit
+-- RLS, so a rebuild without these lines re-exposes the table to anon read/write
+-- (the 2026-07-04 gap that let anon skew cross-device aggregates). Do not remove.
+ALTER TABLE tokentracker_device_machine ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON tokentracker_device_machine FROM anon, authenticated;

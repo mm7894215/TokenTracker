@@ -38,11 +38,11 @@ function json(data: unknown, status = 200) {
   });
 }
 
-function b64urlToBytes(s: string): Uint8Array {
+function b64urlToBytes(s: string): Uint8Array<ArrayBuffer> {
   const b64 = s.replace(/-/g, "+").replace(/_/g, "/");
   const pad = (4 - (b64.length % 4)) % 4;
   const raw = atob(b64 + "=".repeat(pad));
-  const out = new Uint8Array(raw.length);
+  const out = new Uint8Array(new ArrayBuffer(raw.length));
   for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
   return out;
 }
@@ -444,6 +444,15 @@ async function scanHourlyForUser(client: any, userId: string, rangeStartIso: str
   const machineMap = new Map<string, HourlyRow>(); // SUM accumulator
   let offset = 0;
   const PAGE_SIZE = 1000;
+  // Runaway guard: this is a PUBLIC endpoint that walks one user's raw hourly
+  // rows with no server-side aggregation, so an unbounded loop lets a caller
+  // trigger arbitrarily large scans by targeting the heaviest public user.
+  // The heaviest real user is ~11.6k rows (365d); 60k pages is ~5x that, so no
+  // legitimate profile is ever truncated. If the cap is ever hit we log it
+  // loudly (a real user crossing it should become a rewrite-to-RPC signal, not
+  // silent undercounting).
+  const MAX_PAGES = 60;
+  let pages = 0;
   while (true) {
     const { data: rows, error } = await client.database
       .from("tokentracker_hourly")
@@ -494,6 +503,17 @@ async function scanHourlyForUser(client: any, userId: string, rangeStartIso: str
     }
     if (rows.length < PAGE_SIZE) break;
     offset += PAGE_SIZE;
+    pages += 1;
+    if (pages >= MAX_PAGES) {
+      console.warn(JSON.stringify({
+        scope: "leaderboard-profile",
+        event: "scan_cap_hit",
+        user_id: userId,
+        scanned_rows: offset,
+        note: "profile scan hit MAX_PAGES cap — data may undercount; consider server-side RPC",
+      }));
+      break;
+    }
   }
   // Merge (account and machine keys never collide — disjoint source sets).
   const merged = new Map<string, HourlyRow>(machineMap);

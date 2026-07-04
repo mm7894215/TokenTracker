@@ -1,3 +1,8 @@
+-- ⚠️ SUPERSEDED (2026-07-04, issue #263): leaderboard-rollup-daily.sql replaces
+-- this definition with a rollup-backed fast path for the total period.
+-- Re-applying THIS file reverts prod to the full-scan version that times out
+-- (>10s SDK limit). Kept only as rollback reference.
+--
 -- Server-side aggregation for the leaderboard refresh job (ALL users at once).
 --
 -- Motivation: tokentracker-leaderboard-refresh used to fetch raw
