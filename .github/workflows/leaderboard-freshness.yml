@@ -76,6 +76,8 @@ jobs:
         if: steps.probe.outputs.stale != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          # No checkout step, so gh cannot infer the repo from a local git dir.
+          GH_REPO: ${{ github.repository }}
           BODY: ${{ steps.probe.outputs.stale }}
         run: |
           set -euo pipefail
@@ -93,6 +95,8 @@ jobs:
         if: steps.probe.outputs.stale == ''
         env:
           GH_TOKEN: ${{ github.token }}
+          # No checkout step, so gh cannot infer the repo from a local git dir.
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           title="⚠️ Leaderboard snapshot stale"
