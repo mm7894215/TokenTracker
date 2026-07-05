@@ -44,7 +44,7 @@ test("parseOpenRouterAnalyticsRows maps daily analytics rows to records", () => 
   });
 
   assert.equal(records.length, 1);
-  assert.equal(records[0].date, "2026-07-01T12:00:00.000Z");
+  assert.equal(records[0].date, "2026-07-01T18:30:00.000Z");
   assert.equal(records[0].model, "anthropic/claude-sonnet-4");
   assert.equal(records[0].inputTokens, 1200);
   assert.equal(records[0].outputTokens, 300);
@@ -104,7 +104,7 @@ test("parseOpenRouterApiIncremental queues openrouter buckets", async () => {
     const result = await parseOpenRouterApiIncremental({
       records: [
         {
-          date: "2026-07-01T12:00:00.000Z",
+          date: "2026-07-01T18:30:00.000Z",
           model: "anthropic/claude-sonnet-4",
           inputTokens: 100,
           outputTokens: 25,
@@ -121,7 +121,7 @@ test("parseOpenRouterApiIncremental queues openrouter buckets", async () => {
     assert.match(raw, /"source":"openrouter"/);
     assert.match(raw, /"total_tokens":125/);
     assert.equal(
-      cursors.hourly.buckets["openrouter|anthropic/claude-sonnet-4|2026-07-01T12:00:00.000Z"].totals
+      cursors.hourly.buckets["openrouter|anthropic/claude-sonnet-4|2026-07-01T18:30:00.000Z"].totals
         .total_tokens,
       125,
     );

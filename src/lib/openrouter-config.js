@@ -199,7 +199,10 @@ function resolveOpenRouterDayKey(row) {
 
 function dayKeyToIsoDate(dayKey) {
   if (!dayKey) return null;
-  return `${dayKey}T12:00:00.000Z`;
+  // OpenRouter analytics is daily-granularity only. Use 18:30 UTC so positive-offset
+  // timezones (e.g. IST) map the usage day to the same local calendar day as live
+  // CLI session buckets — matching Cursor/Claude week/month visibility.
+  return `${dayKey}T18:30:00.000Z`;
 }
 
 /**
