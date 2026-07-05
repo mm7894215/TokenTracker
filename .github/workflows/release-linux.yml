@@ -1,0 +1,84 @@
+name: release Linux
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g. 0.68.0)"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+
+concurrency:
+  group: release-linux-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+
+      - name: Verify version
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [[ "$PKG_VERSION" != "${{ inputs.version }}" ]]; then
+            echo "::error::package.json version ($PKG_VERSION) does not match input (${{ inputs.version }})"
+            exit 1
+          fi
+
+      - name: Install dashboard dependencies
+        run: npm ci --prefix dashboard
+
+      - name: Build dashboard
+        env:
+          VITE_INSFORGE_BASE_URL: https://srctyff5.us-east.insforge.app
+          VITE_INSFORGE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3OC0xMjM0LTU2NzgtOTBhYi1jZGVmMTIzNDU2NzgiLCJlbWFpbCI6ImFub25AaW5zZm9yZ2UuY29tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExNDU5NDd9.T0auta_IrVIh0uXW1bob5QSnzvsnJmN28r5XkSGEuQY
+        run: npm run dashboard:build
+
+      - name: Bundle Linux runtime
+        run: bash scripts/release/bundle-node-linux.sh
+
+      - name: Verify package contents
+        run: |
+          required=(
+            "build/linux-x64/tokentracker"
+            "build/linux-x64/EmbeddedServer/node"
+            "build/linux-x64/EmbeddedServer/tokentracker/bin/tracker.js"
+            "build/linux-x64/EmbeddedServer/tokentracker/dashboard/dist/index.html"
+          )
+          for file in "${required[@]}"; do
+            if [[ ! -e "$file" ]]; then
+              echo "::error::missing required file: $file"
+              exit 1
+            fi
+          done
+
+      - name: Package tarball
+        run: |
+          tar -C build/linux-x64 -czf TokenTracker-linux-x64.tar.gz .
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          tag="v$VERSION"
+          asset="TokenTracker-linux-x64.tar.gz"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$asset" --clobber
+          else
+            gh release create "$tag" "$asset" --title "$tag" --generate-notes
+          fi
