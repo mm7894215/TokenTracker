@@ -1,6 +1,8 @@
 const http = require("node:http");
 const crypto = require("node:crypto");
 const cp = require("node:child_process");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const { DEFAULT_BASE_URL } = require("./runtime-config");
 
@@ -158,8 +160,103 @@ function buildBrowserList() {
   return [def, ...all.filter((b) => b !== def)];
 }
 
-function openInBrowser(url) {
-  const platform = process.platform;
+function isWslSession(env = process.env) {
+  return Boolean(
+    (typeof env.WSL_DISTRO_NAME === "string" && env.WSL_DISTRO_NAME.trim()) ||
+    (typeof env.WSL_INTEROP === "string" && env.WSL_INTEROP.trim()),
+  );
+}
+
+function hasGraphicalSession(env = process.env) {
+  return Boolean(
+    (typeof env.DISPLAY === "string" && env.DISPLAY.trim()) ||
+    (typeof env.WAYLAND_DISPLAY === "string" && env.WAYLAND_DISPLAY.trim()),
+  );
+}
+
+function isCommandAvailable(command, { env = process.env, platform = process.platform } = {}) {
+  if (typeof command !== "string" || !command.trim()) return false;
+
+  const pathEntries = String(env.PATH || "")
+    .split(path.delimiter)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const hasPathSeparator = command.includes("/") || command.includes("\\");
+  const suffixes = platform === "win32"
+    ? String(env.PATHEXT || ".EXE;.CMD;.BAT;.COM")
+      .split(";")
+      .map((ext) => ext.trim())
+      .filter(Boolean)
+    : [""];
+
+  const candidates = [];
+  if (hasPathSeparator) {
+    candidates.push(command);
+  } else {
+    for (const dir of pathEntries) {
+      if (platform === "win32") {
+        candidates.push(path.join(dir, command));
+        for (const ext of suffixes) {
+          candidates.push(path.join(dir, `${command}${ext}`));
+        }
+      } else {
+        candidates.push(path.join(dir, command));
+      }
+    }
+  }
+
+  for (const candidate of candidates) {
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return true;
+    } catch (_e) {}
+  }
+  return false;
+}
+
+function resolveBrowserLaunchCommand(
+  url,
+  {
+    platform = process.platform,
+    env = process.env,
+    commandExists = isCommandAvailable,
+  } = {},
+) {
+  if (platform === "win32") {
+    const escapedUrl = String(url).replace(/'/g, "''");
+    return {
+      command: "powershell.exe",
+      args: [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        `Start-Process -FilePath '${escapedUrl}'`,
+      ],
+    };
+  }
+
+  if (isWslSession(env) && commandExists("wslview", { env, platform })) {
+    return { command: "wslview", args: [url] };
+  }
+
+  if (!hasGraphicalSession(env)) return null;
+
+  const candidates = [
+    { command: "xdg-open", args: [url] },
+    { command: "gio", args: ["open", url] },
+    { command: "sensible-browser", args: [url] },
+  ];
+  for (const candidate of candidates) {
+    if (commandExists(candidate.command, { env, platform })) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function openInBrowser(url, { platform = process.platform, env = process.env, spawn = cp.spawn, commandExists = isCommandAvailable } = {}) {
 
   if (platform === "darwin") {
     // On macOS, prefer reusing a matching tab in a supported running browser.
@@ -230,34 +327,33 @@ else
   open location "${url}"
 end if
 `;
-    try {
-      const child = cp.spawn("osascript", ["-e", script], { stdio: "ignore", detached: true });
-      child.unref();
-    } catch (_e) {
-      // Fallback to plain open
+    if (commandExists("osascript", { env, platform })) {
       try {
-        const child = cp.spawn("open", [url], { stdio: "ignore", detached: true });
+        const child = spawn("osascript", ["-e", script], { stdio: "ignore", detached: true });
         child.unref();
+        return true;
+      } catch (_e) {}
+    }
+
+    if (commandExists("open", { env, platform })) {
+      try {
+        const child = spawn("open", [url], { stdio: "ignore", detached: true });
+        child.unref();
+        return true;
       } catch (_e2) {}
     }
-    return;
+    return false;
   }
 
-  let cmd = null;
-  let args = [];
-
-  if (platform === "win32") {
-    cmd = "cmd";
-    args = ["/c", "start", "", url];
-  } else {
-    cmd = "xdg-open";
-    args = [url];
-  }
+  const launch = resolveBrowserLaunchCommand(url, { platform, env, commandExists });
+  if (!launch) return false;
 
   try {
-    const child = cp.spawn(cmd, args, { stdio: "ignore", detached: true });
+    const child = spawn(launch.command, launch.args, { stdio: "ignore", detached: true });
     child.unref();
+    return true;
   } catch (_e) {}
+  return false;
 }
 
 function resolvePostAuthRedirect({ dashboardUrl, authUrl }) {
@@ -277,5 +373,9 @@ function resolvePostAuthRedirect({ dashboardUrl, authUrl }) {
 
 module.exports = {
   beginBrowserAuth,
+  hasGraphicalSession,
+  isCommandAvailable,
+  isWslSession,
   openInBrowser,
+  resolveBrowserLaunchCommand,
 };
