@@ -31,6 +31,7 @@ const {
   parseOpencodeDbIncremental,
   parseOpenclawIncremental,
   parseCursorApiIncremental,
+  parseOpenRouterApiIncremental,
   parseKiroIncremental,
   parseHermesIncremental,
   gooseInstallOwnsCursor,
@@ -91,6 +92,11 @@ const {
   fetchCursorUsageCsv,
   parseCursorCsv,
 } = require("../lib/cursor-config");
+const {
+  resolveOpenRouterApiKey,
+  isOpenRouterConfigured,
+  fetchOpenRouterDailyUsage,
+} = require("../lib/openrouter-config");
 const { purgeProjectUsage } = require("../lib/project-usage-purge");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
 const { resolveRuntimeConfig } = require("../lib/runtime-config");
@@ -197,6 +203,7 @@ const AUTO_SYNC_SOURCES = new Set([
   "omp",
   "opencode",
   "openclaw",
+  "openrouter",
   "pi",
   "roocode",
   "workbuddy",
@@ -913,6 +920,46 @@ async function cmdSync(argv) {
       }
     }
 
+    // ── OpenRouter (Analytics API) ──
+    let openrouterResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    if (sourceAllowed("openrouter") && isOpenRouterConfigured({ config, env: process.env })) {
+      const openrouterApiKey = resolveOpenRouterApiKey({ config, env: process.env });
+      if (openrouterApiKey) {
+        try {
+          if (progress?.enabled) {
+            progress.start("Fetching OpenRouter usage...");
+          }
+          const records = await fetchOpenRouterDailyUsage({ apiKey: openrouterApiKey });
+          if (records.length > 0) {
+            if (progress?.enabled) {
+              progress.start(
+                `Parsing OpenRouter ${renderBar(0)} 0/${formatNumber(records.length)} records | buckets 0`,
+              );
+            }
+            openrouterResult = await parseOpenRouterApiIncremental({
+              records,
+              cursors,
+              queuePath,
+              onProgress: (p) => {
+                if (!progress?.enabled) return;
+                const pct = p.total > 0 ? p.index / p.total : 1;
+                progress.update(
+                  `Parsing OpenRouter ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(
+                    p.total,
+                  )} records | buckets ${formatNumber(p.bucketsQueued)}`,
+                );
+              },
+              source: "openrouter",
+            });
+          }
+        } catch (err) {
+          if (!opts.auto) {
+            process.stderr.write(`OpenRouter sync: ${err.message}\n`);
+          }
+        }
+      }
+    }
+
     // ── Kiro (SQLite-based, with JSONL fallback) ──
     let kiroResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     const kiroDbPath = resolveKiroDbPath();
@@ -1461,6 +1508,7 @@ async function cmdSync(argv) {
         antigravityResult.filesProcessed +
         opencodeResult.filesProcessed +
         cursorResult.recordsProcessed +
+        openrouterResult.recordsProcessed +
         kiroResult.recordsProcessed +
         kiroCliResult.recordsProcessed +
         hermesResult.recordsProcessed +
@@ -1489,6 +1537,7 @@ async function cmdSync(argv) {
         antigravityResult.bucketsQueued +
         opencodeResult.bucketsQueued +
         cursorResult.bucketsQueued +
+        openrouterResult.bucketsQueued +
         kiroResult.bucketsQueued +
         kiroCliResult.bucketsQueued +
         hermesResult.bucketsQueued +

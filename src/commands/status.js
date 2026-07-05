@@ -64,6 +64,7 @@ const {
 } = require("../lib/rollout");
 const { getWslMode, isInvalidWslMode, shouldProbeWsl } = require("../lib/wsl-probe");
 const { probeGrokHookState, resolveGrokHome } = require("../lib/grok-hook");
+const { isOpenRouterConfigured } = require("../lib/openrouter-config");
 
 async function cmdStatus(argv = []) {
   const opts = parseArgs(argv);
@@ -415,6 +416,9 @@ async function cmdStatus(argv = []) {
           installed: hermesInstalled,
           detail: hermesPath,
         },
+        openrouter: isOpenRouterConfigured({ config, env: process.env })
+          ? { installed: true, detail: "analytics api" }
+          : { installed: false },
       },
       copilot: {
         token_set: Boolean(copilotToken),
@@ -521,6 +525,9 @@ async function cmdStatus(argv = []) {
         if (!hermesInstalled) return [];
         return [`- Hermes Agent: state.db found (${hermesPath})`];
       })(),
+      isOpenRouterConfigured({ config, env: process.env })
+        ? "- OpenRouter: Analytics API key configured"
+        : "- OpenRouter: unset (set OPENROUTER_API_KEY to enable)",
       ...(() => {
         const passive = passiveProviders.filter((p) => p.passive);
         if (passive.length === 0) return [];

@@ -38,6 +38,7 @@ const {
   isOpencodePluginInstalled,
 } = require("../lib/opencode-config");
 const { isCursorInstalled, extractCursorSessionToken } = require("../lib/cursor-config");
+const { isOpenRouterConfigured } = require("../lib/openrouter-config");
 const { removeOpenclawHookConfig, probeOpenclawHookState } = require("../lib/openclaw-hook");
 const {
   installOpenclawSessionPlugin,
@@ -94,6 +95,7 @@ const SUPPORTED_PROVIDERS = [
   "Claude Code",
   "Codex CLI",
   "Cursor",
+  "OpenRouter",
   "Gemini CLI",
   "Antigravity",
   "Kiro",
@@ -420,6 +422,7 @@ function buildIntegrationTargets({ home, trackerDir, notifyPath }) {
 async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOriginalPath }) {
   const context = buildIntegrationTargets({ home, trackerDir, notifyPath });
   context.notifyOriginalPath = notifyOriginalPath;
+  const config = await readJson(path.join(trackerDir, "config.json"));
 
   const summary = [];
 
@@ -493,6 +496,21 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
     }
   } else {
     summary.push({ label: "Cursor", status: "skipped", detail: "Not installed" });
+  }
+
+  // OpenRouter (Analytics API, optional API key)
+  if (isOpenRouterConfigured({ config, env: process.env })) {
+    summary.push({
+      label: "OpenRouter",
+      status: "detected",
+      detail: "Usage synced via OpenRouter Analytics API",
+    });
+  } else {
+    summary.push({
+      label: "OpenRouter",
+      status: "skipped",
+      detail: "Set OPENROUTER_API_KEY to enable",
+    });
   }
 
   // Kimi: passive reader — no hook installation needed.

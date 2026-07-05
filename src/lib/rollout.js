@@ -3480,6 +3480,95 @@ async function parseCursorApiIncremental({
   return { recordsProcessed: total, eventsAggregated, bucketsQueued };
 }
 
+/**
+ * Incremental state is tracked in `cursors.openrouterApi.lastRecordTimestamp`.
+ */
+async function parseOpenRouterApiIncremental({
+  records,
+  cursors,
+  queuePath,
+  onProgress,
+  source,
+}) {
+  await ensureDir(path.dirname(queuePath));
+  const defaultSource = normalizeSourceInput(source) || "openrouter";
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const touchedBuckets = new Set();
+
+  const lastTs = cursors?.openrouterApi?.lastRecordTimestamp || null;
+  let latestTs = lastTs;
+  let eventsAggregated = 0;
+  const cb = typeof onProgress === "function" ? onProgress : null;
+  const total = records.length;
+
+  if (records.length > 0) {
+    let earliestBucketStart = null;
+    for (const record of records) {
+      if (!record?.date) continue;
+      const b = toUtcHalfHourStart(record.date);
+      if (b && (!earliestBucketStart || b < earliestBucketStart)) earliestBucketStart = b;
+    }
+    if (earliestBucketStart) {
+      for (const [key, bucket] of Object.entries(hourlyState.buckets || {})) {
+        const parsed = parseBucketKey(key);
+        const sourceKey = normalizeSourceInput(parsed.source) || DEFAULT_SOURCE;
+        if (sourceKey !== defaultSource) continue;
+        if (!bucket?.totals) continue;
+        if (parsed.hourStart && parsed.hourStart < earliestBucketStart) continue;
+        bucket.totals = initTotals();
+        touchedBuckets.add(key);
+      }
+    }
+  }
+
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i];
+    const recordDate = record.date;
+    if (!recordDate) continue;
+
+    const { normalizeOpenRouterUsage } = require("./openrouter-config");
+    const delta = normalizeOpenRouterUsage(record);
+    if (isAllZeroUsage(delta)) continue;
+
+    delta.conversation_count = 1;
+
+    const bucketStart = toUtcHalfHourStart(recordDate);
+    if (!bucketStart) continue;
+
+    const model = normalizeModelInput(record.model) || DEFAULT_MODEL;
+    const bucket = getHourlyBucket(hourlyState, defaultSource, model, bucketStart);
+    addTotals(bucket.totals, delta);
+    touchedBuckets.add(bucketKey(defaultSource, model, bucketStart));
+
+    eventsAggregated += 1;
+
+    if (!latestTs || recordDate > latestTs) {
+      latestTs = recordDate;
+    }
+
+    if (cb && (i % 200 === 0 || i === records.length - 1)) {
+      cb({
+        index: i + 1,
+        total,
+        eventsAggregated,
+        bucketsQueued: touchedBuckets.size,
+      });
+    }
+  }
+
+  const bucketsQueued = await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets });
+  hourlyState.updatedAt = new Date().toISOString();
+  cursors.hourly = hourlyState;
+
+  if (!cursors.openrouterApi) cursors.openrouterApi = {};
+  if (latestTs && latestTs !== lastTs) {
+    cursors.openrouterApi.lastRecordTimestamp = latestTs;
+  }
+  cursors.openrouterApi.updatedAt = new Date().toISOString();
+
+  return { recordsProcessed: total, eventsAggregated, bucketsQueued };
+}
+
 // ---------------------------------------------------------------------------
 // Kiro token tracking (reads from devdata.sqlite or tokens_generated.jsonl)
 // ---------------------------------------------------------------------------
@@ -9978,6 +10067,7 @@ module.exports = {
   parseOpencodeDbIncremental,
   parseOpenclawIncremental,
   parseCursorApiIncremental,
+  parseOpenRouterApiIncremental,
   parseKiroIncremental,
   parseHermesIncremental,
   gooseInstallOwnsCursor,
