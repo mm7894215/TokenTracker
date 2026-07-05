@@ -33,6 +33,7 @@
     "graph:auto-index": "node scripts/graph/auto-index.cjs",
     "graph:scip": "node scripts/graph/generate-scip.cjs",
     "pricing:build-seed": "node scripts/build-pricing-seed.cjs",
+    "prepack": "npm run dashboard:build && npm run pricing:build-seed",
     "prepublishOnly": "node scripts/build-pricing-seed.cjs",
     "test": "node --test test/*.test.js",
     "validate:copy": "node scripts/validate-copy-registry.cjs",

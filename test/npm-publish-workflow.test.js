@@ -132,3 +132,25 @@ test("package.json files array includes dashboard/dist", () => {
     "published package must include dashboard/dist/"
   );
 });
+
+test("package.json prepack builds dashboard before packing from a source tree", () => {
+  const pkg = JSON.parse(
+    fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8")
+  );
+  assert.equal(
+    pkg.scripts.prepack,
+    "npm run dashboard:build && npm run pricing:build-seed",
+    "prepack should build dashboard/dist and refresh the pricing seed before pack/publish"
+  );
+});
+
+test("npm install smoke requires dashboard/dist/index.html in the packed artifact", () => {
+  const smoke = fs.readFileSync(
+    path.join(__dirname, "..", "scripts", "acceptance", "npm-install-smoke.cjs"),
+    "utf8"
+  );
+  assert.ok(
+    smoke.includes('"dashboard/dist/index.html"'),
+    "pack smoke should fail when dashboard/dist/index.html is missing from the tarball"
+  );
+});
