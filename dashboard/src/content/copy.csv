@@ -370,6 +370,8 @@ settings.openrouter.badgeConfigured,ui,SettingsPage,OpenRouterSection,badge_conf
 settings.openrouter.badgeUnset,ui,SettingsPage,OpenRouterSection,badge_unset,"Not set",,active
 settings.openrouter.apiKeyLabel,ui,SettingsPage,OpenRouterSection,api_key_label,"API key",,active
 settings.openrouter.apiKeyHint,ui,SettingsPage,OpenRouterSection,api_key_hint,"Requires a management key (not inference key). Create one at",,active
+settings.openrouter.managementKeysLink,ui,SettingsPage,OpenRouterSection,management_keys_link,"openrouter.ai/settings/management-keys",,active
+settings.openrouter.managementKeysUrl,ui,SettingsPage,OpenRouterSection,management_keys_url,"https://openrouter.ai/settings/management-keys",,active
 settings.openrouter.apiKeyPlaceholder,ui,SettingsPage,OpenRouterSection,api_key_placeholder,"sk-or-v1-…",,active
 settings.openrouter.envOverride,ui,SettingsPage,OpenRouterSection,env_override,"Unset OPENROUTER_API_KEY in your shell to manage the key from Settings.",,active
 settings.openrouter.save,ui,SettingsPage,OpenRouterSection,save,"Save & sync",,active
