@@ -91,12 +91,12 @@ export function OpenRouterSection() {
         <p className="mt-0.5 text-xs text-oai-gray-500 dark:text-oai-gray-400">
           {copy("settings.openrouter.apiKeyHint")}{" "}
           <a
-            href="https://openrouter.ai/keys"
+            href="https://openrouter.ai/settings/management-keys"
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-0.5 text-oai-brand-600 hover:underline dark:text-oai-brand-400"
           >
-            openrouter.ai/keys
+            openrouter.ai/settings/management-keys
             <ExternalLink className="h-3 w-3" aria-hidden />
           </a>
         </p>
