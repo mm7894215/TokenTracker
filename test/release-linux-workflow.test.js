@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const { execFileSync } = require("node:child_process");
 const { test } = require("node:test");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -27,26 +28,39 @@ function loadScript() {
   return fs.readFileSync(SCRIPT_PATH, "utf8");
 }
 
+function parseWorkflow() {
+  const script = [
+    "import json, sys, yaml",
+    `with open(${JSON.stringify(WORKFLOW_PATH)}, 'r', encoding='utf-8') as f:`,
+    "    print(json.dumps(yaml.load(f, Loader=yaml.BaseLoader)))",
+  ].join("\n");
+  return JSON.parse(execFileSync("python3", ["-c", script], { encoding: "utf8" }));
+}
+
 test("release-linux workflow file exists", () => {
   assert.ok(fs.existsSync(WORKFLOW_PATH));
 });
 
 test("workflow supports manual and reusable invocation", () => {
-  const content = loadWorkflow();
-  assert.ok(content.includes("workflow_dispatch:"));
-  assert.ok(content.includes("workflow_call:"));
-  assert.ok(content.includes("version:"));
+  const workflow = parseWorkflow();
+  assert.ok(workflow.on.workflow_dispatch);
+  assert.ok(workflow.on.workflow_call);
+  assert.equal(workflow.on.workflow_dispatch.inputs.version.required, "true");
+  assert.equal(workflow.on.workflow_call.inputs.version.required, "true");
 });
 
 test("workflow uses an Ubuntu runner", () => {
-  const content = loadWorkflow();
-  assert.ok(/runs-on:\s*ubuntu-latest/.test(content));
+  const workflow = parseWorkflow();
+  assert.equal(workflow.jobs.build["runs-on"], "ubuntu-latest");
 });
 
 test("workflow verifies the requested version against package.json", () => {
+  const workflow = parseWorkflow();
   const content = loadWorkflow();
+  assert.equal(workflow.jobs.build["timeout-minutes"], "30");
   assert.ok(content.includes("Verify version"));
   assert.ok(content.includes("package.json version"));
+  assert.ok(content.includes("VERSION: ${{ inputs.version }}"));
 });
 
 test("workflow builds dashboard before bundling the Linux runtime", () => {
@@ -79,9 +93,9 @@ test("workflow uploads the tarball to the GitHub release", () => {
 });
 
 test("workflow has a per-version concurrency guard", () => {
-  const content = loadWorkflow();
-  assert.ok(content.includes("concurrency:"));
-  assert.ok(content.includes("release-linux-${{ inputs.version }}"));
+  const workflow = parseWorkflow();
+  assert.equal(workflow.concurrency.group, "release-linux-${{ inputs.version }}");
+  assert.equal(workflow.concurrency["cancel-in-progress"], "false");
 });
 
 test("linux bundle script exists", () => {
@@ -92,11 +106,14 @@ test("linux bundle script pins the Node runtime and downloads the linux-x64 arch
   const script = loadScript();
   assert.ok(script.includes('EXPECTED_NODE_VERSION="22.22.2"'));
   assert.ok(script.includes('node-v${NODE_VERSION}-linux-x64.tar.xz'));
+  assert.ok(script.includes("SHASUMS256.txt"));
+  assert.ok(script.includes("sha256sum"));
 });
 
 test("linux bundle script installs production dependencies only", () => {
   const script = loadScript();
-  assert.ok(script.includes("npm install --omit=dev --no-optional --ignore-scripts"));
+  assert.ok(script.includes("npm ci --omit=dev --no-optional --ignore-scripts"));
+  assert.ok(script.includes('cp "$REPO_ROOT/package-lock.json" "$TT_DIR/"'));
 });
 
 test("linux bundle script fails when dashboard/dist is missing", () => {
@@ -110,4 +127,10 @@ test("linux bundle script emits a launcher that execs the bundled tracker", () =
   assert.ok(script.includes('cat > "$BUILD_ROOT/tokentracker"'));
   assert.ok(script.includes('EmbeddedServer/node'));
   assert.ok(script.includes('EmbeddedServer/tokentracker/bin/tracker.js'));
+});
+
+test("linux bundle script has valid shell syntax", () => {
+  assert.doesNotThrow(() => {
+    execFileSync("bash", ["-n", SCRIPT_PATH], { stdio: "pipe" });
+  });
 });

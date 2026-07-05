@@ -20,6 +20,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
@@ -32,10 +33,12 @@ jobs:
           node-version: 20
 
       - name: Verify version
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
           PKG_VERSION=$(node -p "require('./package.json').version")
-          if [[ "$PKG_VERSION" != "${{ inputs.version }}" ]]; then
-            echo "::error::package.json version ($PKG_VERSION) does not match input (${{ inputs.version }})"
+          if [[ "$PKG_VERSION" != "$VERSION" ]]; then
+            echo "::error::package.json version ($PKG_VERSION) does not match input ($VERSION)"
             exit 1
           fi
 
