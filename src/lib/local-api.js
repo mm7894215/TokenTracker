@@ -1966,18 +1966,16 @@ function createLocalApiHandler({ queuePath }) {
         }
         const verify = body.verify !== false;
         try {
-          if (verify || probeOnly) {
+          if (probeOnly) {
             const probe = await probeOpenRouterApiKey(apiKey);
             if (!probe.ok) {
               json(res, { ok: false, error: probe.error || "OpenRouter API key verification failed" }, 400);
               return true;
             }
-          }
-          if (probeOnly) {
             json(res, { ok: true, verified: true });
             return true;
           }
-          const saved = await saveOpenRouterApiKey({ apiKey, verify: false });
+          const saved = await saveOpenRouterApiKey({ apiKey, verify });
           const snapshot = saved.snapshot || getOpenRouterConfigSnapshot({ config: {} });
           let sync = null;
           if (body.sync === true) {

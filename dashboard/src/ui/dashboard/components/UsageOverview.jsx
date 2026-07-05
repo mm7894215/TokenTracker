@@ -58,6 +58,7 @@ const PROVIDER_COLORS = {
   "KILO-CODE": "#facc15",
   MIMO: "#ff6900",         // Xiaomi MiMo brand orange
   DROID: "#ef4444",        // red-500 (Factory brand)
+  ZCODE: "#14b8a6",        // teal-500 (Z.ai / GLM — distinct from the blues)
   OPENROUTER: "#6366f1",  // indigo-500
 };
 

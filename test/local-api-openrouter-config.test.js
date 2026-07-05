@@ -154,6 +154,10 @@ describe("/functions/tokentracker-openrouter-config", () => {
       });
       assert.equal(save.status, 200);
       assert.equal(save.body.configured, true);
+      assert.equal(typeof save.body.last_verified_at, "string");
+
+      const savedConfig = JSON.parse(fs.readFileSync(path.join(trackerDir, "config.json"), "utf8"));
+      assert.equal(typeof savedConfig.openrouter.lastVerifiedAt, "string");
 
       const cleared = await call({
         method: "DELETE",

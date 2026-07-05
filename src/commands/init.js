@@ -38,7 +38,7 @@ const {
   isOpencodePluginInstalled,
 } = require("../lib/opencode-config");
 const { isCursorInstalled, extractCursorSessionToken } = require("../lib/cursor-config");
-const { isOpenRouterConfigured, saveOpenRouterApiKey } = require("../lib/openrouter-config");
+const { isOpenRouterConfigured, saveOpenRouterApiKey, readTrackerConfig } = require("../lib/openrouter-config");
 const { removeOpenclawHookConfig, probeOpenclawHookState } = require("../lib/openclaw-hook");
 const {
   installOpenclawSessionPlugin,
@@ -1098,7 +1098,8 @@ function isRunnableCommand(command) {
 }
 
 async function maybePromptOpenRouterKey({ home, trackerDir }) {
-  if (isOpenRouterConfigured({ env: process.env })) return;
+  const { config } = await readTrackerConfig({ home, trackerDir });
+  if (isOpenRouterConfigured({ config, env: process.env })) return;
 
   const choice = await prompt(
     "Configure OpenRouter API key now? (y/N) ",

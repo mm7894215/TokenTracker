@@ -8,6 +8,7 @@ const { ensureDir } = require("./fs");
 const { readSqliteJsonRows } = require("./sqlite-reader");
 const wsl = require("./wsl-probe");
 const { resolveInstallPaths } = require("./install-resolver");
+const { normalizeOpenRouterUsage } = require("./openrouter-config");
 
 const DEFAULT_SOURCE = "codex";
 const DEFAULT_MODEL = "unknown";
@@ -3526,7 +3527,6 @@ async function parseOpenRouterApiIncremental({
     const recordDate = record.date;
     if (!recordDate) continue;
 
-    const { normalizeOpenRouterUsage } = require("./openrouter-config");
     const delta = normalizeOpenRouterUsage(record);
     if (isAllZeroUsage(delta)) continue;
 

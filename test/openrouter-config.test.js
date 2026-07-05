@@ -16,6 +16,7 @@ const {
   saveOpenRouterApiKey,
   clearOpenRouterApiKey,
   probeOpenRouterApiKey,
+  fetchOpenRouterDailyUsage,
 } = require("../src/lib/openrouter-config");
 const { parseOpenRouterApiIncremental } = require("../src/lib/rollout");
 
@@ -39,16 +40,26 @@ test("parseOpenRouterAnalyticsRows maps daily analytics rows to records", () => 
           tokens_completion: 0,
           tokens_total: 0,
         },
+        {
+          date__day: "2026-07-03",
+          model: "deepseek/deepseek-chat",
+          tokens_prompt: 500,
+          tokens_completion: 100,
+          cached_tokens: 200,
+          tokens_total: 600,
+        },
       ],
     },
   });
 
-  assert.equal(records.length, 1);
+  assert.equal(records.length, 2);
   assert.equal(records[0].date, "2026-07-01T18:30:00.000Z");
   assert.equal(records[0].model, "anthropic/claude-sonnet-4");
   assert.equal(records[0].inputTokens, 1200);
   assert.equal(records[0].outputTokens, 300);
   assert.equal(records[0].totalTokens, 1500);
+  assert.equal(records[1].inputTokens, 300);
+  assert.equal(records[1].cacheReadTokens, 200);
 });
 
 test("normalizeOpenRouterUsage returns canonical token shape", () => {
@@ -66,6 +77,24 @@ test("normalizeOpenRouterUsage returns canonical token shape", () => {
       reasoning_output_tokens: 0,
       total_tokens: 15,
       billable_total_tokens: 15,
+    },
+  );
+  assert.deepEqual(
+    normalizeOpenRouterUsage({
+      inputTokens: 8,
+      outputTokens: 5,
+      cacheReadTokens: 2,
+      cacheWriteTokens: 1,
+      totalTokens: 16,
+    }),
+    {
+      input_tokens: 8,
+      cached_input_tokens: 2,
+      cache_creation_input_tokens: 1,
+      output_tokens: 5,
+      reasoning_output_tokens: 0,
+      total_tokens: 16,
+      billable_total_tokens: 16,
     },
   );
 });
@@ -216,4 +245,20 @@ test("probeOpenRouterApiKey maps auth failures", async () => {
   const result = await probeOpenRouterApiKey(VALID_KEY, { fetchImpl });
   assert.equal(result.ok, false);
   assert.match(result.error, /invalid|analytics|unauthorized/i);
+});
+
+test("fetchOpenRouterDailyUsage rejects truncated analytics payloads", async () => {
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      metadata: { truncated: true, row_count: 10000 },
+      data: { data: [] },
+    }),
+  });
+
+  await assert.rejects(
+    () => fetchOpenRouterDailyUsage({ apiKey: VALID_KEY, fetchImpl }),
+    /truncated/i,
+  );
 });

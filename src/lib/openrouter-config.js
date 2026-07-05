@@ -205,6 +205,13 @@ function dayKeyToIsoDate(dayKey) {
   return `${dayKey}T18:30:00.000Z`;
 }
 
+function isOpenRouterAnalyticsTruncated(payload) {
+  if (!payload || typeof payload !== "object") return false;
+  if (payload.metadata?.truncated === true) return true;
+  if (payload.data?.metadata?.truncated === true) return true;
+  return false;
+}
+
 /**
  * Parse OpenRouter analytics query rows into Cursor-like records for rollout.
  */
@@ -218,9 +225,16 @@ function parseOpenRouterAnalyticsRows(payload) {
     if (!dayKey) continue;
 
     const model = typeof row.model === "string" && row.model.trim() ? row.model.trim() : "unknown";
-    const inputTokens = toInt(row.tokens_prompt ?? row.tokens_input);
+    const promptTotal = toInt(row.tokens_prompt ?? row.tokens_input);
+    const cacheReadTokens = toInt(row.cached_tokens);
+    const cacheWriteTokens = toInt(row.cache_write_tokens);
+    const inputTokens =
+      cacheReadTokens > 0 && cacheReadTokens <= promptTotal
+        ? promptTotal - cacheReadTokens
+        : promptTotal;
     const outputTokens = toInt(row.tokens_completion ?? row.tokens_output);
-    const totalTokens = toInt(row.tokens_total) || inputTokens + outputTokens;
+    const totalTokens =
+      toInt(row.tokens_total) || inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens;
     if (totalTokens <= 0 && inputTokens <= 0 && outputTokens <= 0) continue;
 
     records.push({
@@ -229,8 +243,8 @@ function parseOpenRouterAnalyticsRows(payload) {
       inputTokens,
       outputTokens,
       totalTokens,
-      cacheWriteTokens: 0,
-      cacheReadTokens: 0,
+      cacheWriteTokens,
+      cacheReadTokens,
     });
   }
 
@@ -257,14 +271,20 @@ async function fetchOpenRouterDailyUsage({
   start.setUTCDate(start.getUTCDate() - Math.max(1, Number(daysBack) || 90));
 
   const body = {
-    metrics: ["tokens_total", "tokens_prompt", "tokens_completion", "request_count"],
+    metrics: [
+      "tokens_total",
+      "tokens_prompt",
+      "tokens_completion",
+      "cached_tokens",
+      "request_count",
+    ],
     dimensions: ["model"],
     granularity: "day",
     time_range: {
       start: start.toISOString(),
       end: end.toISOString(),
     },
-    limit: 500,
+    limit: 10000,
   };
 
   const res = await fetchImpl(OPENROUTER_ANALYTICS_QUERY_URL, {
@@ -289,21 +309,28 @@ async function fetchOpenRouterDailyUsage({
   }
 
   const payload = await res.json();
+  if (isOpenRouterAnalyticsTruncated(payload)) {
+    throw new Error(
+      "OpenRouter analytics response was truncated; reduce the sync window or narrow filters",
+    );
+  }
   openrouterDebugLog(`Fetched ${Array.isArray(payload?.data?.data) ? payload.data.data.length : 0} rows`);
   return parseOpenRouterAnalyticsRows(payload);
 }
 
 function normalizeOpenRouterUsage(record) {
   const inputTokens = Math.max(0, Math.floor(record.inputTokens || 0));
+  const cacheWrite = Math.max(0, Math.floor(record.cacheWriteTokens || 0));
+  const cacheRead = Math.max(0, Math.floor(record.cacheReadTokens || 0));
   const outputTokens = Math.max(0, Math.floor(record.outputTokens || 0));
   const totalTokens = Math.max(
     0,
-    Math.floor(record.totalTokens || inputTokens + outputTokens),
+    Math.floor(record.totalTokens || inputTokens + outputTokens + cacheWrite + cacheRead),
   );
   return {
     input_tokens: inputTokens,
-    cached_input_tokens: 0,
-    cache_creation_input_tokens: 0,
+    cached_input_tokens: cacheRead,
+    cache_creation_input_tokens: cacheWrite,
     output_tokens: outputTokens,
     reasoning_output_tokens: 0,
     total_tokens: totalTokens,
@@ -327,6 +354,7 @@ module.exports = {
   resolveOpenRouterDayKey,
   dayKeyToIsoDate,
   parseOpenRouterAnalyticsRows,
+  isOpenRouterAnalyticsTruncated,
   fetchOpenRouterDailyUsage,
   normalizeOpenRouterUsage,
 };

@@ -1,12 +1,12 @@
 {
-  "generatedAt": "2026-07-04T09:28:02.390Z",
+  "generatedAt": "2026-07-05T19:37:10.032Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
     "rawText": "JSX text nodes containing letters or digits"
   },
   "totals": {
-    "colors": 276,
+    "colors": 277,
     "rawText": 167
   },
   "files": {
@@ -339,7 +339,7 @@
       ]
     },
     "dashboard/src/ui/dashboard/components/UsageOverview.jsx": {
-      "colors": 13,
+      "colors": 14,
       "rawText": 3,
       "rawTextTokens": [
         "0 && (",
