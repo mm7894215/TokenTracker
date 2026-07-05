@@ -13,6 +13,8 @@
  *   user_id  (required) UUID
  *   theme    light | dark             (default: light)
  *   period   week | month | total     (default: total)
+ *   currency ISO code (USD default; supports INR, EUR, …)
+ *   rate     optional USD→currency multiplier (bundled default when omitted)
  *
  * Privacy: gates on `is_public=true` (the same opt-in that the leaderboard
  * profile endpoint enforces). Private profiles → "private" placeholder SVG.
@@ -20,6 +22,7 @@
  * Caching: 60s ISR via Cache-Control.
  */
 import { createClient } from "npm:@insforge/sdk";
+import { formatEmbedCost, parseEmbedCurrency } from "./embed-currency.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -89,12 +92,6 @@ function compactNumber(n: number): string {
   if (abs >= 1e6) return (n / 1e6).toFixed(2).replace(/\.?0+$/, "") + "M";
   if (abs >= 1e3) return (n / 1e3).toFixed(2).replace(/\.?0+$/, "") + "K";
   return String(Math.round(n));
-}
-
-function formatCost(n: number): string {
-  if (n >= 1000) return "$" + Math.round(n).toLocaleString("en-US");
-  if (n >= 100) return "$" + n.toFixed(0);
-  return "$" + n.toFixed(2);
 }
 
 // Deterministic hue from a display string so the same user always gets the
@@ -180,12 +177,13 @@ function renderProfileCard(opts: {
   row: SnapshotRow;
   theme: "light" | "dark";
   period: string;
+  currencyOpts: ReturnType<typeof parseEmbedCurrency>;
 }): string {
-  const { row, theme, period } = opts;
+  const { row, theme, period, currencyOpts } = opts;
   const p = PALETTE[theme];
   const displayName = row.display_name || "Anonymous";
   const tokens = compactNumber(Number(row.total_tokens ?? 0));
-  const cost = formatCost(Number(row.estimated_cost_usd ?? 0));
+  const cost = formatEmbedCost(Number(row.estimated_cost_usd ?? 0), currencyOpts);
   const rank = row.rank ? `#${row.rank}` : "—";
 
   // Mini provider breakdown (top 3 by tokens). Compact bar so the card
@@ -264,6 +262,7 @@ export default async function (req: Request): Promise<Response> {
   const userId = (url.searchParams.get("user_id") || "").trim().toLowerCase();
   const theme = (url.searchParams.get("theme") || "light").toLowerCase() === "dark" ? "dark" : "light";
   const period = (url.searchParams.get("period") || "total").toLowerCase();
+  const currencyOpts = parseEmbedCurrency(url.searchParams);
 
   if (!userId || !isUuid(userId)) {
     return svgResponse(placeholderSvg("bad user_id", theme), 400, 0);
@@ -315,6 +314,6 @@ export default async function (req: Request): Promise<Response> {
   if (!row) return svgResponse(placeholderSvg("not found", theme), 404, 0);
   if (row.is_public === false) return svgResponse(placeholderSvg("profile is private", theme), 403, 0);
 
-  const svg = renderProfileCard({ row, theme, period });
+  const svg = renderProfileCard({ row, theme, period, currencyOpts });
   return svgResponse(svg, 200, 60);
 }

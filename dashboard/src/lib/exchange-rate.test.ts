@@ -24,7 +24,7 @@ describe("fetchUsdRates", () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
-        rates: { CNY: 7.0987, EUR: 0.92, GBP: 0.79, JPY: 155, HKD: 7.8, BTC: 0.00002 },
+        rates: { CNY: 7.0987, EUR: 0.92, GBP: 0.79, JPY: 155, HKD: 7.8, INR: 84.2, BTC: 0.00002 },
       }),
     });
     const result = await fetchUsdRates({ fetchImpl: fetchImpl as any });
@@ -33,6 +33,7 @@ describe("fetchUsdRates", () => {
     expect(result.rates.GBP).toBe(0.79);
     expect(result.rates.JPY).toBe(155);
     expect(result.rates.HKD).toBe(7.8);
+    expect(result.rates.INR).toBe(84.2);
     expect(result.rates.USD).toBe(1);
     // Unsupported codes are filtered out.
     expect(result.rates.BTC).toBeUndefined();

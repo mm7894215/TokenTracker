@@ -9,6 +9,7 @@ import {
   getInitialExchangeRates,
   getRateFor,
   getSupportedCurrencies,
+  inferDefaultCurrencyFromLocale,
   isValidRate,
   normalizeCurrency,
   persistCurrency,
@@ -69,6 +70,7 @@ describe("getCurrencySymbol", () => {
     expect(getCurrencySymbol("CNY")).toBe("¥");
     expect(getCurrencySymbol("JPY")).toBe("¥");
     expect(getCurrencySymbol("HKD")).toBe("HK$");
+    expect(getCurrencySymbol("INR")).toBe("₹");
   });
 
   it("falls back to $ for unknown / invalid codes", () => {
@@ -80,9 +82,9 @@ describe("getCurrencySymbol", () => {
 });
 
 describe("getSupportedCurrencies", () => {
-  it("returns 6 entries with code/symbol/labelKey", () => {
+  it("returns 7 entries with code/symbol/labelKey", () => {
     const list = getSupportedCurrencies();
-    expect(list).toHaveLength(6);
+    expect(list).toHaveLength(7);
     for (const item of list) {
       expect(typeof item.code).toBe("string");
       expect(typeof item.symbol).toBe("string");
@@ -125,6 +127,18 @@ describe("applyCurrency", () => {
   });
 });
 
+describe("inferDefaultCurrencyFromLocale", () => {
+  it("returns INR for India-region browser locales", () => {
+    expect(inferDefaultCurrencyFromLocale(["en-IN"])).toBe("INR");
+    expect(inferDefaultCurrencyFromLocale(["hi-IN", "en"])).toBe("INR");
+  });
+
+  it("returns USD for non-India locales", () => {
+    expect(inferDefaultCurrencyFromLocale(["en-US"])).toBe(CURRENCY_USD);
+    expect(inferDefaultCurrencyFromLocale([])).toBe(CURRENCY_USD);
+  });
+});
+
 describe("persist/getInitial currency", () => {
   it("round-trips supported codes", () => {
     persistCurrency("EUR");
@@ -133,8 +147,17 @@ describe("persist/getInitial currency", () => {
     expect(getInitialCurrency()).toBe("USD");
   });
 
-  it("defaults to USD for empty / unsupported persisted value", () => {
+  it("defaults to USD for empty storage when locale is not India", () => {
+    vi.stubGlobal("navigator", { language: "en-US", languages: ["en-US"] });
     expect(getInitialCurrency()).toBe("USD");
+  });
+
+  it("defaults to INR for empty storage with India locale", () => {
+    vi.stubGlobal("navigator", { language: "en-IN", languages: ["en-IN", "en"] });
+    expect(getInitialCurrency()).toBe("INR");
+  });
+
+  it("normalizes unsupported persisted value to USD", () => {
     window.localStorage.setItem("tokentracker-currency", "weird");
     expect(getInitialCurrency()).toBe("USD");
   });

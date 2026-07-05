@@ -390,6 +390,7 @@ settings.appearance.currency.opt.gbp,ui,SettingsPage,SettingsPage,currency_opt_g
 settings.appearance.currency.opt.cny,ui,SettingsPage,SettingsPage,currency_opt_cny,"CNY (¥)",,active
 settings.appearance.currency.opt.jpy,ui,SettingsPage,SettingsPage,currency_opt_jpy,"JPY (¥)",,active
 settings.appearance.currency.opt.hkd,ui,SettingsPage,SettingsPage,currency_opt_hkd,"HKD (HK$)",,active
+settings.appearance.currency.opt.inr,ui,SettingsPage,SettingsPage,currency_opt_inr,"INR (₹)",,active
 settings.appearance.currency.rate_source.default,ui,SettingsPage,SettingsPage,rate_source_default,"Bundled default rate",,active
 settings.appearance.currency.rate_source.fetched,ui,SettingsPage,SettingsPage,rate_source_fetched,"Source: open.er-api.com",,active
 settings.appearance.currency.rate_updated,ui,SettingsPage,SettingsPage,rate_updated,"updated {{when}}",,active
