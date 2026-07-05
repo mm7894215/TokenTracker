@@ -43,6 +43,13 @@ const {
 } = require("./claude-categorizer");
 
 const { computeCodexContextBreakdown } = require("./codex-context-breakdown");
+const {
+  getOpenRouterConfigSnapshot,
+  saveOpenRouterApiKey,
+  clearOpenRouterApiKey,
+  probeOpenRouterApiKey,
+  readTrackerConfig,
+} = require("./openrouter-config");
 
 // ---------------------------------------------------------------------------
 // Queue data helpers
@@ -1921,6 +1928,79 @@ function createLocalApiHandler({ queuePath }) {
         }
         setCloudSyncPref(body.enabled);
         json(res, { ok: true, enabled: getCloudSyncPref() });
+        return true;
+      }
+      json(res, { error: "Method Not Allowed" }, 405);
+      return true;
+    }
+
+    // --- openrouter-config (API key management for OpenRouter analytics) ---
+    if (p === "/functions/tokentracker-openrouter-config") {
+      const method = String(req.method || "GET").toUpperCase();
+      if (method === "GET") {
+        try {
+          const { config } = await readTrackerConfig();
+          const snapshot = getOpenRouterConfigSnapshot({ config, env: process.env });
+          json(res, { ok: true, ...snapshot });
+        } catch (e) {
+          json(res, { ok: false, error: e?.message || String(e) }, 500);
+        }
+        return true;
+      }
+      if (method === "POST" || method === "PUT") {
+        if (!isAuthorizedLocalMutation(req)) {
+          json(res, { ok: false, error: "Unauthorized" }, 401);
+          return true;
+        }
+        let body = {};
+        try {
+          body = await readJsonBody(req);
+        } catch {
+          body = {};
+        }
+        const apiKey = typeof body?.apiKey === "string" ? body.apiKey.trim() : "";
+        const probeOnly = body.probe === true && body.save !== true;
+        if (!apiKey) {
+          json(res, { ok: false, error: "apiKey is required" }, 400);
+          return true;
+        }
+        const verify = body.verify !== false;
+        try {
+          if (verify || probeOnly) {
+            const probe = await probeOpenRouterApiKey(apiKey);
+            if (!probe.ok) {
+              json(res, { ok: false, error: probe.error || "OpenRouter API key verification failed" }, 400);
+              return true;
+            }
+          }
+          if (probeOnly) {
+            json(res, { ok: true, verified: true });
+            return true;
+          }
+          const saved = await saveOpenRouterApiKey({ apiKey, verify: false });
+          const snapshot = saved.snapshot || getOpenRouterConfigSnapshot({ config: {} });
+          let sync = null;
+          if (body.sync === true) {
+            sync = await runSyncCommand({}, { timeoutMs: SYNC_TIMEOUT_MS });
+          }
+          json(res, { ok: true, ...snapshot, sync });
+        } catch (e) {
+          json(res, { ok: false, error: e?.message || String(e) }, 500);
+        }
+        return true;
+      }
+      if (method === "DELETE") {
+        if (!isAuthorizedLocalMutation(req)) {
+          json(res, { ok: false, error: "Unauthorized" }, 401);
+          return true;
+        }
+        try {
+          const result = await clearOpenRouterApiKey();
+          const snapshot = result.snapshot || getOpenRouterConfigSnapshot({ config: {} });
+          json(res, { ok: true, ...snapshot });
+        } catch (e) {
+          json(res, { ok: false, error: e?.message || String(e) }, 500);
+        }
         return true;
       }
       json(res, { error: "Method Not Allowed" }, 405);

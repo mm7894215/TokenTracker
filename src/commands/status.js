@@ -527,7 +527,7 @@ async function cmdStatus(argv = []) {
       })(),
       isOpenRouterConfigured({ config, env: process.env })
         ? "- OpenRouter: Analytics API key configured"
-        : "- OpenRouter: unset (set OPENROUTER_API_KEY to enable)",
+        : "- OpenRouter: unset (Settings → API Providers, or: tokentracker config openrouter set)",
       ...(() => {
         const passive = passiveProviders.filter((p) => p.passive);
         if (passive.length === 0) return [];

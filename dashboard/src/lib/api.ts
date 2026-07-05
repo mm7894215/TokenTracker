@@ -766,3 +766,107 @@ export async function renameAccountDevice({ deviceId, name, accessToken }: AnyRe
     body: { device_id: deviceId, device_name: name },
   });
 }
+
+export type OpenRouterConfigSnapshot = {
+  ok?: boolean;
+  configured: boolean;
+  source: "env" | "config" | "none";
+  masked_key: string | null;
+  configured_at: string | null;
+  last_verified_at: string | null;
+  env_overrides_config: boolean;
+};
+
+export async function getOpenRouterConfig({ signal }: { signal?: AbortSignal } = {}) {
+  const response = await fetch("/functions/tokentracker-openrouter-config", {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+    signal,
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || payload?.ok === false) {
+    throw new Error(payload?.error || `OpenRouter config request failed with HTTP ${response.status}`);
+  }
+  return payload as OpenRouterConfigSnapshot;
+}
+
+export async function saveOpenRouterConfig({
+  apiKey,
+  verify = true,
+  sync = false,
+  signal,
+}: {
+  apiKey: string;
+  verify?: boolean;
+  sync?: boolean;
+  signal?: AbortSignal;
+}) {
+  const authHeaders = await getLocalApiAuthHeaders();
+  const response = await fetch("/functions/tokentracker-openrouter-config", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      ...authHeaders,
+    },
+    cache: "no-store",
+    signal,
+    body: JSON.stringify({ apiKey, verify, sync }),
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || payload?.ok === false) {
+    throw new Error(payload?.error || `OpenRouter save failed with HTTP ${response.status}`);
+  }
+  return payload as OpenRouterConfigSnapshot & { sync?: unknown };
+}
+
+export async function clearOpenRouterConfig({ signal }: { signal?: AbortSignal } = {}) {
+  const authHeaders = await getLocalApiAuthHeaders();
+  const response = await fetch("/functions/tokentracker-openrouter-config", {
+    method: "DELETE",
+    headers: { Accept: "application/json", ...authHeaders },
+    cache: "no-store",
+    signal,
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || payload?.ok === false) {
+    throw new Error(payload?.error || `OpenRouter clear failed with HTTP ${response.status}`);
+  }
+  return payload as OpenRouterConfigSnapshot;
+}
+
+export async function probeOpenRouterConfig({
+  apiKey,
+  signal,
+}: {
+  apiKey: string;
+  signal?: AbortSignal;
+}) {
+  const authHeaders = await getLocalApiAuthHeaders();
+  const response = await fetch("/functions/tokentracker-openrouter-config", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      ...authHeaders,
+    },
+    cache: "no-store",
+    signal,
+    body: JSON.stringify({ apiKey, probe: true, save: false, verify: true }),
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || payload?.ok === false) {
+    throw new Error(payload?.error || `OpenRouter test failed with HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+export async function testOpenRouterConfig({
+  apiKey,
+  signal,
+}: {
+  apiKey: string;
+  signal?: AbortSignal;
+}) {
+  return probeOpenRouterConfig({ apiKey, signal });
+}

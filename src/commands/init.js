@@ -38,7 +38,7 @@ const {
   isOpencodePluginInstalled,
 } = require("../lib/opencode-config");
 const { isCursorInstalled, extractCursorSessionToken } = require("../lib/cursor-config");
-const { isOpenRouterConfigured } = require("../lib/openrouter-config");
+const { isOpenRouterConfigured, saveOpenRouterApiKey } = require("../lib/openrouter-config");
 const { removeOpenclawHookConfig, probeOpenclawHookState } = require("../lib/openclaw-hook");
 const {
   installOpenclawSessionPlugin,
@@ -199,6 +199,10 @@ async function cmdInit(argv) {
   spinner.stop();
 
   renderLocalReport({ summary: setup.summary, isDryRun: false });
+
+  if (isInteractive() && !opts.yes) {
+    await maybePromptOpenRouterKey({ home, trackerDir });
+  }
 
   // Run first sync inline (with a generous timeout) so we can render the
   // *actual* token total in the success message — the aha moment. If the
@@ -509,7 +513,7 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
     summary.push({
       label: "OpenRouter",
       status: "skipped",
-      detail: "Set OPENROUTER_API_KEY to enable",
+      detail: "Set OPENROUTER_API_KEY or run: tokentracker config openrouter set",
     });
   }
 
@@ -1091,6 +1095,39 @@ function isRunnableCommand(command) {
   }
 }
 `;
+}
+
+async function maybePromptOpenRouterKey({ home, trackerDir }) {
+  if (isOpenRouterConfigured({ env: process.env })) return;
+
+  const choice = await prompt(
+    "Configure OpenRouter API key now? (y/N) ",
+  );
+  const normalized = String(choice || "")
+    .trim()
+    .toLowerCase();
+  if (!normalized.startsWith("y")) return;
+
+  const apiKey = (await promptHidden("OpenRouter API key: ")).trim();
+  if (!apiKey) {
+    process.stdout.write("OpenRouter setup skipped (empty key).\n");
+    return;
+  }
+
+  try {
+    const result = await saveOpenRouterApiKey({
+      apiKey,
+      home,
+      trackerDir,
+      verify: true,
+    });
+    process.stdout.write(`OpenRouter API key saved (${result.masked_key}).\n`);
+    if (!result.verified && result.verify_error) {
+      process.stderr.write(`Warning: verification failed — ${result.verify_error}\n`);
+    }
+  } catch (err) {
+    process.stderr.write(`OpenRouter setup failed: ${err?.message || err}\n`);
+  }
 }
 
 module.exports = { cmdInit, buildNotifyHandler, installLocalTrackerApp };

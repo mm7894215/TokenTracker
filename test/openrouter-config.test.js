@@ -10,8 +10,16 @@ const {
   resolveOpenRouterApiKey,
   isOpenRouterConfigured,
   resolveOpenRouterDayKey,
+  maskOpenRouterApiKey,
+  isValidOpenRouterApiKey,
+  getOpenRouterConfigSnapshot,
+  saveOpenRouterApiKey,
+  clearOpenRouterApiKey,
+  probeOpenRouterApiKey,
 } = require("../src/lib/openrouter-config");
 const { parseOpenRouterApiIncremental } = require("../src/lib/rollout");
+
+const VALID_KEY = "sk-or-v1-abcdefghijklmnopqrst";
 
 test("parseOpenRouterAnalyticsRows maps daily analytics rows to records", () => {
   const records = parseOpenRouterAnalyticsRows({
@@ -120,4 +128,92 @@ test("parseOpenRouterApiIncremental queues openrouter buckets", async () => {
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
+});
+
+test("maskOpenRouterApiKey never returns full key", () => {
+  const masked = maskOpenRouterApiKey(VALID_KEY);
+  assert.ok(masked);
+  assert.notEqual(masked, VALID_KEY);
+  assert.match(masked, /^sk-or-v1-/);
+  assert.doesNotMatch(masked, /abcdefghijklmnopqrst$/);
+});
+
+test("isValidOpenRouterApiKey accepts sk-or-v1 format", () => {
+  assert.equal(isValidOpenRouterApiKey(VALID_KEY), true);
+  assert.equal(isValidOpenRouterApiKey("sk-or-v1-short"), false);
+  assert.equal(isValidOpenRouterApiKey("sk-ant-abc"), false);
+});
+
+test("getOpenRouterConfigSnapshot reports env override", () => {
+  const snapshot = getOpenRouterConfigSnapshot({
+    env: { OPENROUTER_API_KEY: VALID_KEY },
+    config: { openrouter: { apiKey: "sk-or-v1-configkey123456" } },
+  });
+  assert.equal(snapshot.configured, true);
+  assert.equal(snapshot.source, "env");
+  assert.equal(snapshot.env_overrides_config, true);
+});
+
+test("saveOpenRouterApiKey persists masked snapshot to config.json", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-or-save-"));
+  const trackerDir = path.join(tmp, "tracker");
+  await fs.mkdir(trackerDir, { recursive: true });
+
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => "",
+  });
+
+  try {
+    const result = await saveOpenRouterApiKey({
+      apiKey: VALID_KEY,
+      trackerDir,
+      verify: true,
+      fetchImpl,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.verified, true);
+    assert.equal(result.masked_key, maskOpenRouterApiKey(VALID_KEY));
+
+    const raw = await fs.readFile(path.join(trackerDir, "config.json"), "utf8");
+    const config = JSON.parse(raw);
+    assert.equal(config.openrouter.apiKey, VALID_KEY);
+    assert.equal(typeof config.openrouter.configuredAt, "string");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("clearOpenRouterApiKey removes openrouter block", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-or-clear-"));
+  const trackerDir = path.join(tmp, "tracker");
+  await fs.mkdir(trackerDir, { recursive: true });
+  const configPath = path.join(trackerDir, "config.json");
+  await fs.writeFile(
+    configPath,
+    JSON.stringify({ openrouter: { apiKey: VALID_KEY } }, null, 2),
+    "utf8",
+  );
+
+  try {
+    const result = await clearOpenRouterApiKey({ trackerDir });
+    assert.equal(result.cleared, true);
+    assert.equal(result.snapshot.configured, false);
+    const config = JSON.parse(await fs.readFile(configPath, "utf8"));
+    assert.equal(config.openrouter, undefined);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("probeOpenRouterApiKey maps auth failures", async () => {
+  const fetchImpl = async () => ({
+    ok: false,
+    status: 401,
+    text: async () => "unauthorized",
+  });
+  const result = await probeOpenRouterApiKey(VALID_KEY, { fetchImpl });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /invalid|analytics/i);
 });

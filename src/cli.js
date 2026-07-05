@@ -7,6 +7,7 @@ const { cmdUninstall } = require("./commands/uninstall");
 const { cmdServe } = require("./commands/serve");
 const { cmdDeviceLogin } = require("./commands/device-login");
 const { cmdWrapped } = require("./commands/wrapped");
+const { cmdConfig } = require("./commands/config");
 
 async function run(argv) {
   const [command, ...rest] = argv;
@@ -56,6 +57,9 @@ async function run(argv) {
     case "wrapped":
       await cmdWrapped(rest);
       return;
+    case "config":
+      await cmdConfig(rest);
+      return;
     default:
       throw new Error(`Unknown command: ${command}`);
   }
@@ -79,6 +83,7 @@ function printHelp() {
       "  npx tokentracker [--debug] uninstall [--purge]",
       "  npx tokentracker [--debug] device-login [--json] [--base-url <url>]",
       "  npx tokentracker [--debug] wrapped [--year 2026] [--json]",
+      "  npx tokentracker [--debug] config openrouter status|set|clear|test [--json] [--key <key>] [--no-verify]",
       "",
       "Notes:",
       "  - init: consent first, local setup next, browser sign-in last.",

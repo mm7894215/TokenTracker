@@ -5,6 +5,7 @@ import { AppearanceSection } from "../components/settings/AppearanceSection.jsx"
 import { SectionCard, SegmentedControl } from "../components/settings/Controls.jsx";
 import { MenuBarSection, NativeAppFooter } from "../components/settings/MenuBarSection.jsx";
 import { LIMIT_DISPLAY_MODES, useLimitsDisplayPrefs } from "../hooks/use-limits-display-prefs.js";
+import { OpenRouterSection } from "../components/settings/OpenRouterSection.jsx";
 import { copy } from "../lib/copy";
 
 function LimitsDisplayModeControl({ prefs }) {
@@ -40,6 +41,7 @@ export function SettingsPage() {
             <AppearanceSection />
             <MenuBarSection />
             <AccountSection />
+            <OpenRouterSection />
             <SectionCard
               title={copy("settings.section.limits")}
               action={<LimitsDisplayModeControl prefs={limitsPrefs} />}

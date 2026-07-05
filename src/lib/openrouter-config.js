@@ -1,4 +1,9 @@
 const OPENROUTER_ANALYTICS_QUERY_URL = "https://openrouter.ai/api/v1/analytics/query";
+const OPENROUTER_ANALYTICS_META_URL = "https://openrouter.ai/api/v1/analytics/meta";
+
+const path = require("node:path");
+const { readJson, writeJson, chmod600IfPossible } = require("./fs");
+const { resolveTrackerPaths } = require("./tracker-paths");
 
 function toInt(value) {
   const n = Number(value);
@@ -22,6 +27,138 @@ function resolveOpenRouterApiKey({ config, env = process.env } = {}) {
 
 function isOpenRouterConfigured({ config, env = process.env } = {}) {
   return Boolean(resolveOpenRouterApiKey({ config, env }));
+}
+
+function isValidOpenRouterApiKey(key) {
+  if (typeof key !== "string") return false;
+  const trimmed = key.trim();
+  return /^sk-or-v1-[A-Za-z0-9_-]{8,}$/.test(trimmed);
+}
+
+function maskOpenRouterApiKey(key) {
+  if (typeof key !== "string" || !key.trim()) return null;
+  const trimmed = key.trim();
+  if (trimmed.length <= 12) return "sk-or-v1-••••";
+  return `${trimmed.slice(0, 10)}••••${trimmed.slice(-4)}`;
+}
+
+function resolveOpenRouterKeySource({ config, env = process.env } = {}) {
+  const fromEnv = typeof env.OPENROUTER_API_KEY === "string" ? env.OPENROUTER_API_KEY.trim() : "";
+  if (fromEnv) return "env";
+  const fromConfig =
+    typeof config?.openrouter?.apiKey === "string" ? config.openrouter.apiKey.trim() : "";
+  if (fromConfig) return "config";
+  return "none";
+}
+
+function getOpenRouterConfigSnapshot({ config, env = process.env } = {}) {
+  const source = resolveOpenRouterKeySource({ config, env });
+  const apiKey = resolveOpenRouterApiKey({ config, env });
+  const envKey = typeof env.OPENROUTER_API_KEY === "string" ? env.OPENROUTER_API_KEY.trim() : "";
+  const configKey =
+    typeof config?.openrouter?.apiKey === "string" ? config.openrouter.apiKey.trim() : "";
+  return {
+    configured: source !== "none",
+    source,
+    masked_key: apiKey ? maskOpenRouterApiKey(apiKey) : null,
+    configured_at:
+      typeof config?.openrouter?.configuredAt === "string" ? config.openrouter.configuredAt : null,
+    last_verified_at:
+      typeof config?.openrouter?.lastVerifiedAt === "string" ? config.openrouter.lastVerifiedAt : null,
+    env_overrides_config: Boolean(envKey && configKey),
+  };
+}
+
+async function readTrackerConfig({ home, trackerDir } = {}) {
+  const dir = trackerDir || (await resolveTrackerPaths({ home })).trackerDir;
+  const configPath = path.join(dir, "config.json");
+  const config = (await readJson(configPath)) || {};
+  return { configPath, config };
+}
+
+async function saveOpenRouterApiKey({ apiKey, home, trackerDir, verify = false, fetchImpl = fetch } = {}) {
+  const trimmed = typeof apiKey === "string" ? apiKey.trim() : "";
+  if (!isValidOpenRouterApiKey(trimmed)) {
+    throw new Error("Invalid OpenRouter API key format (expected sk-or-v1-...)");
+  }
+
+  const { configPath, config } = await readTrackerConfig({ home, trackerDir });
+  const now = new Date().toISOString();
+  let verified = false;
+  let verifyError = null;
+
+  if (verify) {
+    const probe = await probeOpenRouterApiKey(trimmed, { fetchImpl });
+    verified = probe.ok;
+    verifyError = probe.error || null;
+  }
+
+  const next = {
+    ...config,
+    openrouter: {
+      ...(config.openrouter && typeof config.openrouter === "object" ? config.openrouter : {}),
+      apiKey: trimmed,
+      configuredAt: now,
+      ...(verified ? { lastVerifiedAt: now } : {}),
+    },
+  };
+
+  await writeJson(configPath, next);
+  await chmod600IfPossible(configPath);
+
+  return {
+    ok: true,
+    masked_key: maskOpenRouterApiKey(trimmed),
+    verified,
+    verify_error: verifyError,
+    snapshot: getOpenRouterConfigSnapshot({ config: next }),
+  };
+}
+
+async function clearOpenRouterApiKey({ home, trackerDir } = {}) {
+  const { configPath, config } = await readTrackerConfig({ home, trackerDir });
+  if (!config.openrouter) {
+    return { ok: true, cleared: false, snapshot: getOpenRouterConfigSnapshot({ config }) };
+  }
+
+  const next = { ...config };
+  delete next.openrouter;
+  await writeJson(configPath, next);
+  await chmod600IfPossible(configPath);
+
+  return { ok: true, cleared: true, snapshot: getOpenRouterConfigSnapshot({ config: next }) };
+}
+
+async function probeOpenRouterApiKey(apiKey, { timeoutMs = 15000, fetchImpl = fetch } = {}) {
+  if (!isValidOpenRouterApiKey(apiKey)) {
+    return { ok: false, error: "Invalid OpenRouter API key format" };
+  }
+
+  try {
+    const res = await fetchImpl(OPENROUTER_ANALYTICS_META_URL, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey.trim()}`,
+        Accept: "application/json",
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, error: "OpenRouter API key invalid or lacks analytics access" };
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return {
+        ok: false,
+        error: `OpenRouter API returned ${res.status}${text ? `: ${text.slice(0, 120)}` : ""}`,
+      };
+    }
+
+    return { ok: true, error: null };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
 }
 
 function resolveOpenRouterDayKey(row) {
@@ -154,8 +291,17 @@ function normalizeOpenRouterUsage(record) {
 
 module.exports = {
   OPENROUTER_ANALYTICS_QUERY_URL,
+  OPENROUTER_ANALYTICS_META_URL,
   resolveOpenRouterApiKey,
   isOpenRouterConfigured,
+  isValidOpenRouterApiKey,
+  maskOpenRouterApiKey,
+  resolveOpenRouterKeySource,
+  getOpenRouterConfigSnapshot,
+  saveOpenRouterApiKey,
+  clearOpenRouterApiKey,
+  probeOpenRouterApiKey,
+  readTrackerConfig,
   resolveOpenRouterDayKey,
   dayKeyToIsoDate,
   parseOpenRouterAnalyticsRows,

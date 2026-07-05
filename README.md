@@ -161,7 +161,7 @@ Upgrade with `brew upgrade --cask mm7894215/tokentracker/tokentracker`. The tap 
 | **Claude Code** | ✅ Auto | SessionEnd hook in `settings.json` |
 | **Codex CLI** | ✅ Auto | TOML notify hook in `config.toml` |
 | **Cursor** | ✅ Auto | API + SQLite auth token |
-| **OpenRouter** | ✅ Auto | OpenRouter Analytics API (`OPENROUTER_API_KEY`) |
+| **OpenRouter** | ✅ Auto | OpenRouter Analytics API (Settings, `tokentracker config openrouter set`, or `OPENROUTER_API_KEY`) |
 | **Kiro** | ✅ Auto | SQLite + JSONL hybrid |
 | **Gemini CLI** | ✅ Auto | SessionEnd hook |
 | **OpenCode** | ✅ Auto | Plugin system + SQLite |

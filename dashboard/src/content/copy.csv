@@ -359,6 +359,29 @@ settings.page.subtitle,ui,SettingsPage,SettingsPage,subtitle,"Manage your accoun
 settings.section.appearance,ui,SettingsPage,SettingsPage,sec_appearance,"Appearance",,active
 settings.section.account,ui,SettingsPage,SettingsPage,sec_account,"Account",,active
 settings.section.limits,ui,SettingsPage,SettingsPage,sec_limits,"Limits Display",,active
+settings.section.providers,ui,SettingsPage,OpenRouterSection,sec_providers,"API Providers",,active
+settings.openrouter.subtitle,ui,SettingsPage,OpenRouterSection,subtitle,"Connect OpenRouter to sync usage from the Analytics API.",,active
+settings.openrouter.status,ui,SettingsPage,OpenRouterSection,status,"OpenRouter",,active
+settings.openrouter.loading,ui,SettingsPage,OpenRouterSection,loading,"Checking configuration…",,active
+settings.openrouter.statusConfigured,ui,SettingsPage,OpenRouterSection,status_configured,"Saved key {{key}}",,active
+settings.openrouter.statusUnset,ui,SettingsPage,OpenRouterSection,status_unset,"No API key saved on this machine.",,active
+settings.openrouter.statusEnv,ui,SettingsPage,OpenRouterSection,status_env,"OPENROUTER_API_KEY env var is active and overrides saved config.",,active
+settings.openrouter.badgeConfigured,ui,SettingsPage,OpenRouterSection,badge_configured,"Configured",,active
+settings.openrouter.badgeUnset,ui,SettingsPage,OpenRouterSection,badge_unset,"Not set",,active
+settings.openrouter.apiKeyLabel,ui,SettingsPage,OpenRouterSection,api_key_label,"API key",,active
+settings.openrouter.apiKeyHint,ui,SettingsPage,OpenRouterSection,api_key_hint,"Create a management key at",,active
+settings.openrouter.apiKeyPlaceholder,ui,SettingsPage,OpenRouterSection,api_key_placeholder,"sk-or-v1-…",,active
+settings.openrouter.envOverride,ui,SettingsPage,OpenRouterSection,env_override,"Unset OPENROUTER_API_KEY in your shell to manage the key from Settings.",,active
+settings.openrouter.save,ui,SettingsPage,OpenRouterSection,save,"Save & sync",,active
+settings.openrouter.saving,ui,SettingsPage,OpenRouterSection,saving,"Saving…",,active
+settings.openrouter.test,ui,SettingsPage,OpenRouterSection,test,"Test key",,active
+settings.openrouter.testing,ui,SettingsPage,OpenRouterSection,testing,"Testing…",,active
+settings.openrouter.clear,ui,SettingsPage,OpenRouterSection,clear,"Clear saved key",,active
+settings.openrouter.clearing,ui,SettingsPage,OpenRouterSection,clearing,"Clearing…",,active
+settings.openrouter.saved,ui,SettingsPage,OpenRouterSection,saved,"OpenRouter key saved and sync started.",,active
+settings.openrouter.verified,ui,SettingsPage,OpenRouterSection,verified,"OpenRouter key verified.",,active
+settings.openrouter.cleared,ui,SettingsPage,OpenRouterSection,cleared,"Saved OpenRouter key removed.",,active
+settings.openrouter.testNeedsKey,ui,SettingsPage,OpenRouterSection,test_needs_key,"Enter an API key to test.",,active
 settings.labs.qpd.label,ui,SettingsPage,LabsSection,qpd_label,"Analyze PR cost-efficiency",,active
 settings.labs.qpd.hint,ui,SettingsPage,LabsSection,qpd_hint,"Link GitHub PR history to analyze average delivery costs and effective Tokens per model.",,active
 settings.labs.qpd.aria,ui,SettingsPage,LabsSection,qpd_aria,"Toggle PR cost-efficiency analysis",,active
