@@ -145,7 +145,25 @@ async function probeOpenRouterApiKey(apiKey, { timeoutMs = 15000, fetchImpl = fe
     });
 
     if (res.status === 401 || res.status === 403) {
-      return { ok: false, error: "OpenRouter API key invalid or lacks analytics access" };
+      const text = await res.text().catch(() => "");
+      let detail = "";
+      try {
+        const payload = JSON.parse(text);
+        detail = payload?.error?.message || payload?.message || "";
+      } catch {
+        detail = text.slice(0, 200);
+      }
+      if (/management key/i.test(detail)) {
+        return {
+          ok: false,
+          error:
+            "OpenRouter analytics requires a management key (not a regular inference key). Create one at openrouter.ai/settings/management-keys",
+        };
+      }
+      return {
+        ok: false,
+        error: detail || "OpenRouter API key invalid or lacks analytics access",
+      };
     }
     if (!res.ok) {
       const text = await res.text().catch(() => "");
@@ -197,8 +215,8 @@ function parseOpenRouterAnalyticsRows(payload) {
     if (!dayKey) continue;
 
     const model = typeof row.model === "string" && row.model.trim() ? row.model.trim() : "unknown";
-    const inputTokens = toInt(row.tokens_input);
-    const outputTokens = toInt(row.tokens_output);
+    const inputTokens = toInt(row.tokens_prompt ?? row.tokens_input);
+    const outputTokens = toInt(row.tokens_completion ?? row.tokens_output);
     const totalTokens = toInt(row.tokens_total) || inputTokens + outputTokens;
     if (totalTokens <= 0 && inputTokens <= 0 && outputTokens <= 0) continue;
 
@@ -236,7 +254,7 @@ async function fetchOpenRouterDailyUsage({
   start.setUTCDate(start.getUTCDate() - Math.max(1, Number(daysBack) || 90));
 
   const body = {
-    metrics: ["tokens_total", "tokens_input", "tokens_output", "request_count"],
+    metrics: ["tokens_total", "tokens_prompt", "tokens_completion", "request_count"],
     dimensions: ["model"],
     granularity: "day",
     time_range: {
@@ -253,6 +271,7 @@ async function fetchOpenRouterDailyUsage({
       "Content-Type": "application/json",
       Accept: "application/json",
     },
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(timeoutMs),
   });
 

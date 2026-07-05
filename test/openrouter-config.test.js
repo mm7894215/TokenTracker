@@ -28,15 +28,15 @@ test("parseOpenRouterAnalyticsRows maps daily analytics rows to records", () => 
         {
           date__day: "2026-07-01",
           model: "anthropic/claude-sonnet-4",
-          tokens_input: 1200,
-          tokens_output: 300,
+          tokens_prompt: 1200,
+          tokens_completion: 300,
           tokens_total: 1500,
         },
         {
           created_at__day: "2026-07-02",
           model: "openai/gpt-4.1",
-          tokens_input: 0,
-          tokens_output: 0,
+          tokens_prompt: 0,
+          tokens_completion: 0,
           tokens_total: 0,
         },
       ],
@@ -215,5 +215,5 @@ test("probeOpenRouterApiKey maps auth failures", async () => {
   });
   const result = await probeOpenRouterApiKey(VALID_KEY, { fetchImpl });
   assert.equal(result.ok, false);
-  assert.match(result.error, /invalid|analytics/i);
+  assert.match(result.error, /invalid|analytics|unauthorized/i);
 });
