@@ -142,6 +142,11 @@ test("package.json prepack builds dashboard before packing from a source tree", 
     "npm run dashboard:build && npm run pricing:build-seed",
     "prepack should build dashboard/dist and refresh the pricing seed before pack/publish"
   );
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(pkg.scripts, "prepublishOnly"),
+    false,
+    "prepublishOnly should be removed once prepack is the single packaging entry point"
+  );
 });
 
 test("npm install smoke requires dashboard/dist/index.html in the packed artifact", () => {

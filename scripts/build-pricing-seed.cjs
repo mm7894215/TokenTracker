@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Fetch the live LiteLLM pricing JSON and write a slimmed snapshot used as the
-// day-1 offline fallback. Runs from `npm prepublishOnly`; can also be invoked
+// day-1 offline fallback. Runs from `npm prepack`; can also be invoked
 // manually: `node scripts/build-pricing-seed.cjs`.
 
 const fs = require("node:fs");
