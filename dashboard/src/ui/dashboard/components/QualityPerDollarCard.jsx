@@ -1,6 +1,7 @@
 import React from "react";
 import { Card } from "../../components";
 import { copy } from "../../../lib/copy";
+import { CURRENCY_USD } from "../../../lib/currency";
 import { formatUsdCurrency } from "../../../lib/format";
 import { useCurrency } from "../../../hooks/useCurrency.js";
 import { useQualityPerDollarPref } from "../../../hooks/use-quality-per-dollar-pref.js";
@@ -8,7 +9,8 @@ import { useQualityPerDollar } from "../../../hooks/use-quality-per-dollar";
 
 function formatMoney(n, currency, rate) {
   if (n == null) return "—";
-  const decimals = n === 0 ? 2 : n < 1 ? 4 : 2;
+  const converted = currency === CURRENCY_USD || !rate ? n : n * rate;
+  const decimals = converted === 0 ? 2 : Math.abs(converted) < 1 ? 4 : 2;
   return formatUsdCurrency(n, { currency, rate, decimals });
 }
 
@@ -27,7 +29,8 @@ function avgCostPerAcc(cost_usd, accepted, currency, rate) {
   if (accepted == null || accepted === 0) return "—";
   if (cost_usd == null || cost_usd === 0) return "—";
   const perAcc = cost_usd / accepted;
-  const decimals = perAcc < 1 ? 4 : 2;
+  const convertedPerAcc = currency === CURRENCY_USD || !rate ? perAcc : perAcc * rate;
+  const decimals = Math.abs(convertedPerAcc) < 1 ? 4 : 2;
   return formatUsdCurrency(perAcc, { currency, rate, decimals });
 }
 

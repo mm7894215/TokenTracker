@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { copy } from "../../lib/copy";
 import { formatCompactNumber, formatUsdCurrency } from "../../lib/format";
-import { getCurrencySymbol } from "../../lib/currency";
+import { CURRENCY_USD, getCurrencySymbol } from "../../lib/currency";
 import { useCurrency } from "../../hooks/useCurrency.js";
 import { getLeaderboardProfile } from "../../lib/api";
 import { resolveAuthAccessTokenWithRetry } from "../../lib/auth-token";
@@ -23,7 +23,8 @@ function formatCost(value, currency, rate) {
   const n = Number(value);
   if (!Number.isFinite(n) || n < 0) return "—";
   const symbol = getCurrencySymbol(currency);
-  if (n > 0 && n < 0.01) {
+  const converted = currency === CURRENCY_USD || !rate ? n : n * rate;
+  if (converted > 0 && converted < 0.01) {
     return `<${symbol}0.01`;
   }
   return formatUsdCurrency(n, { decimals: 2, currency, rate });
