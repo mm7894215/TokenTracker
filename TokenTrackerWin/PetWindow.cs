@@ -126,6 +126,55 @@ internal sealed class PetWindow : Window
     {
         base.OnSourceInitialized(e);
         _hwnd = new WindowInteropHelper(this).Handle;
+        HwndSource.FromHwnd(_hwnd)?.AddHook(WndProc);
+    }
+
+    private nint WndProc(nint hwnd, int msg, nint wParam, nint lParam, ref bool handled)
+    {
+        if (msg == WM_NCHITTEST && !IsPointOnPet(HitTestScreenPointFromLParam(lParam)))
+        {
+            handled = true;
+            return (nint)HTTRANSPARENT;
+        }
+
+        return nint.Zero;
+    }
+
+    private bool IsPointOnPet(System.Windows.Point screenPoint)
+    {
+        try
+        {
+            if (ActualWidth <= 0 || ActualHeight <= 0) return true;
+
+            var p = PointFromScreen(screenPoint);
+            if (p.X < 0 || p.Y < 0 || p.X >= ActualWidth || p.Y >= ActualHeight) return false;
+
+            // The WebView2 surface is rectangular even though most of it is transparent.
+            // Keep only the lower centered sprite square mouse-active; clicks on the
+            // bubble band or horizontal padding should pass through to whatever is behind.
+            double spriteSize = Math.Max(40, Math.Min(ActualWidth, ActualHeight - BubbleBand) - 8);
+            double pad = Math.Max(8, spriteSize * 0.08);
+            double left = (ActualWidth - spriteSize) / 2 - pad;
+            double right = left + spriteSize + (pad * 2);
+            double top = BubbleBand - pad;
+            double bottom = Math.Min(ActualHeight, BubbleBand + spriteSize + pad);
+
+            return p.X >= left && p.X <= right && p.Y >= top && p.Y <= bottom;
+        }
+        catch
+        {
+            // If layout or DPI transforms are temporarily unavailable, prefer the old
+            // behaviour over making the pet impossible to interact with.
+            return true;
+        }
+    }
+
+    private static System.Windows.Point HitTestScreenPointFromLParam(nint lParam)
+    {
+        int raw = unchecked((int)lParam);
+        short x = unchecked((short)(raw & 0xFFFF));
+        short y = unchecked((short)((raw >> 16) & 0xFFFF));
+        return new System.Windows.Point(x, y);
     }
 
     private async Task InitializeWebViewAsync()
@@ -568,6 +617,8 @@ internal sealed class PetWindow : Window
     // little roomier than the sprite needs so longer lines have horizontal space. The
     // sprite tracks (height − band), so these heights keep it the same visual size as
     // before the taller band.
+    private const double BubbleBand = 46;
+
     private static (double Width, double Height) SizeDimensions(string size) => size switch
     {
         SizeSmall => (150, 138),
@@ -724,7 +775,9 @@ internal sealed class PetWindow : Window
     // ── P/Invoke + constants ───────────────────────────────────────────
 
     private const int WM_NCLBUTTONDOWN = 0xA1;
+    private const int WM_NCHITTEST = 0x84;
     private const int HTCAPTION = 2;
+    private const int HTTRANSPARENT = -1;
 
     [DllImport("user32.dll")]
     private static extern bool ReleaseCapture();
