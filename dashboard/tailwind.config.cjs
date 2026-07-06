@@ -6,6 +6,14 @@ module.exports = {
   content: ["./index.html", "./src/**/*.{js,jsx,ts,tsx}"],
   theme: {
     extend: {
+      screens: {
+        // Viewport-height gates for vertically-anchored layouts (marketing
+        // hero): default styles fit short laptop screens (13" MacBook Air
+        // ≈ 800px-high viewport); scale the vertical rhythm up only when
+        // there's room.
+        tall: { raw: "(min-height: 900px)" },
+        xtall: { raw: "(min-height: 1000px)" },
+      },
       fontFamily: {
         oai: [
           "'OpenAI Sans'",

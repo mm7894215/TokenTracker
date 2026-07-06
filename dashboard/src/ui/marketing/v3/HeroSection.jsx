@@ -73,11 +73,13 @@ export function HeroSection({
 
   return (
     <section ref={sectionRef} className={animate ? "relative h-[150vh]" : "relative"}>
-      <div className={animate ? "sticky top-0 h-[100svh] overflow-hidden" : "relative min-h-[100svh] overflow-hidden"}>
+      {/* min 52rem stage: on very short viewports the galaxy stage extends
+          below the fold instead of letting the copy crash into the counter. */}
+      <div className={animate ? "sticky top-0 h-[max(100svh,52rem)] overflow-hidden" : "relative min-h-[max(100svh,52rem)] overflow-hidden"}>
         {/* Upper stage: hero copy on clean black — no particles behind it. */}
         <div
           ref={copyRef}
-          className="relative z-20 mx-auto flex max-w-3xl flex-col items-center px-4 pt-24 text-center sm:px-6 sm:pt-28"
+          className="relative z-20 mx-auto flex max-w-3xl flex-col items-center px-4 pt-12 text-center tall:pt-20 xtall:pt-24 sm:px-6 sm:xtall:pt-28"
         >
           <motion.div
             initial={animate ? { opacity: 0, y: 24 } : false}
@@ -85,7 +87,7 @@ export function HeroSection({
             transition={{ duration: 0.6 }}
             className="flex flex-col items-center"
           >
-            <p className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-4 py-1.5 text-[10px] font-bold uppercase tracking-[0.2em] text-oai-gray-400">
+            <p className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-4 py-1.5 text-[10px] font-bold uppercase tracking-[0.2em] text-oai-gray-400 tall:mb-5">
               <span className="relative flex h-1.5 w-1.5" aria-hidden="true">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[color:var(--lv3-accent)] opacity-75" />
                 <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[color:var(--lv3-accent)]" />
@@ -93,7 +95,7 @@ export function HeroSection({
               {copy("landing.v3.hero.kicker")}
             </p>
 
-            <h1 className="text-balance text-4xl font-semibold leading-[1.08] tracking-tight text-white sm:text-6xl lg:text-[4rem]">
+            <h1 className="text-balance text-4xl font-semibold leading-[1.08] tracking-tight text-white sm:text-[2.75rem] sm:tall:text-[3.25rem] sm:xtall:text-6xl lg:xtall:text-[4rem]">
               {copy("landing.v2.hero.title_line1")}
               <br />
               <span
@@ -104,11 +106,11 @@ export function HeroSection({
               </span>
             </h1>
 
-            <p className="mt-5 max-w-2xl text-base leading-relaxed text-oai-gray-400 sm:text-lg">
+            <p className="mt-4 max-w-2xl text-base leading-relaxed text-oai-gray-400 xtall:mt-5 sm:tall:text-lg">
               {copy("landing.v2.hero.subtagline")} {copy("landing.v2.install.availability")}
             </p>
 
-            <div className="mt-7 w-full">
+            <div className="mt-5 w-full xtall:mt-7">
               <InstallCommand
                 copy={copy}
                 installCommand={installCommand}
@@ -118,7 +120,7 @@ export function HeroSection({
               />
             </div>
 
-            <div className="mt-5 w-full">
+            <div className="mt-4 w-full xtall:mt-5">
               <DownloadButtons copy={copy} githubLabel={githubLabel} />
             </div>
           </motion.div>
@@ -152,7 +154,7 @@ export function HeroSection({
               {copy("landing.v3.hero.stat_label")}
             </p>
             <p
-              className="font-mono text-4xl font-bold tabular-nums leading-none text-white sm:text-5xl"
+              className="font-mono text-4xl font-bold tabular-nums leading-none text-white sm:tall:text-5xl"
               style={{
                 textShadow:
                   "0 2px 24px rgba(0, 0, 0, 0.9), 0 0 90px var(--lv3-accent-faint), 0 0 30px var(--lv3-accent-ghost)",
