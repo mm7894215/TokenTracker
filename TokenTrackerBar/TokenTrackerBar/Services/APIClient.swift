@@ -82,10 +82,18 @@ actor APIClient {
         try await fetch("/functions/tokentracker-usage-limits")
     }
 
-    func triggerSync(drain: Bool = false) async throws -> SyncResponse {
-        try await post(
+    func triggerSync(drain: Bool = false, auto: Bool = false) async throws -> SyncResponse {
+        let body: Data
+        if drain {
+            body = Data(#"{"drain":true}"#.utf8)
+        } else if auto {
+            body = Data(#"{"auto":true,"background":true}"#.utf8)
+        } else {
+            body = Data("{}".utf8)
+        }
+        return try await post(
             "/functions/tokentracker-local-sync",
-            body: drain ? Data(#"{"drain":true}"#.utf8) : Data("{}".utf8)
+            body: body
         )
     }
 

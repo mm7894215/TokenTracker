@@ -528,6 +528,8 @@ function readJsonBody(req) {
 function runSyncCommand(extraEnv = {}, opts = {}) {
   return new Promise((resolve, reject) => {
     const args = [TRACKER_BIN, "sync"];
+    if (opts.auto === true) args.push("--auto");
+    if (opts.background === true) args.push("--background");
     if (opts.drain === true) args.push("--drain");
     const child = spawn(process.execPath, args, {
       env: { ...process.env, ...extraEnv },
@@ -1489,6 +1491,9 @@ function createLocalApiHandler({ queuePath }) {
         }
         const extraEnv = {};
         const drain = body.drain === true;
+        const auto = body.auto === true && !drain;
+        const background =
+          auto && (body.background === true || body.lightweight === true);
         if (typeof body.deviceToken === "string" && body.deviceToken.trim()) {
           extraEnv.TOKENTRACKER_DEVICE_TOKEN = body.deviceToken.trim();
         }
@@ -1502,7 +1507,7 @@ function createLocalApiHandler({ queuePath }) {
           extraEnv.TOKENTRACKER_INSFORGE_BASE_URL = allowedBaseUrl;
           localSyncBaseUrl = allowedBaseUrl;
         }
-        if (!extraEnv.TOKENTRACKER_DEVICE_TOKEN && getCloudSyncPref() && getRefreshTokenForCloud()) {
+        if (!background && !extraEnv.TOKENTRACKER_DEVICE_TOKEN && getCloudSyncPref() && getRefreshTokenForCloud()) {
           let issuedToken = null;
           try {
             issuedToken = await issueDeviceTokenForLocalSync(qp, { baseUrl: localSyncBaseUrl });
@@ -1520,7 +1525,7 @@ function createLocalApiHandler({ queuePath }) {
             extraEnv.TOKENTRACKER_DEVICE_TOKEN = issuedToken;
           }
         }
-        const result = await runSyncCommand(extraEnv, { drain });
+        const result = await runSyncCommand(extraEnv, { drain, auto, background });
         try {
           const { resetUsageLimitsCache } = require("./usage-limits");
           resetUsageLimitsCache();

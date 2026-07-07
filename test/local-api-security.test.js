@@ -237,6 +237,165 @@ test("local sync drain request runs sync with --drain", async () => {
   }
 });
 
+test("local sync auto background request runs sync with --auto --background", async () => {
+  const calls = [];
+  const { mod, restore } = loadLocalApiWithSpawn(createSuccessfulSpawn(calls));
+
+  try {
+    const handler = mod.createLocalApiHandler({ queuePath: path.join(process.cwd(), "tmp-queue.jsonl") });
+    const localAuthToken = await getLocalAuthToken(handler);
+    const req = createRequest({
+      method: "POST",
+      headers: { "x-tokentracker-local-auth": localAuthToken },
+      body: JSON.stringify({
+        deviceToken: "device-token",
+        auto: true,
+        background: true,
+      }),
+    });
+    const res = createResponse();
+
+    const handled = await handler(
+      req,
+      res,
+      new URL("http://127.0.0.1/functions/tokentracker-local-sync"),
+    );
+
+    assert.equal(handled, true);
+    assert.equal(res.statusCode, 200);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].args.slice(-4), [
+      path.join(process.cwd(), "bin/tracker.js"),
+      "sync",
+      "--auto",
+      "--background",
+    ]);
+  } finally {
+    restore();
+  }
+});
+
+test("local sync lightweight alias forwards background mode", async () => {
+  const calls = [];
+  const { mod, restore } = loadLocalApiWithSpawn(createSuccessfulSpawn(calls));
+
+  try {
+    const handler = mod.createLocalApiHandler({ queuePath: path.join(process.cwd(), "tmp-queue.jsonl") });
+    const localAuthToken = await getLocalAuthToken(handler);
+    const req = createRequest({
+      method: "POST",
+      headers: { "x-tokentracker-local-auth": localAuthToken },
+      body: JSON.stringify({
+        deviceToken: "device-token",
+        auto: true,
+        lightweight: true,
+      }),
+    });
+    const res = createResponse();
+
+    const handled = await handler(
+      req,
+      res,
+      new URL("http://127.0.0.1/functions/tokentracker-local-sync"),
+    );
+
+    assert.equal(handled, true);
+    assert.equal(res.statusCode, 200);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].args.slice(-4), [
+      path.join(process.cwd(), "bin/tracker.js"),
+      "sync",
+      "--auto",
+      "--background",
+    ]);
+  } finally {
+    restore();
+  }
+});
+
+test("local sync drain priority suppresses auto background mode", async () => {
+  const calls = [];
+  const { mod, restore } = loadLocalApiWithSpawn(createSuccessfulSpawn(calls));
+
+  try {
+    const handler = mod.createLocalApiHandler({ queuePath: path.join(process.cwd(), "tmp-queue.jsonl") });
+    const localAuthToken = await getLocalAuthToken(handler);
+    const req = createRequest({
+      method: "POST",
+      headers: { "x-tokentracker-local-auth": localAuthToken },
+      body: JSON.stringify({
+        deviceToken: "device-token",
+        drain: true,
+        auto: true,
+        background: true,
+        lightweight: true,
+      }),
+    });
+    const res = createResponse();
+
+    const handled = await handler(
+      req,
+      res,
+      new URL("http://127.0.0.1/functions/tokentracker-local-sync"),
+    );
+
+    assert.equal(handled, true);
+    assert.equal(res.statusCode, 200);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].args.slice(-3), [
+      path.join(process.cwd(), "bin/tracker.js"),
+      "sync",
+      "--drain",
+    ]);
+  } finally {
+    restore();
+  }
+});
+
+test("local sync only treats boolean true as background or lightweight", async () => {
+  const cases = [
+    { background: false },
+    { background: "true" },
+    { background: 1 },
+    { lightweight: false },
+    { lightweight: "true" },
+    { lightweight: 1 },
+  ];
+
+  for (const body of cases) {
+    const calls = [];
+    const { mod, restore } = loadLocalApiWithSpawn(createSuccessfulSpawn(calls));
+
+    try {
+      const handler = mod.createLocalApiHandler({ queuePath: path.join(process.cwd(), "tmp-queue.jsonl") });
+      const localAuthToken = await getLocalAuthToken(handler);
+      const req = createRequest({
+        method: "POST",
+        headers: { "x-tokentracker-local-auth": localAuthToken },
+        body: JSON.stringify({
+          deviceToken: "device-token",
+          auto: true,
+          ...body,
+        }),
+      });
+      const res = createResponse();
+
+      const handled = await handler(
+        req,
+        res,
+        new URL("http://127.0.0.1/functions/tokentracker-local-sync"),
+      );
+
+      assert.equal(handled, true);
+      assert.equal(res.statusCode, 200);
+      assert.equal(calls.length, 1);
+      assert.deepEqual(calls[0].args.slice(-3), [path.join(process.cwd(), "bin/tracker.js"), "sync", "--auto"]);
+    } finally {
+      restore();
+    }
+  }
+});
+
 test("local sync only treats boolean true as drain", async () => {
   const cases = [
     {},

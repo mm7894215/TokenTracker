@@ -2,7 +2,7 @@ import Foundation
 
 enum BackgroundRefreshPolicy {
     static let defaultRefreshInterval: TimeInterval = 300
-    static let defaultSyncInterval: TimeInterval = 1_800
+    static let defaultSyncInterval: TimeInterval = 300
     static let defaultCatchUpStaleInterval: TimeInterval = 300
 
     static func shouldRunSync(

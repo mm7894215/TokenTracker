@@ -247,7 +247,7 @@ class DashboardViewModel: ObservableObject {
         defer { isSyncing = false }
         var didSync = false
         do {
-            _ = try await APIClient.shared.triggerSync()
+            _ = try await APIClient.shared.triggerSync(auto: true)
             didSync = true
         } catch {
             // Sync failure is non-fatal — proceed with whatever data exists

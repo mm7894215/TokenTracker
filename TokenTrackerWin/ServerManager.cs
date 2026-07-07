@@ -113,7 +113,7 @@ internal sealed class ServerManager : IDisposable
             if (_syncProcess is { HasExited: false }) return false;
 
             var args = auto
-                ? new[] { "sync", "--auto" }
+                ? new[] { "sync", "--auto", "--background" }
                 : new[] { "sync" };
             var proc = StartTrackerProcess(runtime.Value.NodePath, runtime.Value.EntryPath, args);
             if (proc is null) return false;

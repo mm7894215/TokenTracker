@@ -58,6 +58,26 @@ async function writeArchivedCodexRollout(codexHome, date, uuid, totalTokens = 12
   return filePath;
 }
 
+async function writeNestedArchivedCodexRollout(codexHome, date, uuid, totalTokens = 12) {
+  const [year, month, day] = date.split("-");
+  const dir = path.join(codexHome, "archived_sessions", year, month, day, uuid);
+  await fs.mkdir(dir, { recursive: true });
+  const filePath = path.join(dir, `rollout-${date}T00-00-00-${uuid}.jsonl`);
+  const usage = {
+    input_tokens: totalTokens,
+    cached_input_tokens: 0,
+    output_tokens: 0,
+    reasoning_output_tokens: 0,
+    total_tokens: totalTokens,
+  };
+  await fs.writeFile(
+    filePath,
+    tokenCountLine({ ts: `${date}T00:00:00.000Z`, last: usage, total: usage }) + "\n",
+    "utf8",
+  );
+  return filePath;
+}
+
 async function withTempSyncEnv(fn) {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-source-scope-"));
   const saved = {
@@ -72,6 +92,7 @@ async function withTempSyncEnv(fn) {
     TOKENTRACKER_OPENCLAW_PREV_SESSION_ID: process.env.TOKENTRACKER_OPENCLAW_PREV_SESSION_ID,
     TOKENTRACKER_OPENCLAW_SESSION_KEY: process.env.TOKENTRACKER_OPENCLAW_SESSION_KEY,
     TOKENTRACKER_OPENCLAW_HOME: process.env.TOKENTRACKER_OPENCLAW_HOME,
+    TOKENTRACKER_INSFORGE_BASE_URL: process.env.TOKENTRACKER_INSFORGE_BASE_URL,
   };
   try {
     process.env.HOME = home;
@@ -85,6 +106,7 @@ async function withTempSyncEnv(fn) {
     delete process.env.TOKENTRACKER_OPENCLAW_PREV_SESSION_ID;
     delete process.env.TOKENTRACKER_OPENCLAW_SESSION_KEY;
     delete process.env.TOKENTRACKER_DEVICE_TOKEN;
+    delete process.env.TOKENTRACKER_INSFORGE_BASE_URL;
     return await fn(home);
   } finally {
     for (const [key, value] of Object.entries(saved)) {
@@ -486,6 +508,155 @@ test("full auto sync still scans flat Codex archives", async () => {
     const queue = await fs.readFile(path.join(home, ".tokentracker", "tracker", "queue.jsonl"), "utf8");
     assert.match(queue, /"source":"codex"/);
     assert.match(queue, /"total_tokens":29/);
+  });
+});
+
+test("background auto sync stays bounded and skips deep Codex archives", async () => {
+  await withTempSyncEnv(async (home) => {
+    const codexHome = process.env.CODEX_HOME;
+    await writeCodexRollout(
+      codexHome,
+      "2026-06-30",
+      "019f16bd-6777-7777-8888-999999999999",
+      31,
+    );
+    await writeNestedArchivedCodexRollout(
+      codexHome,
+      "2026-06-30",
+      "019f16bd-6888-7777-8888-999999999999",
+      47,
+    );
+
+    const archiveRoot = path.join(codexHome, "archived_sessions");
+    const { count } = await countReaddir(
+      () => cmdSync(["--auto", "--background"]),
+      (target) => target.startsWith(archiveRoot),
+    );
+
+    assert.equal(count, 0, "background auto sync must not enumerate archived Codex sessions");
+    const queue = await fs.readFile(path.join(home, ".tokentracker", "tracker", "queue.jsonl"), "utf8");
+    assert.match(queue, /"source":"codex"/);
+    assert.match(queue, /"total_tokens":31/);
+    assert.doesNotMatch(queue, /"total_tokens":47/);
+  });
+});
+
+test("background auto sync does not enumerate broad provider roots", async () => {
+  await withTempSyncEnv(async (home) => {
+    const codexHome = process.env.CODEX_HOME;
+    await writeCodexRollout(
+      codexHome,
+      "2026-06-30",
+      "019f16bd-6ddd-7777-8888-999999999999",
+      22,
+    );
+    const broadRoots = [
+      path.join(home, ".claude"),
+      path.join(home, ".gemini"),
+      path.join(home, ".opencode"),
+      path.join(home, ".local", "share", "mimocode"),
+      path.join(home, ".workbuddy"),
+    ];
+    await Promise.all(broadRoots.map((root) => fs.mkdir(root, { recursive: true })));
+
+    const { count } = await countReaddir(
+      () => cmdSync(["--auto", "--background"]),
+      (target) => broadRoots.some((root) => target === root || target.startsWith(`${root}${path.sep}`)),
+    );
+
+    assert.equal(count, 0, "background auto sync must not walk broad non-bounded provider roots");
+    const queue = await fs.readFile(path.join(home, ".tokentracker", "tracker", "queue.jsonl"), "utf8");
+    assert.match(queue, /"source":"codex"/);
+    assert.match(queue, /"total_tokens":22/);
+  });
+});
+
+test("background auto sync does not upload even when cloud credentials exist", async () => {
+  await withTempSyncEnv(async (home) => {
+    const codexHome = process.env.CODEX_HOME;
+    await writeCodexRollout(
+      codexHome,
+      "2026-06-30",
+      "019f16bd-6eee-7777-8888-999999999999",
+      24,
+    );
+    process.env.TOKENTRACKER_DEVICE_TOKEN = "test-device-token";
+    process.env.TOKENTRACKER_INSFORGE_BASE_URL = "https://example.invalid";
+    const originalFetch = global.fetch;
+    let fetchCalls = 0;
+    global.fetch = async () => {
+      fetchCalls += 1;
+      throw new Error("background sync should not upload");
+    };
+
+    try {
+      await cmdSync(["--auto", "--background"]);
+    } finally {
+      global.fetch = originalFetch;
+    }
+
+    assert.equal(fetchCalls, 0, "background auto sync must not call cloud ingest");
+    const queueState = await fs.stat(path.join(home, ".tokentracker", "tracker", "queue.state.json")).catch(() => null);
+    assert.equal(queueState, null, "background auto sync must not advance upload state");
+  });
+});
+
+test("lightweight flag is an alias for bounded background sync", async () => {
+  await withTempSyncEnv(async (home) => {
+    const codexHome = process.env.CODEX_HOME;
+    await writeCodexRollout(
+      codexHome,
+      "2026-06-30",
+      "019f16bd-6999-7777-8888-999999999999",
+      36,
+    );
+    await writeArchivedCodexRollout(
+      codexHome,
+      "2026-06-30",
+      "019f16bd-6aaa-7777-8888-999999999999",
+      58,
+    );
+
+    await cmdSync(["--auto", "--lightweight"]);
+
+    const queue = await fs.readFile(path.join(home, ".tokentracker", "tracker", "queue.jsonl"), "utf8");
+    assert.match(queue, /"source":"codex"/);
+    assert.match(queue, /"total_tokens":36/);
+    assert.doesNotMatch(queue, /"total_tokens":58/);
+  });
+});
+
+test("second unchanged background sync does not deep-read archive descendants or change queue", async () => {
+  await withTempSyncEnv(async (home) => {
+    const codexHome = process.env.CODEX_HOME;
+    await writeCodexRollout(
+      codexHome,
+      "2026-06-30",
+      "019f16bd-6bbb-7777-8888-999999999999",
+      41,
+    );
+    await writeNestedArchivedCodexRollout(
+      codexHome,
+      "2026-06-30",
+      "019f16bd-6ccc-7777-8888-999999999999",
+      67,
+    );
+
+    await cmdSync(["--auto", "--background"]);
+    const queuePath = path.join(home, ".tokentracker", "tracker", "queue.jsonl");
+    const before = await fs.readFile(queuePath, "utf8");
+
+    const archiveRoot = path.join(codexHome, "archived_sessions");
+    const { count } = await countReaddir(
+      () => cmdSync(["--auto", "--background"]),
+      (target) => target.startsWith(`${archiveRoot}${path.sep}`),
+    );
+    const after = await fs.readFile(queuePath, "utf8");
+
+    assert.equal(count, 0, "second background sync must not readdir descendants under archived_sessions");
+    assert.equal(after, before, "idle background sync must leave Codex queue output stable");
+    assert.match(after, /"total_tokens":41/);
+    assert.doesNotMatch(after, /"total_tokens":67/);
   });
 });
 

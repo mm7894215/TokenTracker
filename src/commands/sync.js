@@ -203,6 +203,11 @@ const AUTO_SYNC_SOURCES = new Set([
   "zcode",
   "zed",
 ]);
+const BACKGROUND_AUTO_SYNC_SOURCES = new Set([
+  // Keep unscoped native 5-minute syncs bounded to dated local session trees.
+  "codex",
+  "every-code",
+]);
 
 function warnProviderParseFailure(label, err, opts) {
   if (opts?.auto) return;
@@ -271,23 +276,34 @@ async function cmdSync(argv) {
       : null;
 
     const autoSourceScope = resolveAutoSourceScope(opts);
-    const isFullSourceScan = !autoSourceScope;
-    const sourceAllowed = (...sources) =>
-      !autoSourceScope || sources.includes(autoSourceScope);
+    const isBackgroundLightweightSync = opts.auto && opts.background && !opts.drain;
+    const isFullSourceScan = !autoSourceScope && !isBackgroundLightweightSync;
+    const sourceAllowed = (...sources) => {
+      if (isBackgroundLightweightSync) {
+        if (autoSourceScope) {
+          return BACKGROUND_AUTO_SYNC_SOURCES.has(autoSourceScope) && sources.includes(autoSourceScope);
+        }
+        return sources.some((source) => BACKGROUND_AUTO_SYNC_SOURCES.has(source));
+      }
+      if (autoSourceScope) return sources.includes(autoSourceScope);
+      return true;
+    };
 
     const sources = [];
     if (sourceAllowed("codex")) {
-      sources.push(
-        { source: "codex", sessionsDir: path.join(codexHome, "sessions"), codexInventoryCache: true },
-        // Codex-Manager archives sessions to ~/.codex/archived_sessions/ on every
-        // account/channel switch (issue #187). Scanning it too keeps that usage
-        // counted instead of orphaning it in the cloud (a re-upload's upsert can
-        // never delete cloud rows whose local source file has vanished). Safe
-        // against double-counting: the codex event dedup keys on sessionUUID (in
-        // the filename) + event timestamp, both stable across a sessions/ ->
-        // archived_sessions/ move, so re-reading an archived copy is a no-op.
-        { source: "codex", sessionsDir: path.join(codexHome, "archived_sessions"), deep: true },
-      );
+      sources.push({ source: "codex", sessionsDir: path.join(codexHome, "sessions"), codexInventoryCache: true });
+      if (!isBackgroundLightweightSync) {
+        sources.push(
+          // Codex-Manager archives sessions to ~/.codex/archived_sessions/ on every
+          // account/channel switch (issue #187). Scanning it too keeps that usage
+          // counted instead of orphaning it in the cloud (a re-upload's upsert can
+          // never delete cloud rows whose local source file has vanished). Safe
+          // against double-counting: the codex event dedup keys on sessionUUID (in
+          // the filename) + event timestamp, both stable across a sessions/ ->
+          // archived_sessions/ move, so re-reading an archived copy is a no-op.
+          { source: "codex", sessionsDir: path.join(codexHome, "archived_sessions"), deep: true },
+        );
+      }
     }
     if (sourceAllowed("every-code")) {
       sources.push({ source: "every-code", sessionsDir: path.join(codeHome, "sessions") });
@@ -874,7 +890,7 @@ async function cmdSync(argv) {
     }
 
     let cursorResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    if (sourceAllowed("cursor") && isCursorInstalled({ home })) {
+    if (!isBackgroundLightweightSync && sourceAllowed("cursor") && isCursorInstalled({ home })) {
       const cursorAuth = extractCursorSessionToken({ home });
       if (cursorAuth) {
         try {
@@ -1384,7 +1400,7 @@ async function cmdSync(argv) {
     let uploadResult = { inserted: 0, skipped: 0 };
     let uploadAttempted = false;
 
-    if (runtime.deviceToken && runtime.baseUrl) {
+    if (runtime.deviceToken && runtime.baseUrl && !isBackgroundLightweightSync) {
       uploadAttempted = true;
       // Mirror the machine identity into the purge-surviving seed file so a
       // future `uninstall --purge` + reinstall recovers the same cloud device
@@ -1541,6 +1557,7 @@ function parseArgs(argv) {
     fromOpenclaw: false,
     source: null,
     drain: false,
+    background: false,
     repairGrok: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -1555,6 +1572,7 @@ function parseArgs(argv) {
     }
     else if (a.startsWith("--source=")) out.source = normalizeSyncSource(a.slice("--source=".length));
     else if (a === "--drain") out.drain = true;
+    else if (a === "--background" || a === "--lightweight") out.background = true;
     else if (a === "--repair-grok") out.repairGrok = true;
     else throw new Error(`Unknown option: ${a}`);
   }
