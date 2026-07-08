@@ -376,10 +376,10 @@ export function TokenGalaxy({ mode = "full", progressRef, className = "" }) {
       {/* Core convergence glow (both modes; the particles amplify it in full mode). */}
       <div
         ref={glowRef}
-        className="absolute left-1/2 top-[68vh] h-[28rem] w-[28rem] -translate-x-1/2 -translate-y-1/2 rounded-full opacity-45"
+        className="absolute left-1/2 top-[68vh] h-[28rem] w-[28rem] -translate-x-1/2 -translate-y-1/2 rounded-full opacity-80"
         style={{
           background:
-            "radial-gradient(circle, var(--lv3-bg) 6%, rgba(138, 122, 255, 0.28) 18%, rgba(138, 122, 255, 0.05) 45%, transparent 68%)",
+            "radial-gradient(circle, var(--lv3-bg) 6%, rgba(255, 255, 255, 0.8) 8.5%, rgba(138, 122, 255, 0.5) 16%, rgba(138, 122, 255, 0.1) 40%, transparent 68%)",
         }}
       />
       {isStatic ? (

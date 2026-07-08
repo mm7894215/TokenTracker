@@ -229,36 +229,18 @@ export const GALAXY_VERTEX = /* glsl */ `
       alpha = 0.22 * tw * uIntro;
     }
 
-    // --- GRAVITATIONAL LENSING WARP (3D GARGANTUA BLACK HOLE) ---
+    // --- GRAVITATIONAL LENSING WARP (3D BLACK HOLE) ---
     float r_local = length(p.xy);
     if (r_local > 0.01) {
       float R_horizon = 0.7;
-      
       // Fade out particles that fall below the event horizon
       float horizonFade = smoothstep(0.4, R_horizon, r_local);
       alpha *= horizonFade;
       
-      // Deflect particles and wrap them into a 3D Gargantua halo
+      // Deflect particles around the event horizon
       if (r_local < R_horizon * 4.0) {
-        float blend = smoothstep(R_horizon * 4.0, R_horizon, r_local);
-        
-        // Planar deflection
         float deflection = 0.38 * R_horizon * R_horizon / (r_local - R_horizon * 0.7);
         p.xy += normalize(p.xy) * deflection;
-        
-        // Interstellar style vertical lensing ring for the back of the disc (p.y > 0)
-        if (p.y > 0.0) {
-          float theta = atan(p.y, p.x);
-          float signY = (fract(aSeed * 13.37) > 0.5) ? 1.0 : -1.0;
-          
-          float targetX = R_horizon * 1.5 * cos(theta);
-          float targetY = R_horizon * 1.5 * abs(sin(theta)) * signY;
-          float targetZ = R_horizon * 1.5 * sin(theta);
-          
-          p.x = mix(p.x, targetX, blend * 0.82);
-          p.y = mix(p.y, targetY, blend * 0.82);
-          p.z = mix(p.z, targetZ, blend * 0.82);
-        }
       }
     }
 
@@ -283,8 +265,36 @@ export const GALAXY_VERTEX = /* glsl */ `
     // Scale particle sizes up moderately during the flash phase to intensify the explosion
     float sizeMultiplier = 1.0 + flash * 0.8;
 
-    // Individual particle burnout based on uProgress and aSeed (burn out completely by progress = 0.80)
-    float burnOut = smoothstep(0.08 + 0.52 * fract(aSeed * 23.45), 0.80, uProgress);
+    // --- Gravitational Lensing & Horizon Void (The 3D Black Hole) ---
+    float R_horizon = 0.5; // Event horizon (the dark core)
+    float R_photon = 0.9;  // Accretion ring (where light gets trapped and glows)
+    float r2d = max(0.001, length(p.xz));
+    
+    if (r2d < 6.0) {
+      // 1. Relativistic Frame Dragging (The violent swirl near the core)
+      float swirlFactor = smoothstep(6.0, 0.0, r2d);
+      float frameDrag = pow(swirlFactor, 2.5) * 25.0; // Extreme spin
+      float sDrag = sin(frameDrag);
+      float cDrag = cos(frameDrag);
+      p.xz = vec2(p.x * cDrag - p.z * sDrag, p.x * sDrag + p.z * cDrag);
+      
+      // 2. Gravitational Lensing (Photon Ring Bulge)
+      // Light is bent up and around the black hole. We compress particles into R_photon.
+      float lensWarp = exp(-pow(r2d - R_photon, 2.0) * 3.0); 
+      
+      // Push particles outwards to compress them into the bright ring
+      p.xz += (p.xz / r2d) * lensWarp * 0.7;
+      
+      // The Y bulge gives it that 3D "Interstellar" bent-light look
+      p.y += lensWarp * (0.8 + sin(aSeed * 6.28) * 1.5); 
+      
+      // 3. Superheating (Accretion Glow)
+      glow += lensWarp * 2.0; 
+    }
+    
+    // Completely fade out particles that cross the horizon
+    float finalR = length(p.xz);
+    float burnOut = 1.0 - smoothstep(R_horizon - 0.2, R_horizon + 0.3, finalR);
     alpha *= (1.0 - burnOut);
     // ---------------------------------
 
