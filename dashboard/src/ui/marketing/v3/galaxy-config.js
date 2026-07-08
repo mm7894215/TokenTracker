@@ -261,25 +261,26 @@ export const GALAXY_VERTEX = /* glsl */ `
     p = vec3(p.x, p.y * c - p.z * s, p.y * s + p.z * c);
     p.y += uYOffset;
 
-    // --- GRAVITATIONAL LENSING WARP (3D BLACK HOLE) ---
-    vec3 center = vec3(0.0, uYOffset, 0.0);
-    vec3 toParticle = p - center;
-    float r_tilted = length(toParticle.xy);
-    if (r_tilted > 0.01) {
-      float R_horizon = 0.65;
+    vec4 mv = modelViewMatrix * vec4(p, 1.0);
+
+    // --- GRAVITATIONAL LENSING WARP (3D BLACK HOLE) IN CAMERA SPACE ---
+    vec3 bh_cam = (modelViewMatrix * vec4(0.0, uYOffset, 0.0, 1.0)).xyz;
+    vec2 toParticle = mv.xy - bh_cam.xy;
+    float r_cam = length(toParticle);
+    if (r_cam > 0.01) {
+      float R_horizon = 0.85;
       // Fade out particles that fall below the event horizon
-      float horizonFade = smoothstep(0.3, R_horizon, r_tilted);
+      float horizonFade = smoothstep(0.4, R_horizon, r_cam);
       alpha *= horizonFade;
       
-      // Deflect particles around the event horizon (isotropic screen deflection)
-      if (r_tilted < R_horizon * 4.5) {
-        float deflection = 0.38 * R_horizon * R_horizon / (r_tilted - R_horizon * 0.7);
-        p.xy += normalize(toParticle.xy) * deflection;
-        p.z += deflection * 0.5; // push lensed rays forward
+      // Deflect particles around the event horizon (isotropic camera-space deflection)
+      if (r_cam < R_horizon * 4.0) {
+        float deflection = 0.45 * R_horizon * R_horizon / (r_cam - R_horizon * 0.7);
+        mv.xy += normalize(toParticle) * deflection;
+        mv.z += deflection * 0.4; // warp depth forward
       }
     }
 
-    vec4 mv = modelViewMatrix * vec4(p, 1.0);
     gl_Position = projectionMatrix * mv;
     float dist = max(0.001, -mv.z);
     // Exaggerated near-big/far-small: particles low in the frame (near side
