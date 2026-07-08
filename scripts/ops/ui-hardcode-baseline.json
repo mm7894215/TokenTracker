@@ -1,12 +1,12 @@
 {
-  "generatedAt": "2026-07-06T06:28:42.437Z",
+  "generatedAt": "2026-07-08T11:01:00.028Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
     "rawText": "JSX text nodes containing letters or digits"
   },
   "totals": {
-    "colors": 285,
+    "colors": 287,
     "rawText": 164
   },
   "files": {
@@ -433,6 +433,11 @@
       "rawTextTokens": [
         "0 ? Math.max(6, Math.round((tokens / maxTokens) * 100)) : 0; return ("
       ]
+    },
+    "dashboard/src/ui/marketing/v3/TokenGalaxy.jsx": {
+      "colors": 2,
+      "rawText": 0,
+      "rawTextTokens": []
     },
     "dashboard/src/ui/marketing/v3/palette.js": {
       "colors": 21,
