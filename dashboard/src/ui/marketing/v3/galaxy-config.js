@@ -229,18 +229,36 @@ export const GALAXY_VERTEX = /* glsl */ `
       alpha = 0.22 * tw * uIntro;
     }
 
-    // --- GRAVITATIONAL LENSING WARP (3D BLACK HOLE) ---
+    // --- GRAVITATIONAL LENSING WARP (3D GARGANTUA BLACK HOLE) ---
     float r_local = length(p.xy);
     if (r_local > 0.01) {
       float R_horizon = 0.7;
+      
       // Fade out particles that fall below the event horizon
       float horizonFade = smoothstep(0.4, R_horizon, r_local);
       alpha *= horizonFade;
       
-      // Deflect particles around the event horizon
+      // Deflect particles and wrap them into a 3D Gargantua halo
       if (r_local < R_horizon * 4.0) {
+        float blend = smoothstep(R_horizon * 4.0, R_horizon, r_local);
+        
+        // Planar deflection
         float deflection = 0.38 * R_horizon * R_horizon / (r_local - R_horizon * 0.7);
         p.xy += normalize(p.xy) * deflection;
+        
+        // Interstellar style vertical lensing ring for the back of the disc (p.y > 0)
+        if (p.y > 0.0) {
+          float theta = atan(p.y, p.x);
+          float signY = (fract(aSeed * 13.37) > 0.5) ? 1.0 : -1.0;
+          
+          float targetX = R_horizon * 1.5 * cos(theta);
+          float targetY = R_horizon * 1.5 * abs(sin(theta)) * signY;
+          float targetZ = R_horizon * 1.5 * sin(theta);
+          
+          p.x = mix(p.x, targetX, blend * 0.82);
+          p.y = mix(p.y, targetY, blend * 0.82);
+          p.z = mix(p.z, targetZ, blend * 0.82);
+        }
       }
     }
 
