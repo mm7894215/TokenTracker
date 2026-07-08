@@ -19,14 +19,14 @@ export const GALAXY_PROVIDERS = [
 ];
 
 const RING_SLOTS = [
-  { left: 88, top: 38 }, // claude
-  { left: 73, top: 18 }, // opencode
-  { left: 27, top: 18 }, // gemini
-  { left: 12, top: 38 }, // copilot
-  { left: 9, top: 66 }, // codex
-  { left: 24, top: 88 }, // antigravity
-  { left: 76, top: 88 }, // cursor
-  { left: 91, top: 66 }, // kimi
+  { left: 88, top: 29 }, // claude
+  { left: 73, top: 9 }, // opencode
+  { left: 27, top: 9 }, // gemini
+  { left: 12, top: 29 }, // copilot
+  { left: 9, top: 57 }, // codex
+  { left: 24, top: 79 }, // antigravity
+  { left: 76, top: 79 }, // cursor
+  { left: 91, top: 57 }, // kimi
 ];
 
 // World-space disc the particles live on (before the X-axis tilt).
@@ -63,7 +63,7 @@ const FRAME_ASPECT = 1.78;
 // The orbs travel on this fixed SCREEN-SPACE ellipse (viewport %). Orbiting
 // along it keeps every orb inside the frame forever — orbiting disc-plane
 // circles instead would fling the large-radius ones off screen.
-const ORB_RING = { cx: 50, cy: 52, rx: 40, ry: 34 };
+const ORB_RING = { cx: 50, cy: 43, rx: 40, ry: 34 };
 
 // Initial angle of each provider on the orbit, matching the designed slots.
 export function orbBaseAngles() {
