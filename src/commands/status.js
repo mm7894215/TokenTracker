@@ -693,7 +693,15 @@ function renderLightTable(summary) {
     push(`Provider · ${name}`, detail.length ? detail.join(", ") : "—");
   }
 
-  if (summary.copilot) {
+  // Mirror formatCopilotLines(): stay silent for machines with no Copilot
+  // signal at all instead of printing "not found" rows for everyone.
+  const copilotDetected =
+    summary.copilot &&
+    (summary.copilot.token_set ||
+      summary.copilot.otel_enabled ||
+      summary.copilot.otel_has_files ||
+      summary.copilot.app_db_has_file);
+  if (copilotDetected) {
     push(
       "Copilot App DB",
       summary.copilot.app_db_has_file

@@ -9577,23 +9577,20 @@ function readCopilotAppSessionsFromSqlite(dbPath, sqliteOptions = {}) {
   const orderBy = orderTerms.length > 0
     ? `ORDER BY COALESCE(${orderTerms.join(", ")}, ''), id`
     : "ORDER BY id";
+  // Select only the columns the parser consumes. Content-ish columns like
+  // `title` must stay out of the query: token counts only, never user content.
   const sql = `
     SELECT
       id,
-      ${optional("title")},
       ${optional("session_type")},
-      ${optional("mode")},
       ${optional("model")},
       ${optional("provider_id")},
       ${optional("created_at")},
       ${optional("updated_at")},
-      ${optional("forked_from_session_id")},
-      ${optional("fork_original_history_event_count")},
       ${optional("total_input_tokens")},
       ${optional("total_output_tokens")},
       ${optional("total_cached_tokens")},
-      ${optional("total_reasoning_tokens")},
-      ${optional("total_nano_aiu")}
+      ${optional("total_reasoning_tokens")}
     FROM sessions
     ${orderBy}
   `.trim();
