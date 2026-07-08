@@ -30,16 +30,16 @@
     "date-fns": "^4.4.0",
     "gsap": "^3.15.0",
     "html-to-image": "^1.11.13",
-    "lucide-react": "^1.22.0",
+    "lucide-react": "^1.23.0",
     "metal-fx": "^1.0.4",
     "motion": "^12.42.2",
-    "posthog-js": "^1.398.0",
+    "posthog-js": "^1.398.3",
     "react": "^18.2.0",
     "react-day-picker": "^9.14.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^7.18.1",
     "tailwind-merge": "^3.6.0",
-    "three": "^0.185.0"
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.4.5",
