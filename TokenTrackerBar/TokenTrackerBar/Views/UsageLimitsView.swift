@@ -773,16 +773,8 @@ private struct LimitsExplainContent: View {
 
             if let updatedLabel {
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 4) {
-                        if isStale {
-                            // Decorative — `updatedLabel` already conveys staleness in text.
-                            Image(systemName: "clock.arrow.circlepath")
-                                .font(.system(size: 9, weight: .medium))
-                                .accessibilityHidden(true)
-                        }
-                        Text(updatedLabel)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    Text(updatedLabel)
+                        .fixedSize(horizontal: false, vertical: true)
                     if let retryLabel {
                         Text(retryLabel)
                             .fixedSize(horizontal: false, vertical: true)
