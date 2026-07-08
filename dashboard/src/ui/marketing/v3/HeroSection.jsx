@@ -38,7 +38,7 @@ export function HeroSection({
       ScrollTrigger.create({
         trigger: sectionRef.current,
         start: "top top",
-        end: "bottom bottom",
+        end: "bottom top",
         scrub: true,
         onUpdate: (st) => {
           progressRef.current = st.progress;
@@ -52,12 +52,12 @@ export function HeroSection({
         scrollTrigger: {
           trigger: sectionRef.current,
           start: "top top",
-          end: "bottom bottom",
+          end: "bottom top",
           scrub: 0.5,
         },
       });
-      tl.to(copyRef.current, { yPercent: -16, autoAlpha: 0, duration: 0.35 }, 0.12);
-      tl.to(statRef.current, { y: -28, scale: 0.94, autoAlpha: 0, duration: 0.24 }, 0.66);
+      tl.to(copyRef.current, { yPercent: -16, autoAlpha: 0, duration: 0.30 }, 0.08);
+      tl.to(statRef.current, { y: -28, scale: 0.94, autoAlpha: 0, duration: 0.22 }, 0.45);
       tl.to({}, { duration: 0.1 });
     }, sectionRef);
     return () => ctx.revert();
@@ -72,14 +72,14 @@ export function HeroSection({
   const galaxyMode = animate && effectsReady ? "full" : "static";
 
   return (
-    <section ref={sectionRef} className={animate ? "relative h-[150vh]" : "relative"}>
+    <section ref={sectionRef} className="relative">
       {/* min 52rem stage: on very short viewports the galaxy stage extends
           below the fold instead of letting the copy crash into the counter. */}
-      <div className={animate ? "sticky top-0 h-[max(100svh,52rem)] overflow-hidden" : "relative min-h-[max(100svh,52rem)] overflow-hidden"}>
+      <div className="relative min-h-[max(100svh,52rem)]">
         {/* Upper stage: hero copy on clean black — no particles behind it. */}
         <div
           ref={copyRef}
-          className="relative z-20 mx-auto flex max-w-3xl flex-col items-center px-4 pt-12 text-center tall:pt-20 xtall:pt-24 sm:px-6 sm:xtall:pt-28"
+          className="relative z-20 mx-auto flex max-w-3xl flex-col items-center px-4 pt-28 text-center tall:pt-48 xtall:pt-56 sm:px-6 sm:pt-36 sm:xtall:pt-60"
         >
           <motion.div
             initial={animate ? { opacity: 0, y: 24 } : false}
@@ -106,11 +106,7 @@ export function HeroSection({
               </span>
             </h1>
 
-            <p className="mt-4 max-w-2xl text-base leading-relaxed text-oai-gray-400 xtall:mt-5 sm:tall:text-lg">
-              {copy("landing.v2.hero.subtagline")} {copy("landing.v2.install.availability")}
-            </p>
-
-            <div className="mt-5 w-full xtall:mt-7">
+            <div className="mt-8 sm:mt-10 w-full xtall:mt-12">
               <InstallCommand
                 copy={copy}
                 installCommand={installCommand}
@@ -129,12 +125,12 @@ export function HeroSection({
         {/* The galaxy canvas covers the whole viewport — no container edge can
             slice it — while the disc itself is parked in the lower half, with
             the live counter floating on its bright core. */}
-        <div className="absolute inset-0 z-0">
+        <div className={animate ? "absolute inset-x-0 top-0 bottom-[-40vh] z-0" : "absolute inset-0 z-0"}>
           <TokenGalaxy mode={galaxyMode} progressRef={progressRef} />
 
           {/* Outer div owns the centering; GSAP animates the inner one so the
               -50% translate never gets clobbered by the tween's transform. */}
-          <div className="pointer-events-none absolute left-1/2 top-[68%] z-10 -translate-x-1/2 -translate-y-1/2">
+          <div className="pointer-events-none absolute left-1/2 top-[68vh] z-10 -translate-x-1/2 -translate-y-1/2">
             <div ref={statRef} className="flex flex-col items-center gap-2">
             {/* Frosted dark pad: blurs the particles directly behind the
                 counter and dims them, with a radial mask so it melts into the

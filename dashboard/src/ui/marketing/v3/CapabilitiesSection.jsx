@@ -55,15 +55,34 @@ export function CapabilitiesSection({ copy, animate, screenshotSrc, screenshotAl
     if (!animate) return undefined;
     const ctx = gsap.context(() => {
       gsap.fromTo(
+        ".lv3-cap-header",
+        { y: 160, autoAlpha: 0 },
+        {
+          y: 0,
+          autoAlpha: 1,
+          ease: "power1.out",
+          scrollTrigger: {
+            trigger: sectionRef.current,
+            start: "top bottom",
+            end: "top 25%",
+            scrub: 0.5,
+          },
+        },
+      );
+      gsap.fromTo(
         ".lv3-cap-card",
-        { autoAlpha: 0, y: 32 },
+        { autoAlpha: 0, y: 110 },
         {
           autoAlpha: 1,
           y: 0,
-          duration: 0.7,
-          stagger: 0.12,
-          ease: "power3.out",
-          scrollTrigger: { trigger: sectionRef.current, start: "top 70%" },
+          ease: "power1.out",
+          stagger: 0.1,
+          scrollTrigger: {
+            trigger: sectionRef.current,
+            start: "top 85%",
+            end: "top 15%",
+            scrub: 0.5,
+          },
         },
       );
       gsap.fromTo(
@@ -87,9 +106,18 @@ export function CapabilitiesSection({ copy, animate, screenshotSrc, screenshotAl
   }, [animate]);
 
   return (
-    <section ref={sectionRef} className="relative border-t border-oai-gray-900 bg-oai-gray-950 py-20 sm:py-28 lg:py-36">
+    <section ref={sectionRef} className="relative bg-transparent py-20 sm:py-28 lg:py-36">
+      {/* Background glow at the top boundary to bleed light from the galaxy */}
+      <div
+        className="pointer-events-none absolute -top-40 left-1/2 h-80 w-[60rem] -translate-x-1/2 rounded-[50%] opacity-20"
+        style={{
+          background: "radial-gradient(ellipse at center, var(--lv3-accent), transparent 65%)",
+          filter: "blur(120px)",
+        }}
+        aria-hidden="true"
+      />
       <div className="mx-auto max-w-6xl px-4 sm:px-6">
-        <div className="max-w-2xl">
+        <div className="max-w-2xl lv3-cap-header">
           <p className="text-xs font-bold uppercase tracking-widest text-[color:var(--lv3-accent-soft)]">
             {copy("landing.v3.cap.kicker")}
           </p>

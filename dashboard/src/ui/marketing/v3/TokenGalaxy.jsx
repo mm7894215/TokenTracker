@@ -100,6 +100,7 @@ function buildGeometry(anchors, counts) {
 export function TokenGalaxy({ mode = "full", progressRef, className = "" }) {
   const mountRef = useRef(null);
   const chipRefs = useRef([]);
+  const glowRef = useRef(null);
   const [webglFailed, setWebglFailed] = useState(false);
 
   useEffect(() => {
@@ -147,6 +148,7 @@ export function TokenGalaxy({ mode = "full", progressRef, className = "" }) {
       uOrbit: { value: 0 },
       uAnchors: { value: anchors.map((a) => new THREE.Vector3(a.x, a.y, a.z)) },
       uGlobalAlpha: { value: 0 },
+      uProgress: { value: 0 },
       uColorA: { value: new THREE.Color(LV3_GL.accent) },
       uColorB: { value: new THREE.Color(LV3_GL.accentSoft) },
       uColorC: { value: new THREE.Color(LV3_GL.glint) },
@@ -202,6 +204,12 @@ export function TokenGalaxy({ mode = "full", progressRef, className = "" }) {
       renderer.setSize(w, h, false);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
+
+      // Keep galaxy visual center aligned to the top 100vh of the canvas by shifting projection center
+      const hView = window.innerHeight || 1;
+      if (h > hView) {
+        camera.projectionMatrix.elements[9] = - (h - hView) / h;
+      }
     }
     let rafResize = 0;
     const ro = new ResizeObserver(() => {
@@ -260,6 +268,7 @@ export function TokenGalaxy({ mode = "full", progressRef, className = "" }) {
 
       uniforms.uTime.value = t;
       uniforms.uOrbit.value = t * DISC.orbitSpeed;
+      uniforms.uProgress.value = progress;
       fade = Math.min(1, fade + dt / 0.9);
       // Entrance: eased 0..1 sweep that grows the streams out of the chips
       // and dollies the camera in.
@@ -267,7 +276,7 @@ export function TokenGalaxy({ mode = "full", progressRef, className = "" }) {
       const introEase = 1 - Math.pow(1 - intro, 3);
       uniforms.uIntro.value = introEase;
       // Fade the whole galaxy out as the visitor scrolls past the hero.
-      uniforms.uGlobalAlpha.value = fade * (1 - THREE.MathUtils.smoothstep(progress, 0.5, 0.9));
+      uniforms.uGlobalAlpha.value = fade * (1 - THREE.MathUtils.smoothstep(progress, 0.55, 0.80));
 
       const damp = 1 - Math.exp(-dt / 0.22);
       pointerSmooth.x += (pointerTarget.x - pointerSmooth.x) * damp;
@@ -282,16 +291,29 @@ export function TokenGalaxy({ mode = "full", progressRef, className = "" }) {
 
       renderer.render(scene, camera);
 
+      // Animate background core glow (glowRef) during the big bang explosion
+      if (glowRef.current) {
+        const glowFlash = THREE.MathUtils.smoothstep(progress, 0.0, 0.25) * (1.0 - THREE.MathUtils.smoothstep(progress, 0.25, 0.65));
+        const glowFade = 1.0 - THREE.MathUtils.smoothstep(progress, 0.35, 0.75);
+        const glowScale = 1.0 + progress * 1.2;
+        const glowOpacity = 0.4 * fade * glowFade * (1.0 + glowFlash * 1.5);
+        glowRef.current.style.transform = `translate3d(-50%, -50%, 0) scale(${glowScale.toFixed(3)})`;
+        glowRef.current.style.opacity = String(glowOpacity.toFixed(3));
+      }
+
       // Project provider chips into screen space alongside the particles.
       // Chips cascade in one by one during the intro, then track scroll fade.
       // Each orb is scaled by its camera distance so the far (upper) orbs
       // read smaller than the near (lower) ones — true perspective toward
       // the convergence point under the counter.
-      const chipAlpha = fade * (1 - THREE.MathUtils.smoothstep(progress, 0.32, 0.75));
+      const orbExplosionScale = 1.0 + Math.pow(progress, 1.8) * 1.5;
+      const chipAlpha = fade * (1 - THREE.MathUtils.smoothstep(progress, 0.25, 0.70));
+      const chipFlash = THREE.MathUtils.smoothstep(progress, 0.0, 0.20) * (1.0 - THREE.MathUtils.smoothstep(progress, 0.20, 0.60));
       for (let i = 0; i < baseAngles.length; i += 1) {
         const el = chipRefs.current[i];
         if (!el) continue;
-        const pos = orbScreenPos(baseAngles[i] + uniforms.uOrbit.value);
+        const theta = baseAngles[i] + uniforms.uOrbit.value;
+        const pos = orbScreenPos(theta, orbExplosionScale);
         chipAnchorOnPlane(pos.left, pos.top, uniforms.uAnchors.value[i]);
         const x = (pos.left / 100) * lastW;
         const y = (pos.top / 100) * lastH;
@@ -299,9 +321,18 @@ export function TokenGalaxy({ mode = "full", progressRef, className = "" }) {
         // it orbits toward the near side and shrinks as it swings away.
         const depthScale = slotDepthFactor(pos.top);
         const cascade = Math.min(1, Math.max(0, introEase * 2.6 - i * 0.22));
-        const scale = depthScale * (0.6 + 0.4 * cascade);
+        const scale = depthScale * (0.6 + 0.4 * cascade) * (1.0 - progress * 0.3);
         el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0) translate(-50%, -50%) scale(${scale.toFixed(3)})`;
         el.style.opacity = String(Math.max(0, chipAlpha * cascade * (0.75 + 0.25 * depthScale)).toFixed(3));
+        
+        // Planet / orb igniting and glowing hot matching the big bang color flash
+        const brightness = 1.0 + chipFlash * 1.4;
+        const saturate = 1.0 + chipFlash * 0.6;
+        el.style.filter = `brightness(${brightness.toFixed(2)}) saturate(${saturate.toFixed(2)})`;
+        
+        const shadowGlow = (12 + chipFlash * 28).toFixed(0);
+        const shadowOpacity = (0.3 + chipFlash * 0.6).toFixed(2);
+        el.style.boxShadow = `0 0 ${shadowGlow}px rgba(168, 85, 247, ${shadowOpacity})`;
       }
     }
     animate();
@@ -335,7 +366,8 @@ export function TokenGalaxy({ mode = "full", progressRef, className = "" }) {
     >
       {/* Core convergence glow (both modes; the particles amplify it in full mode). */}
       <div
-        className="absolute left-1/2 top-[68%] h-[34rem] w-[34rem] -translate-x-1/2 -translate-y-1/2 rounded-full opacity-40"
+        ref={glowRef}
+        className="absolute left-1/2 top-[68vh] h-[34rem] w-[34rem] -translate-x-1/2 -translate-y-1/2 rounded-full opacity-40"
         style={{
           background:
             "radial-gradient(closest-side, var(--lv3-accent-faint), var(--lv3-accent-ghost) 45%, transparent 72%)",
@@ -343,7 +375,7 @@ export function TokenGalaxy({ mode = "full", progressRef, className = "" }) {
       />
       {isStatic ? (
         <div
-          className="absolute left-1/2 top-[68%] h-[22rem] w-[52rem] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 rounded-[50%] opacity-50"
+          className="absolute left-1/2 top-[68vh] h-[22rem] w-[52rem] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 rounded-[50%] opacity-50"
           style={{
             background:
               "radial-gradient(ellipse at center, var(--lv3-accent-ghost) 0%, transparent 60%)",

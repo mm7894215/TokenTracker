@@ -72,10 +72,10 @@ export function orbBaseAngles() {
   );
 }
 
-export function orbScreenPos(theta) {
+export function orbScreenPos(theta, scale = 1.0) {
   return {
-    left: ORB_RING.cx + Math.cos(theta) * ORB_RING.rx,
-    top: ORB_RING.cy - Math.sin(theta) * ORB_RING.ry,
+    left: ORB_RING.cx + Math.cos(theta) * ORB_RING.rx * scale,
+    top: ORB_RING.cy - Math.sin(theta) * ORB_RING.ry * scale,
   };
 }
 
@@ -131,6 +131,7 @@ export const GALAXY_VERTEX = /* glsl */ `
   uniform vec3 uColorA;
   uniform vec3 uColorB;
   uniform vec3 uColorC;
+  uniform float uProgress;
   attribute float aSeed;
   attribute float aPhase;
   attribute float aSize;
@@ -228,6 +229,32 @@ export const GALAXY_VERTEX = /* glsl */ `
       alpha = 0.22 * tw * uIntro;
     }
 
+    // --- COSMIC BIG BANG EXPLOSION ---
+    // Calculate 3D explosion direction based on the local position p
+    // Adding some random spread on Z direction so it expands as a 3D dome/ellipsoid.
+    vec3 explodeDir = normalize(p + vec3(0.0, 0.0, (fract(aSeed * 7.13) - 0.5) * 1.5));
+    // Each particle has its own explosion speed based on aSeed
+    float explodeSpeed = 0.4 + 0.6 * fract(aSeed * 19.87);
+    // Exponential acceleration for the blast wave
+    float expProgress = pow(uProgress, 2.2);
+    float explodeDist = expProgress * 48.0 * explodeSpeed;
+    
+    // Displace the particle outward
+    p += explodeDir * explodeDist;
+
+    // Soft neon purple/pink/cyan flash at the start of the explosion
+    // Peaks around uProgress = 0.2, cools down by 0.6
+    float flash = smoothstep(0.0, 0.2, uProgress) * (1.0 - smoothstep(0.2, 0.6, uProgress));
+    vec3 flashColor = mix(uColorA * 1.5, uColorC * 1.6, fract(aSeed * 3.0));
+    
+    // Scale particle sizes up moderately during the flash phase to intensify the explosion
+    float sizeMultiplier = 1.0 + flash * 0.8;
+
+    // Individual particle burnout based on uProgress and aSeed (burn out completely by progress = 0.80)
+    float burnOut = smoothstep(0.08 + 0.52 * fract(aSeed * 23.45), 0.80, uProgress);
+    alpha *= (1.0 - burnOut);
+    // ---------------------------------
+
     // Tilt the whole disc around the X axis for depth.
     float c = cos(uTilt);
     float s = sin(uTilt);
@@ -240,9 +267,10 @@ export const GALAXY_VERTEX = /* glsl */ `
     // Exaggerated near-big/far-small: particles low in the frame (near side
     // of the tilted disc) render larger than the far ones behind the copy.
     float depthK = mix(1.45, 0.6, smoothstep(-10.0, 8.0, p.y));
-    gl_PointSize = aSize * uPixelRatio * (26.0 / dist) * depthK * (1.0 + glow * 1.7);
+    gl_PointSize = aSize * uPixelRatio * (26.0 / dist) * depthK * (1.0 + glow * 1.7) * sizeMultiplier;
 
     vColor = mix(mix(uColorA, uColorB, aSeed), uColorC, clamp(glow, 0.0, 1.0) * 0.85);
+    vColor = mix(vColor, flashColor, flash * 0.95);
     vAlpha = alpha;
     vGlow = glow;
   }
