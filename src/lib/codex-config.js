@@ -22,13 +22,16 @@ async function upsertNotify({
   const already = arraysEqual(existingNotify, notifyCmd);
 
   if (!already) {
-    // Persist original notify once (for uninstall + chaining).
-    if (captureOriginal && existingNotify && existingNotify.length > 0) {
+    // Persist original notify once (for uninstall + chaining). When a caller
+    // asks to replace the stored original and the config has no notify, record
+    // that absence so uninstall does not resurrect a stale backup.
+    const hasExistingNotify = Array.isArray(existingNotify);
+    if (captureOriginal && (hasExistingNotify || replaceOriginal)) {
       await ensureDir(path.dirname(notifyOriginalPath));
       const existing = await readJson(notifyOriginalPath);
       if (replaceOriginal || !existing) {
         await writeJson(notifyOriginalPath, {
-          notify: existingNotify,
+          notify: hasExistingNotify ? existingNotify : null,
           capturedAt: new Date().toISOString(),
         });
       }

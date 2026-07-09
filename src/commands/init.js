@@ -477,10 +477,12 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
 
   const codexProbe = await probeFile(context.codexConfigPath);
   if (codexProbe.exists) {
+    const currentNotify = await readCodexNotify(context.codexConfigPath);
     const result = await upsertCodexNotify({
       codexConfigPath: context.codexConfigPath,
       notifyCmd: context.notifyCmd,
       notifyOriginalPath: context.notifyOriginalPath,
+      replaceOriginal: shouldReplaceStoredOriginalNotify(currentNotify, context.notifyCmd),
     });
     summary.push({
       label: "Codex CLI",
@@ -730,10 +732,12 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
 
   const codeProbe = await probeFile(context.codeConfigPath);
   if (codeProbe.exists) {
+    const currentNotify = await readEveryCodeNotify(context.codeConfigPath);
     const result = await upsertEveryCodeNotify({
       codeConfigPath: context.codeConfigPath,
       notifyCmd: context.codeNotifyCmd,
       notifyOriginalPath: context.codeNotifyOriginalPath,
+      replaceOriginal: shouldReplaceStoredOriginalNotify(currentNotify, context.codeNotifyCmd),
     });
     summary.push({
       label: "Every Code",
@@ -930,6 +934,11 @@ async function shouldRepairCodexNotify({ currentNotify, expectedNotify, notifyOr
   }
 
   return { repair: false, reason: "external-notify" };
+}
+
+function shouldReplaceStoredOriginalNotify(currentNotify, expectedNotify) {
+  if (isTokenTrackerNotify(currentNotify, expectedNotify)) return false;
+  return currentNotify === null || Array.isArray(currentNotify);
 }
 
 function isTokenTrackerNotify(cmd, expectedNotify) {

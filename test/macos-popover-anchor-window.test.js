@@ -92,4 +92,14 @@ test("menu-bar popover is anchored to an app-owned positioning window", () => {
     /shouldRunPopoverOpenLoad\([\s\S]*lastRefreshed/,
     "When popover sync is throttled, dashboard reload should also be debounced by lastRefreshed.",
   );
+  assert.match(
+    viewModel,
+    /guard\s+!isLoading\s+else\s*\{\s*shouldReloadAfterCurrentLoad\s*=\s*true\s*return\s*\}/,
+    "Concurrent dashboard reload requests should queue one follow-up load instead of being dropped.",
+  );
+  assert.match(
+    viewModel,
+    /private\s+func\s+runQueuedReloadIfNeeded\(\)\s+async[\s\S]*shouldReloadAfterCurrentLoad\s*=\s*false[\s\S]*await\s+loadAll\(\)/,
+    "A queued reload should run after the current load finishes so sync-now can refresh stale data.",
+  );
 });
