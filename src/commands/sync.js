@@ -605,7 +605,7 @@ async function cmdSync(argv) {
       opencodeResult.bucketsQueued += opencodeDbResult.bucketsQueued;
     }
 
-    async function parseOpencodeDbInstall({ dbPath, readFn, source, cursorKey, ...rest }) {
+    async function parseOpencodeDbForInstall({ dbPath, readFn, source, cursorKey, ...rest }) {
       if (!dbPath || !fssync.existsSync(dbPath)) {
         return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
       }
@@ -633,7 +633,7 @@ async function cmdSync(argv) {
         if (progress?.enabled) progress.start(`Parsing Kilo CLI ${renderBar(0)} | buckets 0`);
         try {
           kiloResult = await multiInstallParse({
-            paths: kiloPaths, parserFn: parseOpencodeDbInstall, providerName: "kiloCli",
+            paths: kiloPaths, parserFn: parseOpencodeDbForInstall, providerName: "kiloCli",
             cursors, getParams: (p) => ({ dbPath: p, readFn: readOpencodeDbMessages, source: "kilo-cli", cursorKey: "kiloCli" }),
             queuePath, projectQueuePath, onProgress: makeProviderProgress("Kilo CLI"),
           });
@@ -657,7 +657,7 @@ async function cmdSync(argv) {
         if (progress?.enabled) progress.start(`Parsing Mimo ${renderBar(0)} | buckets 0`);
         try {
           mimoResult = await multiInstallParse({
-            paths: mimoPaths, parserFn: parseOpencodeDbInstall, providerName: "mimo",
+            paths: mimoPaths, parserFn: parseOpencodeDbForInstall, providerName: "mimo",
             cursors, getParams: (p) => ({ dbPath: p, readFn: readMimoDbMessages, source: "mimo", cursorKey: "mimo" }),
             queuePath, projectQueuePath, onProgress: makeProviderProgress("Mimo"),
           });
@@ -679,7 +679,7 @@ async function cmdSync(argv) {
         if (progress?.enabled) progress.start(`Parsing ZCode ${renderBar(0)} | buckets 0`);
         try {
           zcodeResult = await multiInstallParse({
-            paths: zcodePaths, parserFn: parseOpencodeDbInstall, providerName: "zcode",
+            paths: zcodePaths, parserFn: parseOpencodeDbForInstall, providerName: "zcode",
             cursors, getParams: (p) => ({ dbPath: p, readFn: readZcodeDbMessages, source: "zcode", cursorKey: "zcode" }),
             queuePath, projectQueuePath, onProgress: makeProviderProgress("ZCode"),
           });
