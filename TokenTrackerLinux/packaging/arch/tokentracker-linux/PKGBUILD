@@ -1,6 +1,6 @@
 # Maintainer: local
 pkgname=tokentracker-linux
-pkgver=0.59.0
+pkgver=0.68.1
 pkgrel=1
 pkgdesc='Local TokenTracker Linux desktop client for Arch KDE'
 arch=('x86_64')
@@ -51,8 +51,8 @@ package() {
   install -Dm644 "TokenTrackerLinux/packaging/arch/tokentracker-linux/tokentracker-linux.desktop" \
     "${pkgdir}/usr/share/applications/tokentracker-linux.desktop"
 
-  install -Dm644 "TokenTrackerLinux/icons/tokentracker-linux.svg" \
-    "${pkgdir}/usr/share/icons/hicolor/scalable/apps/tokentracker-linux.svg"
+  install -Dm644 "dashboard/public/icon-512.png" \
+    "${pkgdir}/usr/share/icons/hicolor/512x512/apps/tokentracker-linux.png"
 
   install -Dm644 "LICENSE" "${pkgdir}/usr/share/licenses/tokentracker-linux/LICENSE"
 }
