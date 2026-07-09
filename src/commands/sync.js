@@ -625,16 +625,17 @@ async function cmdSync(argv) {
       const kiloNativeValue = process.platform === "win32" && typeof process.env.APPDATA === "string"
         ? path.join(process.env.APPDATA.trim(), "kilo", "kilo.db")
         : path.join(kiloHome, "kilo.db");
-      const wslKiloDir = wsl.shouldProbeWsl(process.env) ? wsl.discoverWslHome(".local/share/kilo") : null;
-      const wslKiloDb = wslKiloDir ? path.join(wslKiloDir, "kilo.db") : null;
-      const kiloPaths = resolveInstallPaths({ nativeValue: kiloNativeValue, wslValue: wslKiloDb });
+      const wslKiloDir = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
+        ? wsl.discoverWslHome(".local/share/kilo")
+        : null;
+      const kiloPaths = resolveInstallPaths({ nativeValue: kiloNativeValue, wslValue: wslKiloDir ? path.join(wslKiloDir, "kilo.db") : null });
       if (kiloPaths.native || kiloPaths.wsl) {
         if (progress?.enabled) progress.start(`Parsing Kilo CLI ${renderBar(0)} | buckets 0`);
         try {
           kiloResult = await multiInstallParse({
             paths: kiloPaths, parserFn: parseOpencodeDbInstall, providerName: "kiloCli",
             cursors, getParams: (p) => ({ dbPath: p, readFn: readOpencodeDbMessages, source: "kilo-cli", cursorKey: "kiloCli" }),
-            queuePath, projectQueuePath, onProgress: kiloOnProgress,
+            queuePath, projectQueuePath, onProgress: makeProviderProgress("Kilo CLI"),
           });
         } catch (err) { warnProviderParseFailure("Kilo CLI", err, opts); }
       }
@@ -648,16 +649,17 @@ async function cmdSync(argv) {
       const mimoNativeValue = process.platform === "win32" && typeof process.env.APPDATA === "string"
         ? path.join(process.env.APPDATA.trim(), "mimocode", "mimocode.db")
         : path.join(mimoHome, "mimocode.db");
-      const wslMimoDir = wsl.shouldProbeWsl(process.env) ? wsl.discoverWslHome(".local/share/mimocode") : null;
-      const wslMimoDb = wslMimoDir ? path.join(wslMimoDir, "mimocode.db") : null;
-      const mimoPaths = resolveInstallPaths({ nativeValue: mimoNativeValue, wslValue: wslMimoDb });
+      const wslMimoDir = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
+        ? wsl.discoverWslHome(".local/share/mimocode")
+        : null;
+      const mimoPaths = resolveInstallPaths({ nativeValue: mimoNativeValue, wslValue: wslMimoDir ? path.join(wslMimoDir, "mimocode.db") : null });
       if (mimoPaths.native || mimoPaths.wsl) {
         if (progress?.enabled) progress.start(`Parsing Mimo ${renderBar(0)} | buckets 0`);
         try {
           mimoResult = await multiInstallParse({
             paths: mimoPaths, parserFn: parseOpencodeDbInstall, providerName: "mimo",
             cursors, getParams: (p) => ({ dbPath: p, readFn: readMimoDbMessages, source: "mimo", cursorKey: "mimo" }),
-            queuePath, projectQueuePath, onProgress: mimoOnProgress,
+            queuePath, projectQueuePath, onProgress: makeProviderProgress("Mimo"),
           });
         } catch (err) { warnProviderParseFailure("Mimo", err, opts); }
       }
@@ -666,45 +668,33 @@ async function cmdSync(argv) {
     // ── ZCode (Z.ai's coding agent — OpenCode-fork SQLite) ──
     let zcodeResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (sourceAllowed("zcode")) {
-      const zcodeDbPath = path.join(zcodeHome, "cli", "db", "db.sqlite");
       const zcodeNativeValue = process.platform === "win32" && typeof process.env.APPDATA === "string"
         ? path.join(process.env.APPDATA.trim(), ".zcode", "cli", "db", "db.sqlite")
-        : zcodeDbPath;
-      const wslZcodeDir = wsl.shouldProbeWsl(process.env) ? wsl.discoverWslHome(".zcode") : null;
-      const wslZcodeDb = wslZcodeDir ? path.join(wslZcodeDir, "cli", "db", "db.sqlite") : null;
-      const zcodePaths = resolveInstallPaths({ nativeValue: zcodeNativeValue, wslValue: wslZcodeDb });
+        : path.join(zcodeHome, "cli", "db", "db.sqlite");
+      const wslZcodeDir = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
+        ? wsl.discoverWslHome(".zcode")
+        : null;
+      const zcodePaths = resolveInstallPaths({ nativeValue: zcodeNativeValue, wslValue: wslZcodeDir ? path.join(wslZcodeDir, "cli", "db", "db.sqlite") : null });
       if (zcodePaths.native || zcodePaths.wsl) {
         if (progress?.enabled) progress.start(`Parsing ZCode ${renderBar(0)} | buckets 0`);
         try {
           zcodeResult = await multiInstallParse({
             paths: zcodePaths, parserFn: parseOpencodeDbInstall, providerName: "zcode",
             cursors, getParams: (p) => ({ dbPath: p, readFn: readZcodeDbMessages, source: "zcode", cursorKey: "zcode" }),
-            queuePath, projectQueuePath, onProgress: zcodeOnProgress,
+            queuePath, projectQueuePath, onProgress: makeProviderProgress("ZCode"),
           });
         } catch (err) { warnProviderParseFailure("ZCode", err, opts); }
       }
     }
 
-    function kiloOnProgress(p) {
-      if (!progress?.enabled) return;
-      const pct = p.total > 0 ? p.index / p.total : 1;
-      progress.update(
-        `Parsing Kilo CLI ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} records | buckets ${formatNumber(p.bucketsQueued)}`,
-      );
-    }
-    function mimoOnProgress(p) {
-      if (!progress?.enabled) return;
-      const pct = p.total > 0 ? p.index / p.total : 1;
-      progress.update(
-        `Parsing Mimo ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} records | buckets ${formatNumber(p.bucketsQueued)}`,
-      );
-    }
-    function zcodeOnProgress(p) {
-      if (!progress?.enabled) return;
-      const pct = p.total > 0 ? p.index / p.total : 1;
-      progress.update(
-        `Parsing ZCode ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} records | buckets ${formatNumber(p.bucketsQueued)}`,
-      );
+    function makeProviderProgress(label) {
+      return (p) => {
+        if (!progress?.enabled) return;
+        const pct = p.total > 0 ? p.index / p.total : 1;
+        progress.update(
+          `Parsing ${label} ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} records | buckets ${formatNumber(p.bucketsQueued)}`,
+        );
+      };
     }
 
     // ── Kilo Code VS Code extension (Cline-style ui_messages.json) ──
