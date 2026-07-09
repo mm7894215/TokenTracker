@@ -52,6 +52,23 @@ test("readNotify unescapes JSON/TOML basic string escapes", async () => {
   ]);
 });
 
+test("upsertNotify round-trips escaped quotes in notify strings", async () => {
+  const dir = tmpDir("tokentracker-codex-config-");
+  const configPath = path.join(dir, "config.toml");
+  const notifyOriginalPath = path.join(dir, "codex_notify_original.json");
+  const notify = ["/usr/bin/env", "node", path.join(dir, 'we"ird', "notify.cjs")];
+  fs.writeFileSync(configPath, 'model = "gpt-5"\n', "utf8");
+
+  await upsertNotify({
+    configPath,
+    notifyCmd: notify,
+    notifyOriginalPath,
+    configLabel: "Codex config",
+  });
+
+  assert.deepEqual(await readNotify(configPath), notify);
+});
+
 test("upsertNotify replaces multi-line notify blocks without leaving trailing lines", async () => {
   const dir = tmpDir("tokentracker-codex-upsert-");
   const configPath = path.join(dir, "config.toml");

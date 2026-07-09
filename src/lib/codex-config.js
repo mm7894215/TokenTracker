@@ -302,6 +302,10 @@ function readTomlArrayLiteral(lines, startIndex, rhs) {
       if (ch === quote) {
         inString = false;
         quote = null;
+        continue;
+      }
+      if (quote === '"' && ch === "\\") {
+        i += 1;
       }
     }
     return -1;
@@ -356,6 +360,10 @@ function findTomlArrayBlockEnd(lines, startIndex, rhs) {
       if (ch === quote) {
         inString = false;
         quote = null;
+        continue;
+      }
+      if (quote === '"' && ch === "\\") {
+        i += 1;
       }
     }
     return false;

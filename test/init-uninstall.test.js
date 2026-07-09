@@ -859,6 +859,66 @@ test("init clears stale Every Code backup when current notify is absent", async 
   }
 });
 
+test("init refreshes stale Every Code backup when current notify is external", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
+  const prevHome = process.env.HOME;
+  const prevCodexHome = process.env.CODEX_HOME;
+  const prevCodeHome = process.env.CODE_HOME;
+  const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
+  const prevOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
+  const prevWrite = process.stdout.write;
+
+  try {
+    process.env.HOME = tmp;
+    process.env.CODEX_HOME = path.join(tmp, ".codex");
+    process.env.CODE_HOME = path.join(tmp, ".code");
+    delete process.env.TOKENTRACKER_DEVICE_TOKEN;
+    process.env.OPENCODE_CONFIG_DIR = path.join(tmp, ".config", "opencode");
+    await fs.mkdir(process.env.CODEX_HOME, { recursive: true });
+    await fs.mkdir(process.env.CODE_HOME, { recursive: true });
+
+    const codexConfigPath = path.join(process.env.CODEX_HOME, "config.toml");
+    await fs.writeFile(codexConfigPath, "# empty\n", "utf8");
+
+    const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+    await fs.mkdir(trackerDir, { recursive: true });
+    const staleNotify = ["old-code-notify", "arg"];
+    const notifyOriginalPath = path.join(trackerDir, "code_notify_original.json");
+    await fs.writeFile(
+      notifyOriginalPath,
+      JSON.stringify({ notify: staleNotify, capturedAt: "2026-01-01T00:00:00.000Z" }) + "\n",
+      "utf8",
+    );
+    const externalNotify = ["third-party-code-notify", "new"];
+    const codeConfigPath = path.join(process.env.CODE_HOME, "config.toml");
+    await fs.writeFile(codeConfigPath, `notify = ${JSON.stringify(externalNotify)}\n`, "utf8");
+
+    process.stdout.write = () => true;
+    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid"]);
+
+    const original = JSON.parse(await fs.readFile(notifyOriginalPath, "utf8"));
+    assert.deepEqual(original.notify, externalNotify);
+
+    await cmdUninstall([]);
+    const restored = await fs.readFile(codeConfigPath, "utf8");
+    assert.match(restored, /third-party-code-notify/);
+    assert.doesNotMatch(restored, /old-code-notify/);
+  } finally {
+    process.stdout.write = prevWrite;
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = prevCodexHome;
+    if (prevCodeHome === undefined) delete process.env.CODE_HOME;
+    else process.env.CODE_HOME = prevCodeHome;
+    if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;
+    else process.env.TOKENTRACKER_DEVICE_TOKEN = prevToken;
+    if (prevOpencodeConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+    else process.env.OPENCODE_CONFIG_DIR = prevOpencodeConfigDir;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("init skips Every Code notify when config is missing", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
   const prevHome = process.env.HOME;
