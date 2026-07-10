@@ -126,7 +126,7 @@ internal sealed class PetWindow : Window
         // with the pet while allowing padding clicks to reach other processes.
         _clickThroughTimer = new System.Windows.Threading.DispatcherTimer
         {
-            Interval = TimeSpan.FromMilliseconds(50),
+            Interval = TimeSpan.FromMilliseconds(16),
         };
         _clickThroughTimer.Tick += (_, _) => ClickThroughTick();
 
