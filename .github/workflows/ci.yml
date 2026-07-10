@@ -84,3 +84,16 @@ jobs:
           xcodebuild test \
             -scheme TokenTrackerBarTests \
             -destination 'platform=macOS'
+
+  windows-build:
+    name: Windows build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build TokenTrackerWin
+        run: dotnet build TokenTrackerWin/TokenTrackerWin.csproj --configuration Release

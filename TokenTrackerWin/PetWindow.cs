@@ -22,8 +22,9 @@ namespace TokenTrackerWin;
 /// the sprite's opaque pixels show and everything around it is fully see-through to
 /// the desktop — no frame, no frosted box.
 ///
-/// There is no chrome: the whole surface is the hit area. The page decides what a
-/// press means (<c>pet:drag</c> → native window move, tap → animation, right-click →
+/// There is no chrome: only the pet sprite is mouse-active, while transparent padding
+/// passes clicks to the desktop or app underneath. The page decides what a press on the
+/// pet means (<c>pet:drag</c> → native window move, tap → animation, right-click →
 /// <c>pet:open-dashboard</c>). Closing hides the window; the app exits via the tray
 /// "Quit" → <see cref="Shutdown"/>.
 /// </summary>
@@ -36,7 +37,9 @@ internal sealed class PetWindow : Window
     private readonly ServerManager _server;
     private readonly System.Windows.Threading.DispatcherTimer _saveTimer;
     private readonly System.Windows.Threading.DispatcherTimer _hoverTimer;
+    private readonly System.Windows.Threading.DispatcherTimer _clickThroughTimer;
     private bool _lastHover;
+    private bool _clickThrough;
     private bool _typing;
     private long _lastKeyTick;
     private long _typingStreakStart;  // when the current unbroken typing streak began (0 = not typing)
@@ -118,6 +121,15 @@ internal sealed class PetWindow : Window
         };
         _hoverTimer.Tick += (_, _) => { HoverTick(); TypingTick(); };
 
+        // WS_EX_TRANSPARENT is window-wide, so poll the OS cursor and apply it only
+        // while the pointer is over transparent padding. This preserves interaction
+        // with the pet while allowing padding clicks to reach other processes.
+        _clickThroughTimer = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(50),
+        };
+        _clickThroughTimer.Tick += (_, _) => ClickThroughTick();
+
         Loaded += async (_, _) => await InitializeWebViewAsync();
         _server.StatusChanged += OnServerStatusChanged;
     }
@@ -126,18 +138,8 @@ internal sealed class PetWindow : Window
     {
         base.OnSourceInitialized(e);
         _hwnd = new WindowInteropHelper(this).Handle;
-        HwndSource.FromHwnd(_hwnd)?.AddHook(WndProc);
-    }
-
-    private nint WndProc(nint hwnd, int msg, nint wParam, nint lParam, ref bool handled)
-    {
-        if (msg == WM_NCHITTEST && !IsPointOnPet(HitTestScreenPointFromLParam(lParam)))
-        {
-            handled = true;
-            return (nint)HTTRANSPARENT;
-        }
-
-        return nint.Zero;
+        _clickThrough = (GetWindowExStyle(_hwnd).ToInt64() & WS_EX_TRANSPARENT) != 0;
+        ClickThroughTick();
     }
 
     private bool IsPointOnPet(System.Windows.Point screenPoint)
@@ -169,12 +171,34 @@ internal sealed class PetWindow : Window
         }
     }
 
-    private static System.Windows.Point HitTestScreenPointFromLParam(nint lParam)
+    private void ClickThroughTick()
     {
-        int raw = unchecked((int)lParam);
-        short x = unchecked((short)(raw & 0xFFFF));
-        short y = unchecked((short)((raw >> 16) & 0xFFFF));
-        return new System.Windows.Point(x, y);
+        if (!IsVisible || _hwnd == nint.Zero || !GetCursorPos(out var cursor)) return;
+        SetClickThrough(!IsPointOnPet(new System.Windows.Point(cursor.X, cursor.Y)));
+    }
+
+    private void SetClickThrough(bool enabled)
+    {
+        if (_hwnd == nint.Zero || enabled == _clickThrough) return;
+
+        long style = GetWindowExStyle(_hwnd).ToInt64();
+        long updatedStyle = enabled
+            ? style | WS_EX_TRANSPARENT
+            : style & ~WS_EX_TRANSPARENT;
+        SetWindowExStyle(_hwnd, (nint)updatedStyle);
+
+        long appliedStyle = GetWindowExStyle(_hwnd).ToInt64();
+        if (((appliedStyle & WS_EX_TRANSPARENT) != 0) != enabled) return;
+
+        _clickThrough = enabled;
+        SetWindowPos(
+            _hwnd,
+            nint.Zero,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     }
 
     private async Task InitializeWebViewAsync()
@@ -255,10 +279,14 @@ internal sealed class PetWindow : Window
         if (!IsVisible) Show();
         Topmost = true;
         _hoverTimer.Start();
+        _clickThroughTimer.Start();
+        ClickThroughTick();
     }
 
     public void HidePet()
     {
+        _clickThroughTimer.Stop();
+        SetClickThrough(false);
         Hide();
         _hoverTimer.Stop();
         _lastHover = false;
@@ -565,6 +593,7 @@ internal sealed class PetWindow : Window
         SavePlacement();
         _saveTimer.Stop();
         _hoverTimer.Stop();
+        _clickThroughTimer.Stop();
         _server.StatusChanged -= OnServerStatusChanged;
         base.OnClosing(e);
     }
@@ -775,9 +804,44 @@ internal sealed class PetWindow : Window
     // ── P/Invoke + constants ───────────────────────────────────────────
 
     private const int WM_NCLBUTTONDOWN = 0xA1;
-    private const int WM_NCHITTEST = 0x84;
     private const int HTCAPTION = 2;
-    private const int HTTRANSPARENT = -1;
+    private const int GWL_EXSTYLE = -20;
+    private const long WS_EX_TRANSPARENT = 0x00000020L;
+    private const uint SWP_NOSIZE = 0x0001;
+    private const uint SWP_NOMOVE = 0x0002;
+    private const uint SWP_NOZORDER = 0x0004;
+    private const uint SWP_NOACTIVATE = 0x0010;
+    private const uint SWP_FRAMECHANGED = 0x0020;
+
+    private static nint GetWindowExStyle(nint hWnd) => IntPtr.Size == 8
+        ? GetWindowLongPtr64(hWnd, GWL_EXSTYLE)
+        : (nint)GetWindowLong32(hWnd, GWL_EXSTYLE);
+
+    private static nint SetWindowExStyle(nint hWnd, nint style) => IntPtr.Size == 8
+        ? SetWindowLongPtr64(hWnd, GWL_EXSTYLE, style)
+        : (nint)SetWindowLong32(hWnd, GWL_EXSTYLE, style.ToInt32());
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
+    private static extern nint GetWindowLongPtr64(nint hWnd, int nIndex);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongW", SetLastError = true)]
+    private static extern int GetWindowLong32(nint hWnd, int nIndex);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
+    private static extern nint SetWindowLongPtr64(nint hWnd, int nIndex, nint dwNewLong);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongW", SetLastError = true)]
+    private static extern int SetWindowLong32(nint hWnd, int nIndex, int dwNewLong);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(
+        nint hWnd,
+        nint hWndInsertAfter,
+        int x,
+        int y,
+        int cx,
+        int cy,
+        uint uFlags);
 
     [DllImport("user32.dll")]
     private static extern bool ReleaseCapture();
