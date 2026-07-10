@@ -923,6 +923,12 @@ async function shouldRepairCodexNotify({ currentNotify, expectedNotify, notifyOr
   if (isTokenTrackerNotify(currentNotify, expectedNotify)) {
     return { repair: true, captureOriginal: false };
   }
+  if (
+    isSkyComputerUseNotify(currentNotify)
+    && containsNestedTokenTrackerNotify(currentNotify, expectedNotify)
+  ) {
+    return { repair: false, reason: "already-wrapped" };
+  }
   if (isSkyComputerUseNotify(currentNotify)) {
     return { repair: true, captureOriginal: true, replaceOriginal: true };
   }
@@ -953,6 +959,17 @@ function isTokenTrackerNotify(cmd, expectedNotify) {
 function isSkyComputerUseNotify(cmd) {
   if (!Array.isArray(cmd)) return false;
   return cmd.some((part) => typeof part === "string" && part.includes("SkyComputerUseClient"));
+}
+
+function containsNestedTokenTrackerNotify(cmd, expectedNotify) {
+  if (!Array.isArray(cmd)) return false;
+  for (const part of cmd) {
+    if (typeof part !== "string") continue;
+    try {
+      if (isTokenTrackerNotify(JSON.parse(part), expectedNotify)) return true;
+    } catch (_) {}
+  }
+  return false;
 }
 
 function parseArgs(argv) {
@@ -1145,6 +1162,10 @@ function isSelfNotify(cmd) {
     if (!part.includes('notify.cjs')) continue;
     const resolved = resolveMaybeHome(part);
     if (resolved && resolved === selfPath) return true;
+    try {
+      const nested = JSON.parse(part);
+      if (Array.isArray(nested) && isSelfNotify(nested)) return true;
+    } catch (_) {}
   }
   return false;
 }

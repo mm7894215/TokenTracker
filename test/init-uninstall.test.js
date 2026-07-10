@@ -107,6 +107,37 @@ test("notify handler chains executable original notify commands and skips stale 
   }
 });
 
+test("notify handler skips an original notify that nests itself", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-notify-chain-"));
+  try {
+    const trackerDir = path.join(tmp, "tracker");
+    await fs.mkdir(trackerDir, { recursive: true });
+    const notifyPath = path.join(await fs.realpath(trackerDir), "notify.cjs");
+    const markerPath = path.join(tmp, "sky-marker");
+    const skyPath = path.join(tmp, "SkyComputerUseClient");
+    await fs.writeFile(
+      skyPath,
+      `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(markerPath)}, 'ran');\n`,
+      "utf8",
+    );
+    await fs.chmod(skyPath, 0o755);
+
+    await runGeneratedNotifyHandler({
+      trackerDir,
+      notify: [
+        skyPath,
+        "turn-ended",
+        "--previous-notify",
+        JSON.stringify(["/usr/bin/env", "node", notifyPath]),
+      ],
+    });
+
+    assert.equal(await waitForFile(markerPath, { timeoutMs: 500 }), null);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("notify handler avoids duplicating existing payload args when chaining", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-notify-chain-"));
   try {
@@ -188,6 +219,47 @@ test("serve-time Codex notify repair installs TokenTracker and preserves Sky ori
       await fs.readFile(path.join(trackerDir, "codex_notify_original.json"), "utf8"),
     );
     assert.deepEqual(original.notify, skyNotify);
+  } finally {
+    if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = prevCodexHome;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("serve-time Codex notify repair leaves Sky wrapping TokenTracker unchanged", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-notify-repair-"));
+  const prevCodexHome = process.env.CODEX_HOME;
+  try {
+    process.env.CODEX_HOME = path.join(tmp, ".codex");
+    const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+    const binDir = path.join(tmp, ".tokentracker", "bin");
+    const notifyPath = path.join(binDir, "notify.cjs");
+    await fs.mkdir(process.env.CODEX_HOME, { recursive: true });
+
+    const tokenTrackerNotify = ["/usr/bin/env", "node", notifyPath];
+    const skyNotify = [
+      path.join(tmp, "SkyComputerUseClient.app", "Contents", "MacOS", "SkyComputerUseClient"),
+      "turn-ended",
+      "--previous-notify",
+      JSON.stringify(tokenTrackerNotify),
+    ];
+    const codexConfigPath = path.join(process.env.CODEX_HOME, "config.toml");
+    await fs.writeFile(codexConfigPath, `notify = ${JSON.stringify(skyNotify)}\n`, "utf8");
+
+    const result = await repairCodexNotifyIntegration({
+      home: tmp,
+      trackerDir,
+      binDir,
+      safeMode: true,
+    });
+
+    assert.equal(result.changed, false);
+    assert.equal(result.skippedReason, "already-wrapped");
+    assert.deepEqual(await fs.readFile(codexConfigPath, "utf8"), `notify = ${JSON.stringify(skyNotify)}\n`);
+    await assert.rejects(
+      fs.stat(path.join(trackerDir, "codex_notify_original.json")),
+      /ENOENT/,
+    );
   } finally {
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
