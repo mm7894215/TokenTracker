@@ -1161,13 +1161,25 @@ function isSelfNotify(cmd) {
     if (typeof part !== 'string') continue;
     if (!part.includes('notify.cjs')) continue;
     const resolved = resolveMaybeHome(part);
-    if (resolved && resolved === selfPath) return true;
+    if (resolved && isSelfNotifyPath(resolved)) return true;
     try {
       const nested = JSON.parse(part);
       if (Array.isArray(nested) && isSelfNotify(nested)) return true;
     } catch (_) {}
   }
   return false;
+}
+
+function isSelfNotifyPath(resolved) {
+  if (resolved === selfPath) return true;
+  // selfPath is realpath-resolved by Node; stored paths may reach the same
+  // file through a symlink (e.g. a symlinked home directory).
+  try {
+    if (fs.realpathSync(resolved) === selfPath) return true;
+  } catch (_) {}
+  // Any notify.cjs under a .tokentracker dir is ours (matches the repair-time
+  // isTokenTrackerNotify heuristic), even if that copy no longer exists.
+  return resolved.replace(/\\\\/g, '/').includes('/.tokentracker/');
 }
 
 function shouldChainNotify(cmd) {

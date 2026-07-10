@@ -138,6 +138,70 @@ test("notify handler skips an original notify that nests itself", async () => {
   }
 });
 
+test("notify handler skips a nested self notify referenced through a symlinked path", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-notify-chain-"));
+  try {
+    const trackerDir = path.join(tmp, "tracker");
+    await fs.mkdir(trackerDir, { recursive: true });
+    const linkDir = path.join(tmp, "tracker-link");
+    await fs.symlink(trackerDir, linkDir, "dir");
+    const notifyPath = path.join(linkDir, "notify.cjs");
+    const markerPath = path.join(tmp, "sky-marker");
+    const skyPath = path.join(tmp, "SkyComputerUseClient");
+    await fs.writeFile(
+      skyPath,
+      `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(markerPath)}, 'ran');\n`,
+      "utf8",
+    );
+    await fs.chmod(skyPath, 0o755);
+
+    await runGeneratedNotifyHandler({
+      trackerDir,
+      notify: [
+        skyPath,
+        "turn-ended",
+        "--previous-notify",
+        JSON.stringify(["/usr/bin/env", "node", notifyPath]),
+      ],
+    });
+
+    assert.equal(await waitForFile(markerPath, { timeoutMs: 1500 }), null);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("notify handler skips a stale nested notify pointing into a .tokentracker dir", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-notify-chain-"));
+  try {
+    const trackerDir = path.join(tmp, "tracker");
+    const staleNotifyPath = path.join(tmp, ".tokentracker", "bin", "notify.cjs");
+    const markerPath = path.join(tmp, "sky-marker");
+    const skyPath = path.join(tmp, "SkyComputerUseClient");
+    await fs.mkdir(trackerDir, { recursive: true });
+    await fs.writeFile(
+      skyPath,
+      `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(markerPath)}, 'ran');\n`,
+      "utf8",
+    );
+    await fs.chmod(skyPath, 0o755);
+
+    await runGeneratedNotifyHandler({
+      trackerDir,
+      notify: [
+        skyPath,
+        "turn-ended",
+        "--previous-notify",
+        JSON.stringify(["/usr/bin/env", "node", staleNotifyPath]),
+      ],
+    });
+
+    assert.equal(await waitForFile(markerPath, { timeoutMs: 1500 }), null);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("notify handler avoids duplicating existing payload args when chaining", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-notify-chain-"));
   try {
