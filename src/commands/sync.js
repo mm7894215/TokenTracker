@@ -44,6 +44,7 @@ const {
   resolveKimiCodeWireFiles,
   parseKimiCodeIncremental,
   resolveOmpSessionFiles,
+  resolveOmpSubagentFiles,
   parseOmpIncremental,
   resolvePiSessionFiles,
   parsePiIncremental,
@@ -1184,17 +1185,23 @@ async function cmdSync(argv) {
     }
 
     // ── oh-my-pi (passive ~/.omp/agent/sessions/**/*.jsonl reader) ──
+    // Task-subagent transcripts (nested below the cwd level) are scanned too,
+    // so their usage counts toward the omp totals.
     let ompResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     const ompFiles = sourceAllowed("omp")
       ? mergeBothFileSources({ resolveFiles: resolveOmpSessionFiles, env: process.env })
       : [];
-    if (ompFiles.length > 0) {
+    const ompSubagentFiles = sourceAllowed("omp")
+      ? mergeBothFileSources({ resolveFiles: resolveOmpSubagentFiles, env: process.env })
+      : [];
+    if (ompFiles.length > 0 || ompSubagentFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing oh-my-pi ${renderBar(0)} | buckets 0`);
       }
       try {
         ompResult = await parseOmpIncremental({
           sessionFiles: ompFiles,
+          subagentFiles: ompSubagentFiles,
           cursors,
           queuePath,
           env: process.env,

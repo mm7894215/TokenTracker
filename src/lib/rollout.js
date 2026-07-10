@@ -6474,6 +6474,9 @@ async function parseWorkbuddyIncremental({
 //
 // oh-my-pi writes one append-only JSONL per session:
 //   ~/.omp/agent/sessions/--<cwd-encoded>--/<timestamp>_<sessionId>.jsonl
+// Task subagents spawned by that session get their own JSONL files nested in
+// a sibling directory named after the session file (see
+// resolveOmpSubagentFiles); their usage counts toward the same "omp" totals.
 //
 // Per-line record types: the first line is type:"session" (header).
 // Only type:"message" lines with message.role=="assistant" carry token usage.
@@ -6571,6 +6574,63 @@ function resolveOmpSessionFiles(env = process.env) {
       for (const entry of entries) {
         if (!entry.endsWith(".jsonl")) continue;
         files.push(path.join(cwdPath, entry));
+      }
+    }
+  } catch {
+    // ignore — return what we have
+  }
+  files.sort((a, b) => a.localeCompare(b));
+  return files;
+}
+
+// Subagent transcripts live in a directory named after the session file:
+//   ~/.omp/agent/sessions/<cwd>/<session>.jsonl            (main agent)
+//   ~/.omp/agent/sessions/<cwd>/<session>/<Agent>.jsonl    (task subagent)
+//   ~/.omp/agent/sessions/<cwd>/<session>/<sub>/<A>.jsonl  (nested advisor)
+// oh-my-pi's own stats indexer classifies by depth (packages/stats/parser.ts:
+// rel path <= 2 segments → main, deeper → subagent/advisor), so we mirror
+// that: everything below the cwd level is subagent traffic. Session dirs also
+// hold non-JSONL artefacts (*.bash-original.log, *.md) — skipped by extension.
+function resolveOmpSubagentFiles(env = process.env) {
+  const agentDir = resolveOmpAgentDir(env);
+  if (!agentDir) return [];
+  const sessionsDir = path.join(agentDir, "sessions");
+  if (!fssync.existsSync(sessionsDir)) return [];
+  const files = [];
+  const walk = (dir) => {
+    let entries;
+    try { entries = fssync.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      let isDir = entry.isDirectory();
+      let isFile = entry.isFile();
+      // Resolve symlinks defensively (Dirent flags are false for symlinks).
+      if (!isDir && !isFile) {
+        try {
+          const st = fssync.statSync(full);
+          isDir = st.isDirectory();
+          isFile = st.isFile();
+        } catch { continue; }
+      }
+      if (isDir) walk(full);
+      else if (isFile && entry.name.endsWith(".jsonl")) files.push(full);
+    }
+  };
+  try {
+    for (const cwdDir of fssync.readdirSync(sessionsDir)) {
+      const cwdPath = path.join(sessionsDir, cwdDir);
+      let stat;
+      try { stat = fssync.statSync(cwdPath); } catch { continue; }
+      if (!stat.isDirectory()) continue;
+      let entries;
+      try { entries = fssync.readdirSync(cwdPath, { withFileTypes: true }); } catch { continue; }
+      for (const entry of entries) {
+        const full = path.join(cwdPath, entry.name);
+        let isDir = entry.isDirectory();
+        if (!isDir && !entry.isFile()) {
+          try { isDir = fssync.statSync(full).isDirectory(); } catch { continue; }
+        }
+        if (isDir) walk(full);
       }
     }
   } catch {
@@ -8331,6 +8391,7 @@ async function parseKilocodeIncremental({
 
 async function parseOmpIncremental({
   sessionFiles,
+  subagentFiles,
   cursors,
   queuePath,
   onProgress,
@@ -8345,9 +8406,19 @@ async function parseOmpIncremental({
       ? { ...ompState.fileOffsets }
       : {};
 
-  const files = Array.isArray(sessionFiles)
+  const mainFiles = Array.isArray(sessionFiles)
     ? sessionFiles
     : resolveOmpSessionFiles(env || process.env);
+  // Subagent transcripts share the session format and count toward the same
+  // "omp" totals; they're discovered separately because they nest below the
+  // cwd level. When the caller supplies explicit sessionFiles (tests), don't
+  // auto-resolve — keep the parse hermetic.
+  const subFiles = Array.isArray(subagentFiles)
+    ? subagentFiles
+    : Array.isArray(sessionFiles)
+      ? []
+      : resolveOmpSubagentFiles(env || process.env);
+  const files = [...mainFiles, ...subFiles];
   const fallbackModel = defaultModel || resolveOmpDefaultModel();
 
   if (files.length === 0) {
@@ -10782,6 +10853,7 @@ module.exports = {
   resolveOmpHome,
   resolveOmpAgentDir,
   resolveOmpSessionFiles,
+  resolveOmpSubagentFiles,
   resolveOmpDefaultModel,
   parseOmpIncremental,
   resolveKilocodeRoots,

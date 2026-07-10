@@ -32,6 +32,7 @@ const {
   resolveWorkbuddyProjectFiles,
   parseOmpIncremental,
   resolveOmpSessionFiles,
+  resolveOmpSubagentFiles,
   parsePiIncremental,
   resolvePiSessionFiles,
   resolvePiAgentDir,
@@ -7784,6 +7785,102 @@ test("parseOmpIncremental counts pure-reasoning rows (only reasoningTokens > 0)"
     assert.equal(queued[0].source, "omp");
     assert.equal(queued[0].reasoning_output_tokens, 42);
     assert.equal(queued[0].total_tokens, 42);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveOmpSubagentFiles discovers nested subagent jsonl and skips main files and non-jsonl artefacts", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-"));
+  try {
+    const cwdDir = path.join(tmp, "agent", "sessions", "--myproject--");
+    const sessionDir = path.join(cwdDir, "2026-04-05T14-00-00-000Z_session-1");
+    const deepDir = path.join(sessionDir, "smol-review");
+    await fs.mkdir(deepDir, { recursive: true });
+
+    // Main session file — must NOT be returned by the subagent resolver.
+    await fs.writeFile(path.join(cwdDir, "2026-04-05T14-00-00-000Z_session-1.jsonl"), buildOmpSessionHeader() + "\n", "utf8");
+    // Subagent transcript + non-JSONL session artefacts.
+    await fs.writeFile(path.join(sessionDir, "AgentA.jsonl"), buildOmpSessionHeader() + "\n", "utf8");
+    await fs.writeFile(path.join(sessionDir, "12.bash-original.log"), "log\n", "utf8");
+    await fs.writeFile(path.join(sessionDir, "notes.md"), "notes\n", "utf8");
+    // Advisor transcript nested one level deeper inside the session dir.
+    await fs.writeFile(path.join(deepDir, "smol-review.AdvisorReview.jsonl"), buildOmpSessionHeader() + "\n", "utf8");
+
+    const result = resolveOmpSubagentFiles({ OMP_HOME: tmp });
+    assert.deepEqual(result, [
+      path.join(sessionDir, "AgentA.jsonl"),
+      path.join(deepDir, "smol-review.AdvisorReview.jsonl"),
+    ]);
+
+    // Main resolver stays main-only: exactly the one top-level session file.
+    const mainResult = resolveOmpSessionFiles({ OMP_HOME: tmp });
+    assert.equal(mainResult.length, 1);
+    assert.ok(mainResult[0].endsWith("session-1.jsonl"));
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseOmpIncremental counts subagent files toward the same omp bucket", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-"));
+  try {
+    const cwdDir = path.join(tmp, "sessions", "--test--");
+    const sessionDir = path.join(cwdDir, "session-1");
+    await fs.mkdir(sessionDir, { recursive: true });
+    const mainPath = path.join(cwdDir, "session-1.jsonl");
+    const subPath = path.join(sessionDir, "AgentA.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const ts = Date.UTC(2026, 3, 5, 14, 10, 0);
+    await fs.writeFile(mainPath, [
+      buildOmpSessionHeader(),
+      buildOmpAssistantLine({ id: "msg-1", model: "claude-sonnet-4-5", input: 100, output: 20, timestamp: ts, totalTokens: 120 }),
+    ].join("\n") + "\n", "utf8");
+    await fs.writeFile(subPath, [
+      buildOmpSessionHeader(),
+      buildOmpAssistantLine({ id: "msg-2", model: "claude-sonnet-4-5", input: 200, output: 40, timestamp: ts, totalTokens: 240 }),
+    ].join("\n") + "\n", "utf8");
+
+    const res = await parseOmpIncremental({ sessionFiles: [mainPath], subagentFiles: [subPath], cursors, queuePath });
+    assert.equal(res.eventsAggregated, 2);
+
+    // Same source + model + half-hour → one merged bucket (main + subagent).
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].source, "omp");
+    assert.equal(queued[0].model, "claude-sonnet-4-5");
+    assert.equal(queued[0].input_tokens, 300);
+    assert.equal(queued[0].output_tokens, 60);
+    assert.equal(queued[0].total_tokens, 360);
+    assert.equal(queued[0].hour_start, "2026-04-05T14:00:00.000Z");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseOmpIncremental dedupes subagent entries across two runs", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-"));
+  try {
+    const cwdDir = path.join(tmp, "sessions", "--test--");
+    const sessionDir = path.join(cwdDir, "session-1");
+    await fs.mkdir(sessionDir, { recursive: true });
+    const subPath = path.join(sessionDir, "AgentA.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const ts = Date.UTC(2026, 3, 5, 14, 10, 0);
+    await fs.writeFile(subPath, [
+      buildOmpSessionHeader(),
+      buildOmpAssistantLine({ id: "msg-1", model: "claude-sonnet-4-5", input: 10, output: 5, timestamp: ts, totalTokens: 15 }),
+    ].join("\n") + "\n", "utf8");
+
+    const res1 = await parseOmpIncremental({ sessionFiles: [], subagentFiles: [subPath], cursors, queuePath });
+    assert.equal(res1.eventsAggregated, 1);
+
+    const res2 = await parseOmpIncremental({ sessionFiles: [], subagentFiles: [subPath], cursors, queuePath });
+    assert.equal(res2.eventsAggregated, 0);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
