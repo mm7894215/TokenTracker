@@ -263,8 +263,6 @@ async function cmdSync(argv) {
 
     const codexHome = process.env.CODEX_HOME || path.join(home, ".codex");
     const claudeProjectsDir = path.join(home, ".claude", "projects");
-    const geminiHome = process.env.GEMINI_HOME || path.join(home, ".gemini");
-    const geminiTmpDir = path.join(geminiHome, "tmp");
     const xdgDataHome = process.env.XDG_DATA_HOME || path.join(home, ".local", "share");
     const opencodeHome = process.env.OPENCODE_HOME || path.join(xdgDataHome, "opencode");
     const opencodeStorageDir = path.join(opencodeHome, "storage");
@@ -491,7 +489,32 @@ async function cmdSync(argv) {
       }
     }
 
-    const geminiFiles = sourceAllowed("gemini") ? await listGeminiSessionFiles(geminiTmpDir) : [];
+    let geminiFiles = [];
+    if (sourceAllowed("gemini")) {
+      const geminiNativeValue = process.env.GEMINI_HOME || (process.platform === "win32" && typeof process.env.LOCALAPPDATA === "string"
+        ? path.join(process.env.LOCALAPPDATA.trim(), "Gemini")
+        : path.join(home, ".gemini"));
+      const wslGeminiDir = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
+        ? wsl.discoverWslHome(".gemini")
+        : null;
+      const geminiPaths = resolveInstallPaths({ nativeValue: geminiNativeValue, wslValue: wslGeminiDir });
+      const fileSets = [];
+      if (geminiPaths.native) {
+        fileSets.push(await listGeminiSessionFiles(path.join(geminiPaths.native, "tmp")));
+      }
+      if (geminiPaths.wsl) {
+        fileSets.push(await listGeminiSessionFiles(path.join(geminiPaths.wsl, "tmp")));
+      }
+      const seen = new Set();
+      for (const set of fileSets) {
+        for (const f of set) {
+          if (!seen.has(f)) {
+            seen.add(f);
+            geminiFiles.push(f);
+          }
+        }
+      }
+    }
     let geminiResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (geminiFiles.length > 0) {
       if (progress?.enabled) {
@@ -521,7 +544,32 @@ async function cmdSync(argv) {
       }
     }
 
-    const antigravityFiles = sourceAllowed("antigravity") ? await listAntigravityTranscripts(geminiHome) : [];
+    let antigravityFiles = [];
+    if (sourceAllowed("antigravity")) {
+      const geminiNativeValue = process.env.GEMINI_HOME || (process.platform === "win32" && typeof process.env.LOCALAPPDATA === "string"
+        ? path.join(process.env.LOCALAPPDATA.trim(), "Gemini")
+        : path.join(home, ".gemini"));
+      const wslGeminiDir = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
+        ? wsl.discoverWslHome(".gemini")
+        : null;
+      const geminiPaths = resolveInstallPaths({ nativeValue: geminiNativeValue, wslValue: wslGeminiDir });
+      const fileSets = [];
+      if (geminiPaths.native) {
+        fileSets.push(await listAntigravityTranscripts(geminiPaths.native));
+      }
+      if (geminiPaths.wsl) {
+        fileSets.push(await listAntigravityTranscripts(geminiPaths.wsl));
+      }
+      const seen = new Set();
+      for (const set of fileSets) {
+        for (const f of set) {
+          if (!seen.has(f)) {
+            seen.add(f);
+            antigravityFiles.push(f);
+          }
+        }
+      }
+    }
     let antigravityResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (antigravityFiles.length > 0) {
       if (progress?.enabled) {
