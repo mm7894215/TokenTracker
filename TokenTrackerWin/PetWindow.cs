@@ -55,6 +55,12 @@ internal sealed class PetWindow : Window
     private string _character = CurrentCharacter;
     private UsagePoller.UsageStats _stats;
     private bool _connected = true;
+    private bool _isDragging;
+    private bool _isAnimating;
+    private EventHandler? _renderHandler;
+    private System.Diagnostics.Stopwatch? _animStopwatch;
+    private double _animStartX;
+    private double _animTargetX;
 
     // Snapping / Mini mode states
     private bool _miniMode;
@@ -63,6 +69,7 @@ internal sealed class PetWindow : Window
     private double _preMiniY;
     private const double EdgePeek = 30;
     private const double SnapMargin = 24;
+    private const double EdgeTolerance = 4.0;
 
     // Mouse idle / wake tracking
     private POINT _lastMousePos;
@@ -174,7 +181,10 @@ internal sealed class PetWindow : Window
 
     private void ClickThroughTick()
     {
-        if (!IsVisible || _hwnd == nint.Zero || !GetCursorPos(out var cursor)) return;
+        // Skip while dragging or sliding: recomputing IsPointOnPet against the moving
+        // window would thrash WS_EX_TRANSPARENT and issue a SWP_FRAMECHANGED (non-client
+        // recalc + redraw) every 16ms, fighting the edge slide and making it stutter.
+        if (!IsVisible || _hwnd == nint.Zero || _isDragging || _isAnimating || !GetCursorPos(out var cursor)) return;
         SetClickThrough(!IsPointOnPet(new System.Windows.Point(cursor.X, cursor.Y)));
     }
 
@@ -244,8 +254,11 @@ internal sealed class PetWindow : Window
             {
                 case "pet:drag":
                     // Hand the press off to the OS so the borderless window moves natively.
+                    _isDragging = true;
+                    StopEdgeAnimation();
                     ReleaseCapture();
                     SendMessage(_hwnd, WM_NCLBUTTONDOWN, (nint)HTCAPTION, nint.Zero);
+                    _isDragging = false;
                     break;
                 case "pet:context-menu":
                     ContextMenuRequested?.Invoke();
@@ -287,6 +300,7 @@ internal sealed class PetWindow : Window
     public void HidePet()
     {
         _clickThroughTimer.Stop();
+        StopEdgeAnimation();
         SetClickThrough(false);
         Hide();
         _hoverTimer.Stop();
@@ -299,7 +313,7 @@ internal sealed class PetWindow : Window
 
     private void HoverTick()
     {
-        if (!IsVisible || !_coreReady) return;
+        if (!IsVisible || !_coreReady || _isDragging) return;
         if (!GetCursorPos(out var p)) return;
 
         // Global mouse movement & sleep/wake sequence
@@ -332,7 +346,24 @@ internal sealed class PetWindow : Window
         {
             var tl = PointToScreen(new System.Windows.Point(0, 0));
             var br = PointToScreen(new System.Windows.Point(ActualWidth, ActualHeight));
-            inside = p.X >= tl.X && p.X < br.X && p.Y >= tl.Y && p.Y < br.Y;
+            if (_miniMode)
+            {
+                // Anchor the hover test to the *target* geometry (both peek and revealed
+                // states hug the right work-area edge), NOT the live window X, which is
+                // mid-slide during ApplyEdgePlacement. Reading the moving rect here would
+                // let the inside/outside result flip against the animating edge and re-
+                // toggle _isRevealed, cancelling and restarting the slide — the retract
+                // stutter. Using _isRevealed as the reference gives stable hysteresis:
+                // tucked → only the peek strip is "inside"; revealed → the full window is.
+                var wa = SystemParameters.WorkArea;
+                double leftX = _isRevealed ? wa.Right - Width : wa.Right - EdgePeek;
+                double rightLimit = wa.Right + EdgeTolerance; // cursor clamps at the screen edge
+                inside = p.X >= leftX && p.X < rightLimit && p.Y >= tl.Y && p.Y < br.Y;
+            }
+            else
+            {
+                inside = p.X >= tl.X && p.X < br.X && p.Y >= tl.Y && p.Y < br.Y;
+            }
         }
         catch { return; }   // not laid out yet
 
@@ -610,6 +641,7 @@ internal sealed class PetWindow : Window
             return;
         }
         SavePlacement();
+        StopEdgeAnimation();
         _saveTimer.Stop();
         _hoverTimer.Stop();
         _clickThroughTimer.Stop();
@@ -791,9 +823,17 @@ internal sealed class PetWindow : Window
         catch { }
     }
 
-    private async void ApplyEdgePlacement(bool animated)
+    // Duration of the tuck/reveal slide. Time-based (not step-based) so the motion is
+    // frame-rate independent.
+    private const double EdgeAnimMs = 200.0;
+
+    private void ApplyEdgePlacement(bool animated)
     {
         if (!_coreReady) return;
+
+        // Cancel any in-flight slide before starting a new target.
+        StopEdgeAnimation();
+
         var wa = SystemParameters.WorkArea;
         double targetX = _isRevealed ? wa.Right - Width : wa.Right - EdgePeek;
 
@@ -803,21 +843,47 @@ internal sealed class PetWindow : Window
             return;
         }
 
-        double startX = Left;
-        double dx = targetX - startX;
-        if (Math.Abs(dx) < 1) return;
-
-        int steps = 15;
-        int durationMs = 220;
-        int delay = durationMs / steps;
-        for (int i = 1; i <= steps; i++)
+        _animStartX = Left;
+        _animTargetX = targetX;
+        if (Math.Abs(_animTargetX - _animStartX) < 1)
         {
-            double t = (double)i / steps;
-            double eased = t * (2 - t); // ease-out
-            Left = startX + dx * eased;
-            await Task.Delay(delay);
+            Left = targetX;
+            return;
         }
-        Left = targetX;
+
+        // Drive the slide off the composition (render) clock instead of Task.Delay: it
+        // ticks once per WPF frame, vsync-paced, so the motion is smooth. A Task.Delay
+        // loop rounds to the ~15.6ms OS timer quantum, producing the visible stepping.
+        _animStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        _isAnimating = true;
+        _renderHandler = OnEdgeAnimationFrame;
+        System.Windows.Media.CompositionTarget.Rendering += _renderHandler;
+    }
+
+    private void OnEdgeAnimationFrame(object? sender, EventArgs e)
+    {
+        if (_animStopwatch is null) { StopEdgeAnimation(); return; }
+
+        double t = Math.Min(1.0, _animStopwatch.Elapsed.TotalMilliseconds / EdgeAnimMs);
+        double eased = t * (2 - t); // ease-out
+        Left = _animStartX + (_animTargetX - _animStartX) * eased;
+
+        if (t >= 1.0)
+        {
+            Left = _animTargetX;
+            StopEdgeAnimation();
+        }
+    }
+
+    private void StopEdgeAnimation()
+    {
+        if (_renderHandler is not null)
+        {
+            System.Windows.Media.CompositionTarget.Rendering -= _renderHandler;
+            _renderHandler = null;
+        }
+        _animStopwatch = null;
+        _isAnimating = false;
     }
 
     /// <summary>Keep the saved top-left within the virtual desktop (guards against a
