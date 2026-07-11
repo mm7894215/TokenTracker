@@ -407,5 +407,17 @@ test("codex/opencode WSL paths resolve on Windows both mode", (t) => {
   assert.equal(r.wsl, wslDir);
 });
 
+test("opencode paths union correctly combines storage and db paths", () => {
+  const storagePaths = { native: "/storage/native", wsl: null };
+  const dbPaths = { native: null, wsl: "/db/wsl" };
+  const opencodePaths = {
+    native: storagePaths.native || dbPaths.native,
+    wsl: storagePaths.wsl || dbPaths.wsl,
+  };
+  assert.equal(opencodePaths.native, "/storage/native");
+  assert.equal(opencodePaths.wsl, "/db/wsl");
+});
+
+
 
 

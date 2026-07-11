@@ -659,14 +659,19 @@ async function cmdSync(argv) {
         };
       };
 
+      const opencodePaths = {
+        native: storagePaths.native || dbPaths.native,
+        wsl: storagePaths.wsl || dbPaths.wsl,
+      };
+
       const multiResult = await multiInstallParse({
-        paths: storagePaths,
+        paths: opencodePaths,
         parserFn: parseOpencodeForInstall,
         providerName: "opencode",
         cursors,
         queuePath,
         projectQueuePath,
-        getParams: (storageDir, key) => ({ storageDir, dbDir: dbPaths[key] }),
+        getParams: (p, key) => ({ storageDir: storagePaths[key], dbDir: dbPaths[key] }),
         onProgress: (p) => {
           if (!progress?.enabled) return;
           const pct = p.total > 0 ? p.index / p.total : 1;

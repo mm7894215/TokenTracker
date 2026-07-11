@@ -4847,7 +4847,7 @@ test("Kimi (legacy) wsl-first prefers WSL home when both sides exist", (t) => {
   mockWsl(t);
   mockMethod(t, fssync, "existsSync", (candidate) => (
     candidate === "\\\\wsl$\\Ubuntu\\home\\dev\\.kimi" ||
-    candidate === path.join("C:\\Users\\me", ".kimi")
+    candidate === path.join(os.homedir(), ".kimi")
   ));
 
   const home = resolveKimiHome({
