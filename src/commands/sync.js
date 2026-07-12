@@ -289,9 +289,7 @@ async function cmdSync(argv) {
 
     const sources = [];
     if (sourceAllowed("codex")) {
-      const codexNativeValue = process.env.CODEX_HOME || (process.platform === "win32" && typeof process.env.APPDATA === "string"
-        ? path.join(process.env.APPDATA.trim(), ".codex")
-        : path.join(home, ".codex"));
+      const codexNativeValue = process.env.CODEX_HOME || path.join(home, ".codex");
       const wslCodexDir = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
         ? wsl.discoverWslHome(".codex")
         : null;
@@ -310,9 +308,7 @@ async function cmdSync(argv) {
       }
     }
     if (sourceAllowed("every-code")) {
-      const codeNativeValue = process.env.CODE_HOME || (process.platform === "win32" && typeof process.env.APPDATA === "string"
-        ? path.join(process.env.APPDATA.trim(), ".code")
-        : path.join(home, ".code"));
+      const codeNativeValue = process.env.CODE_HOME || path.join(home, ".code");
       const wslCodeDir = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
         ? wsl.discoverWslHome(".code")
         : null;
@@ -494,9 +490,7 @@ async function cmdSync(argv) {
 
     let geminiPaths = null;
     if (sourceAllowed("gemini") || sourceAllowed("antigravity")) {
-      const geminiNativeValue = process.env.GEMINI_HOME || (process.platform === "win32" && typeof process.env.LOCALAPPDATA === "string"
-        ? path.join(process.env.LOCALAPPDATA.trim(), "Gemini")
-        : path.join(home, ".gemini"));
+      const geminiNativeValue = process.env.GEMINI_HOME || path.join(home, ".gemini");
       const wslGeminiDir = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
         ? wsl.discoverWslHome(".gemini")
         : null;
@@ -601,9 +595,7 @@ async function cmdSync(argv) {
 
     let opencodeResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (sourceAllowed("opencode")) {
-      const opencodeStorageNativeValue = process.env.OPENCODE_HOME || (process.platform === "win32" && typeof process.env.APPDATA === "string"
-        ? path.join(process.env.APPDATA.trim(), "opencode")
-        : path.join(xdgDataHome, "opencode"));
+      const opencodeStorageNativeValue = process.env.OPENCODE_HOME || path.join(xdgDataHome, "opencode");
       const wslOpencodeStorageDir = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
         ? wsl.discoverWslHome(".local/share/opencode")
         : null;
@@ -612,9 +604,7 @@ async function cmdSync(argv) {
         wslValue: wslOpencodeStorageDir,
       });
 
-      const opencodeDbNativeValue = process.env.OPENCODE_HOME || (process.platform === "win32" && typeof process.env.APPDATA === "string"
-        ? path.join(process.env.APPDATA.trim(), "opencode")
-        : path.join(xdgDataHome, "opencode"));
+      const opencodeDbNativeValue = process.env.OPENCODE_HOME || path.join(xdgDataHome, "opencode");
       const wslOpencodeDbDir = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
         ? wsl.discoverWslHome(".local/share/opencode")
         : null;
@@ -640,31 +630,12 @@ async function cmdSync(argv) {
         let dbResult = { messagesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
         if (dbDir) {
           const dbPath = path.join(dbDir, "opencode.db");
-          let shouldSkip = false;
-          let stats = null;
-          try {
-            stats = fssync.statSync(dbPath);
-            const cursorNamespace = options.cursorKey || "opencode";
-            const cursorState = cursors[cursorNamespace];
-            if (cursorState && cursorState.dbSize === stats.size && cursorState.dbMtime === stats.mtimeMs) {
-              shouldSkip = true;
-            }
-          } catch (_e) { }
-
-          if (!shouldSkip) {
-            const dbMessages = readOpencodeDbMessages(dbPath);
-            if (dbMessages.length > 0) {
-              dbResult = await parseOpencodeDbIncremental({
-                ...options,
-                dbMessages,
-              });
-            }
-            if (stats) {
-              const cursorNamespace = options.cursorKey || "opencode";
-              if (!cursors[cursorNamespace]) cursors[cursorNamespace] = {};
-              cursors[cursorNamespace].dbSize = stats.size;
-              cursors[cursorNamespace].dbMtime = stats.mtimeMs;
-            }
+          const dbMessages = readOpencodeDbMessages(dbPath);
+          if (dbMessages.length > 0) {
+            dbResult = await parseOpencodeDbIncremental({
+              ...options,
+              dbMessages,
+            });
           }
         }
 

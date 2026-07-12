@@ -275,7 +275,7 @@ Most users never need this — defaults are sensible. For advanced setups:
 
 ### 🐧 Windows Subsystem for Linux (WSL) Auto-Discovery
 
-If you run AI coding agents inside WSL on Windows, TokenTracker can auto-discover and aggregate metrics from both native Windows and WSL installations. 
+If you run AI coding agents inside WSL on Windows, TokenTracker can auto-discover and aggregate metrics from both native Windows and WSL installations.
 
 Configure this behavior using the `TOKENTRACKER_WSL_MODE` environment variable:
 * `both` (Recommended): Scans and aggregates metrics from both native Windows and WSL.

@@ -300,9 +300,7 @@ async function cmdStatus(argv = []) {
   const zcodeDbPath = zcodeActive.join(" | ");
 
   // OpenCode (JSON files + SQLite DB) — passive scan of storage/message/ and opencode.db.
-  const opencodeStorageNativeValue = process.env.OPENCODE_HOME || (process.platform === "win32" && typeof process.env.APPDATA === "string"
-    ? path.join(process.env.APPDATA.trim(), "opencode")
-    : path.join(xdgDataHome, "opencode"));
+  const opencodeStorageNativeValue = process.env.OPENCODE_HOME || path.join(xdgDataHome, "opencode");
   const wslOpencodeStorageDir = process.platform === "win32" && shouldProbeWsl(process.env)
     ? discoverWslHome(".local/share/opencode")
     : null;
@@ -312,9 +310,7 @@ async function cmdStatus(argv = []) {
   });
   const opencodeStorageActive = formatResolvedPaths(opencodeStoragePaths);
 
-  const opencodeDbNativeValue = process.env.OPENCODE_HOME || (process.platform === "win32" && typeof process.env.APPDATA === "string"
-    ? path.join(process.env.APPDATA.trim(), "opencode")
-    : path.join(xdgDataHome, "opencode"));
+  const opencodeDbNativeValue = process.env.OPENCODE_HOME || path.join(xdgDataHome, "opencode");
   const wslOpencodeDbDir = process.platform === "win32" && shouldProbeWsl(process.env)
     ? discoverWslHome(".local/share/opencode")
     : null;
@@ -327,9 +323,7 @@ async function cmdStatus(argv = []) {
 
   // Every Code (passive sessions scan)
   const codePaths = resolveInstallPaths({
-    nativeValue: process.env.CODE_HOME || (process.platform === "win32" && typeof process.env.APPDATA === "string"
-      ? path.join(process.env.APPDATA.trim(), ".code")
-      : path.join(home, ".code")),
+    nativeValue: process.env.CODE_HOME || path.join(home, ".code"),
     wslDir: ".code",
   });
   const codeActive = formatResolvedPaths(codePaths, "sessions");
@@ -337,9 +331,7 @@ async function cmdStatus(argv = []) {
 
   // Gemini CLI & Antigravity (shared home)
   const geminiPaths = resolveInstallPaths({
-    nativeValue: process.env.GEMINI_HOME || (process.platform === "win32" && typeof process.env.LOCALAPPDATA === "string"
-      ? path.join(process.env.LOCALAPPDATA.trim(), "Gemini")
-      : path.join(home, ".gemini")),
+    nativeValue: process.env.GEMINI_HOME || path.join(home, ".gemini"),
     wslDir: ".gemini",
   });
   const geminiActive = formatResolvedPaths(geminiPaths);

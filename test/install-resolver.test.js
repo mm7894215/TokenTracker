@@ -305,7 +305,7 @@ test("resolveAllWin32Paths returns single path in non-both mode", (t) => {
 
 // ── Every Code path resolution (PR #261) ──────────────────────────────────────
 
-test("every-code native path defaults to HOME on Linux, APPDATA on Windows", (t) => {
+test("every-code native path defaults to HOME on all platforms", (t) => {
   mockPlatform(t, "linux");
   const home = "/home/user";
   const r = resolveInstallPaths(
@@ -337,7 +337,7 @@ test("every-code WSL path resolves on Windows both mode", (t) => {
 
 // ── Gemini CLI & Antigravity path resolution (PR #261) ────────────────────────
 
-test("gemini/antigravity native path defaults to HOME on Linux, LOCALAPPDATA on Windows", (t) => {
+test("gemini/antigravity native path defaults to HOME on all platforms", (t) => {
   mockPlatform(t, "linux");
   const home = "/home/user";
   const r = resolveInstallPaths(
@@ -417,7 +417,3 @@ test("opencode paths union correctly combines storage and db paths", () => {
   assert.equal(opencodePaths.native, "/storage/native");
   assert.equal(opencodePaths.wsl, "/db/wsl");
 });
-
-
-
-
