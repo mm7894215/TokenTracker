@@ -617,9 +617,9 @@ async function cmdSync(argv) {
 
       const opencodeDbNativeValue = process.env.OPENCODE_HOME || (process.platform === "win32" && typeof process.env.APPDATA === "string"
         ? path.join(process.env.APPDATA.trim(), "opencode")
-        : path.join(home, ".config", "opencode"));
+        : path.join(xdgDataHome, "opencode"));
       const wslOpencodeDbDir = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
-        ? wsl.discoverWslHome(".config/opencode")
+        ? wsl.discoverWslHome(".local/share/opencode")
         : null;
       const dbPaths = resolveInstallPaths({
         nativeValue: opencodeDbNativeValue,

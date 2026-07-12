@@ -381,11 +381,11 @@ test("codex/opencode native paths default correctly", (t) => {
   assert.equal(rCodex.wsl, null);
 
   const rOpencode = resolveInstallPaths(
-    { nativeValue: path.join(home, ".config", "opencode") },
+    { nativeValue: path.join(home, ".local", "share", "opencode") },
     {},
     {},
   );
-  assert.equal(rOpencode.native, path.join(home, ".config", "opencode"));
+  assert.equal(rOpencode.native, path.join(home, ".local", "share", "opencode"));
   assert.equal(rOpencode.wsl, null);
 });
 
