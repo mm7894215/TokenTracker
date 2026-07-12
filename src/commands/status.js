@@ -64,8 +64,21 @@ const {
   resolveCopilotAppDbPaths,
   probeWslDistros,
 } = require("../lib/rollout");
-const { getWslMode, isInvalidWslMode, shouldProbeWsl } = require("../lib/wsl-probe");
+const wsl = require("../lib/wsl-probe");
+const { getWslMode, isInvalidWslMode, shouldProbeWsl } = wsl;
+const { resolveInstallPaths } = require("../lib/install-resolver");
 const { probeGrokHookState, resolveGrokHome } = require("../lib/grok-hook");
+
+function formatResolvedPaths(paths, filename) {
+  const active = [];
+  if (paths.native) {
+    active.push(`native: ${filename ? path.join(paths.native, filename) : paths.native}`);
+  }
+  if (paths.wsl) {
+    active.push(`WSL: ${filename ? path.join(paths.wsl, filename) : paths.wsl}`);
+  }
+  return active;
+}
 
 async function cmdStatus(argv = []) {
   const opts = parseArgs(argv);
@@ -247,18 +260,42 @@ async function cmdStatus(argv = []) {
   // Kilo CLI (kilo.ai @kilocode/plugin) — passive scan of kilo.db.
   const xdgDataHome = process.env.XDG_DATA_HOME || path.join(home, ".local", "share");
   const kiloHome = process.env.KILO_HOME || path.join(xdgDataHome, "kilo");
-  const kiloDbPath = path.join(kiloHome, "kilo.db");
-  const kiloInstalled = fssync.existsSync(kiloDbPath);
+  const kiloNativeValue = process.platform === "win32" && typeof process.env.APPDATA === "string"
+    ? path.join(process.env.APPDATA.trim(), "kilo", "kilo.db")
+    : path.join(kiloHome, "kilo.db");
+  const wslKiloDir = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
+    ? wsl.discoverWslHome(".local/share/kilo")
+    : null;
+  const kiloPaths = resolveInstallPaths({ nativeValue: kiloNativeValue, wslValue: wslKiloDir ? path.join(wslKiloDir, "kilo.db") : null });
+  const kiloActive = formatResolvedPaths(kiloPaths);
+  const kiloInstalled = kiloActive.length > 0;
+  const kiloDbPath = kiloActive.join(" | ");
 
   // Mimo (mimocode — OpenCode-fork SQLite) — passive scan of mimocode.db.
   const mimoHome = process.env.MIMO_HOME || path.join(xdgDataHome, "mimocode");
-  const mimoDbPath = path.join(mimoHome, "mimocode.db");
-  const mimoInstalled = fssync.existsSync(mimoDbPath);
+  const mimoNativeValue = process.platform === "win32" && typeof process.env.APPDATA === "string"
+    ? path.join(process.env.APPDATA.trim(), "mimocode", "mimocode.db")
+    : path.join(mimoHome, "mimocode.db");
+  const wslMimoDir = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
+    ? wsl.discoverWslHome(".local/share/mimocode")
+    : null;
+  const mimoPaths = resolveInstallPaths({ nativeValue: mimoNativeValue, wslValue: wslMimoDir ? path.join(wslMimoDir, "mimocode.db") : null });
+  const mimoActive = formatResolvedPaths(mimoPaths);
+  const mimoInstalled = mimoActive.length > 0;
+  const mimoDbPath = mimoActive.join(" | ");
 
   // ZCode (Z.ai's coding agent — OpenCode-fork SQLite) — passive scan of db.sqlite.
   const zcodeHome = process.env.ZCODE_HOME || path.join(home, ".zcode");
-  const zcodeDbPath = path.join(zcodeHome, "cli", "db", "db.sqlite");
-  const zcodeInstalled = fssync.existsSync(zcodeDbPath);
+  const zcodeNativeValue = process.platform === "win32" && typeof process.env.APPDATA === "string"
+    ? path.join(process.env.APPDATA.trim(), ".zcode", "cli", "db", "db.sqlite")
+    : path.join(zcodeHome, "cli", "db", "db.sqlite");
+  const wslZcodeDir = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
+    ? wsl.discoverWslHome(".zcode")
+    : null;
+  const zcodePaths = resolveInstallPaths({ nativeValue: zcodeNativeValue, wslValue: wslZcodeDir ? path.join(wslZcodeDir, "cli", "db", "db.sqlite") : null });
+  const zcodeActive = formatResolvedPaths(zcodePaths);
+  const zcodeInstalled = zcodeActive.length > 0;
+  const zcodeDbPath = zcodeActive.join(" | ");
 
   // Kilo Code VS Code extension — passive scan of all VS Code-family
   // globalStorage/kilocode.kilo-code/tasks/ ui_messages.json files.

@@ -251,6 +251,7 @@ Die meisten Nutzer brauchen das nie – die Standardwerte sind sinnvoll. Für fo
 | `TOKENTRACKER_DEBUG` | Debug-Ausgabe aktivieren (`1` zum Aktivieren) | — |
 | `TOKENTRACKER_NO_TELEMETRY` | Alle anonyme Telemetrie deaktivieren — täglicher Heartbeat und Dashboard-Analytics (`1` zum Deaktivieren; der `DO_NOT_TRACK`-Standard wird ebenfalls respektiert) | — |
 | `TOKENTRACKER_HTTP_TIMEOUT_MS` | HTTP-Timeout in Millisekunden | `20000` |
+| `TOKENTRACKER_WSL_MODE` | WSL-Installations-Auflösungsverhalten unter Windows (zur Aggregation von nativen und WSL-Installationen). `wsl-first` (bevorzugt WSL), `native-first`, `wsl-only`, `native-only`, `both` (aggregiert beide Installationen) | `wsl-first` |
 | `CODEX_HOME` | Codex CLI-Verzeichnis überschreiben | `~/.codex` |
 | `GEMINI_HOME` | Gemini CLI-Verzeichnis überschreiben | `~/.gemini` |
 | `TOKENTRACKER_GROK_HOME` | Grok Build-Verzeichnis für Grok-Integration und Skills-Manager | `~/.grok` |

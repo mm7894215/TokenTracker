@@ -257,6 +257,7 @@ Most users never need this — defaults are sensible. For advanced setups:
 | `TOKENTRACKER_DEBUG` | Enable debug output (`1` to enable) | — |
 | `TOKENTRACKER_NO_TELEMETRY` | Disable all anonymous telemetry — daily heartbeat and dashboard analytics (`1` to disable; the `DO_NOT_TRACK` standard is also respected) | — |
 | `TOKENTRACKER_HTTP_TIMEOUT_MS` | HTTP timeout in milliseconds | `20000` |
+| `TOKENTRACKER_WSL_MODE` | WSL install resolution behavior on Windows (for aggregating native and WSL installations). `wsl-first` (prefer WSL), `native-first`, `wsl-only`, `native-only`, `both` (aggregate both installs) | `wsl-first` |
 | `CODEX_HOME` | Override Codex CLI directory | `~/.codex` |
 | `GEMINI_HOME` | Override Gemini CLI directory | `~/.gemini` |
 | `TOKENTRACKER_GROK_HOME` | Override Grok Build directory for the Grok integration and Skills Manager | `~/.grok` |

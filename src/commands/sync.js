@@ -605,121 +605,96 @@ async function cmdSync(argv) {
       opencodeResult.bucketsQueued += opencodeDbResult.bucketsQueued;
     }
 
-    // ── Kilo CLI (kilo.ai @kilocode/plugin — OpenCode-fork SQLite) ──
-    // Uses the exact same `message` table schema as OpenCode v1.2+. We reuse
-    // the OpenCode DB reader/parser, just with a separate cursor namespace so
-    // the message indexes don't collide.
-    const kiloDbPath = path.join(kiloHome, "kilo.db");
-    let kiloResult = { messagesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const kiloDbMessages = sourceAllowed("kilo-cli") ? readOpencodeDbMessages(kiloDbPath) : [];
-    if (kiloDbMessages.length > 0) {
-      if (progress?.enabled) {
-        progress.start(
-          `Parsing Kilo CLI ${renderBar(0)} 0/${formatNumber(kiloDbMessages.length)} msgs | buckets 0`,
-        );
+    async function parseOpencodeDbForInstall({ dbPath, readFn, source, cursorKey, ...rest }) {
+      if (!dbPath || !fssync.existsSync(dbPath)) {
+        return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
       }
-      try {
-        kiloResult = await parseOpencodeDbIncremental({
-          dbMessages: kiloDbMessages,
-          cursors,
-          queuePath,
-          projectQueuePath,
-          onProgress: (p) => {
-            if (!progress?.enabled) return;
-            const pct = p.total > 0 ? p.index / p.total : 1;
-            progress.update(
-              `Parsing Kilo CLI ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(
-                p.total,
-              )} msgs | buckets ${formatNumber(p.bucketsQueued)}`,
-            );
-          },
-          source: "kilo-cli",
-          cursorKey: "kiloCli",
-        });
-      } catch (err) {
-        warnProviderParseFailure("Kilo CLI", err, opts);
+      const dbMessages = readFn(dbPath);
+      if (dbMessages.length === 0) return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+      const result = await parseOpencodeDbIncremental({ dbMessages, source, cursorKey, ...rest });
+      return {
+        recordsProcessed: result.messagesProcessed || 0,
+        eventsAggregated: result.eventsAggregated || 0,
+        bucketsQueued: result.bucketsQueued || 0,
+      };
+    }
+
+    // ── Kilo CLI (kilo.ai @kilocode/plugin — OpenCode-fork SQLite) ──
+    let kiloResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    if (sourceAllowed("kilo-cli")) {
+      const kiloNativeValue = process.platform === "win32" && typeof process.env.APPDATA === "string"
+        ? path.join(process.env.APPDATA.trim(), "kilo", "kilo.db")
+        : path.join(kiloHome, "kilo.db");
+      const wslKiloDir = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
+        ? wsl.discoverWslHome(".local/share/kilo")
+        : null;
+      const kiloPaths = resolveInstallPaths({ nativeValue: kiloNativeValue, wslValue: wslKiloDir ? path.join(wslKiloDir, "kilo.db") : null });
+      if (kiloPaths.native || kiloPaths.wsl) {
+        if (progress?.enabled) progress.start(`Parsing Kilo CLI ${renderBar(0)} | buckets 0`);
+        try {
+          kiloResult = await multiInstallParse({
+            paths: kiloPaths, parserFn: parseOpencodeDbForInstall, providerName: "kiloCli",
+            cursors, getParams: (p) => ({ dbPath: p, readFn: readOpencodeDbMessages, source: "kilo-cli", cursorKey: "kiloCli" }),
+            queuePath, projectQueuePath, onProgress: makeProviderProgress("Kilo CLI"),
+          });
+        } catch (err) { warnProviderParseFailure("Kilo CLI", err, opts); }
       }
     }
 
     // ── Mimo (mimocode — OpenCode-fork SQLite) ──
-    // Xiaomi's Mimo code CLI is an OpenCode fork that stores assistant
-    // messages in the exact same `message` table schema (mimocode.db). Reuse
-    // the OpenCode parser with a dedicated cursor namespace so the message
-    // indexes don't collide. readMimoDbMessages returns ONLY mimo's own-model
-    // rows — mimocode mirrors the user's Claude Code + claude-mem history into
-    // its DB (already counted as source=claude), so anything else would
-    // double-count and mislabel Claude usage as mimo.
-    const mimoDbPath = path.join(mimoHome, "mimocode.db");
-    let mimoResult = { messagesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const mimoDbMessages = sourceAllowed("mimo") ? readMimoDbMessages(mimoDbPath) : [];
-    if (mimoDbMessages.length > 0) {
-      if (progress?.enabled) {
-        progress.start(
-          `Parsing Mimo ${renderBar(0)} 0/${formatNumber(mimoDbMessages.length)} msgs | buckets 0`,
-        );
-      }
-      try {
-        mimoResult = await parseOpencodeDbIncremental({
-          dbMessages: mimoDbMessages,
-          cursors,
-          queuePath,
-          projectQueuePath,
-          onProgress: (p) => {
-            if (!progress?.enabled) return;
-            const pct = p.total > 0 ? p.index / p.total : 1;
-            progress.update(
-              `Parsing Mimo ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(
-                p.total,
-              )} msgs | buckets ${formatNumber(p.bucketsQueued)}`,
-            );
-          },
-          source: "mimo",
-          cursorKey: "mimo",
-        });
-      } catch (err) {
-        warnProviderParseFailure("Mimo", err, opts);
+    // readMimoDbMessages filters out mirrored Claude Code rows to avoid
+    // double-counting usage already counted as source=claude.
+    let mimoResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    if (sourceAllowed("mimo")) {
+      const mimoNativeValue = process.platform === "win32" && typeof process.env.APPDATA === "string"
+        ? path.join(process.env.APPDATA.trim(), "mimocode", "mimocode.db")
+        : path.join(mimoHome, "mimocode.db");
+      const wslMimoDir = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
+        ? wsl.discoverWslHome(".local/share/mimocode")
+        : null;
+      const mimoPaths = resolveInstallPaths({ nativeValue: mimoNativeValue, wslValue: wslMimoDir ? path.join(wslMimoDir, "mimocode.db") : null });
+      if (mimoPaths.native || mimoPaths.wsl) {
+        if (progress?.enabled) progress.start(`Parsing Mimo ${renderBar(0)} | buckets 0`);
+        try {
+          mimoResult = await multiInstallParse({
+            paths: mimoPaths, parserFn: parseOpencodeDbForInstall, providerName: "mimo",
+            cursors, getParams: (p) => ({ dbPath: p, readFn: readMimoDbMessages, source: "mimo", cursorKey: "mimo" }),
+            queuePath, projectQueuePath, onProgress: makeProviderProgress("Mimo"),
+          });
+        } catch (err) { warnProviderParseFailure("Mimo", err, opts); }
       }
     }
 
     // ── ZCode (Z.ai's coding agent — OpenCode-fork SQLite) ──
-    // Z.ai's ZCode CLI is an OpenCode fork that stores assistant messages in the
-    // exact same `message` table schema (~/.zcode/cli/db/db.sqlite). Reuse the
-    // OpenCode parser with a dedicated cursor namespace so the message indexes
-    // don't collide. readZcodeDbMessages returns ONLY ZCode's own GLM rows
-    // (providerID zai/bigmodel/zhipu) — ZCode can orchestrate bundled
-    // claude-code/codex/gemini-cli sub-agents whose turns (anthropic/openai/
-    // google) are already counted by the standalone parsers, so anything else
-    // would double-count.
-    const zcodeDbPath = path.join(zcodeHome, "cli", "db", "db.sqlite");
-    let zcodeResult = { messagesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const zcodeDbMessages = sourceAllowed("zcode") ? readZcodeDbMessages(zcodeDbPath) : [];
-    if (zcodeDbMessages.length > 0) {
-      if (progress?.enabled) {
-        progress.start(
-          `Parsing ZCode ${renderBar(0)} 0/${formatNumber(zcodeDbMessages.length)} msgs | buckets 0`,
+    let zcodeResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    if (sourceAllowed("zcode")) {
+      const zcodeNativeValue = process.platform === "win32" && typeof process.env.APPDATA === "string"
+        ? path.join(process.env.APPDATA.trim(), ".zcode", "cli", "db", "db.sqlite")
+        : path.join(zcodeHome, "cli", "db", "db.sqlite");
+      const wslZcodeDir = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
+        ? wsl.discoverWslHome(".zcode")
+        : null;
+      const zcodePaths = resolveInstallPaths({ nativeValue: zcodeNativeValue, wslValue: wslZcodeDir ? path.join(wslZcodeDir, "cli", "db", "db.sqlite") : null });
+      if (zcodePaths.native || zcodePaths.wsl) {
+        if (progress?.enabled) progress.start(`Parsing ZCode ${renderBar(0)} | buckets 0`);
+        try {
+          zcodeResult = await multiInstallParse({
+            paths: zcodePaths, parserFn: parseOpencodeDbForInstall, providerName: "zcode",
+            cursors, getParams: (p) => ({ dbPath: p, readFn: readZcodeDbMessages, source: "zcode", cursorKey: "zcode" }),
+            queuePath, projectQueuePath, onProgress: makeProviderProgress("ZCode"),
+          });
+        } catch (err) { warnProviderParseFailure("ZCode", err, opts); }
+      }
+    }
+
+    function makeProviderProgress(label) {
+      return (p) => {
+        if (!progress?.enabled) return;
+        const pct = p.total > 0 ? p.index / p.total : 1;
+        progress.update(
+          `Parsing ${label} ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} records | buckets ${formatNumber(p.bucketsQueued)}`,
         );
-      }
-      try {
-        zcodeResult = await parseOpencodeDbIncremental({
-          dbMessages: zcodeDbMessages,
-          cursors,
-          queuePath,
-          projectQueuePath,
-          onProgress: (p) => {
-            if (!progress?.enabled) return;
-            const pct = p.total > 0 ? p.index / p.total : 1;
-            progress.update(
-              `Parsing ZCode ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(
-                p.total,
-              )} msgs | buckets ${formatNumber(p.bucketsQueued)}`,
-            );
-          },
-          source: "zcode",
-          cursorKey: "zcode",
-        });
-      } catch (err) {
-        warnProviderParseFailure("ZCode", err, opts);
-      }
+      };
     }
 
     // ── Kilo Code VS Code extension (Cline-style ui_messages.json) ──
@@ -1533,9 +1508,9 @@ async function cmdSync(argv) {
         craftResult.recordsProcessed +
         grokResult.recordsProcessed +
         copilotResult.recordsProcessed +
-        kiloResult.messagesProcessed +
-        mimoResult.messagesProcessed +
-        zcodeResult.messagesProcessed +
+        kiloResult.recordsProcessed +
+        mimoResult.recordsProcessed +
+        zcodeResult.recordsProcessed +
         kilocodeResult.recordsProcessed +
         roocodeResult.recordsProcessed +
         zedResult.recordsProcessed +

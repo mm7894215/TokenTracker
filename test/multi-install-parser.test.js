@@ -156,3 +156,66 @@ test("multiInstallParse dual-to-single transition with namespaced cursor", async
 
   assert.equal(r.recordsProcessed, 1);
 });
+
+test("adapter normalizing messagesProcessed to recordsProcessed works with multiInstallParse", async () => {
+  const cursors = { hourly: {} };
+  async function adapter({ dbPath, ...rest }) {
+    const result = await rawParser({ dbPath, ...rest });
+    return {
+      recordsProcessed: result.messagesProcessed || 0,
+      eventsAggregated: result.eventsAggregated || 0,
+      bucketsQueued: result.bucketsQueued || 0,
+    };
+  }
+  async function rawParser({ dbPath, cursors: c }) {
+    c.adapterTest = { lastPath: dbPath };
+    return { messagesProcessed: 42, eventsAggregated: 10, bucketsQueued: 5 };
+  }
+  const r = await multiInstallParse({
+    paths: { native: "/db", wsl: null },
+    parserFn: adapter,
+    providerName: "adapterTest",
+    cursors,
+    getParams: (path) => ({ dbPath: path }),
+  });
+  assert.equal(r.recordsProcessed, 42);
+  assert.equal(r.eventsAggregated, 10);
+  assert.equal(r.bucketsQueued, 5);
+  assert.equal(cursors.adapterTest.lastPath, "/db");
+});
+
+test("adapter normalizing messagesProcessed works in dual mode", async () => {
+  const cursors = { hourly: { buckets: {} } };
+  const seen = [];
+  async function adapter({ dbPath, ...rest }) {
+    const result = await rawParser({ dbPath, ...rest });
+    seen.push({ dbPath, result });
+    return {
+      recordsProcessed: result.messagesProcessed || 0,
+      eventsAggregated: result.eventsAggregated || 0,
+      bucketsQueued: result.bucketsQueued || 0,
+    };
+  }
+  const counts = { "/native": 10, "/wsl": 32 };
+  async function rawParser({ dbPath, cursors: c }) {
+    const prev = c.adapterTest?.lastCount || 0;
+    c.adapterTest = { lastCount: prev + counts[dbPath], lastPath: dbPath };
+    return { messagesProcessed: counts[dbPath], eventsAggregated: counts[dbPath], bucketsQueued: 1 };
+  }
+  const r = await multiInstallParse({
+    paths: { native: "/native", wsl: "/wsl" },
+    parserFn: adapter,
+    providerName: "adapterTest",
+    cursors,
+    getParams: (path) => ({ dbPath: path }),
+  });
+  assert.equal(seen.length, 2, `adapter called twice, got ${seen.length}`);
+  assert.equal(seen[0].dbPath, "/native");
+  assert.equal(seen[1].dbPath, "/wsl");
+  assert.equal(r.recordsProcessed, 42, "10+32 from both installs");
+  assert.equal(r.eventsAggregated, 42);
+  assert.equal(r.bucketsQueued, 2);
+  assert.deepStrictEqual(Object.keys(cursors.adapterTest).sort(), ["native", "wsl"]);
+  assert.equal(cursors.adapterTest.native.lastCount, 10);
+  assert.equal(cursors.adapterTest.wsl.lastCount, 32);
+});
