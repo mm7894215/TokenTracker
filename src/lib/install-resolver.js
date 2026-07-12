@@ -7,7 +7,7 @@ function resolveInstallPaths({ nativeValue, wslDir, wslValue } = {}, env = proce
   }
 
   const wslCandidate = wslValue !== undefined
-    ? (wsl.shouldProbeWsl(env) ? wslValue : null)
+    ? (wsl.shouldProbeWsl(env) && pathExists(wslValue, deps.existsSync) ? wslValue : null)
     : (wslDir && wsl.shouldProbeWsl(env) ? wsl.discoverWslHome(wslDir, { ...deps, env }) : null);
   const nativeCandidate = wsl.shouldProbeNative(env) && nativeValue
     ? pathExists(nativeValue, deps.existsSync) : null;

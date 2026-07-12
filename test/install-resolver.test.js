@@ -88,6 +88,25 @@ test("resolveInstallPaths non-both modes return single path with correct selecti
   }
 });
 
+test("resolveInstallPaths wsl-first falls back to native when WSL DB is missing but native exists", (t) => {
+  mockPlatform(t, "win32");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ir-wsl-fallback-"));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  const nativeDb = path.join(tmpDir, "native.db");
+  const wslDb = path.join(tmpDir, "wsl.db");
+
+  // Create native DB only, leave WSL DB missing
+  fs.writeFileSync(nativeDb, "fake-db");
+
+  const r = resolveInstallPaths(
+    { nativeValue: nativeDb, wslValue: wslDb },
+    { TOKENTRACKER_WSL_MODE: "wsl-first" },
+    { runWsl: () => "Ubuntu\n" }
+  );
+  assert.equal(r.wsl, null);
+  assert.equal(r.native, nativeDb);
+});
+
 // ── Provider path resolution (PR #261) ────────────────────────────────────────
 
 test("kilo-cli native path defaults to XDG on Linux, APPDATA on Windows", (t) => {

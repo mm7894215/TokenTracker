@@ -3116,37 +3116,51 @@ async function walkOpencodeMessages(dir, out) {
 function readOpencodeDbMessages(dbPath, sqliteOptions = {}) {
   if (!dbPath || !fssync.existsSync(dbPath)) return [];
   const sql = `SELECT id, session_id, time_updated, data FROM message WHERE json_extract(data, '$.role') = 'assistant' ORDER BY time_created ASC`;
-  const rows = readSqliteJsonRows(dbPath, sql, {
-    label: "OpenCode",
-    maxBuffer: 50 * 1024 * 1024,
-    timeout: 30_000,
-    ...sqliteOptions,
-  });
-  const out = [];
-  for (const row of rows) {
-    if (!row || typeof row.data !== "string") continue;
-    let data;
+
+  let snapshot = null;
+  let effectiveDbPath = dbPath;
+  if (isUncPath(dbPath)) {
     try {
-      data = JSON.parse(row.data);
-    } catch (_e) {
-      continue;
-    }
-    const tokens = data?.tokens;
-    if (!tokens || typeof tokens !== "object") continue;
-    // Skip messages with no meaningful token data
-    const hasTokens =
-      toNonNegativeInt(tokens.input) > 0 ||
-      toNonNegativeInt(tokens.output) > 0 ||
-      toNonNegativeInt(tokens.reasoning) > 0;
-    if (!hasTokens) continue;
-    out.push({
-      id: row.id || data.id,
-      sessionID: row.session_id || data.sessionID,
-      timeUpdated: row.time_updated || 0,
-      data,
-    });
+      snapshot = snapshotSqliteDb(dbPath);
+      effectiveDbPath = snapshot.path;
+    } catch (_e) { }
   }
-  return out;
+
+  try {
+    const rows = readSqliteJsonRows(effectiveDbPath, sql, {
+      label: "OpenCode",
+      maxBuffer: 50 * 1024 * 1024,
+      timeout: 30_000,
+      ...sqliteOptions,
+    });
+    const out = [];
+    for (const row of rows) {
+      if (!row || typeof row.data !== "string") continue;
+      let data;
+      try {
+        data = JSON.parse(row.data);
+      } catch (_e) {
+        continue;
+      }
+      const tokens = data?.tokens;
+      if (!tokens || typeof tokens !== "object") continue;
+      // Skip messages with no meaningful token data
+      const hasTokens =
+        toNonNegativeInt(tokens.input) > 0 ||
+        toNonNegativeInt(tokens.output) > 0 ||
+        toNonNegativeInt(tokens.reasoning) > 0;
+      if (!hasTokens) continue;
+      out.push({
+        id: row.id || data.id,
+        sessionID: row.session_id || data.sessionID,
+        timeUpdated: row.time_updated || 0,
+        data,
+      });
+    }
+    return out;
+  } finally {
+    if (snapshot) snapshot.cleanup();
+  }
 }
 
 // mimocode mirrors the user's Claude Code + claude-mem history into its own
