@@ -787,14 +787,14 @@ test("resolveCopilotAppDbPaths includes COPILOT_HOME/data.db and ~/.copilot/data
   assert.ok(paths.includes(path.join("/tmp/home", ".copilot", "data.db")));
 });
 
-test("resolveCopilotAppDbPaths respects Windows wsl-only mode by not adding native fallback", (t) => {
+test("resolveCopilotAppDbPaths stays native when Windows WSL mode is wsl-only", (t) => {
   mockPlatform(t, "win32");
-  mockMethod(t, cp, "execFileSync", () => {
-    throw new Error("no WSL distros");
-  });
   const paths = resolveCopilotAppDbPaths({
-    HOME: "C:\\Users\\dev",
+    HOME: "/tmp/shell-home",
+    USERPROFILE: "/tmp/native-user",
     TOKENTRACKER_WSL_MODE: "wsl-only",
   });
-  assert.deepEqual(paths, []);
+  assert.deepEqual(paths, [
+    path.join("/tmp/native-user", ".copilot", "data.db"),
+  ]);
 });

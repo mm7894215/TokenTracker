@@ -9393,6 +9393,45 @@ async function scanCopilotV1MigrationFile(filePath, maxBytes) {
   return result;
 }
 
+async function copilotOtelCursorHasLegacyCliUsage(cursors) {
+  const state =
+    cursors?.copilot && typeof cursors.copilot === "object"
+      ? cursors.copilot
+      : {};
+  if (state.legacyCliHistory === true) return true;
+  if (state.usageClaimsComplete === true) return false;
+  const offsets =
+    state.fileOffsets && typeof state.fileOffsets === "object"
+      ? state.fileOffsets
+      : {};
+  const entries = Object.entries(offsets).filter(
+    ([, entry]) => Number(entry?.size) > 0,
+  );
+  const hasSeenIds =
+    Array.isArray(state.seenIds) && state.seenIds.length > 0;
+  if (entries.length === 0) return hasSeenIds;
+  for (const [filePath, entry] of entries) {
+    let stat;
+    try {
+      stat = fssync.statSync(filePath);
+    } catch (_e) {
+      return true;
+    }
+    if (
+      stat.size < Number(entry?.size) ||
+      (typeof entry?.ino === "number" && stat.ino !== entry.ino)
+    ) {
+      return true;
+    }
+    const scan = await scanCopilotV1MigrationFile(
+      filePath,
+      Number(entry?.size) || 0,
+    );
+    if (scan.v1Processed) return true;
+  }
+  return false;
+}
+
 async function parseCopilotIncremental({
   otelPaths,
   cursors,
@@ -9419,6 +9458,10 @@ async function parseCopilotIncremental({
           event.consumed !== true,
       )
     : [];
+  const hadPriorUsageHistory =
+    seenIds.size > 0 || Object.keys(fileOffsetsRaw).length > 0;
+  let usageClaimsComplete =
+    copilotState.usageClaimsComplete === true || !hadPriorUsageHistory;
   const migrationSkipLineHashes = new Map();
   // One-shot v1->v2 migration:
   // - pure v2-only files: clear offset and re-read all skipped Chat records
@@ -9446,6 +9489,7 @@ async function parseCopilotIncremental({
       version: COPILOT_PARSER_VERSION,
       seenIds: Array.from(seenIds),
       fileOffsets,
+      usageClaimsComplete,
       updatedAt: new Date().toISOString(),
     };
     return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
@@ -9579,6 +9623,7 @@ async function parseCopilotIncremental({
         typeof attrs["gen_ai.conversation.id"] === "string"
           ? attrs["gen_ai.conversation.id"].trim()
           : "";
+      if (cliSpan && !cliSessionId) usageClaimsComplete = false;
       const matchBase = {
         sessionId: cliSessionId,
         model,
@@ -9651,10 +9696,6 @@ async function parseCopilotIncremental({
   // Cap dedup set to last 10k IDs to bound state size
   const seenArr = Array.from(seenIds);
   const cappedSeen = seenArr.length > 10_000 ? seenArr.slice(seenArr.length - 10_000) : seenArr;
-  const cappedRecentUsageEvents =
-    recentOtelUsageEvents.length > 10_000
-      ? recentOtelUsageEvents.slice(recentOtelUsageEvents.length - 10_000)
-      : recentOtelUsageEvents;
 
   const bucketsQueued = await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets });
   const updatedAt = new Date().toISOString();
@@ -9665,7 +9706,8 @@ async function parseCopilotIncremental({
     version: COPILOT_PARSER_VERSION,
     seenIds: cappedSeen,
     fileOffsets,
-    recentUsageEvents: cappedRecentUsageEvents,
+    recentUsageEvents: recentOtelUsageEvents,
+    usageClaimsComplete,
     updatedAt,
   };
 
@@ -9681,50 +9723,142 @@ async function parseCopilotIncremental({
 // the App-owned portion of those sessions.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const COPILOT_STORE_CURSOR_VERSION = 1;
+const COPILOT_STORE_CURSOR_VERSION = 2;
+const COPILOT_STORE_LEGACY_MODEL = "github-copilot-legacy";
 
-function resolveCopilotSessionStorePaths(env = process.env) {
-  const home = env.HOME || require("node:os").homedir();
+function resolveCopilotDbPaths({ fileName, overrideEnvKey }, env = process.env) {
+  const home =
+    process.platform === "win32"
+      ? env.USERPROFILE || env.HOME || require("node:os").homedir()
+      : env.HOME || require("node:os").homedir();
   const paths = new Set();
   const addDbPath = (dbPath) => {
-    const normalized = normalizeCopilotAppDbPath(dbPath, env);
+    const normalized = normalizeCopilotDbPath(dbPath, env);
     if (normalized) paths.add(normalized);
   };
   const addHome = (homePath) => {
-    const normalizedHome = normalizeCopilotAppDbPath(homePath, env);
-    if (normalizedHome) addDbPath(path.join(normalizedHome, "session-store.db"));
+    const normalizedHome = normalizeCopilotDbPath(homePath, env);
+    if (normalizedHome) addDbPath(path.join(normalizedHome, fileName));
   };
 
-  if (
-    typeof env.TOKENTRACKER_COPILOT_SESSION_STORE_DB === "string" &&
-    env.TOKENTRACKER_COPILOT_SESSION_STORE_DB.trim()
-  ) {
-    addDbPath(env.TOKENTRACKER_COPILOT_SESSION_STORE_DB);
+  if (typeof env[overrideEnvKey] === "string" && env[overrideEnvKey].trim()) {
+    addDbPath(env[overrideEnvKey]);
   }
   if (typeof env.COPILOT_HOME === "string" && env.COPILOT_HOME.trim()) {
     addHome(env.COPILOT_HOME);
   }
 
-  const defaultDb = path.join(home, ".copilot", "session-store.db");
-  if (process.platform === "win32") {
-    const wslHome = wsl.shouldProbeWsl(env)
-      ? wsl.discoverWslHome(".copilot", { env })
-      : null;
-    const wslDbCandidate = wslHome ? path.join(wslHome, "session-store.db") : null;
-    const wslDb =
-      wslDbCandidate && fssync.existsSync(wslDbCandidate) ? wslDbCandidate : null;
-    const resolved = resolveInstallPaths({ nativeValue: defaultDb, wslValue: wslDb }, env);
-    if (resolved.native) addDbPath(resolved.native);
-    if (resolved.wsl) addDbPath(resolved.wsl);
-    if (paths.size === 0 && wsl.shouldProbeNative(env)) addDbPath(defaultDb);
-  } else {
-    addDbPath(defaultDb);
-  }
+  addDbPath(path.join(home, ".copilot", fileName));
 
   return Array.from(paths).sort();
 }
 
-function readCopilotSessionStoreMetadata(dbPath, sqliteOptions = {}) {
+function resolveCopilotSessionStorePaths(env = process.env) {
+  return resolveCopilotDbPaths(
+    {
+      fileName: "session-store.db",
+      overrideEnvKey: "TOKENTRACKER_COPILOT_SESSION_STORE_DB",
+    },
+    env,
+  );
+}
+
+function copilotStoreRowKey(row) {
+  if (!row) return null;
+  return crypto
+    .createHash("sha256")
+    .update(
+      JSON.stringify([
+        row.max_id ?? row.id,
+        row.session_id,
+        row.model,
+        row.input_tokens,
+        row.output_tokens,
+        row.cache_read_tokens,
+        row.cache_write_tokens,
+        row.reasoning_tokens,
+        row.created_at,
+      ]),
+    )
+    .digest("hex");
+}
+
+function copilotStoreEventFingerprint(row) {
+  const sessionId =
+    typeof row?.session_id === "string" ? row.session_id.trim() : "";
+  if (!sessionId) return null;
+  const normalized = normalizeCopilotSessionStoreUsage(row);
+  const timestamp =
+    parseCopilotAppTimestamp(row?.created_at) ||
+    `invalid:${String(row?.created_at ?? "")}`;
+  return crypto
+    .createHash("sha256")
+    .update(
+      JSON.stringify([
+        sessionId,
+        normalizeCopilotAppModel(row?.model) || COPILOT_APP_DEFAULT_MODEL,
+        normalized.input_tokens,
+        normalized.output_tokens,
+        normalized.cached_input_tokens,
+        normalized.cache_creation_input_tokens,
+        normalized.reasoning_output_tokens,
+        timestamp,
+      ]),
+    )
+    .digest("hex");
+}
+
+function normalizeCopilotFingerprintCounts(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const result = {};
+  for (const [fingerprint, count] of Object.entries(value)) {
+    const normalized = toNonNegativeInt(count);
+    if (/^[a-f0-9]{64}$/.test(fingerprint) && normalized > 0) {
+      result[fingerprint] = normalized;
+    }
+  }
+  return result;
+}
+
+function normalizeCopilotPendingMalformedEvents(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const result = {};
+  for (const [id, fingerprint] of Object.entries(value)) {
+    const normalizedId = toNonNegativeInt(id);
+    if (normalizedId > 0) {
+      result[normalizedId] =
+        typeof fingerprint === "string" ? fingerprint : "";
+    }
+  }
+  return result;
+}
+
+function incrementCopilotFingerprintCount(counts, fingerprint) {
+  if (!fingerprint) return;
+  counts[fingerprint] = toNonNegativeInt(counts[fingerprint]) + 1;
+}
+
+function latestCopilotTimestamp(first, second) {
+  const values = [first, second]
+    .map((value) => parseCopilotAppTimestamp(value))
+    .filter(Boolean);
+  if (values.length === 0) return null;
+  return values.reduce((latest, value) => (value > latest ? value : latest));
+}
+
+function omitCopilotLegacyCatchupState(state) {
+  const clean = { ...(state || {}) };
+  delete clean.pendingCatchupMaxId;
+  delete clean.pendingCatchupFingerprint;
+  delete clean.pendingLegacyCatchup;
+  return clean;
+}
+
+function readCopilotSessionStoreMetadata(
+  dbPath,
+  sqliteOptions = {},
+  cursorId = 0,
+) {
   const tables = readSqliteJsonRows(
     dbPath,
     "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('assistant_usage_events', 'schema_version')",
@@ -9783,50 +9917,96 @@ function readCopilotSessionStoreMetadata(dbPath, sqliteOptions = {}) {
     );
     schemaVersion = toNonNegativeInt(versionRows[0]?.version);
   }
+  let cursorRowKey = null;
+  const normalizedCursorId = toNonNegativeInt(cursorId);
+  if (normalizedCursorId > 0) {
+    if (normalizedCursorId === toNonNegativeInt(maxRows[0]?.max_id)) {
+      cursorRowKey = copilotStoreRowKey(maxRows[0]);
+    } else {
+      const cursorRows = readSqliteJsonRows(
+        dbPath,
+        `
+          SELECT
+            id,
+            session_id,
+            model,
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+            reasoning_tokens,
+            created_at
+          FROM assistant_usage_events
+          WHERE id = ${normalizedCursorId}
+          LIMIT 1
+        `.trim(),
+        {
+          label: "GitHub Copilot session store",
+          maxBuffer: 4 * 1024 * 1024,
+          timeout: 10_000,
+          readOnly: true,
+          throwOnReadFailure: true,
+          ...sqliteOptions,
+        },
+      );
+      cursorRowKey = copilotStoreRowKey(cursorRows[0]);
+    }
+  }
   return {
     active: true,
     schemaVersion,
     maxId: toNonNegativeInt(maxRows[0]?.max_id),
-    lastRowKey: maxRows[0]
-      ? crypto
-          .createHash("sha256")
-          .update(
-            JSON.stringify([
-              maxRows[0].max_id,
-              maxRows[0].session_id,
-              maxRows[0].model,
-              maxRows[0].input_tokens,
-              maxRows[0].output_tokens,
-              maxRows[0].cache_read_tokens,
-              maxRows[0].cache_write_tokens,
-              maxRows[0].reasoning_tokens,
-              maxRows[0].created_at,
-            ]),
-          )
-          .digest("hex")
-      : null,
+    lastRowKey: copilotStoreRowKey(maxRows[0]),
+    lastEventAt: parseCopilotAppTimestamp(maxRows[0]?.created_at),
+    cursorRowKey,
   };
 }
 
-function readCopilotSessionStoreSessionIds(dbPath, sqliteOptions = {}) {
-  const rows = readSqliteJsonRows(
-    dbPath,
-    "SELECT DISTINCT session_id FROM assistant_usage_events WHERE session_id IS NOT NULL",
-    {
-      label: "GitHub Copilot session store",
-      maxBuffer: 16 * 1024 * 1024,
-      timeout: 30_000,
-      readOnly: true,
-      throwOnReadFailure: true,
-      ...sqliteOptions,
-    },
-  );
-  return rows
-    .map((row) => (typeof row?.session_id === "string" ? row.session_id.trim() : ""))
-    .filter(Boolean);
+function describeCopilotSessionStoreDb(dbPath, sqliteOptions = {}) {
+  let snap = null;
+  try {
+    snap = snapshotSqliteDb(dbPath);
+    const metadata = readCopilotSessionStoreMetadata(snap.path, sqliteOptions);
+    if (!metadata.active) {
+      return {
+        path: dbPath,
+        active: false,
+        schemaVersion: metadata.schemaVersion,
+        eventCount: 0,
+        lastEventId: 0,
+        lastEventAt: null,
+      };
+    }
+    const countRows = readSqliteJsonRows(
+      snap.path,
+      "SELECT COUNT(*) AS event_count FROM assistant_usage_events",
+      {
+        label: "GitHub Copilot session store",
+        maxBuffer: 4 * 1024 * 1024,
+        timeout: 10_000,
+        readOnly: true,
+        throwOnReadFailure: true,
+        ...sqliteOptions,
+      },
+    );
+    return {
+      path: dbPath,
+      active: true,
+      schemaVersion: metadata.schemaVersion,
+      eventCount: toNonNegativeInt(countRows[0]?.event_count),
+      lastEventId: metadata.maxId,
+      lastEventAt: metadata.lastEventAt,
+    };
+  } finally {
+    if (snap) snap.cleanup();
+  }
 }
 
-function readCopilotSessionStoreUsageRows(dbPath, lastId, sqliteOptions = {}) {
+function readCopilotSessionStoreUsageRowsWhere(
+  dbPath,
+  whereClause,
+  sqliteOptions = {},
+) {
   return readSqliteJsonRows(
     dbPath,
     `
@@ -9842,7 +10022,7 @@ function readCopilotSessionStoreUsageRows(dbPath, lastId, sqliteOptions = {}) {
         token_details_json,
         created_at
       FROM assistant_usage_events
-      WHERE id > ${toNonNegativeInt(lastId)}
+      WHERE ${whereClause}
       ORDER BY id ASC
     `.trim(),
     {
@@ -9854,6 +10034,40 @@ function readCopilotSessionStoreUsageRows(dbPath, lastId, sqliteOptions = {}) {
       ...sqliteOptions,
     },
   );
+}
+
+function readCopilotSessionStoreUsageRows(dbPath, lastId, sqliteOptions = {}) {
+  return readCopilotSessionStoreUsageRowsWhere(
+    dbPath,
+    `id > ${toNonNegativeInt(lastId)}`,
+    sqliteOptions,
+  );
+}
+
+function readCopilotSessionStoreUsageRowsByIds(
+  dbPath,
+  ids,
+  sqliteOptions = {},
+) {
+  const normalizedIds = [
+    ...new Set(
+      (Array.isArray(ids) ? ids : [])
+        .map(toNonNegativeInt)
+        .filter((id) => id > 0),
+    ),
+  ];
+  const rows = [];
+  for (let start = 0; start < normalizedIds.length; start += 500) {
+    const chunk = normalizedIds.slice(start, start + 500);
+    rows.push(
+      ...readCopilotSessionStoreUsageRowsWhere(
+        dbPath,
+        `id IN (${chunk.join(",")})`,
+        sqliteOptions,
+      ),
+    );
+  }
+  return rows.sort((a, b) => toNonNegativeInt(a?.id) - toNonNegativeInt(b?.id));
 }
 
 function parseCopilotStoreTokenDetails(raw) {
@@ -9969,6 +10183,7 @@ async function parseCopilotSessionStoreIncremental({
   sqliteOptions,
   backfillOnFirstRun = false,
   excludeSessionIdsOnFirstRun,
+  excludeSessionTotalsOnFirstRun,
   expectedFingerprints,
   otelUsageEvents,
 } = {}) {
@@ -9978,19 +10193,25 @@ async function parseCopilotSessionStoreIncremental({
     : dbPath
       ? [dbPath]
       : resolveCopilotSessionStorePaths(env || process.env);
-  const uniquePaths = [
-    ...new Set(
-      paths
-        .map((candidate) => normalizeCopilotAppDbPath(candidate, env || process.env))
-        .filter(Boolean),
-    ),
-  ];
   const storeState =
     cursors.copilotStore && typeof cursors.copilotStore === "object"
       ? cursors.copilotStore
       : {};
   const dbStates =
     storeState.dbs && typeof storeState.dbs === "object" ? { ...storeState.dbs } : {};
+  let uniquePaths = uniqueCopilotDbPaths(
+    paths,
+    env || process.env,
+    Object.keys(dbStates),
+  );
+  const migratedAliasPaths = coalesceCopilotDbStatesByIdentity(
+    dbStates,
+    uniquePaths,
+    mergeCopilotStoreAliasStates,
+  );
+  uniquePaths = uniquePaths.filter(
+    (dbPath) => !migratedAliasPaths.has(dbPath),
+  );
   const seenSessions = new Set(
     Array.isArray(storeState.seenSessions) ? storeState.seenSessions : [],
   );
@@ -9999,6 +10220,13 @@ async function parseCopilotSessionStoreIncremental({
       ? excludeSessionIdsOnFirstRun.filter((value) => typeof value === "string" && value)
       : [],
   );
+  const excludedFirstRunTotals =
+    excludeSessionTotalsOnFirstRun &&
+    typeof excludeSessionTotalsOnFirstRun === "object" &&
+    !Array.isArray(excludeSessionTotalsOnFirstRun)
+      ? excludeSessionTotalsOnFirstRun
+      : {};
+  const legacyResiduals = new Map();
   const recentEvents = Array.isArray(storeState.recentEvents)
     ? storeState.recentEvents.filter(
         (event) =>
@@ -10017,8 +10245,6 @@ async function parseCopilotSessionStoreIncremental({
   let recordsProcessed = 0;
   let eventsAggregated = 0;
   let dbErrors = 0;
-  const legacyGlobalPending = storeState.pendingLegacyCatchup === true;
-  const pendingDbPaths = [];
   const canonicalDbPaths = [];
   const globalAdoptionPending = storeState.active !== true;
 
@@ -10027,6 +10253,12 @@ async function parseCopilotSessionStoreIncremental({
       dbStates[resolvedDb] && typeof dbStates[resolvedDb] === "object"
         ? dbStates[resolvedDb]
         : {};
+    const seenEventCounts = normalizeCopilotFingerprintCounts(
+      dbState.seenEventCounts,
+    );
+    let pendingMalformedEvents = normalizeCopilotPendingMalformedEvents(
+      dbState.pendingMalformedEvents,
+    );
     let fingerprint = null;
     let snap = null;
     try {
@@ -10037,17 +10269,23 @@ async function parseCopilotSessionStoreIncremental({
         !sameSqliteFingerprint(fingerprint, expectedFingerprint)
       ) {
         dbStates[resolvedDb] = {
-          ...dbState,
+          ...omitCopilotLegacyCatchupState(dbState),
           adoptionDeferredAt: updatedAt,
           updatedAt,
         };
         continue;
       }
+      const currentIno = fingerprint?.db?.ino;
+      const priorLastId = toNonNegativeInt(dbState.lastId);
       snap = snapshotSqliteDb(resolvedDb);
-      const metadata = readCopilotSessionStoreMetadata(snap.path, sqliteOptions);
+      const metadata = readCopilotSessionStoreMetadata(
+        snap.path,
+        sqliteOptions,
+        priorLastId,
+      );
       if (!metadata.active) {
         dbStates[resolvedDb] = {
-          ...dbState,
+          ...omitCopilotLegacyCatchupState(dbState),
           schemaVersion: metadata.schemaVersion,
           lastError: null,
           lastErrorAt: null,
@@ -10056,50 +10294,79 @@ async function parseCopilotSessionStoreIncremental({
         continue;
       }
 
-      const currentIno = fingerprint?.db?.ino;
-      const priorLastId = toNonNegativeInt(dbState.lastId);
       const inodeChanged =
         typeof dbState.dbIno === "number" &&
         typeof currentIno === "number" &&
         dbState.dbIno !== currentIno;
-      const lastRowChangedAtSameId =
+      const cursorRowChanged =
         priorLastId > 0 &&
-        metadata.maxId === priorLastId &&
         typeof dbState.lastRowKey === "string" &&
-        typeof metadata.lastRowKey === "string" &&
-        dbState.lastRowKey !== metadata.lastRowKey;
+        dbState.lastRowKey !== metadata.cursorRowKey;
+      const idRegressed = metadata.maxId < priorLastId;
+      const resetDetected =
+        Boolean(dbState.adoptedAt) && (idRegressed || cursorRowChanged);
+      const needsFingerprintSeed =
+        Boolean(dbState.adoptedAt) &&
+        priorLastId > 0 &&
+        Object.keys(seenEventCounts).length === 0;
+      const resetWithoutFingerprintHistory =
+        resetDetected && needsFingerprintSeed;
+      const reconcileAllRows =
+        (resetDetected || inodeChanged) && !resetWithoutFingerprintHistory;
       const needsAdoption =
         globalAdoptionPending ||
         !dbState.adoptedAt ||
-        inodeChanged ||
-        metadata.maxId < priorLastId ||
-        lastRowChangedAtSameId;
-      const firstId = needsAdoption && !backfillOnFirstRun ? metadata.maxId : priorLastId;
-      let dbPendingLegacyCatchup =
-        dbState.pendingLegacyCatchup === true ||
-        (legacyGlobalPending && Boolean(dbState.adoptedAt));
-
-      if (needsAdoption) {
-        adoptedThisRun = true;
-        if (storeState.active === true) dbPendingLegacyCatchup = true;
-        if (!backfillOnFirstRun) {
-          for (const sessionId of readCopilotSessionStoreSessionIds(snap.path, sqliteOptions)) {
-            seenSessions.add(sessionId);
+        resetDetected;
+      const baselineOnly =
+        resetWithoutFingerprintHistory ||
+        (needsAdoption && !resetDetected && !backfillOnFirstRun);
+      const incrementalRows = readCopilotSessionStoreUsageRows(
+        snap.path,
+        reconcileAllRows || baselineOnly || needsFingerprintSeed ? 0 : priorLastId,
+        sqliteOptions,
+      );
+      const pendingRetryRows = resetDetected || reconcileAllRows
+        ? []
+        : readCopilotSessionStoreUsageRowsByIds(
+            snap.path,
+            Object.keys(pendingMalformedEvents),
+            sqliteOptions,
+          );
+      const pendingRetryIds = new Set(
+        pendingRetryRows.map((row) => toNonNegativeInt(row?.id)),
+      );
+      if (resetDetected || reconcileAllRows) {
+        pendingMalformedEvents = {};
+      } else {
+        for (const pendingId of Object.keys(pendingMalformedEvents)) {
+          if (!pendingRetryIds.has(toNonNegativeInt(pendingId))) {
+            delete pendingMalformedEvents[pendingId];
           }
         }
       }
-
-      const waitForLegacyCatchup =
-        storeState.active === true && dbPendingLegacyCatchup;
-      const rows =
-        waitForLegacyCatchup || (needsAdoption && !backfillOnFirstRun)
-          ? []
-          : readCopilotSessionStoreUsageRows(snap.path, firstId, sqliteOptions);
+      const rowsById = new Map();
+      for (const row of [...pendingRetryRows, ...incrementalRows]) {
+        rowsById.set(toNonNegativeInt(row?.id), row);
+      }
+      const rows = Array.from(rowsById.values()).sort(
+        (a, b) => toNonNegativeInt(a?.id) - toNonNegativeInt(b?.id),
+      );
+      // Reindex/reset can rewrite every SQLite id. Subtract the exact metadata
+      // multiset already observed so only genuinely new requests are emitted.
+      const historicalFingerprintCounts = reconcileAllRows
+        ? new Map(
+            Object.entries(seenEventCounts).map(([eventFingerprint, count]) => [
+              eventFingerprint,
+              toNonNegativeInt(count),
+            ]),
+          )
+        : null;
+      if (needsAdoption) adoptedThisRun = true;
       if (expectedFingerprint) {
         const finalFingerprint = sqliteSidecarFingerprint(resolvedDb);
         if (!sameSqliteFingerprint(finalFingerprint, expectedFingerprint)) {
           dbStates[resolvedDb] = {
-            ...dbState,
+            ...omitCopilotLegacyCatchupState(dbState),
             adoptionDeferredAt: updatedAt,
             updatedAt,
           };
@@ -10108,25 +10375,90 @@ async function parseCopilotSessionStoreIncremental({
         fingerprint = finalFingerprint;
       }
       let lastId =
-        needsAdoption && !backfillOnFirstRun
-          ? metadata.maxId
-          : firstId;
+        reconcileAllRows || baselineOnly ? metadata.maxId : priorLastId;
       for (const row of rows) {
         recordsProcessed++;
-        lastId = Math.max(lastId, toNonNegativeInt(row?.id));
+        const rowId = toNonNegativeInt(row?.id);
+        lastId = Math.max(lastId, rowId);
         const sessionId =
           typeof row?.session_id === "string" ? row.session_id.trim() : "";
-        if (!sessionId) continue;
+        if (!sessionId) {
+          if (rowId > 0) pendingMalformedEvents[rowId] = "";
+          continue;
+        }
+        const eventFingerprint = copilotStoreEventFingerprint(row);
+        if (historicalFingerprintCounts && eventFingerprint) {
+          const historicalCount = toNonNegativeInt(
+            historicalFingerprintCounts.get(eventFingerprint),
+          );
+          if (historicalCount > 0) {
+            historicalFingerprintCounts.set(
+              eventFingerprint,
+              historicalCount - 1,
+            );
+            if (!parseCopilotAppTimestamp(row?.created_at) && rowId > 0) {
+              pendingMalformedEvents[rowId] = eventFingerprint;
+            }
+            seenSessions.add(sessionId);
+            continue;
+          }
+        }
+        const seedOnly =
+          needsFingerprintSeed && rowId <= priorLastId;
         const recentEvent = copilotStoreRecentEvent(row);
-        if (recentEvent) recentEvents.push(recentEvent);
+        if (pendingRetryIds.has(rowId) && !recentEvent) {
+          if (seedOnly) {
+            incrementCopilotFingerprintCount(
+              seenEventCounts,
+              eventFingerprint,
+            );
+          }
+          pendingMalformedEvents[rowId] = eventFingerprint || "";
+          seenSessions.add(sessionId);
+          continue;
+        }
+        if (rowId > 0) delete pendingMalformedEvents[rowId];
+        const matchedOtelUsage =
+          recentEvent && otelUsageMatcher.consume(recentEvent);
+        if (matchedOtelUsage) recentEvent.consumed = true;
+        if (baselineOnly || seedOnly) {
+          incrementCopilotFingerprintCount(seenEventCounts, eventFingerprint);
+          if (!recentEvent && rowId > 0) {
+            pendingMalformedEvents[rowId] = eventFingerprint || "";
+          }
+          seenSessions.add(sessionId);
+          continue;
+        }
+        incrementCopilotFingerprintCount(seenEventCounts, eventFingerprint);
         if (needsAdoption && backfillOnFirstRun && excludedFirstRunSessions.has(sessionId)) {
+          if (
+            !matchedOtelUsage &&
+            Object.prototype.hasOwnProperty.call(
+              excludedFirstRunTotals,
+              sessionId,
+            )
+          ) {
+            const normalized = normalizeCopilotSessionStoreUsage(row);
+            const priorResidual = legacyResiduals.get(sessionId) || {
+              storeTokens: 0,
+              lastEventAt: null,
+            };
+            priorResidual.storeTokens += normalized.total_tokens;
+            priorResidual.lastEventAt = latestCopilotTimestamp(
+              priorResidual.lastEventAt,
+              row?.created_at,
+            );
+            legacyResiduals.set(sessionId, priorResidual);
+          }
+          if (recentEvent && !matchedOtelUsage) recentEvents.push(recentEvent);
           seenSessions.add(sessionId);
           continue;
         }
-        if (recentEvent && otelUsageMatcher.consume(recentEvent)) {
+        if (matchedOtelUsage) {
           seenSessions.add(sessionId);
           continue;
         }
+        if (recentEvent) recentEvents.push(recentEvent);
         const normalized = normalizeCopilotSessionStoreUsage(row);
         if (normalized.total_tokens <= 0) {
           seenSessions.add(sessionId);
@@ -10134,7 +10466,13 @@ async function parseCopilotSessionStoreIncremental({
         }
         const tsIso = parseCopilotAppTimestamp(row.created_at);
         const bucketStart = tsIso ? toUtcHalfHourStart(tsIso) : null;
-        if (!bucketStart) continue;
+        if (!bucketStart) {
+          if (rowId > 0) {
+            pendingMalformedEvents[rowId] = eventFingerprint || "";
+          }
+          seenSessions.add(sessionId);
+          continue;
+        }
         const model =
           normalizeCopilotAppModel(row.model) || COPILOT_APP_DEFAULT_MODEL;
         const delta = {
@@ -10163,50 +10501,81 @@ async function parseCopilotSessionStoreIncremental({
       }
 
       dbStates[resolvedDb] = {
-        ...dbState,
+        ...omitCopilotLegacyCatchupState(dbState),
         adoptedAt: dbState.adoptedAt || updatedAt,
-        resetAt: needsAdoption && dbState.adoptedAt ? updatedAt : dbState.resetAt || null,
+        resetAt: resetDetected ? updatedAt : dbState.resetAt || null,
         schemaVersion: metadata.schemaVersion,
         lastRowKey: metadata.lastRowKey,
-        lastId: waitForLegacyCatchup
-          ? priorLastId
-          : Math.max(lastId, metadata.maxId),
-        pendingCatchupMaxId: waitForLegacyCatchup
-          ? Math.max(
-              toNonNegativeInt(dbState.pendingCatchupMaxId),
-              metadata.maxId,
-            )
-          : null,
-        pendingCatchupFingerprint: waitForLegacyCatchup
-          ? fingerprint
-          : null,
-        pendingLegacyCatchup: waitForLegacyCatchup,
+        lastId: Math.max(lastId, metadata.maxId),
+        lastEventAt: latestCopilotTimestamp(
+          dbState.lastEventAt,
+          metadata.lastEventAt,
+        ),
+        seenEventCounts,
+        pendingMalformedEvents,
+        malformedEventCount: Object.keys(pendingMalformedEvents).length,
+        resetGapEventCount:
+          toNonNegativeInt(dbState.resetGapEventCount) +
+          (resetWithoutFingerprintHistory ? rows.length : 0),
         dbIno: typeof currentIno === "number" ? currentIno : null,
         lastDbFingerprint: fingerprint,
         lastError: null,
         lastErrorAt: null,
         updatedAt,
       };
-      if (waitForLegacyCatchup) pendingDbPaths.push(resolvedDb);
-      else canonicalDbPaths.push(resolvedDb);
+      canonicalDbPaths.push(resolvedDb);
       activeDbCount++;
     } catch (err) {
       if (err?.code !== "ENOENT") dbErrors++;
       dbStates[resolvedDb] = {
-        ...dbState,
+        ...omitCopilotLegacyCatchupState(dbState),
         lastError: err && err.message ? err.message : String(err),
         lastErrorAt: updatedAt,
         updatedAt,
       };
-      if (
-        dbState.pendingLegacyCatchup === true ||
-        (legacyGlobalPending && Boolean(dbState.adoptedAt))
-      ) {
-        pendingDbPaths.push(resolvedDb);
-      }
     } finally {
       if (snap) snap.cleanup();
     }
+  }
+
+  for (const [sessionId, residual] of legacyResiduals) {
+    const baseline = excludedFirstRunTotals[sessionId] || {};
+    const appTotals = normalizeCopilotAppTokenDelta(baseline, {
+      input: 0,
+      output: 0,
+      cached: 0,
+      reasoning: 0,
+    });
+    const residualTokens = Math.max(
+      0,
+      toNonNegativeInt(residual.storeTokens) - appTotals.total_tokens,
+    );
+    if (residualTokens <= 0) continue;
+    const timestamp = latestCopilotTimestamp(
+      residual.lastEventAt,
+      baseline.updatedAt,
+    );
+    const bucketStart = timestamp ? toUtcHalfHourStart(timestamp) : null;
+    if (!bucketStart) continue;
+    const bucket = getHourlyBucket(
+      hourlyState,
+      "copilot",
+      COPILOT_STORE_LEGACY_MODEL,
+      bucketStart,
+    );
+    addTotals(bucket.totals, {
+      input_tokens: residualTokens,
+      cached_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      output_tokens: 0,
+      reasoning_output_tokens: 0,
+      total_tokens: residualTokens,
+      conversation_count: 0,
+    });
+    touchedBuckets.add(
+      bucketKey("copilot", COPILOT_STORE_LEGACY_MODEL, bucketStart),
+    );
+    eventsAggregated++;
   }
 
   const bucketsQueued = await enqueueTouchedBuckets({
@@ -10214,107 +10583,32 @@ async function parseCopilotSessionStoreIncremental({
     hourlyState,
     touchedBuckets,
   });
-  const seenArr = Array.from(seenSessions);
-  const cappedSeen =
-    seenArr.length > 10_000 ? seenArr.slice(seenArr.length - 10_000) : seenArr;
-  const cappedRecentEvents =
-    recentEvents.length > 10_000
-      ? recentEvents.slice(recentEvents.length - 10_000)
-      : recentEvents;
   const allCurrentPathsHealthy =
     uniquePaths.length > 0 &&
     activeDbCount === uniquePaths.length &&
     dbErrors === 0;
   const canonicalActive = storeState.active === true || allCurrentPathsHealthy;
-  const pendingLegacyCatchup = Object.values(dbStates).some(
-    (dbState) => dbState?.pendingLegacyCatchup === true,
-  );
   hourlyState.updatedAt = updatedAt;
   cursors.hourly = hourlyState;
   cursors.copilotStore = {
-    ...storeState,
+    ...omitCopilotLegacyCatchupState(storeState),
     version: COPILOT_STORE_CURSOR_VERSION,
     active: canonicalActive,
     dbs: dbStates,
-    seenSessions: cappedSeen,
-    recentEvents: cappedRecentEvents,
-    pendingLegacyCatchup,
+    seenSessions: Array.from(seenSessions),
+    recentEvents,
     updatedAt,
   };
   return {
     active: canonicalActive,
     healthy: allCurrentPathsHealthy,
-    adoptedThisRun: adoptedThisRun || pendingLegacyCatchup,
-    pendingDbPaths,
+    adoptedThisRun,
     canonicalDbPaths,
     recordsProcessed,
     eventsAggregated,
     bucketsQueued,
     dbErrors,
   };
-}
-
-function finalizeCopilotStoreLegacyCatchup({
-  dbPaths,
-  cursors,
-  sqliteOptions,
-} = {}) {
-  const state =
-    cursors?.copilotStore && typeof cursors.copilotStore === "object"
-      ? cursors.copilotStore
-      : null;
-  if (!state?.pendingLegacyCatchup) return true;
-  const paths = Array.isArray(dbPaths)
-    ? dbPaths
-    : Object.keys(state.dbs || {});
-  const updatedAt = new Date().toISOString();
-  let failed = false;
-  for (const dbPath of paths) {
-    const dbState = state.dbs?.[dbPath];
-    if (
-      !dbState ||
-      typeof dbState !== "object" ||
-      dbState.pendingLegacyCatchup !== true
-    ) {
-      continue;
-    }
-    let snap = null;
-    try {
-      const before = sqliteSidecarFingerprint(dbPath);
-      if (
-        dbState.pendingCatchupFingerprint &&
-        !sameSqliteFingerprint(before, dbState.pendingCatchupFingerprint)
-      ) {
-        failed = true;
-        continue;
-      }
-      snap = snapshotSqliteDb(dbPath);
-      const metadata = readCopilotSessionStoreMetadata(snap.path, sqliteOptions);
-      const after = sqliteSidecarFingerprint(dbPath);
-      if (!metadata.active || !sameSqliteFingerprint(before, after)) {
-        failed = true;
-        continue;
-      }
-      dbState.lastId = metadata.maxId;
-      dbState.pendingCatchupMaxId = null;
-      dbState.pendingCatchupFingerprint = null;
-      dbState.pendingLegacyCatchup = false;
-      dbState.dbIno = typeof after?.db?.ino === "number" ? after.db.ino : null;
-      dbState.lastDbFingerprint = after;
-      dbState.schemaVersion = metadata.schemaVersion;
-      dbState.lastRowKey = metadata.lastRowKey;
-      dbState.updatedAt = updatedAt;
-    } catch (_e) {
-      failed = true;
-    } finally {
-      if (snap) snap.cleanup();
-    }
-  }
-  state.pendingLegacyCatchup = Object.values(state.dbs || {}).some(
-    (dbState) => dbState?.pendingLegacyCatchup === true,
-  );
-  state.updatedAt = updatedAt;
-  return !failed && !state.pendingLegacyCatchup;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -10326,9 +10620,9 @@ function finalizeCopilotStoreLegacyCatchup({
 // there before the child has produced any tokens, so parsing event history would
 // double-count parent usage. The only accounting source here is positive deltas
 // from the `sessions.total_*` counters. Those deltas feed the same aggregate
-// `source="copilot"` pipeline as existing OTEL data (dashboard totals, trends,
-// model breakdown, cost), but the cursor is separate (`cursors.copilotApp`) so
-// Copilot CLI / Chat extension OTEL support keeps its existing behavior.
+// `source="copilot"` pipeline during legacy adoption. Once session-store is
+// canonical, this parser runs observe-only so a temporary store outage cannot
+// create duplicate fallback writes when the store returns.
 // Project attribution and per-conversation detail are intentionally absent:
 // data.db's summary columns do not expose privacy-safe project/message metadata.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -10336,46 +10630,169 @@ function finalizeCopilotStoreLegacyCatchup({
 const COPILOT_APP_CURSOR_VERSION = 1;
 const COPILOT_APP_DEFAULT_MODEL = "github-copilot";
 
-function normalizeCopilotAppDbPath(dbPath, env = process.env) {
+function normalizeCopilotDbPath(dbPath, env = process.env) {
   if (typeof dbPath !== "string" || !dbPath.trim()) return null;
-  const expanded = expandHomePath(dbPath.trim(), env);
-  return path.isAbsolute(expanded) ? path.normalize(expanded) : path.resolve(expanded);
+  const raw = dbPath.trim();
+  const home =
+    process.platform === "win32"
+      ? env.USERPROFILE || env.HOME || require("node:os").homedir()
+      : env.HOME || require("node:os").homedir();
+  const expanded =
+    raw === "~"
+      ? home
+      : raw.startsWith("~/") || raw.startsWith("~\\")
+        ? path.join(home, raw.slice(2))
+        : raw;
+  const normalized =
+    path.isAbsolute(expanded) ? path.normalize(expanded) : path.resolve(expanded);
+  return normalized;
+}
+
+function mergeCopilotStoreAliasStates(primary = {}, alias = {}) {
+  const primaryLastId = toNonNegativeInt(primary?.lastId);
+  const aliasLastId = toNonNegativeInt(alias?.lastId);
+  const primaryUpdatedAt = Date.parse(primary?.updatedAt || "") || 0;
+  const aliasUpdatedAt = Date.parse(alias?.updatedAt || "") || 0;
+  const newer =
+    aliasLastId > primaryLastId ||
+    (aliasLastId === primaryLastId && aliasUpdatedAt > primaryUpdatedAt)
+      ? alias
+      : primary;
+  const seenEventCounts = normalizeCopilotFingerprintCounts(
+    primary?.seenEventCounts,
+  );
+  for (const [fingerprint, count] of Object.entries(
+    normalizeCopilotFingerprintCounts(alias?.seenEventCounts),
+  )) {
+    seenEventCounts[fingerprint] = Math.max(
+      toNonNegativeInt(seenEventCounts[fingerprint]),
+      count,
+    );
+  }
+  const pendingMalformedEvents = {
+    ...normalizeCopilotPendingMalformedEvents(
+      primary?.pendingMalformedEvents,
+    ),
+    ...normalizeCopilotPendingMalformedEvents(
+      alias?.pendingMalformedEvents,
+    ),
+  };
+  return {
+    ...primary,
+    ...newer,
+    seenEventCounts,
+    pendingMalformedEvents,
+    malformedEventCount: Object.keys(pendingMalformedEvents).length,
+    resetGapEventCount: Math.max(
+      toNonNegativeInt(primary?.resetGapEventCount),
+      toNonNegativeInt(alias?.resetGapEventCount),
+    ),
+  };
+}
+
+function coalesceCopilotDbStatesByIdentity(
+  dbStates,
+  selectedPaths,
+  mergeStates,
+) {
+  if (!dbStates || typeof dbStates !== "object") return new Set();
+  const selectedByIdentity = new Map();
+  const selectedByInode = new Map();
+  for (const selectedPath of selectedPaths) {
+    try {
+      const stat = fssync.statSync(selectedPath);
+      selectedByIdentity.set(`${stat.dev}:${stat.ino}`, selectedPath);
+      if (selectedByInode.has(stat.ino)) selectedByInode.set(stat.ino, null);
+      else selectedByInode.set(stat.ino, selectedPath);
+    } catch (_e) {}
+  }
+  const migratedPaths = new Set();
+  for (const [statePath, state] of Object.entries({ ...dbStates })) {
+    let dev = null;
+    let ino = null;
+    try {
+      const stat = fssync.statSync(statePath);
+      dev = stat.dev;
+      ino = stat.ino;
+    } catch (_e) {
+      dev = state?.lastDbFingerprint?.db?.dev;
+      ino = state?.lastDbFingerprint?.db?.ino;
+    }
+    const selectedPath =
+      Number.isFinite(dev) && Number.isFinite(ino)
+        ? selectedByIdentity.get(`${dev}:${ino}`)
+        : Number.isFinite(ino)
+          ? selectedByInode.get(ino)
+          : null;
+    if (!selectedPath || selectedPath === statePath) continue;
+    dbStates[selectedPath] = mergeStates(
+      dbStates[selectedPath],
+      state,
+    );
+    delete dbStates[statePath];
+    migratedPaths.add(statePath);
+  }
+  return migratedPaths;
+}
+
+function uniqueCopilotDbPaths(
+  paths,
+  env = process.env,
+  preferredPaths = [],
+) {
+  const pathKey = (dbPath) =>
+    process.platform === "win32" ? dbPath.toLowerCase() : dbPath;
+  const preferredKeys = new Set(
+    (Array.isArray(preferredPaths) ? preferredPaths : [])
+      .map((candidate) => normalizeCopilotDbPath(candidate, env))
+      .filter(Boolean)
+      .map(pathKey),
+  );
+  const candidates = (Array.isArray(paths) ? paths : [])
+    .map((candidate, index) => ({
+      index,
+      path: normalizeCopilotDbPath(candidate, env),
+    }))
+    .filter((candidate) => candidate.path)
+    .sort((a, b) => {
+      const preferredDiff =
+        Number(preferredKeys.has(pathKey(b.path))) -
+        Number(preferredKeys.has(pathKey(a.path)));
+      return preferredDiff || a.index - b.index;
+    });
+  const result = [];
+  const identities = new Set();
+  for (const candidate of candidates) {
+    const normalized = candidate.path;
+    let identity =
+      process.platform === "win32"
+        ? `path:${normalized.toLowerCase()}`
+        : `path:${normalized}`;
+    try {
+      const stat = fssync.statSync(normalized);
+      if (
+        Number.isFinite(stat.dev) &&
+        Number.isFinite(stat.ino) &&
+        stat.ino > 0
+      ) {
+        identity = `inode:${stat.dev}:${stat.ino}`;
+      }
+    } catch (_e) {}
+    if (identities.has(identity)) continue;
+    identities.add(identity);
+    result.push(normalized);
+  }
+  return result;
 }
 
 function resolveCopilotAppDbPaths(env = process.env) {
-  const home = env.HOME || require("node:os").homedir();
-  const paths = new Set();
-  const addDbPath = (dbPath) => {
-    const normalized = normalizeCopilotAppDbPath(dbPath, env);
-    if (normalized) paths.add(normalized);
-  };
-  const addHome = (homePath) => {
-    const normalizedHome = normalizeCopilotAppDbPath(homePath, env);
-    if (normalizedHome) addDbPath(path.join(normalizedHome, "data.db"));
-  };
-
-  if (typeof env.TOKENTRACKER_COPILOT_APP_DB === "string" && env.TOKENTRACKER_COPILOT_APP_DB.trim()) {
-    addDbPath(env.TOKENTRACKER_COPILOT_APP_DB);
-  }
-  if (typeof env.COPILOT_HOME === "string" && env.COPILOT_HOME.trim()) {
-    addHome(env.COPILOT_HOME);
-  }
-
-  const defaultDb = path.join(home, ".copilot", "data.db");
-  if (process.platform === "win32") {
-    const wslHome = wsl.shouldProbeWsl(env) ? wsl.discoverWslHome(".copilot", { env }) : null;
-    const wslDbCandidate = wslHome ? path.join(wslHome, "data.db") : null;
-    const wslDb =
-      wslDbCandidate && fssync.existsSync(wslDbCandidate) ? wslDbCandidate : null;
-    const resolved = resolveInstallPaths({ nativeValue: defaultDb, wslValue: wslDb }, env);
-    if (resolved.native) addDbPath(resolved.native);
-    if (resolved.wsl) addDbPath(resolved.wsl);
-    if (paths.size === 0 && wsl.shouldProbeNative(env)) addDbPath(defaultDb);
-  } else {
-    addDbPath(defaultDb);
-  }
-
-  return Array.from(paths).sort();
+  return resolveCopilotDbPaths(
+    {
+      fileName: "data.db",
+      overrideEnvKey: "TOKENTRACKER_COPILOT_APP_DB",
+    },
+    env,
+  );
 }
 
 function resolveCopilotAppDbPath(env = process.env) {
@@ -10484,6 +10901,7 @@ function sqliteSidecarFingerprint(dbPath) {
       out[suffix || "db"] = {
         size: stat.size,
         mtimeMs: stat.mtimeMs,
+        dev: stat.dev,
         ino: stat.ino,
       };
     } catch (e) {
@@ -10574,11 +10992,15 @@ async function parseCopilotAppDbIncremental({
     : dbPath
       ? [dbPath]
       : resolveCopilotAppDbPaths(env || process.env);
-  const uniquePaths = [...new Set(paths.map((p) => normalizeCopilotAppDbPath(p, env || process.env)).filter(Boolean))];
   const appState =
     cursors.copilotApp && typeof cursors.copilotApp === "object" ? cursors.copilotApp : {};
   const dbStates =
     appState.dbs && typeof appState.dbs === "object" ? { ...appState.dbs } : {};
+  const uniquePaths = uniqueCopilotDbPaths(
+    paths,
+    env || process.env,
+    Object.keys(dbStates),
+  );
   const hourlyState = normalizeHourlyState(cursors?.hourly);
   const touchedBuckets = new Set();
   const cb = typeof onProgress === "function" ? onProgress : null;
@@ -11629,8 +12051,12 @@ module.exports = {
   probeWslDistros,
   discoverWslHermesHome,
   resolveCopilotOtelPaths,
+  normalizeCopilotDbPath,
+  uniqueCopilotDbPaths,
+  coalesceCopilotDbStatesByIdentity,
   resolveCopilotSessionStorePaths,
   getCopilotSqliteFingerprint,
+  describeCopilotSessionStoreDb,
   resolveCopilotAppDbPath,
   resolveCopilotAppDbPaths,
   readCopilotSessionStoreUsageRows,
@@ -11648,9 +12074,9 @@ module.exports = {
   gooseInstallOwnsCursor,
   zedInstallOwnsCursor,
   hermesInstallOwnsCursor,
+  copilotOtelCursorHasLegacyCliUsage,
   parseCopilotIncremental,
   parseCopilotSessionStoreIncremental,
-  finalizeCopilotStoreLegacyCatchup,
   parseCopilotAppDbIncremental,
   resolveKimiWireFiles,
   resolveKimiDefaultModel,

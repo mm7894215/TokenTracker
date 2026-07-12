@@ -8,6 +8,12 @@ const { test } = require("node:test");
 const { cmdStatus } = require("../src/commands/status");
 const { mockPlatform, mockMethod } = require("./helpers/mock");
 
+function runSql(dbPath, sql) {
+  cp.execFileSync("sqlite3", [dbPath, sql], {
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+}
+
 test("status prints last upload timestamps from upload.throttle.json", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-status-"));
   const prevHome = process.env.HOME;
@@ -123,6 +129,104 @@ test("status reports Codex notify unset when config points to another command", 
     await cmdStatus();
 
     assert.match(out, /- Codex notify: unset/);
+  } finally {
+    process.stdout.write = prevWrite;
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = prevCodexHome;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("status JSON reports Copilot canonical store diagnostics", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-status-copilot-"));
+  const prevHome = process.env.HOME;
+  const prevCodexHome = process.env.CODEX_HOME;
+  const prevWrite = process.stdout.write;
+
+  try {
+    process.env.HOME = tmp;
+    process.env.CODEX_HOME = path.join(tmp, ".codex");
+    const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+    const copilotHome = path.join(tmp, ".copilot");
+    const storeDb = path.join(copilotHome, "session-store.db");
+    const appDb = path.join(copilotHome, "data.db");
+    await fs.mkdir(trackerDir, { recursive: true });
+    await fs.mkdir(copilotHome, { recursive: true });
+    await fs.writeFile(appDb, "", "utf8");
+    runSql(storeDb, `
+      CREATE TABLE schema_version (version INTEGER NOT NULL);
+      INSERT INTO schema_version (version) VALUES (6);
+      CREATE TABLE assistant_usage_events (
+        id INTEGER PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        model TEXT NOT NULL,
+        input_tokens INTEGER,
+        output_tokens INTEGER,
+        cache_read_tokens INTEGER,
+        cache_write_tokens INTEGER,
+        reasoning_tokens INTEGER,
+        token_details_json TEXT,
+        created_at TEXT
+      );
+      INSERT INTO assistant_usage_events
+        (id, session_id, model, input_tokens, output_tokens, created_at)
+      VALUES
+        (1, 'status-session', 'gpt-5.6-luna', 10, 1, '2026-07-10T10:00:00Z'),
+        (2, 'status-session', 'gpt-5.6-luna', 20, 2, '2026-07-10T10:30:00Z');
+    `);
+    await fs.writeFile(
+      path.join(trackerDir, "cursors.json"),
+      JSON.stringify({
+        copilotStore: {
+          active: true,
+          dbs: {
+            [storeDb]: {
+              adoptedAt: "2026-07-10T10:00:00.000Z",
+              lastId: 2,
+              malformedEventCount: 1,
+              resetGapEventCount: 2,
+            },
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    let out = "";
+    process.stdout.write = (chunk, enc, cb) => {
+      out += typeof chunk === "string" ? chunk : chunk.toString(enc || "utf8");
+      if (typeof cb === "function") cb();
+      return true;
+    };
+    await cmdStatus(["--json"]);
+
+    const status = JSON.parse(out);
+    assert.equal(status.copilot.canonical, true);
+    assert.equal(status.copilot.source_mode, "canonical-degraded");
+    assert.equal(status.copilot.app_db_mode, "observe-only");
+    assert.equal(
+      status.copilot.coverage,
+      "per-request-post-adoption; legacy-aggregate-pre-adoption",
+    );
+    assert.equal(status.copilot.store_details[0].schema_version, 6);
+    assert.equal(status.copilot.store_details[0].event_count, 2);
+    assert.equal(status.copilot.store_details[0].last_event_id, 2);
+    assert.equal(
+      status.copilot.store_details[0].last_event_at,
+      "2026-07-10T10:30:00.000Z",
+    );
+    assert.equal(status.copilot.malformed_event_count, 1);
+    assert.equal(status.copilot.reset_gap_event_count, 2);
+    assert.equal(status.copilot.degraded, true);
+    assert.match(status.copilot.degraded_reasons[0], /valid timestamp/);
+    assert.ok(
+      status.copilot.degraded_reasons.some((reason) =>
+        /legacy cursor\/reset race/.test(reason),
+      ),
+    );
+    assert.match(status.copilot.recommended_action, /tokentracker sync/);
   } finally {
     process.stdout.write = prevWrite;
     if (prevHome === undefined) delete process.env.HOME;
