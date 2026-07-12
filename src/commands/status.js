@@ -401,9 +401,15 @@ async function cmdStatus(argv = []) {
   // install / WSL auto-discovery. Surface the resolved path (UNC included) and,
   // on Windows, the discovered distros so WSL users can debug "why no sync"
   // without guessing the right UNC alias (#87).
-  const hermesPath = resolveHermesPath();
-  const hermesDbPath = resolveHermesDbPath();
-  const hermesInstalled = Boolean(hermesDbPath && fssync.existsSync(hermesDbPath));
+  const hermesPaths = resolveInstallPaths({
+    nativeValue: process.env.TOKENTRACKER_HERMES_HOME || (process.platform === "win32" && typeof process.env.LOCALAPPDATA === "string"
+      ? path.join(process.env.LOCALAPPDATA.trim(), "hermes")
+      : path.join(home, ".hermes")),
+    wslDir: ".hermes",
+  });
+  const hermesActive = formatResolvedPaths(hermesPaths, "state.db");
+  const hermesInstalled = hermesActive.length > 0;
+  const hermesPath = hermesActive.join(" | ");
   const wslDistros = process.platform === "win32" && shouldProbeWsl(process.env) ? probeWslDistros() : [];
 
   const copilotToken = readCopilotOauthToken({ home });
