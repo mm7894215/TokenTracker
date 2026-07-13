@@ -43,6 +43,10 @@ async function replaceLines(filePath, lines) {
   await fs.rename(replacement, filePath);
 }
 
+function openclawCursor(cursors, filePath) {
+  return cursors.files[openclawCursorKey(filePath)];
+}
+
 test("parseOpenclawIncremental counts only the new event after an atomic session rewrite", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-openclaw-"));
   try {
@@ -109,8 +113,8 @@ test("parseOpenclawIncremental keeps the append-only fast path", async () => {
       cursors,
       queuePath,
     });
-    const inode = cursors.files[sessionPath].inode;
-    const offset = cursors.files[sessionPath].offset;
+    const inode = openclawCursor(cursors, sessionPath).inode;
+    const offset = openclawCursor(cursors, sessionPath).offset;
 
     await fs.appendFile(sessionPath, `${secondLine}\n`, "utf8");
     const second = await parseOpenclawIncremental({
@@ -120,8 +124,8 @@ test("parseOpenclawIncremental keeps the append-only fast path", async () => {
     });
 
     assert.equal(second.eventsAggregated, 1);
-    assert.equal(cursors.files[sessionPath].inode, inode);
-    assert.ok(cursors.files[sessionPath].offset > offset);
+    assert.equal(openclawCursor(cursors, sessionPath).inode, inode);
+    assert.ok(openclawCursor(cursors, sessionPath).offset > offset);
     const bucket = cursors.hourly.buckets[
       "openclaw|claude-opus-4.7|2026-07-07T13:30:00.000Z"
     ];
@@ -205,7 +209,7 @@ test("parseOpenclawIncremental deduplicates stable IDs after same-inode compacti
     });
     assert.equal(compacted.eventsAggregated, 1);
     assert.equal(
-      Object.keys(cursors.files[sessionPath].usageEvents).length,
+      Object.keys(openclawCursor(cursors, sessionPath).usageEvents).length,
       4,
       "exact dedup must retain identities that a later rewrite could restore",
     );
@@ -257,8 +261,8 @@ test("parseOpenclawIncremental handles atomic rewrites when the persisted inode 
       cursors,
       queuePath,
     });
-    cursors.files[sessionPath].inode = 0;
-    assert.equal(cursors.files[sessionPath].inode, 0);
+    openclawCursor(cursors, sessionPath).inode = 0;
+    assert.equal(openclawCursor(cursors, sessionPath).inode, 0);
 
     await replaceLines(sessionPath, [secondLine]);
     const second = await parseOpenclawIncremental({
@@ -302,11 +306,11 @@ test("parseOpenclawIncremental fingerprints same-inode same-size and larger rewr
       queuePath,
     });
     const inode = (await fs.stat(sessionPath)).ino;
-    const priorOffset = cursors.files[sessionPath].offset;
-    assert.equal(cursors.files[sessionPath].usageFingerprint?.version, 1);
+    const priorOffset = openclawCursor(cursors, sessionPath).offset;
+    assert.equal(openclawCursor(cursors, sessionPath).usageFingerprint?.version, 1);
     assert.equal(
       Object.prototype.hasOwnProperty.call(
-        cursors.files[sessionPath],
+        openclawCursor(cursors, sessionPath),
         "prefixHash",
       ),
       false,
@@ -385,10 +389,10 @@ test("parseOpenclawIncremental ignores prompt-only rewrites when verifying the u
     });
 
     assert.equal(parsed.eventsAggregated, 1);
-    assert.equal(cursors.files[sessionPath].usageFingerprint.eventCount, 2);
+    assert.equal(openclawCursor(cursors, sessionPath).usageFingerprint.eventCount, 2);
     assert.equal(
       Object.prototype.hasOwnProperty.call(
-        cursors.files[sessionPath],
+        openclawCursor(cursors, sessionPath),
         "prefixHash",
       ),
       false,
@@ -422,7 +426,11 @@ test("parseOpenclawIncremental retries an atomic replacement that lands during p
       const stream = realCreateReadStream(...args);
       if (!replaced) {
         replaced = true;
-        fssync.renameSync(replacementPath, sessionPath);
+        if (process.platform === "win32") {
+          fssync.copyFileSync(replacementPath, sessionPath);
+        } else {
+          fssync.renameSync(replacementPath, sessionPath);
+        }
       }
       return stream;
     });
@@ -433,7 +441,7 @@ test("parseOpenclawIncremental retries an atomic replacement that lands during p
       queuePath,
     });
     assert.equal(parsed.eventsAggregated, 2);
-    assert.equal(cursors.files[sessionPath].usageFingerprint.eventCount, 2);
+    assert.equal(openclawCursor(cursors, sessionPath).usageFingerprint.eventCount, 2);
     const bucket = cursors.hourly.buckets[
       "openclaw|claude-opus-4.7|2026-07-07T13:30:00.000Z"
     ];
@@ -465,7 +473,7 @@ test("parseOpenclawIncremental counts duplicate stable IDs once per scan", async
       "openclaw|claude-opus-4.7|2026-07-07T13:30:00.000Z"
     ];
     assert.equal(bucket.totals.conversation_count, 1);
-    assert.equal(Object.keys(cursors.files[sessionPath].usageEvents).length, 1);
+    assert.equal(Object.keys(openclawCursor(cursors, sessionPath).usageEvents).length, 1);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
@@ -506,8 +514,8 @@ test("parseOpenclawIncremental resumes append-only files that previously had no 
       cursors,
       queuePath,
     });
-    assert.deepEqual(cursors.files[sessionPath].usageEvents, {});
-    const offset = cursors.files[sessionPath].offset;
+    assert.deepEqual(openclawCursor(cursors, sessionPath).usageEvents, {});
+    const offset = openclawCursor(cursors, sessionPath).offset;
 
     await fs.appendFile(
       sessionPath,
@@ -523,7 +531,7 @@ test("parseOpenclawIncremental resumes append-only files that previously had no 
       queuePath,
     });
     assert.equal(appended.eventsAggregated, 1);
-    assert.ok(cursors.files[sessionPath].offset > offset);
+    assert.ok(openclawCursor(cursors, sessionPath).offset > offset);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
@@ -547,7 +555,7 @@ test("parseOpenclawIncremental adopts a legacy offset cursor without replaying h
     const cursors = {
       version: 1,
       files: {
-        [sessionPath]: {
+        [openclawCursorKey(sessionPath)]: {
           inode: stat.ino,
           offset: stat.size,
         },
@@ -578,8 +586,8 @@ test("parseOpenclawIncremental adopts a legacy offset cursor without replaying h
       queuePath,
     });
     assert.equal(adopted.eventsAggregated, 0);
-    assert.equal(Object.keys(cursors.files[sessionPath].usageEvents).length, 1);
-    assert.equal(cursors.files[sessionPath].usageFingerprint?.version, 1);
+    assert.equal(Object.keys(openclawCursor(cursors, sessionPath).usageEvents).length, 1);
+    assert.equal(openclawCursor(cursors, sessionPath).usageFingerprint?.version, 1);
 
     await replaceLines(sessionPath, [firstLine, secondLine]);
     const rewritten = await parseOpenclawIncremental({
@@ -616,7 +624,7 @@ test("parseOpenclawIncremental keeps post-boundary legacy events out of the base
     const cursors = {
       version: 1,
       files: {
-        [sessionPath]: { inode: stat.ino, offset: stat.size },
+        [openclawCursorKey(sessionPath)]: { inode: stat.ino, offset: stat.size },
       },
       hourly: {
         version: 3,
@@ -658,7 +666,7 @@ test("parseOpenclawIncremental keeps post-boundary legacy events out of the base
       1,
       "a generation retry must count the concurrently appended event",
     );
-    assert.equal(Object.keys(cursors.files[sessionPath].usageEvents).length, 2);
+    assert.equal(Object.keys(openclawCursor(cursors, sessionPath).usageEvents).length, 2);
     const bucket = cursors.hourly.buckets[
       "openclaw|claude-opus-4.7|2026-07-07T13:30:00.000Z"
     ];
@@ -727,7 +735,7 @@ test("OpenClaw cursor ownership does not claim Codex rollout files", async () =>
       cursors,
       queuePath,
     });
-    assert.equal(cursors.files[openclawPath].provider, "openclaw");
+    assert.equal(openclawCursor(cursors, openclawPath).provider, "openclaw");
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
