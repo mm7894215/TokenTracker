@@ -154,6 +154,11 @@ test("published releases are immutable and builds use the version tag", () => {
     "the tag ref must be created explicitly before draft builders check it out"
   );
   assert.ok(
+    content.indexOf('tag_sha=$(git rev-list -n 1 "$tag")') <
+      content.indexOf('draft_sha=$(jq -r \'.targetCommitish\''),
+    "an existing tag SHA must be authoritative before falling back to draft targetCommitish"
+  );
+  assert.ok(
     /gh release create[^\n]*--verify-tag[^\n]*--draft/.test(content),
     "the draft must be created only after the immutable tag exists"
   );

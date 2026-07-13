@@ -81,15 +81,13 @@ jobs:
               exit 1
             fi
 
-            draft_sha=$(jq -r '.targetCommitish' <<<"$release_json")
-            if [ "$draft_sha" != "$GITHUB_SHA" ]; then
-              echo "::error::Draft $tag targets $draft_sha, but this workflow is running from $GITHUB_SHA. Re-run the original workflow or bump the version."
-              exit 1
-            fi
-
             # GitHub does not materialize the tag ref for a draft release until
             # publication. Create it explicitly so parallel builders can check
             # out the immutable tag while the release is still safely private.
+            # Once the tag exists, GitHub may report targetCommitish as the
+            # default branch (for example "main"), so the tag SHA is the source
+            # of truth for retry safety. targetCommitish is only authoritative
+            # for an older/incomplete draft that has no tag yet.
             if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
               git fetch --force origin "refs/tags/$tag:refs/tags/$tag"
               tag_sha=$(git rev-list -n 1 "$tag")
@@ -98,6 +96,11 @@ jobs:
                 exit 1
               fi
             else
+              draft_sha=$(jq -r '.targetCommitish' <<<"$release_json")
+              if [ "$draft_sha" != "$GITHUB_SHA" ]; then
+                echo "::error::Draft $tag targets $draft_sha, but this workflow is running from $GITHUB_SHA. Re-run the original workflow or bump the version."
+                exit 1
+              fi
               gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
                 -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" >/dev/null
             fi
