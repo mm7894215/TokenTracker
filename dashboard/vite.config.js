@@ -871,225 +871,6 @@ async function handleLocalApi(req, res, url) {
     return true;
   }
 
-  // 处理 project-usage-summary
-  if (pathname === "/functions/tokentracker-project-usage-summary") {
-    // 优先读 ~/.tokentracker/tracker/project.queue.jsonl（与 7680 真实归因一致）
-    const projectQueuePath = path.join(os.homedir(), ".tokentracker", "tracker", "project.queue.jsonl");
-    try {
-      const projectRaw = fs.readFileSync(projectQueuePath, "utf8");
-      const dedup = new Map();
-      for (const line of projectRaw.split("\n")) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const row = JSON.parse(trimmed);
-          const k = `${row.project_key || ""}|${row.source || ""}|${row.hour_start || ""}`;
-          dedup.set(k, row);
-        } catch { /* skip malformed */ }
-      }
-      const byProject = new Map();
-      for (const row of dedup.values()) {
-        const key = row.project_key || "unknown";
-        if (!byProject.has(key)) {
-          byProject.set(key, {
-            project_key: key,
-            project_ref: row.project_ref || key,
-            total_tokens: 0,
-            billable_total_tokens: 0,
-          });
-        }
-        const agg = byProject.get(key);
-        agg.total_tokens += Number(row.total_tokens || 0);
-        agg.billable_total_tokens += Number(row.total_tokens || 0);
-        if (!agg.project_ref && row.project_ref) agg.project_ref = row.project_ref;
-      }
-      if (byProject.size > 0) {
-        const entries = Array.from(byProject.values())
-          .sort((a, b) => b.billable_total_tokens - a.billable_total_tokens)
-          .map((e) => ({
-            ...e,
-            total_tokens: String(e.total_tokens),
-            billable_total_tokens: String(e.billable_total_tokens),
-          }));
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ generated_at: new Date().toISOString(), entries }));
-        return true;
-      }
-    } catch (e) {
-      if (e?.code !== "ENOENT") console.warn("[vite-mock] project.queue.jsonl read failed:", e?.message || e);
-    }
-
-    // Fallback：扫 raw 日志按 session count 估算（旧逻辑）
-    const projectMap = new Map();
-
-    function parseGitUrl(url) {
-      if (!url) return null;
-      // 处理 SSH 格式: git@host:owner/repo.git
-      const sshMatch = url.match(/git@[^:]+:([^\/]+)\/(.+?)(?:\.git)?$/);
-      if (sshMatch) {
-        return { host: 'gitlab', owner: sshMatch[1], repo: sshMatch[2] };
-      }
-      // 处理 HTTP 格式: http(s)://host/owner/repo.git
-      const httpMatch = url.match(/https?:\/\/[^\/]+\/([^\/]+)\/(.+?)(?:\.git)?$/);
-      if (httpMatch) {
-        return { host: 'gitlab', owner: httpMatch[1], repo: httpMatch[2] };
-      }
-      return null;
-    }
-
-    // 从 cwd 提取项目名
-    function extractProjectFromCwd(cwd) {
-      if (!cwd || cwd === '/Users/sunxiufeng' || cwd === os.homedir()) return null;
-      // 移除 home 路径前缀
-      const relative = cwd.replace(os.homedir() + '/', '');
-      // 取第一级目录作为项目名
-      const parts = relative.split('/').filter(p => p && !p.startsWith('.') && p !== 'ext-global');
-      if (parts.length === 0) return null;
-      return parts[0];
-    }
-
-    // 解析 Codex 日志
-    const codexDir = path.join(os.homedir(), ".codex", "sessions");
-    try {
-      const years = fs.readdirSync(codexDir);
-      for (const year of years) {
-        const yearPath = path.join(codexDir, year);
-        if (!fs.statSync(yearPath).isDirectory()) continue;
-        const months = fs.readdirSync(yearPath);
-        for (const month of months) {
-          const monthPath = path.join(yearPath, month);
-          if (!fs.statSync(monthPath).isDirectory()) continue;
-          const days = fs.readdirSync(monthPath);
-          for (const day of days) {
-            const dayPath = path.join(monthPath, day);
-            if (!fs.statSync(dayPath).isDirectory()) continue;
-            const files = fs.readdirSync(dayPath).filter(f => f.endsWith('.jsonl'));
-            for (const file of files.slice(0, 200)) { // 增加文件数量限制
-              const filePath = path.join(dayPath, file);
-              try {
-                const firstLine = fs.readFileSync(filePath, 'utf8').split('\n')[0];
-                const data = JSON.parse(firstLine);
-                // 优先从 git URL 解析
-                if (data.git?.repository_url) {
-                  const parsed = parseGitUrl(data.git.repository_url);
-                  if (parsed) {
-                    const projectKey = `${parsed.owner}/${parsed.repo}`;
-                    if (!projectMap.has(projectKey)) {
-                      projectMap.set(projectKey, {
-                        project_key: projectKey,
-                        project_ref: data.git.repository_url,
-                        source: 'codex',
-                        count: 0
-                      });
-                    }
-                    projectMap.get(projectKey).count++;
-                  }
-                }
-              } catch (e) { /* ignore */ }
-            }
-          }
-        }
-      }
-    } catch (e) { /* ignore */ }
-
-    // 解析 Claude 项目日志（递归查找所有 subagents 目录）
-    const claudeDir = path.join(os.homedir(), ".claude", "projects");
-    function findSubagentsDirs(dir, depth = 0) {
-      const results = [];
-      if (depth > 3) return results; // 限制递归深度
-      try {
-        const items = fs.readdirSync(dir);
-        for (const item of items) {
-          const fullPath = path.join(dir, item);
-          const stat = fs.statSync(fullPath);
-          if (!stat.isDirectory()) continue;
-          if (item === 'subagents') {
-            results.push(fullPath);
-          } else {
-            results.push(...findSubagentsDirs(fullPath, depth + 1));
-          }
-        }
-      } catch (e) { /* ignore */ }
-      return results;
-    }
-
-    try {
-      const subagentsDirs = findSubagentsDirs(claudeDir);
-      for (const subagentsPath of subagentsDirs) {
-        const files = fs.readdirSync(subagentsPath).filter(f => f.endsWith('.jsonl'));
-        for (const file of files.slice(0, 100)) {
-          const filePath = path.join(subagentsPath, file);
-          try {
-            const firstLine = fs.readFileSync(filePath, 'utf8').split('\n')[0];
-            if (!firstLine) continue;
-            const data = JSON.parse(firstLine);
-            const projectName = extractProjectFromCwd(data.cwd);
-            if (projectName) {
-              if (!projectMap.has(projectName)) {
-                projectMap.set(projectName, {
-                  project_key: projectName,
-                  project_ref: `file://${data.cwd}`,
-                  source: 'claude',
-                  count: 0
-                });
-              }
-              projectMap.get(projectName).count++;
-            }
-          } catch (e) { /* ignore */ }
-        }
-      }
-    } catch (e) { /* ignore */ }
-
-    // 从 queue 数据按项目活跃度分配 token
-    const rows = readQueueData();
-    const totalTokens = rows.reduce((sum, row) => sum + (row.total_tokens || 0), 0);
-    const entries = [];
-
-    if (projectMap.size === 0) {
-      // 备用：按 source 分组
-      const bySource = new Map();
-      for (const row of rows) {
-        const source = row.source || "unknown";
-        if (!bySource.has(source)) {
-          bySource.set(source, {
-            project_key: source,
-            project_ref: `https://${source}.ai`,
-            total_tokens: 0,
-            billable_total_tokens: 0
-          });
-        }
-        bySource.get(source).total_tokens += row.total_tokens || 0;
-        bySource.get(source).billable_total_tokens += row.total_tokens || 0;
-      }
-      entries.push(...Array.from(bySource.values()).sort((a, b) => b.billable_total_tokens - a.total_tokens).map(e => ({
-        ...e,
-        total_tokens: String(e.total_tokens),
-        billable_total_tokens: String(e.billable_total_tokens)
-      })));
-    } else {
-      // 按项目活跃度（count）分配 token
-      const totalCount = Array.from(projectMap.values()).reduce((sum, p) => sum + p.count, 0);
-      for (const [, project] of projectMap) {
-        const ratio = totalCount > 0 ? project.count / totalCount : 1 / projectMap.size;
-        const tokens = Math.floor(totalTokens * ratio);
-        entries.push({
-          project_key: project.project_key,
-          project_ref: project.project_ref,
-          total_tokens: String(tokens),
-          billable_total_tokens: String(tokens)
-        });
-      }
-      // 按 token 数排序
-      entries.sort((a, b) => Number(b.billable_total_tokens) - Number(a.billable_total_tokens));
-    }
-
-    res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({
-      generated_at: new Date().toISOString(),
-      entries
-    }));
-    return true;
-  }
 
   // 处理 usage-limits
   if (pathname === "/functions/tokentracker-usage-limits") {
@@ -1165,6 +946,16 @@ function localDataApiPlugin() {
   // running there, which would make the import UI silently disappear even
   // though the source tree already supports the feature.
   const esmRequire = createRequire(import.meta.url);
+  // Vite config reloads reuse the same node process, so the CJS require
+  // cache would otherwise keep serving the local-api module loaded at the
+  // first startup — evict it so a config reload picks up edits to
+  // local-api.js ITSELF. Its dependencies (rollout.js, pricing, …) stay
+  // cached; editing those still requires a full dev-server restart.
+  try {
+    delete esmRequire.cache[esmRequire.resolve("../src/lib/local-api")];
+  } catch {
+    // fresh process — nothing cached yet
+  }
   const { createLocalApiHandler, resolveQueuePath } = esmRequire("../src/lib/local-api");
   const handleRepoLocalApi = createLocalApiHandler({ queuePath: resolveQueuePath() });
 
@@ -1182,7 +973,13 @@ function localDataApiPlugin() {
           || url.pathname === "/functions/tokentracker-pets"
           || url.pathname === "/api/pets/import"
           || url.pathname.startsWith("/api/pets/local/");
-        if (isRepoPetApi) {
+        // Project usage also runs against the current checkout (not :7680):
+        // the endpoints evolve with the dashboard UI, and a stale packaged
+        // app on :7680 would 404 the drill-down modal.
+        const isRepoProjectUsageApi =
+          url.pathname === "/functions/tokentracker-project-usage-summary"
+          || url.pathname === "/functions/tokentracker-project-usage-detail";
+        if (isRepoPetApi || isRepoProjectUsageApi) {
           Promise.resolve(handleRepoLocalApi(req, res, url))
             .then((handled) => { if (!handled) next(); })
             .catch(next);

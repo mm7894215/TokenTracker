@@ -103,7 +103,7 @@ const MODEL_PROVIDER_COLORS = {
   kilo: "#facc15",
 };
 
-function getModelColor(modelName) {
+export function getModelColor(modelName) {
   const normalized = modelName.toLowerCase();
   for (const [key, color] of Object.entries(MODEL_PROVIDER_COLORS)) {
     if (normalized.includes(key)) {

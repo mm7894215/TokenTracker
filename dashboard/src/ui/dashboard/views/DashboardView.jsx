@@ -119,6 +119,7 @@ export function DashboardView(props) {
     projectUsageEntries,
     projectUsageLimit,
     setProjectUsageLimit,
+    projectDetailQuery,
     topModels,
     signedIn,
     publicMode,
@@ -366,6 +367,7 @@ export function DashboardView(props) {
               projectEntries={projectUsageEntries}
               projectLimit={projectUsageLimit}
               onProjectLimitChange={setProjectUsageLimit}
+              projectDetailQuery={projectDetailQuery}
               copy={copy}
               hasDetailsActual={hasDetailsActual}
               dailyEmptyPrefix={dailyEmptyPrefix}

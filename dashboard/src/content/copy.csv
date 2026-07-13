@@ -158,15 +158,33 @@ dashboard.rolling.last_7d,ui,RollingUsagePanel,RollingUsagePanel,label_last_7d,"
 dashboard.rolling.last_30d,ui,RollingUsagePanel,RollingUsagePanel,label_last_30d,"Last 30 days",,active
 dashboard.rolling.avg_active_day,ui,RollingUsagePanel,RollingUsagePanel,label_avg_active_day,"Daily average",,active
 
-dashboard.projects.title,ui,ProjectUsagePanel,ProjectUsagePanel,title,"Project Usage",,active
-dashboard.projects.tokens_label,ui,ProjectUsagePanel,ProjectUsagePanel,tokens_label,"Tokens",,active
-dashboard.projects.stars_label,ui,ProjectUsagePanel,ProjectUsagePanel,stars_label,"STAR",,active
-dashboard.projects.limit_label,ui,ProjectUsagePanel,ProjectUsagePanel,limit_label,"Show",,active
-dashboard.projects.limit_aria,ui,ProjectUsagePanel,ProjectUsagePanel,limit_aria,"Select repository limit",,active
-dashboard.projects.limit_top_3,ui,ProjectUsagePanel,ProjectUsagePanel,limit_top_3,"TOP 3",,active
-dashboard.projects.limit_top_6,ui,ProjectUsagePanel,ProjectUsagePanel,limit_top_6,"TOP 6",,active
-dashboard.projects.limit_top_10,ui,ProjectUsagePanel,ProjectUsagePanel,limit_top_10,"TOP 10",,active
-dashboard.projects.empty,ui,ProjectUsagePanel,ProjectUsagePanel,empty,"No public repositories",,active
+dashboard.projects.title,ui,DataDetails,DataDetails,title,"Project Usage",,active
+dashboard.projects.limit_aria,ui,DataDetails,DataDetails,limit_aria,"Select project limit",,active
+dashboard.projects.limit_top_3,ui,DataDetails,DataDetails,limit_top_3,"TOP 3",,active
+dashboard.projects.limit_top_6,ui,DataDetails,DataDetails,limit_top_6,"TOP 6",,active
+dashboard.projects.limit_top_10,ui,DataDetails,DataDetails,limit_top_10,"TOP 10",,active
+dashboard.projects.empty,ui,DataDetails,DataDetails,empty,"No project usage yet. Run a supported CLI inside a git repository and its usage lands here.",,active
+dashboard.projects.sources_more,ui,DataDetails,DataDetails,sources_more,"+{{n}}",,active
+dashboard.projects.detail.badge,ui,DataDetails,ProjectDetailModal,badge,"Project",,active
+dashboard.projects.detail.close_aria,ui,DataDetails,ProjectDetailModal,close_aria,"Close project details",,active
+dashboard.projects.detail.error,ui,DataDetails,ProjectDetailModal,error,"Failed to load project details",,active
+dashboard.projects.detail.empty_range,ui,DataDetails,ProjectDetailModal,empty_range,"No usage in the selected range",,active
+dashboard.projects.detail.stat_total,ui,DataDetails,ProjectDetailModal,stat_total,"Total tokens",,active
+dashboard.projects.detail.stat_conversations,ui,DataDetails,ProjectDetailModal,stat_conversations,"Conversations",,active
+dashboard.projects.detail.stat_active_days,ui,DataDetails,ProjectDetailModal,stat_active_days,"Active days",,active
+dashboard.projects.detail.stat_avg_day,ui,DataDetails,ProjectDetailModal,stat_avg_day,"Avg / active day",,active
+dashboard.projects.detail.stat_cache_hit,ui,DataDetails,ProjectDetailModal,stat_cache_hit,"Cache hit rate",,active
+dashboard.projects.detail.stat_share,ui,DataDetails,ProjectDetailModal,stat_share,"Share of all usage",,active
+dashboard.projects.detail.section_trend,ui,DataDetails,ProjectDetailModal,section_trend,"Daily activity",,active
+dashboard.projects.detail.section_composition,ui,DataDetails,ProjectDetailModal,section_composition,"Token composition",,active
+dashboard.projects.detail.section_sources,ui,DataDetails,ProjectDetailModal,section_sources,"By source",,active
+dashboard.projects.detail.comp_input,ui,DataDetails,ProjectDetailModal,comp_input,"Input",,active
+dashboard.projects.detail.comp_cached,ui,DataDetails,ProjectDetailModal,comp_cached,"Cached input",,active
+dashboard.projects.detail.comp_cache_write,ui,DataDetails,ProjectDetailModal,comp_cache_write,"Cache write",,active
+dashboard.projects.detail.comp_output,ui,DataDetails,ProjectDetailModal,comp_output,"Output",,active
+dashboard.projects.detail.comp_reasoning,ui,DataDetails,ProjectDetailModal,comp_reasoning,"Reasoning",,active
+dashboard.projects.detail.source_days,ui,DataDetails,ProjectDetailModal,source_days,"{{n}}d",,active
+dashboard.projects.detail.source_conv,ui,DataDetails,ProjectDetailModal,source_conv,"{{n}} conv",,active
 dashboard.widgets.title,dashboard,DashboardPage,WidgetOnboardingCard,title,"Desktop Widgets",,active
 dashboard.widgets.hint,dashboard,DashboardPage,WidgetOnboardingCard,hint,"Right-click your desktop → Edit Widgets → search ""TokenTracker""",,active
 dashboard.widgets.dismiss_aria,dashboard,DashboardPage,WidgetOnboardingCard,dismiss_aria,"Dismiss widget intro",,active

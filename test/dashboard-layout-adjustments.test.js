@@ -15,7 +15,7 @@ const viewPath = path.join(
   "DashboardView.jsx",
 );
 const copyPath = path.join(__dirname, "..", "dashboard", "src", "content", "copy.csv");
-const projectUsagePath = path.join(
+const dataDetailsPath = path.join(
   __dirname,
   "..",
   "dashboard",
@@ -23,7 +23,17 @@ const projectUsagePath = path.join(
   "ui",
   "dashboard",
   "components",
-  "ProjectUsagePanel.jsx",
+  "DataDetails.jsx",
+);
+const projectDetailModalPath = path.join(
+  __dirname,
+  "..",
+  "dashboard",
+  "src",
+  "ui",
+  "dashboard",
+  "components",
+  "ProjectDetailModal.jsx",
 );
 const installStatusPath = path.join(
   __dirname,
@@ -63,37 +73,33 @@ test("DashboardPage right column contains UsageOverview", () => {
   assert.ok(rightRenderer.includes("<UsageOverview"), "expected UsageOverview in right column");
 });
 
-test("ProjectUsagePanel lays out cards in responsive grid", () => {
-  const src = readFile(projectUsagePath);
-  assert.ok(src.includes("grid-cols-1"), "expected project usage grid to start with one column");
+test("DataDetails project rows open the drill-down modal instead of navigating", () => {
+  const src = readFile(dataDetailsPath);
+  assert.ok(src.includes("<ProjectDetailModal"), "expected project detail modal wiring");
+  assert.ok(src.includes("onSelect?.(entry)"), "expected project row click to select entry");
   assert.ok(
-    src.includes("md:grid-cols-2"),
-    "expected project usage grid to use two columns on medium screens",
-  );
-  assert.ok(
-    src.includes("lg:grid-cols-3"),
-    "expected project usage grid to use three columns on large screens",
+    !src.includes("target=\"_blank\""),
+    "project rows must not navigate to external project URLs",
   );
 });
 
-test("ProjectUsagePanel formats star values compactly", () => {
-  const src = readFile(projectUsagePath);
+test("DataDetails project rows show compact tokens, sources and share bar", () => {
+  const src = readFile(dataDetailsPath);
+  assert.ok(src.includes("formatCompactNumber(tokensRaw"), "expected compact token values");
+  assert.ok(src.includes("<ProviderIcon"), "expected per-source provider icons");
+  assert.ok(src.includes("maxTokens"), "expected share bar scaled to top project");
+  assert.ok(src.includes("truncate"), "expected truncated project names");
+  assert.ok(src.includes("min-w-0"), "expected min width constraint for project names");
+});
+
+test("ProjectDetailModal renders inline (no body portal) and stays local", () => {
+  const src = readFile(projectDetailModalPath);
+  assert.ok(!src.includes("createPortal("), "modal must render inline for Windows WebView2");
   assert.ok(
-    src.includes("formatCompactNumber(starsRaw"),
-    "expected project usage panel to compact star values",
+    !src.includes("api.github.com"),
+    "modal must not call external APIs — local data only",
   );
-});
-
-test("ProjectUsagePanel renders star and token info", () => {
-  const src = readFile(projectUsagePath);
-  assert.ok(src.includes("starsCompact"), "expected project usage card to show stars");
-  assert.ok(src.includes("tokensCompact"), "expected project usage card to show tokens");
-});
-
-test("ProjectUsagePanel constrains identity text width", () => {
-  const src = readFile(projectUsagePath);
-  assert.ok(src.includes("truncate"), "expected truncated identity text");
-  assert.ok(src.includes("min-w-0"), "expected min width constraint for identity text");
+  assert.ok(src.includes("useProjectUsageDetail"), "expected drill-down data hook");
 });
 
 test("DashboardPage wires install panel gating through helper", () => {

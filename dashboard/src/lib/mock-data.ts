@@ -474,20 +474,50 @@ function buildMockRollingWindow({ rows, from, to }: AnyRecord = {}) {
   };
 }
 
+const MOCK_PROJECT_SOURCES = ["claude", "codex", "gemini", "cursor", "opencode", "kilo"];
+
+function buildMockProjectEntry(repo: string, index: number, seedValue: string) {
+  const hash = hashString(`${seedValue}:${repo}`);
+  const base = 120000 + (hash % 900000);
+  const drift = (index % 4) * 4200;
+  const total = Math.max(0, base + drift);
+  const billable = Math.max(0, Math.round(total * 0.96));
+  const sourceCount = 1 + (hash % 4);
+  let remaining = total;
+  const sources = Array.from({ length: sourceCount }, (_, i) => {
+    const isLast = i === sourceCount - 1;
+    const share = isLast ? remaining : Math.floor(remaining * (0.4 + ((hash >> i) % 3) * 0.1));
+    remaining -= share;
+    return {
+      source: MOCK_PROJECT_SOURCES[(hash + i) % MOCK_PROJECT_SOURCES.length],
+      total_tokens: share,
+    };
+  }).sort((a, b) => b.total_tokens - a.total_tokens);
+  const cached = Math.floor(total * 0.7);
+  const input = Math.floor(total * 0.12);
+  const output = Math.floor(total * 0.1);
+  return {
+    project_key: repo,
+    project_ref: `https://github.com/${repo}`,
+    total_tokens: String(total),
+    billable_total_tokens: String(billable),
+    input_tokens: input,
+    output_tokens: output,
+    cached_input_tokens: cached,
+    cache_creation_input_tokens: Math.floor(total * 0.06),
+    reasoning_output_tokens: Math.floor(total * 0.02),
+    conversation_count: 5 + (hash % 120),
+    // internal only: drives the mock detail's daily series length
+    mockDayCount: 1 + (hash % 14),
+    sources,
+  };
+}
+
 export function getMockProjectUsageSummary({ seed, limit = 3 }: AnyRecord = {}) {
   const seedValue = toSeed(seed);
   const entries = MOCK_PROJECT_REPOS.map((repo, index) => {
-    const hash = hashString(`${seedValue}:${repo}`);
-    const base = 120000 + (hash % 900000);
-    const drift = (index % 4) * 4200;
-    const total = Math.max(0, base + drift);
-    const billable = Math.max(0, Math.round(total * 0.96));
-    return {
-      project_key: repo,
-      project_ref: `https://github.com/${repo}`,
-      total_tokens: String(total),
-      billable_total_tokens: String(billable),
-    };
+    const { mockDayCount, ...entry } = buildMockProjectEntry(repo, index, seedValue);
+    return entry;
   })
     .sort((a, b) => Number(b.billable_total_tokens) - Number(a.billable_total_tokens))
     .slice(0, Math.max(1, Math.min(10, Math.floor(Number(limit) || 3))));
@@ -495,6 +525,62 @@ export function getMockProjectUsageSummary({ seed, limit = 3 }: AnyRecord = {}) 
   return {
     generated_at: new Date().toISOString(),
     entries,
+  };
+}
+
+export function getMockProjectUsageDetail({ projectKey, from, to }: AnyRecord = {}) {
+  const repo = typeof projectKey === "string" && projectKey ? projectKey : MOCK_PROJECT_REPOS[0];
+  const index = Math.max(0, MOCK_PROJECT_REPOS.indexOf(repo));
+  const entry = buildMockProjectEntry(repo, index, toSeed(repo));
+  const total = Number(entry.total_tokens);
+  const dayCount = entry.mockDayCount;
+  const today = new Date();
+  const daily = Array.from({ length: dayCount }, (_, i) => {
+    const d = new Date(today.getTime() - (dayCount - 1 - i) * 86400000);
+    const hash = hashString(`${repo}:${i}`);
+    const dayTotal = Math.floor((total / dayCount) * (0.4 + (hash % 120) / 100));
+    const primary = entry.sources[0]?.source || "claude";
+    const secondary = entry.sources[1]?.source;
+    const models: AnyRecord = { [primary]: Math.floor(dayTotal * 0.8) };
+    if (secondary) models[secondary] = dayTotal - models[primary];
+    return {
+      day: d.toISOString().slice(0, 10),
+      total_tokens: dayTotal,
+      billable_total_tokens: dayTotal,
+      input_tokens: Math.floor(dayTotal * 0.12),
+      output_tokens: Math.floor(dayTotal * 0.1),
+      cached_input_tokens: Math.floor(dayTotal * 0.7),
+      cache_creation_input_tokens: Math.floor(dayTotal * 0.06),
+      reasoning_output_tokens: Math.floor(dayTotal * 0.02),
+      conversation_count: 1 + (hash % 20),
+      models,
+    };
+  });
+  return {
+    generated_at: new Date().toISOString(),
+    from: from || daily[0]?.day || "",
+    to: to || daily[daily.length - 1]?.day || "",
+    project_key: repo,
+    project_ref: entry.project_ref,
+    totals: {
+      total_tokens: total,
+      billable_total_tokens: Number(entry.billable_total_tokens),
+      input_tokens: entry.input_tokens,
+      output_tokens: entry.output_tokens,
+      cached_input_tokens: entry.cached_input_tokens,
+      cache_creation_input_tokens: entry.cache_creation_input_tokens,
+      reasoning_output_tokens: entry.reasoning_output_tokens,
+      conversation_count: entry.conversation_count,
+    },
+    days_active: dayCount,
+    range_total_tokens: total * 3,
+    daily,
+    sources: entry.sources.map((s, i) => ({
+      source: s.source,
+      total_tokens: s.total_tokens,
+      conversation_count: 1 + (hashString(`${repo}:src:${i}`) % 60),
+      days_active: Math.max(1, dayCount - i),
+    })),
   };
 }
 

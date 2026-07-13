@@ -43,7 +43,6 @@ import {
   renameAccountDevice,
 } from "../lib/api";
 import { ActivityHeatmap } from "../ui/dashboard/components/ActivityHeatmap.jsx";
-import { ProjectUsagePanel } from "../ui/dashboard/components/ProjectUsagePanel.jsx";
 import { DashboardView } from "../ui/dashboard/views/DashboardView.jsx";
 import { useAccountDevices } from "../hooks/use-account-devices.js";
 import { DeviceUsageCard } from "../ui/dashboard/components/DeviceUsageCard.jsx";
@@ -589,7 +588,6 @@ export function DashboardPage({
   } = useProjectUsageSummary({
     baseUrl,
     accessToken,
-    limit: projectUsageLimit,
     from,
     to,
     timeZone,
@@ -1310,6 +1308,7 @@ export function DashboardPage({
       projectUsageEntries={projectUsageEntries}
       projectUsageLimit={projectUsageLimit}
       setProjectUsageLimit={setProjectUsageLimit}
+      projectDetailQuery={{ from, to, timeZone, tzOffsetMinutes }}
       topModels={topModels}
       signedIn={signedIn}
       publicMode={publicMode}

@@ -12245,6 +12245,7 @@ module.exports = {
   // Exposed for regression tests covering nested-group remote URLs.
   canonicalizeProjectRef,
   deriveProjectKeyFromRef,
+  CLAUDE_MEM_OBSERVER_PROJECT_REF,
 
   // Grok Build (xAI) — SessionEnd hook + passive updates.jsonl/signals.json reader
   resolveGrokBuildHome,

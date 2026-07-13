@@ -125,6 +125,14 @@ function GithubIcon({ size = 16, className = "" }) {
   );
 }
 
+function GitlabIcon({ size = 16, className = "" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M23.955 13.587l-1.342-4.135-2.664-8.189c-.135-.423-.73-.423-.867 0L16.418 9.45H7.582L4.919 1.263c-.135-.423-.73-.423-.867 0L1.388 9.452.045 13.587a.924.924 0 0 0 .331 1.03L12 23.054l11.625-8.436a.92.92 0 0 0 .33-1.031" />
+    </svg>
+  );
+}
+
 // Craft Agents — official brand mark (three stacked rectangle bars in
 // Craft purple #9570BE). The brand color reads well on both light and
 // dark backgrounds, so it does not adapt to currentColor.
@@ -268,6 +276,7 @@ const PROVIDER_ICON_MAP = {
   DROID: DroidIcon,
   GEMINI: GeminiIcon,
   GITHUB: GithubIcon,
+  GITLAB: GitlabIcon,
   GOOSE: GooseIcon,
   GROK: GrokIcon,
   HERMES: HermesIcon,

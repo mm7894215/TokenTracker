@@ -1,11 +1,95 @@
 import React, { useState } from "react";
 import { Card, Select } from "../../components";
+import { formatCompactNumber, toDisplayNumber, toFiniteNumber } from "../../../lib/format";
+import { ProviderIcon } from "./ProviderIcon";
+import { ProjectDetailModal } from "./ProjectDetailModal.jsx";
+import {
+  ProjectAvatar,
+  githubOwnerFor,
+  splitProjectKey,
+} from "./project-usage-utils.jsx";
+
+const PROJECT_SOURCE_ICON_LIMIT = 5;
+
+function ProjectRow({ entry, maxTokens, copy, tokenFormatOptions, onSelect }) {
+  const projectKey = typeof entry?.project_key === "string" ? entry.project_key : "";
+  const projectRef = typeof entry?.project_ref === "string" ? entry.project_ref : "";
+  const { owner, repo } = splitProjectKey(projectKey);
+  const githubOwner = githubOwnerFor(projectRef, owner);
+  const tokensRaw = toFiniteNumber(entry?.billable_total_tokens ?? entry?.total_tokens) ?? 0;
+  const widthPct = maxTokens > 0 ? Math.min(100, Math.max(2, (tokensRaw / maxTokens) * 100)) : 0;
+  const sources = Array.isArray(entry?.sources) ? entry.sources : [];
+  const visibleSources = sources.slice(0, PROJECT_SOURCE_ICON_LIMIT);
+  const overflowCount = sources.length - visibleSources.length;
+
+  // A button, not an external link: clicking opens the local drill-down
+  // modal. Never navigate to project_ref — leaking which repos the user
+  // works on to an external host is not this panel's call to make.
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect?.(entry)}
+      className="flex w-full items-center gap-3 p-2 rounded-lg text-left hover:bg-oai-gray-50 dark:hover:bg-oai-gray-800/50 active:bg-oai-gray-100 dark:active:bg-oai-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand/60 transition-colors"
+    >
+      <ProjectAvatar
+        githubOwner={githubOwner}
+        letter={(repo?.[0] || projectKey?.[0] || "?").toUpperCase()}
+      />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline min-w-0">
+          {owner ? (
+            <span className="oai-text-caption text-oai-gray-400 dark:text-oai-gray-500 truncate flex-shrink-[2]">
+              {owner}/
+            </span>
+          ) : null}
+          <span className="oai-text-body-sm font-medium text-oai-black dark:text-oai-white truncate">
+            {repo || projectKey || "—"}
+          </span>
+        </div>
+        {visibleSources.length > 0 && (
+          <div className="mt-0.5 flex items-center gap-1">
+            {visibleSources.map((s) => (
+              <ProviderIcon
+                key={s.source}
+                provider={s.source}
+                size={12}
+                className="text-oai-gray-400 dark:text-oai-gray-500"
+              />
+            ))}
+            {overflowCount > 0 && (
+              <span className="oai-text-caption text-oai-gray-400 dark:text-oai-gray-500">
+                {copy("dashboard.projects.sources_more", { n: overflowCount })}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+      <div className="flex w-24 flex-shrink-0 flex-col items-end gap-1">
+        <span
+          className="oai-text-body-sm font-medium text-oai-black dark:text-oai-white tabular-nums"
+          title={toDisplayNumber(tokensRaw)}
+        >
+          {formatCompactNumber(tokensRaw, tokenFormatOptions)}
+        </span>
+        <div className="h-1 w-full overflow-hidden rounded-full bg-oai-gray-100 dark:bg-oai-gray-800">
+          <div
+            className="h-full rounded-full bg-emerald-500"
+            style={{ width: `${widthPct}%`, minWidth: tokensRaw > 0 ? "3px" : 0 }}
+          />
+        </div>
+      </div>
+    </button>
+  );
+}
 
 export function DataDetails({
   // Project props
   projectEntries = [],
   projectLimit = 3,
   onProjectLimitChange,
+  // { from, to, timeZone, tzOffsetMinutes } — forwarded to the per-project
+  // drill-down modal so it queries the same range the panel shows.
+  projectDetailQuery = {},
   // Daily breakdown props
   copy,
   hasDetailsActual,
@@ -33,6 +117,7 @@ export function DataDetails({
   setDetailsPage,
 }) {
   const [activeTab, setActiveTab] = useState("daily");
+  const [detailEntry, setDetailEntry] = useState(null);
 
   return (
     <Card>
@@ -83,35 +168,47 @@ export function DataDetails({
       </div>
 
       {/* Projects Tab */}
-      {activeTab === "projects" && (
-        <div className="space-y-1">
-          {projectEntries.slice(0, projectLimit).map((entry, idx) => {
-            const ref = typeof entry?.project_ref === "string" ? entry.project_ref : "";
-            const key = entry?.project_key || ref || `entry-${idx}`;
-            const raw = entry?.billable_total_tokens ?? entry?.total_tokens;
-            const n = Number(raw);
-            const tokenLabel = Number.isFinite(n) ? n.toLocaleString() : "—";
-            const projectLabel = entry?.project_key || ref.split("/").pop() || "—";
-            return (
-              <div
-                key={key}
-                className="flex items-center gap-3 p-2 rounded-lg"
-              >
-                <div className="w-8 h-8 rounded-md oai-bg-elevated flex items-center justify-center oai-text-caption font-medium text-oai-gray-500 dark:text-oai-gray-300">
-                  {(entry?.project_key?.[0] || "?").toUpperCase()}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="oai-text-body-sm font-medium text-oai-black dark:text-oai-white truncate">
-                    {projectLabel}
-                  </div>
-                </div>
-                <div className="oai-text-body-sm font-medium text-oai-black dark:text-oai-white tabular-nums">
-                  {tokenLabel}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+      {activeTab === "projects" && (() => {
+        const visibleEntries = projectEntries.slice(0, projectLimit);
+        if (visibleEntries.length === 0) {
+          return (
+            <div className="oai-text-body-sm text-oai-gray-500 dark:text-oai-gray-300">
+              {copy("dashboard.projects.empty")}
+            </div>
+          );
+        }
+        const tokenFormatOptions = {
+          thousandSuffix: copy("shared.unit.thousand_abbrev"),
+          millionSuffix: copy("shared.unit.million_abbrev"),
+          billionSuffix: copy("shared.unit.billion_abbrev"),
+          decimals: 1,
+        };
+        const maxTokens = visibleEntries.reduce((max, entry) => {
+          const n = toFiniteNumber(entry?.billable_total_tokens ?? entry?.total_tokens) ?? 0;
+          return n > max ? n : max;
+        }, 0);
+        return (
+          <div className="space-y-1">
+            {visibleEntries.map((entry, idx) => (
+              <ProjectRow
+                key={entry?.project_key || entry?.project_ref || `entry-${idx}`}
+                entry={entry}
+                maxTokens={maxTokens}
+                copy={copy}
+                tokenFormatOptions={tokenFormatOptions}
+                onSelect={setDetailEntry}
+              />
+            ))}
+          </div>
+        );
+      })()}
+
+      {detailEntry && (
+        <ProjectDetailModal
+          entry={detailEntry}
+          query={projectDetailQuery}
+          onClose={() => setDetailEntry(null)}
+        />
       )}
 
       {/* Daily Tab */}

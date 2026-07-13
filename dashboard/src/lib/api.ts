@@ -7,6 +7,7 @@ import {
   getMockUsageCategoryBreakdown,
   getMockUsageSummary,
   getMockProjectUsageSummary,
+  getMockProjectUsageDetail,
   getMockLeaderboard,
   isMockEnabled,
 } from "./mock-data";
@@ -25,6 +26,7 @@ const PATHS = {
   usageModelBreakdown: "tokentracker-usage-model-breakdown",
   usageCategoryBreakdown: "tokentracker-usage-category-breakdown",
   projectUsageSummary: "tokentracker-project-usage-summary",
+  projectUsageDetail: "tokentracker-project-usage-detail",
   userStatus: "tokentracker-user-status",
   localSync: "tokentracker-local-sync",
   usageLimits: "tokentracker-usage-limits",
@@ -163,6 +165,23 @@ export async function getProjectUsageSummary({
   if (to) params.to = to;
   if (limit != null) params.limit = String(limit);
   return fetchLocalJson(PATHS.projectUsageSummary, params);
+}
+
+export async function getProjectUsageDetail({
+  projectKey,
+  from,
+  to,
+  timeZone,
+  tzOffsetMinutes,
+}: AnyRecord = {}) {
+  if (isMockEnabled()) {
+    return getMockProjectUsageDetail({ projectKey, from, to });
+  }
+  const tzParams = buildTimeZoneParams({ timeZone, tzOffsetMinutes });
+  const params: AnyRecord = { project_key: projectKey, ...tzParams };
+  if (from) params.from = from;
+  if (to) params.to = to;
+  return fetchLocalJson(PATHS.projectUsageDetail, params);
 }
 
 async function fetchInsforgeFunction(slug: string, options: {

@@ -1,13 +1,13 @@
 {
-  "generatedAt": "2026-07-10T11:38:59.237Z",
+  "generatedAt": "2026-07-13T07:34:11.867Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
     "rawText": "JSX text nodes containing letters or digits"
   },
   "totals": {
-    "colors": 287,
-    "rawText": 165
+    "colors": 293,
+    "rawText": 174
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -74,12 +74,11 @@
     },
     "dashboard/src/pages/DevicePage.jsx": {
       "colors": 0,
-      "rawText": 4,
+      "rawText": 3,
       "rawTextTokens": [
         "Approve your CLI",
         "CLI code",
-        "Sign in first, then return to this page.",
-        "Type the code your CLI showed you. We'll link it to your account so token usage from that machine flows into your leaderboard profile."
+        "Sign in first, then return to this page."
       ]
     },
     "dashboard/src/pages/IpCheckPage.jsx": {
@@ -256,8 +255,10 @@
     },
     "dashboard/src/ui/dashboard/components/DataDetails.jsx": {
       "colors": 0,
-      "rawText": 1,
+      "rawText": 4,
       "rawTextTokens": [
+        "0 && (",
+        "0 ? Math.min(100, Math.max(2, (tokensRaw / maxTokens) * 100)) : 0; const sources = Array.isArray(entry?.sources) ? entry.sources : []; const visibleSources = sources.slice(0, PROJECT_SOURCE_ICON_LIMIT); const overflowCount = sources.length - visibleSources.length; // A button, not an external link: clicking opens the local drill-down // modal. Never navigate to project_ref — leaking which repos the user // works on to an external host is not this panel's call to make. return (",
         "1 ? ("
       ]
     },
@@ -285,6 +286,18 @@
       "rawText": 1,
       "rawTextTokens": [
         "setTriggerNumAnim(false), 500); const colors = [\"#ff4757\", \"#ff6b81\", \"#ffa502\", \"#70a1ff\", \"#2ed573\", \"#a29bfe\"]; const shapes = [\"circle\", \"heart\"]; const newParticles = []; for (let i = 0; i"
+      ]
+    },
+    "dashboard/src/ui/dashboard/components/ProjectDetailModal.jsx": {
+      "colors": 6,
+      "rawText": 7,
+      "rawTextTokens": [
+        "0 && (",
+        "0 ? (",
+        "0 ? value / totalTokens : 0; const sharePct = srcShare * 100; const convCount = Number(src.conversation_count || 0); const color = getModelColor(src.source || \"unknown\"); return (",
+        "0; // Render inline (NOT createPortal to document.body) — see // TrendMonitorZoomModal: body-portaled overlays don't present on-screen in // the Windows WebView2 host's transparent composition. return (",
+        "1 && (",
+        "todayKey) end = todayKey; const lastDataDay = daily[daily.length - 1].day; if (end"
       ]
     },
     "dashboard/src/ui/dashboard/components/ProviderIcon.jsx": {

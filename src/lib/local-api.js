@@ -44,6 +44,11 @@ const {
 
 const { computeCodexContextBreakdown } = require("./codex-context-breakdown");
 
+const {
+  deriveProjectKeyFromRef,
+  CLAUDE_MEM_OBSERVER_PROJECT_REF,
+} = require("./rollout");
+
 // ---------------------------------------------------------------------------
 // Queue data helpers
 // ---------------------------------------------------------------------------
@@ -51,6 +56,38 @@ const { computeCodexContextBreakdown } = require("./codex-context-breakdown");
 function resolveQueuePath() {
   const home = os.homedir();
   return path.join(home, ".tokentracker", "tracker", "queue.jsonl");
+}
+
+// Pseudo-project written by the pre-fix claude-mem observer attribution;
+// mirrored Claude Code sessions, not a real repository. Excluded at read
+// time so historical rows never surface on the Project Usage panel. Derived
+// from rollout.js's ref so a rename there cannot silently desync the filter.
+const CLAUDE_MEM_OBSERVER_PROJECT_KEY = deriveProjectKeyFromRef(
+  CLAUDE_MEM_OBSERVER_PROJECT_REF,
+);
+const PROJECT_USAGE_MAX_ENTRIES = 10;
+
+// Shared by project-usage-summary and project-usage-detail: reads the
+// deduped project bucket log, drops the claude-mem pseudo project, and
+// builds the from/to day-range predicate. Callers compute each row's day
+// key ONCE (rowDayKey constructs an Intl.DateTimeFormat per call — the
+// dominant per-row cost) and reuse it for both the range check and any
+// day bucketing.
+function readProjectUsageContext(qp, url) {
+  const from = url.searchParams.get("from") || "";
+  const to = url.searchParams.get("to") || "";
+  const timeZoneContext = getTimeZoneContext(url);
+  const hasRange = Boolean(from || to);
+  const dayInRange = (day) => {
+    if (!hasRange) return true;
+    if (!day) return false;
+    return (!from || day >= from) && (!to || day <= to);
+  };
+  const projectQueuePath = path.join(path.dirname(qp), "project.queue.jsonl");
+  const projectRows = readProjectQueueData(projectQueuePath).filter(
+    (row) => row.project_key !== CLAUDE_MEM_OBSERVER_PROJECT_KEY,
+  );
+  return { from, to, timeZoneContext, hasRange, dayInRange, projectRows };
 }
 
 function readProjectQueueData(projectQueuePath) {
@@ -1912,73 +1949,182 @@ function createLocalApiHandler({ queuePath }) {
       // hour_start). Falling back to "session-file count × total tokens"
       // (the old behavior) produced pure fiction: every short-and-hot
       // project got the same weight as every long-and-cold one.
-      const projectQueuePath = path.join(
-        path.dirname(qp),
-        "project.queue.jsonl",
-      );
-      const projectRows = readProjectQueueData(projectQueuePath);
+      const limitParam = Number(url.searchParams.get("limit"));
+      const limit = Number.isFinite(limitParam) && limitParam > 0
+        ? Math.min(Math.floor(limitParam), PROJECT_USAGE_MAX_ENTRIES)
+        : PROJECT_USAGE_MAX_ENTRIES;
+      const { timeZoneContext, hasRange, dayInRange, projectRows } =
+        readProjectUsageContext(qp, url);
 
-      const byProject = new Map();
-      for (const row of projectRows) {
-        const key = row.project_key || "unknown";
-        if (!byProject.has(key)) {
-          byProject.set(key, {
-            project_key: key,
-            project_ref: row.project_ref || key,
-            total_tokens: 0,
-            billable_total_tokens: 0,
-          });
+      const aggregateEntries = (rows, keyOf, refOf) => {
+        const byKey = new Map();
+        for (const row of rows) {
+          if (hasRange && !dayInRange(rowDayKey(row, timeZoneContext))) continue;
+          const key = keyOf(row);
+          if (!byKey.has(key)) {
+            byKey.set(key, {
+              project_key: key,
+              project_ref: refOf(row),
+              total_tokens: 0,
+              billable_total_tokens: 0,
+              input_tokens: 0,
+              output_tokens: 0,
+              cached_input_tokens: 0,
+              cache_creation_input_tokens: 0,
+              reasoning_output_tokens: 0,
+              conversation_count: 0,
+              sourceTotals: new Map(),
+            });
+          }
+          const agg = byKey.get(key);
+          agg.total_tokens += Number(row.total_tokens || 0);
+          agg.billable_total_tokens += Number(
+            row.billable_total_tokens ?? row.total_tokens ?? 0,
+          );
+          agg.input_tokens += Number(row.input_tokens || 0);
+          agg.output_tokens += Number(row.output_tokens || 0);
+          agg.cached_input_tokens += Number(row.cached_input_tokens || 0);
+          agg.cache_creation_input_tokens += Number(row.cache_creation_input_tokens || 0);
+          agg.reasoning_output_tokens += Number(row.reasoning_output_tokens || 0);
+          agg.conversation_count += Number(row.conversation_count || 0);
+          if (!agg.project_ref) agg.project_ref = refOf(row);
+          const src = row.source || "unknown";
+          agg.sourceTotals.set(
+            src,
+            (agg.sourceTotals.get(src) || 0) + Number(row.total_tokens || 0),
+          );
         }
-        const agg = byProject.get(key);
-        agg.total_tokens += Number(row.total_tokens || 0);
-        agg.billable_total_tokens += Number(row.total_tokens || 0);
-        if (!agg.project_ref && row.project_ref) agg.project_ref = row.project_ref;
-      }
+        return Array.from(byKey.values())
+          .sort((a, b) => b.billable_total_tokens - a.billable_total_tokens)
+          .slice(0, limit)
+          .map(({ sourceTotals, ...entry }) => ({
+            ...entry,
+            total_tokens: String(entry.total_tokens),
+            billable_total_tokens: String(entry.billable_total_tokens),
+            sources: Array.from(sourceTotals.entries())
+              .sort((a, b) => b[1] - a[1])
+              .map(([source, totalTokens]) => ({ source, total_tokens: totalTokens })),
+          }));
+      };
+
+      let entries = aggregateEntries(
+        projectRows,
+        (row) => row.project_key || "unknown",
+        (row) => row.project_ref || "",
+      );
 
       // If no project-attributed rows exist yet (user hasn't synced project
       // attribution, or never used a project-capable CLI), fall back to
       // per-source aggregation over the main queue so the panel isn't
       // totally empty. This path used to also exist for the non-empty case
       // and produce wrong numbers; keep it only as the empty fallback.
-      let entries;
-      if (byProject.size === 0) {
-        const rows = readQueueData(qp);
-        const bySrc = new Map();
-        for (const row of rows) {
-          const src = row.source || "unknown";
-          if (!bySrc.has(src)) {
-            bySrc.set(src, {
-              project_key: src,
-              // Synthetic source-only row: leave project_ref empty rather than
-              // fabricating `https://${src}.ai`, which resolves to unrelated
-              // domains (e.g. codex.ai, cursor.ai) and was sent to the
-              // dashboard as a clickable href before v0.11.1 / this commit.
-              project_ref: "",
-              total_tokens: 0,
-              billable_total_tokens: 0,
-            });
-          }
-          bySrc.get(src).total_tokens += row.total_tokens || 0;
-          bySrc.get(src).billable_total_tokens += row.total_tokens || 0;
-        }
-        entries = Array.from(bySrc.values())
-          .sort((a, b) => b.billable_total_tokens - a.billable_total_tokens)
-          .map((e) => ({
-            ...e,
-            total_tokens: String(e.total_tokens),
-            billable_total_tokens: String(e.billable_total_tokens),
-          }));
-      } else {
-        entries = Array.from(byProject.values())
-          .sort((a, b) => b.billable_total_tokens - a.billable_total_tokens)
-          .map((e) => ({
-            ...e,
-            total_tokens: String(e.total_tokens),
-            billable_total_tokens: String(e.billable_total_tokens),
-          }));
+      if (entries.length === 0 && projectRows.length === 0) {
+        entries = aggregateEntries(
+          readQueueData(qp),
+          (row) => row.source || "unknown",
+          // Synthetic source-only row: leave project_ref empty rather than
+          // fabricating `https://${src}.ai`, which resolves to unrelated
+          // domains (e.g. codex.ai, cursor.ai) and was sent to the
+          // dashboard as a clickable href before v0.11.1 / this commit.
+          () => "",
+        );
       }
 
       json(res, { generated_at: new Date().toISOString(), entries });
+      return true;
+    }
+
+    // --- project-usage-detail ---
+    // Per-project drill-down for the Project Usage modal: daily series,
+    // per-source breakdown, and aggregate stats. Everything comes from the
+    // local project bucket log — no external requests, no git access.
+    if (p === "/functions/tokentracker-project-usage-detail") {
+      const projectKey = url.searchParams.get("project_key") || "";
+      if (!projectKey) {
+        json(res, { error: "missing_project_key" }, 400);
+        return true;
+      }
+      const { from, to, timeZoneContext, dayInRange, projectRows } =
+        readProjectUsageContext(qp, url);
+
+      const emptyMeasures = () => ({
+        total_tokens: 0,
+        billable_total_tokens: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        cached_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        reasoning_output_tokens: 0,
+        conversation_count: 0,
+      });
+      const addMeasures = (acc, row) => {
+        acc.total_tokens += Number(row.total_tokens || 0);
+        acc.billable_total_tokens += Number(
+          row.billable_total_tokens ?? row.total_tokens ?? 0,
+        );
+        acc.input_tokens += Number(row.input_tokens || 0);
+        acc.output_tokens += Number(row.output_tokens || 0);
+        acc.cached_input_tokens += Number(row.cached_input_tokens || 0);
+        acc.cache_creation_input_tokens += Number(row.cache_creation_input_tokens || 0);
+        acc.reasoning_output_tokens += Number(row.reasoning_output_tokens || 0);
+        acc.conversation_count += Number(row.conversation_count || 0);
+      };
+
+      let projectRef = "";
+      const totals = emptyMeasures();
+      const byDay = new Map();
+      const bySource = new Map();
+      let rangeTotalTokens = 0;
+
+      for (const row of projectRows) {
+        const day = rowDayKey(row, timeZoneContext);
+        if (!dayInRange(day)) continue;
+        rangeTotalTokens += Number(row.total_tokens || 0);
+        if (row.project_key !== projectKey) continue;
+        if (!projectRef && row.project_ref) projectRef = row.project_ref;
+        addMeasures(totals, row);
+
+        const src = row.source || "unknown";
+        if (day) {
+          // `models` keyed by source (project rows carry no model column) —
+          // it feeds TrendMonitor's stacked-segment slot so the modal chart
+          // colors by provider exactly like the dashboard's Usage Trend.
+          if (!byDay.has(day)) byDay.set(day, { day, ...emptyMeasures(), models: {} });
+          const dayAgg = byDay.get(day);
+          addMeasures(dayAgg, row);
+          dayAgg.models[src] = (dayAgg.models[src] || 0) + Number(row.total_tokens || 0);
+        }
+
+        if (!bySource.has(src)) {
+          bySource.set(src, {
+            source: src,
+            total_tokens: 0,
+            conversation_count: 0,
+            dayKeys: new Set(),
+          });
+        }
+        const srcAgg = bySource.get(src);
+        srcAgg.total_tokens += Number(row.total_tokens || 0);
+        srcAgg.conversation_count += Number(row.conversation_count || 0);
+        if (day) srcAgg.dayKeys.add(day);
+      }
+
+      json(res, {
+        generated_at: new Date().toISOString(),
+        from,
+        to,
+        project_key: projectKey,
+        project_ref: projectRef,
+        totals,
+        days_active: byDay.size,
+        // All-project total over the same range so the client can render
+        // "share of everything you tracked" without a second request.
+        range_total_tokens: rangeTotalTokens,
+        daily: Array.from(byDay.values()).sort((a, b) => a.day.localeCompare(b.day)),
+        sources: Array.from(bySource.values())
+          .sort((a, b) => b.total_tokens - a.total_tokens)
+          .map(({ dayKeys, ...src }) => ({ ...src, days_active: dayKeys.size })),
+      });
       return true;
     }
 

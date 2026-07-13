@@ -3,10 +3,13 @@ import { isAccessTokenReady, resolveAuthAccessToken } from "../lib/auth-token";
 import { isMockEnabled } from "../lib/mock-data";
 import { getProjectUsageSummary } from "../lib/api";
 
+// Always fetch the max the UI can show (TOP 10); the TOP 3/6/10 selector
+// slices client-side so toggling it never refetches.
+const FETCH_LIMIT = 10;
+
 export function useProjectUsageSummary({
   baseUrl,
   accessToken,
-  limit = 3,
   from,
   to,
   source,
@@ -37,7 +40,7 @@ export function useProjectUsageSummary({
       const res = await getProjectUsageSummary({
         baseUrl,
         accessToken: resolvedToken,
-        limit,
+        limit: FETCH_LIMIT,
         from,
         to,
         source,
@@ -52,7 +55,7 @@ export function useProjectUsageSummary({
     } finally {
       setLoading(false);
     }
-  }, [accessToken, baseUrl, from, limit, mockEnabled, source, timeZone, to, tzOffsetMinutes, isLocalMode]);
+  }, [accessToken, baseUrl, from, mockEnabled, source, timeZone, to, tzOffsetMinutes, isLocalMode]);
 
   useEffect(() => {
     // 本地模式跳过 token 检查
