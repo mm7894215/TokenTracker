@@ -60,6 +60,8 @@ const {
   resolveGrokBuildSessions,
   resolveHermesPath,
   resolveHermesDbPath,
+  resolveCopilotSessionStorePaths,
+  describeCopilotSessionStoreDb,
   resolveCopilotAppDbPath,
   resolveCopilotAppDbPaths,
   probeWslDistros,
@@ -349,14 +351,123 @@ async function cmdStatus(argv = []) {
   const copilotAppExistingPaths = copilotAppDbPaths.filter((p) => {
     try { return fssync.existsSync(p); } catch (_e) { return false; }
   });
+  const copilotStorePaths = Array.from(
+    new Set([
+      ...resolveCopilotSessionStorePaths(process.env),
+      ...Object.keys(cursors?.copilotStore?.dbs || {}),
+    ]),
+  );
+  const copilotStoreExistingPaths = copilotStorePaths.filter((p) => {
+    try { return fssync.existsSync(p); } catch (_e) { return false; }
+  });
+  const copilotStoreDetails = [];
+  const copilotStoreInspectionErrors = [];
+  for (const storePath of copilotStoreExistingPaths) {
+    try {
+      copilotStoreDetails.push(describeCopilotSessionStoreDb(storePath));
+    } catch (err) {
+      copilotStoreInspectionErrors.push(
+        `${storePath}: ${err && err.message ? err.message : String(err)}`,
+      );
+    }
+  }
+  const copilotStoreCursor =
+    cursors?.copilotStore && typeof cursors.copilotStore === "object"
+      ? cursors.copilotStore
+      : {};
+  const copilotStoreDbStates =
+    copilotStoreCursor.dbs && typeof copilotStoreCursor.dbs === "object"
+      ? copilotStoreCursor.dbs
+      : {};
+  const copilotStatusPathKey = (dbPath) => {
+    const normalized = path.normalize(dbPath);
+    return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+  };
+  const existingCopilotStoreKeys = new Set(
+    copilotStoreExistingPaths.map(copilotStatusPathKey),
+  );
+  const adoptedCopilotStores = Object.entries(copilotStoreDbStates).filter(
+    ([, state]) => state?.adoptedAt,
+  );
+  const missingAdoptedCopilotStores = adoptedCopilotStores
+    .map(([dbPath]) => dbPath)
+    .filter((dbPath) => !existingCopilotStoreKeys.has(copilotStatusPathKey(dbPath)));
+  const copilotStoreDegradedReasons = [
+    ...missingAdoptedCopilotStores.map(
+      (dbPath) => `canonical store unavailable: ${dbPath}`,
+    ),
+    ...copilotStoreInspectionErrors.map(
+      (message) => `store inspection failed: ${message}`,
+    ),
+    ...Object.entries(copilotStoreDbStates)
+      .filter(([, state]) => state?.lastError)
+      .map(([dbPath, state]) => `${dbPath}: ${state.lastError}`),
+  ];
+  const malformedCopilotEvents = Object.values(copilotStoreDbStates).reduce(
+    (sum, state) => sum + Math.max(0, Number(state?.malformedEventCount) || 0),
+    0,
+  );
+  if (malformedCopilotEvents > 0) {
+    copilotStoreDegradedReasons.push(
+      `${malformedCopilotEvents} event${malformedCopilotEvents === 1 ? "" : "s"} lack a valid timestamp`,
+    );
+  }
+  const copilotResetGapEvents = Object.values(copilotStoreDbStates).reduce(
+    (sum, state) => sum + Math.max(0, Number(state?.resetGapEventCount) || 0),
+    0,
+  );
+  if (copilotResetGapEvents > 0) {
+    copilotStoreDegradedReasons.push(
+      `${copilotResetGapEvents} event${copilotResetGapEvents === 1 ? "" : "s"} were baselined during a legacy cursor/reset race`,
+    );
+  }
+  const copilotStoreCanonical =
+    copilotStoreCursor.active === true && adoptedCopilotStores.length > 0;
+  const copilotStoreDegraded = copilotStoreDegradedReasons.length > 0;
+  const copilotStoreStatus = {
+    store_paths: copilotStoreExistingPaths,
+    store_path: copilotStorePaths[0] || null,
+    store_has_file: copilotStoreExistingPaths.length > 0,
+    store_details: copilotStoreDetails.map((detail) => ({
+      path: detail.path,
+      schema_version: detail.schemaVersion,
+      event_count: detail.eventCount,
+      last_event_id: detail.lastEventId,
+      last_event_at: detail.lastEventAt,
+    })),
+    canonical: copilotStoreCanonical,
+    source_mode: copilotStoreCanonical
+      ? copilotStoreDegraded
+        ? "canonical-degraded"
+        : "canonical"
+      : copilotStoreExistingPaths.length > 0
+        ? "awaiting-adoption"
+        : "legacy",
+    precision: copilotStoreCanonical
+      ? "exact-post-adoption; aggregate-pre-adoption"
+      : "aggregate",
+    coverage: copilotStoreCanonical
+      ? "per-request-post-adoption; legacy-aggregate-pre-adoption"
+      : "legacy-aggregate",
+    malformed_event_count: malformedCopilotEvents,
+    reset_gap_event_count: copilotResetGapEvents,
+    degraded: copilotStoreDegraded,
+    degraded_reasons: copilotStoreDegradedReasons,
+    recommended_action: copilotStoreDegraded
+      ? "Restore or repair the Copilot session store, then run `tokentracker sync`."
+      : null,
+  };
+  const copilotAppStatus = {
+    app_db_path: resolveCopilotAppDbPath(process.env),
+    app_db_paths: copilotAppExistingPaths,
+    app_db_has_file: copilotAppExistingPaths.length > 0,
+    app_db_mode: copilotStoreCanonical ? "observe-only" : "legacy-writer",
+  };
   const copilotLines = formatCopilotLines({
     token: copilotToken,
     otel: copilotOtel,
-    appDb: {
-      app_db_path: resolveCopilotAppDbPath(process.env),
-      app_db_paths: copilotAppExistingPaths,
-      app_db_has_file: copilotAppExistingPaths.length > 0,
-    },
+    sessionStore: copilotStoreStatus,
+    appDb: copilotAppStatus,
   });
 
   // Detect passive-mode providers exactly once — both the JSON/light path
@@ -473,9 +584,8 @@ async function cmdStatus(argv = []) {
         otel_has_files: Boolean(copilotOtel.otel_has_files),
         otel_path: copilotOtel.otel_path || null,
         otel_enabled: Boolean(copilotOtel.otel_enabled),
-        app_db_has_file: copilotAppExistingPaths.length > 0,
-        app_db_path: resolveCopilotAppDbPath(process.env),
-        app_db_paths: copilotAppExistingPaths,
+        ...copilotStoreStatus,
+        ...copilotAppStatus,
       },
       passive_mode: {
         active: isPassiveModeActive(passiveProviders),
@@ -607,13 +717,30 @@ async function cmdStatus(argv = []) {
   );
 }
 
-function formatCopilotLines({ token, otel, appDb }) {
-  if (!token && !otel.otel_has_files && !appDb?.app_db_has_file) return [];
+function formatCopilotStoreDetail(detail) {
+  return `${detail.path} (schema ${detail.schema_version ?? "?"}, ${detail.event_count ?? 0} events, last id ${detail.last_event_id ?? 0}${detail.last_event_at ? ` at ${detail.last_event_at}` : ""})`;
+}
+
+function formatCopilotLines({ token, otel, sessionStore, appDb }) {
+  if (
+    !token &&
+    !otel.otel_has_files &&
+    !sessionStore?.store_has_file &&
+    !appDb?.app_db_has_file
+  ) {
+    return [];
+  }
   const limitsState = token
     ? "set (via GitHub OAuth)"
     : "unset (no Copilot OAuth token found)";
+  const storeDetail = (sessionStore?.store_details || [])
+    .map(formatCopilotStoreDetail)
+    .join(", ");
+  const storeState = sessionStore?.store_has_file
+    ? `${sessionStore.source_mode || "set"} (${storeDetail || (sessionStore.store_paths || []).join(", ")}; precision ${sessionStore.precision || "unknown"}; coverage ${sessionStore.coverage || "unknown"})`
+    : `not found (${sessionStore?.store_path || "unknown"})`;
   const appDbState = appDb?.app_db_has_file
-    ? `set (${(appDb.app_db_paths || []).join(", ")})`
+    ? `${appDb.app_db_mode || "set"} (${(appDb.app_db_paths || []).join(", ")})`
     : `not found (${appDb?.app_db_path || "unknown"})`;
   const usageState = otel.otel_has_files
     ? `set (${otel.otel_path || otel.otel_default_dir})`
@@ -622,12 +749,19 @@ function formatCopilotLines({ token, otel, appDb }) {
       : "unset (OTEL export not enabled)";
   const lines = [
     `- GitHub Copilot limits: ${limitsState}`,
-    `- GitHub Copilot usage (App DB): ${appDbState}`,
-    `- GitHub Copilot usage (OTEL CLI/Chat extension): ${usageState}`,
+    `- GitHub Copilot usage (App/CLI store): ${storeState}`,
+    `- GitHub Copilot usage (App DB legacy baseline): ${appDbState}`,
+    `- GitHub Copilot usage (OTEL Chat/legacy CLI): ${usageState}`,
   ];
-  if (!otel.otel_has_files) {
+  for (const reason of sessionStore?.degraded_reasons || []) {
+    lines.push(`    Degraded: ${reason}`);
+  }
+  if (sessionStore?.recommended_action) {
+    lines.push(`    Action: ${sessionStore.recommended_action}`);
+  }
+  if (!sessionStore?.store_has_file && !otel.otel_has_files) {
     lines.push(
-      "    To track Copilot CLI / Chat extension token usage, add to your shell profile:",
+      "    To track older Copilot CLI / Chat extension token usage, add to your shell profile:",
       "      export COPILOT_OTEL_ENABLED=true",
       "      export COPILOT_OTEL_EXPORTER_TYPE=file",
       `      export COPILOT_OTEL_FILE_EXPORTER_PATH="${otel.otel_default_dir}/copilot-otel-$(date +%Y%m%d).jsonl"`,
@@ -745,22 +879,44 @@ function renderLightTable(summary) {
     (summary.copilot.token_set ||
       summary.copilot.otel_enabled ||
       summary.copilot.otel_has_files ||
+      summary.copilot.store_has_file ||
       summary.copilot.app_db_has_file);
   if (copilotDetected) {
     push(
-      "Copilot App DB",
+      "Copilot App/CLI store",
+      summary.copilot.store_has_file
+        ? `${summary.copilot.source_mode || "set"}: ${
+            (summary.copilot.store_details || [])
+              .map(formatCopilotStoreDetail)
+              .join(", ") ||
+            (summary.copilot.store_paths || [summary.copilot.store_path])
+              .filter(Boolean)
+              .join(", ")
+          }`
+        : `not found (${summary.copilot.store_path || "unknown"})`,
+    );
+    push(
+      "Copilot App DB legacy baseline",
       summary.copilot.app_db_has_file
-        ? (summary.copilot.app_db_paths || [summary.copilot.app_db_path]).filter(Boolean).join(", ")
+        ? `${summary.copilot.app_db_mode || "set"}: ${(summary.copilot.app_db_paths || [summary.copilot.app_db_path]).filter(Boolean).join(", ")}`
         : `not found (${summary.copilot.app_db_path || "unknown"})`,
     );
     push(
-      "Copilot OTEL",
+      "Copilot OTEL Chat/legacy CLI",
       summary.copilot.otel_has_files
         ? summary.copilot.otel_path || "files found"
         : summary.copilot.otel_enabled
           ? "enabled, no files"
           : "not enabled",
     );
+    push("Copilot precision", summary.copilot.precision);
+    push("Copilot coverage", summary.copilot.coverage);
+    for (const reason of summary.copilot.degraded_reasons || []) {
+      push("Copilot degraded", reason);
+    }
+    if (summary.copilot.recommended_action) {
+      push("Copilot action", summary.copilot.recommended_action);
+    }
   }
 
   if (summary.passive_mode) {

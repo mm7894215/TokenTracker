@@ -24,6 +24,11 @@ const {
   resolveKiroJsonlPath,
   resolveHermesPath,
   resolveCopilotOtelPaths,
+  normalizeCopilotDbPath,
+  uniqueCopilotDbPaths,
+  coalesceCopilotDbStatesByIdentity,
+  resolveCopilotSessionStorePaths,
+  getCopilotSqliteFingerprint,
   resolveCopilotAppDbPaths,
   parseRolloutIncremental,
   parseClaudeIncremental,
@@ -37,7 +42,10 @@ const {
   gooseInstallOwnsCursor,
   zedInstallOwnsCursor,
   hermesInstallOwnsCursor,
+  copilotOtelCursorHasLegacyCliUsage,
+  pruneCopilotUsageClaims,
   parseCopilotIncremental,
+  parseCopilotSessionStoreIncremental,
   parseCopilotAppDbIncremental,
   resolveKimiWireFiles,
   parseKimiIncremental,
@@ -216,6 +224,50 @@ const BACKGROUND_AUTO_SYNC_SOURCES = new Set([
 function warnProviderParseFailure(label, err, opts) {
   if (opts?.auto) return;
   process.stderr.write(`${label} sync: ${err && err.message ? err.message : err}\n`);
+}
+
+function mergeParseResult(total, next) {
+  return {
+    recordsProcessed: total.recordsProcessed + next.recordsProcessed,
+    eventsAggregated: total.eventsAggregated + next.eventsAggregated,
+    bucketsQueued: total.bucketsQueued + next.bucketsQueued,
+  };
+}
+
+function copilotAppBaselineTotal(baseline) {
+  return (
+    Math.max(0, Number(baseline?.input) || 0) +
+    Math.max(0, Number(baseline?.output) || 0) +
+    Math.max(0, Number(baseline?.cached) || 0) +
+    Math.max(0, Number(baseline?.reasoning) || 0)
+  );
+}
+
+function mergeCopilotAppDbStates(primary = {}, alias = {}) {
+  const primaryUpdatedAt = Date.parse(primary?.updatedAt || "") || 0;
+  const aliasUpdatedAt = Date.parse(alias?.updatedAt || "") || 0;
+  const newer = aliasUpdatedAt > primaryUpdatedAt ? alias : primary;
+  const sessionTotals = {};
+  for (const state of [primary, alias]) {
+    for (const [sessionId, baseline] of Object.entries(
+      state?.sessionTotals || {},
+    )) {
+      const current = sessionTotals[sessionId];
+      const baselineTotal = copilotAppBaselineTotal(baseline);
+      const currentTotal = copilotAppBaselineTotal(current);
+      const baselineUpdatedAt = Date.parse(baseline?.updatedAt || "") || 0;
+      const currentUpdatedAt = Date.parse(current?.updatedAt || "") || 0;
+      if (
+        !current ||
+        baselineTotal > currentTotal ||
+        (baselineTotal === currentTotal &&
+          baselineUpdatedAt > currentUpdatedAt)
+      ) {
+        sessionTotals[sessionId] = baseline;
+      }
+    }
+  }
+  return { ...primary, ...newer, sessionTotals };
 }
 
 async function cmdSync(argv) {
@@ -1326,19 +1378,135 @@ async function cmdSync(argv) {
       await repairGrokQueueFromSessionSnapshots({ cursors, queuePath, queueStatePath });
     }
 
-    // ── GitHub Copilot CLI / Chat extension (OTEL JSONL files) ──
+    // ── GitHub Copilot App / CLI unified local runtime ──
+    //
+    // First adoption deliberately runs legacy OTEL + App DB once before the
+    // session-store parser records its max-id barrier. Subsequent scans use
+    // session-store as canonical for CLI/App requests: OTEL keeps only Chat
+    // extension LogRecords, while App DB remains an observe-only baseline.
     let copilotResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const copilotPaths = sourceAllowed("copilot") ? resolveCopilotOtelPaths(process.env) : [];
+    const copilotSourceAllowed = sourceAllowed("copilot");
+    const adoptedCopilotStorePaths = new Set(
+      Object.entries(cursors?.copilotStore?.dbs || {})
+        .filter(([, state]) => state?.adoptedAt)
+        .map(([dbPath]) => dbPath),
+    );
+    const copilotStorePaths = copilotSourceAllowed
+      ? Array.from(
+          new Set([
+            ...resolveCopilotSessionStorePaths(process.env),
+            ...adoptedCopilotStorePaths,
+          ]),
+        ).filter((dbPath) => {
+          if (adoptedCopilotStorePaths.has(dbPath)) return true;
+          try { return fssync.existsSync(dbPath); } catch (_e) { return false; }
+        })
+      : [];
+    const copilotStoreWasActive = cursors?.copilotStore?.active === true;
+    const copilotStoreAdoptionFingerprints = {};
+    if (!copilotStoreWasActive) {
+      for (const dbPath of copilotStorePaths) {
+        try {
+          copilotStoreAdoptionFingerprints[dbPath] =
+            getCopilotSqliteFingerprint(dbPath);
+        } catch (_e) {}
+      }
+    }
+    let copilotHadLegacyCliOtelHistory = false;
+    if (!copilotStoreWasActive) {
+      copilotHadLegacyCliOtelHistory =
+        await copilotOtelCursorHasLegacyCliUsage(cursors);
+      if (cursors?.copilot && typeof cursors.copilot === "object") {
+        if (copilotHadLegacyCliOtelHistory) {
+          cursors.copilot.legacyCliHistory = true;
+        } else {
+          cursors.copilot.usageClaimsComplete = true;
+        }
+      }
+    }
+    let copilotLegacyHealthy = true;
+    let copilotOtelUsageClaims =
+      cursors?.copilot?.recentUsageEvents || [];
+    let copilotStoreResult = {
+      active: copilotStoreWasActive,
+      healthy: false,
+      adoptedThisRun: false,
+      canonicalDbPaths: [],
+      recordsProcessed: 0,
+      eventsAggregated: 0,
+      bucketsQueued: 0,
+      usageClaims: cursors?.copilotStore?.recentEvents || [],
+    };
+    if (copilotSourceAllowed && copilotStoreWasActive) {
+      if (progress?.enabled) {
+        progress.start(`Parsing Copilot App/CLI ${renderBar(0)} | buckets 0`);
+      }
+      try {
+        copilotStoreResult = await parseCopilotSessionStoreIncremental({
+          dbPaths: copilotStorePaths,
+          cursors,
+          queuePath,
+          env: process.env,
+          otelUsageEvents: cursors?.copilot?.recentUsageEvents,
+          onProgress: (p) => {
+            if (!progress?.enabled) return;
+            const pct = p.total > 0 ? p.index / p.total : 1;
+            progress.update(
+              `Parsing Copilot App/CLI ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} events | buckets ${formatNumber(p.bucketsQueued)}`,
+            );
+          },
+        });
+        copilotResult = mergeParseResult(copilotResult, copilotStoreResult);
+      } catch (err) {
+        warnProviderParseFailure("Copilot App/CLI session store", err, opts);
+      }
+    }
+    const copilotPathKey = (dbPath) => {
+      const normalized = path.normalize(dbPath);
+      return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+    };
+    const canonicalCopilotStorePaths = new Set(
+      (copilotStoreResult.canonicalDbPaths || []).map(copilotPathKey),
+    );
+    const adoptedCopilotStorePathKeys = new Set(
+      Object.entries(cursors?.copilotStore?.dbs || {})
+        .filter(([, state]) => state?.adoptedAt)
+        .map(([dbPath]) => copilotPathKey(dbPath)),
+    );
+    const explicitCopilotStorePath =
+      typeof process.env.TOKENTRACKER_COPILOT_SESSION_STORE_DB === "string" &&
+      process.env.TOKENTRACKER_COPILOT_SESSION_STORE_DB.trim()
+        ? copilotPathKey(
+            normalizeCopilotDbPath(
+              process.env.TOKENTRACKER_COPILOT_SESSION_STORE_DB,
+              process.env,
+            ),
+          )
+        : null;
+    const explicitStoreIsCanonical =
+      explicitCopilotStorePath !== null &&
+      canonicalCopilotStorePaths.has(explicitCopilotStorePath);
+    const explicitStoreIsAdopted =
+      explicitCopilotStorePath !== null &&
+      adoptedCopilotStorePathKeys.has(explicitCopilotStorePath);
+
+    // ── GitHub Copilot CLI / Chat extension (OTEL JSONL files) ──
+    const copilotPaths = copilotSourceAllowed ? resolveCopilotOtelPaths(process.env) : [];
     if (copilotPaths.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing Copilot ${renderBar(0)} | buckets 0`);
       }
       try {
-        copilotResult = await parseCopilotIncremental({
+        const copilotOtelResult = await parseCopilotIncremental({
           otelPaths: copilotPaths,
           cursors,
           queuePath,
           env: process.env,
+          storeUsageEvents:
+            copilotStoreResult.usageClaims ||
+            cursors?.copilotStore?.recentEvents ||
+            [],
+          skipCliSpans: copilotStoreWasActive,
           onProgress: (p) => {
             if (!progress?.enabled) return;
             const pct = p.total > 0 ? p.index / p.total : 1;
@@ -1347,42 +1515,189 @@ async function cmdSync(argv) {
             );
           },
         });
+        copilotOtelUsageClaims =
+          copilotOtelResult.usageClaims ||
+          cursors?.copilot?.recentUsageEvents ||
+          [];
+        copilotResult = mergeParseResult(copilotResult, copilotOtelResult);
       } catch (err) {
+        copilotLegacyHealthy = false;
         warnProviderParseFailure("Copilot", err, opts);
       }
     }
 
     // ── GitHub Copilot App (passive data.db session summaries) ──
-    const copilotAppDbPaths = sourceAllowed("copilot")
-      ? resolveCopilotAppDbPaths(process.env).filter((p) => {
-          try { return fssync.existsSync(p); } catch (_e) { return false; }
+    const copilotAppDbStates =
+      cursors?.copilotApp?.dbs && typeof cursors.copilotApp.dbs === "object"
+        ? cursors.copilotApp.dbs
+        : null;
+    const initialTrackedCopilotAppDbPaths = new Set(
+      Object.keys(copilotAppDbStates || {}),
+    );
+    const copilotAppDbCandidates = uniqueCopilotDbPaths(
+      [
+        ...resolveCopilotAppDbPaths(process.env),
+        ...initialTrackedCopilotAppDbPaths,
+      ],
+      process.env,
+      Array.from(initialTrackedCopilotAppDbPaths),
+    );
+    coalesceCopilotDbStatesByIdentity(
+      copilotAppDbStates,
+      copilotAppDbCandidates,
+      mergeCopilotAppDbStates,
+    );
+    const explicitStoreOwnsSingleApp =
+      copilotAppDbCandidates.length === 1 &&
+      explicitStoreIsAdopted;
+    if (copilotAppDbStates && (copilotStoreWasActive || copilotStorePaths.length > 0)) {
+      for (const dbPath of Object.keys(copilotAppDbStates)) {
+        try {
+          fssync.statSync(dbPath);
+        } catch (err) {
+          const matchingStorePath = copilotPathKey(
+            path.join(path.dirname(dbPath), "session-store.db"),
+          );
+          if (err?.code === "ENOENT") {
+            if (
+              canonicalCopilotStorePaths.has(matchingStorePath) ||
+              (explicitStoreOwnsSingleApp && explicitStoreIsCanonical)
+            ) {
+              delete copilotAppDbStates[dbPath];
+            }
+          } else {
+            if (!copilotStoreWasActive) copilotLegacyHealthy = false;
+          }
+        }
+      }
+    }
+    const trackedCopilotAppDbPaths = new Set(
+      Object.keys(cursors?.copilotApp?.dbs || {}),
+    );
+    const rawCopilotAppDbPaths = copilotSourceAllowed
+      ? Array.from(new Set([
+          ...copilotAppDbCandidates,
+          ...trackedCopilotAppDbPaths,
+        ])).filter((dbPath) => {
+          if (trackedCopilotAppDbPaths.has(dbPath)) return true;
+          try { return fssync.existsSync(dbPath); } catch (_e) { return false; }
         })
       : [];
+    const copilotAppDbPaths = uniqueCopilotDbPaths(
+      rawCopilotAppDbPaths,
+      process.env,
+      Array.from(trackedCopilotAppDbPaths),
+    );
     if (copilotAppDbPaths.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing Copilot App ${renderBar(0)} | buckets 0`);
       }
+      for (const appDbPath of copilotAppDbPaths) {
+        const storePathKey = copilotPathKey(
+          path.join(path.dirname(appDbPath), "session-store.db"),
+        );
+        const observeOnly =
+          copilotStoreWasActive ||
+          adoptedCopilotStorePathKeys.has(storePathKey) ||
+          (copilotAppDbPaths.length === 1 && explicitStoreIsAdopted);
+        const catchupRelevant =
+          !observeOnly &&
+          !copilotStoreWasActive &&
+          copilotStorePaths.length > 0;
+        try {
+          const copilotAppResult = await parseCopilotAppDbIncremental({
+            dbPaths: [appDbPath],
+            cursors,
+            queuePath,
+            env: process.env,
+            observeOnly,
+            onProgress: (p) => {
+              if (!progress?.enabled) return;
+              const pct = p.total > 0 ? p.index / p.total : 1;
+              progress.update(
+                `Parsing Copilot App ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} sessions | buckets ${formatNumber(p.bucketsQueued)}`,
+              );
+            },
+          });
+          copilotResult = mergeParseResult(copilotResult, copilotAppResult);
+          if (catchupRelevant && copilotAppResult.dbErrors > 0) {
+            copilotLegacyHealthy = false;
+          }
+        } catch (err) {
+          if (catchupRelevant) copilotLegacyHealthy = false;
+          warnProviderParseFailure("Copilot App", err, opts);
+        }
+      }
+    }
+
+    if (
+      copilotSourceAllowed &&
+      !copilotStoreWasActive &&
+      copilotStorePaths.length > 0 &&
+      copilotLegacyHealthy
+    ) {
+      if (progress?.enabled) {
+        progress.start(`Adopting Copilot App/CLI store ${renderBar(0)} | buckets 0`);
+      }
       try {
-        const copilotAppResult = await parseCopilotAppDbIncremental({
-          dbPaths: copilotAppDbPaths,
+        const copilotHasOtelCursorHistory =
+          (Array.isArray(cursors?.copilot?.seenIds) &&
+            cursors.copilot.seenIds.length > 0) ||
+          (cursors?.copilot?.fileOffsets &&
+            Object.keys(cursors.copilot.fileOffsets).length > 0);
+        const copilotOtelClaimsIncomplete =
+          copilotHadLegacyCliOtelHistory ||
+          (copilotHasOtelCursorHistory &&
+            cursors?.copilot?.usageClaimsComplete !== true);
+        const appSessionIds = [];
+        const appSessionTotals = {};
+        for (const dbState of Object.values(cursors?.copilotApp?.dbs || {})) {
+          for (const [sessionId, totals] of Object.entries(
+            dbState?.sessionTotals || {},
+          )) {
+            const total =
+              Number(totals?.input || 0) +
+              Number(totals?.output || 0) +
+              Number(totals?.cached || 0) +
+              Number(totals?.reasoning || 0);
+            if (total <= 0) continue;
+            appSessionIds.push(sessionId);
+            const prior = appSessionTotals[sessionId];
+            const priorTotal =
+              Number(prior?.input || 0) +
+              Number(prior?.output || 0) +
+              Number(prior?.cached || 0) +
+              Number(prior?.reasoning || 0);
+            if (total > priorTotal) appSessionTotals[sessionId] = totals;
+          }
+        }
+        copilotStoreResult = await parseCopilotSessionStoreIncremental({
+          dbPaths: copilotStorePaths,
           cursors,
           queuePath,
           env: process.env,
-          onProgress: (p) => {
-            if (!progress?.enabled) return;
-            const pct = p.total > 0 ? p.index / p.total : 1;
-            progress.update(
-              `Parsing Copilot App ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} sessions | buckets ${formatNumber(p.bucketsQueued)}`,
-            );
-          },
+          backfillOnFirstRun: !copilotOtelClaimsIncomplete,
+          excludeSessionIdsOnFirstRun: appSessionIds,
+          excludeSessionTotalsOnFirstRun: appSessionTotals,
+          expectedFingerprints: copilotStoreAdoptionFingerprints,
+          otelUsageEvents: copilotOtelUsageClaims,
         });
-        copilotResult = {
-          recordsProcessed: copilotResult.recordsProcessed + copilotAppResult.recordsProcessed,
-          eventsAggregated: copilotResult.eventsAggregated + copilotAppResult.eventsAggregated,
-          bucketsQueued: copilotResult.bucketsQueued + copilotAppResult.bucketsQueued,
-        };
+        copilotResult = mergeParseResult(copilotResult, copilotStoreResult);
       } catch (err) {
-        warnProviderParseFailure("Copilot App", err, opts);
+        warnProviderParseFailure("Copilot App/CLI session store", err, opts);
+      }
+    }
+
+    if (copilotSourceAllowed) {
+      if (Array.isArray(cursors?.copilot?.recentUsageEvents)) {
+        cursors.copilot.recentUsageEvents = pruneCopilotUsageClaims(
+          cursors.copilot.recentUsageEvents,
+        );
+      }
+      if (Array.isArray(cursors?.copilotStore?.recentEvents)) {
+        cursors.copilotStore.recentEvents = pruneCopilotUsageClaims(
+          cursors.copilotStore.recentEvents,
+        );
       }
     }
 

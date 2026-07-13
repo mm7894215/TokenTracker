@@ -297,6 +297,67 @@ test("parseCopilotAppDbIncremental emits only positive deltas on subsequent sync
   }
 });
 
+test("parseCopilotAppDbIncremental observe-only mode advances baselines without emitting", async () => {
+  const { dir, dbPath } = makeCopilotAppDb([
+    {
+      id: "store-owned-session",
+      session_type: "project",
+      model: "gpt-5.6-luna",
+      created_at: "2026-07-10T12:00:00Z",
+      updated_at: "2026-07-10T12:05:00Z",
+      total_input_tokens: 100,
+      total_output_tokens: 10,
+      total_cached_tokens: 20,
+      total_reasoning_tokens: 2,
+    },
+  ]);
+  try {
+    const queuePath = path.join(dir, "queue.jsonl");
+    const cursors = {};
+    const first = await parseCopilotAppDbIncremental({
+      dbPath,
+      cursors,
+      queuePath,
+      observeOnly: true,
+    });
+    assert.equal(first.eventsAggregated, 0);
+    assert.deepEqual(readQueue(queuePath), []);
+    assert.equal(
+      cursors.copilotApp.dbs[dbPath].sessionTotals["store-owned-session"].input,
+      100,
+    );
+
+    updateSession(dbPath, "store-owned-session", {
+      updated_at: "2026-07-10T12:20:00Z",
+      total_input_tokens: 150,
+      total_output_tokens: 15,
+      total_cached_tokens: 30,
+      total_reasoning_tokens: 3,
+    });
+    const second = await parseCopilotAppDbIncremental({
+      dbPath,
+      cursors,
+      queuePath,
+      observeOnly: true,
+    });
+    assert.equal(second.eventsAggregated, 0);
+    assert.deepEqual(readQueue(queuePath), []);
+    assert.equal(
+      cursors.copilotApp.dbs[dbPath].sessionTotals["store-owned-session"].input,
+      150,
+    );
+
+    const legacyAfterObservation = await parseCopilotAppDbIncremental({
+      dbPath,
+      cursors,
+      queuePath,
+    });
+    assert.equal(legacyAfterObservation.eventsAggregated, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("parseCopilotAppDbIncremental does not emit negative deltas when counters shrink", async () => {
   const { dir, dbPath } = makeCopilotAppDb([
     {
@@ -726,14 +787,14 @@ test("resolveCopilotAppDbPaths includes COPILOT_HOME/data.db and ~/.copilot/data
   assert.ok(paths.includes(path.join("/tmp/home", ".copilot", "data.db")));
 });
 
-test("resolveCopilotAppDbPaths respects Windows wsl-only mode by not adding native fallback", (t) => {
+test("resolveCopilotAppDbPaths stays native when Windows WSL mode is wsl-only", (t) => {
   mockPlatform(t, "win32");
-  mockMethod(t, cp, "execFileSync", () => {
-    throw new Error("no WSL distros");
-  });
   const paths = resolveCopilotAppDbPaths({
-    HOME: "C:\\Users\\dev",
+    HOME: "/tmp/shell-home",
+    USERPROFILE: "/tmp/native-user",
     TOKENTRACKER_WSL_MODE: "wsl-only",
   });
-  assert.deepEqual(paths, []);
+  assert.deepEqual(paths, [
+    path.join("/tmp/native-user", ".copilot", "data.db"),
+  ]);
 });
