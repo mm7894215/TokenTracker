@@ -85,7 +85,7 @@ function latestByKey(rows) {
 }
 
 function openclawCursor(cursors, filePath) {
-  return cursors.files[openclawCursorKey(filePath)];
+  return cursors.files[filePath] || cursors.files[openclawCursorKey(filePath)];
 }
 
 async function makeInflatedInstall({
@@ -905,6 +905,7 @@ test("a full sync repairs legacy cursors under a custom OpenClaw home without a 
     });
     const savedEnv = {
       HOME: process.env.HOME,
+      USERPROFILE: process.env.USERPROFILE,
       CODEX_HOME: process.env.CODEX_HOME,
       CODE_HOME: process.env.CODE_HOME,
       GEMINI_HOME: process.env.GEMINI_HOME,
@@ -923,6 +924,7 @@ test("a full sync repairs legacy cursors under a custom OpenClaw home without a 
         "utf8",
       );
       process.env.HOME = install.home;
+      process.env.USERPROFILE = install.home;
       process.env.CODEX_HOME = path.join(install.home, ".codex");
       process.env.CODE_HOME = path.join(install.home, ".code");
       process.env.GEMINI_HOME = path.join(install.home, ".gemini");
@@ -958,6 +960,7 @@ test("two OpenClaw syncs keep the repaired aggregate stable", async () => {
   const install = await makeInflatedInstall();
   const savedEnv = {
     HOME: process.env.HOME,
+    USERPROFILE: process.env.USERPROFILE,
     CODEX_HOME: process.env.CODEX_HOME,
     CODE_HOME: process.env.CODE_HOME,
     GEMINI_HOME: process.env.GEMINI_HOME,
@@ -978,6 +981,7 @@ test("two OpenClaw syncs keep the repaired aggregate stable", async () => {
       "utf8",
     );
     process.env.HOME = install.home;
+    process.env.USERPROFILE = install.home;
     process.env.CODEX_HOME = path.join(install.home, ".codex");
     process.env.CODE_HOME = path.join(install.home, ".code");
     process.env.GEMINI_HOME = path.join(install.home, ".gemini");
