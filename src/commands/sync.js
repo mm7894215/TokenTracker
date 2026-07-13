@@ -1,5 +1,6 @@
 const os = require("node:os");
 const path = require("node:path");
+const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const fssync = require("node:fs");
 const cp = require("node:child_process");
@@ -35,6 +36,7 @@ const {
   parseGeminiIncremental,
   parseOpencodeIncremental,
   parseOpencodeDbIncremental,
+  openclawCursorKey,
   parseOpenclawIncremental,
   parseCursorApiIncremental,
   parseKiroIncremental,
@@ -83,6 +85,7 @@ const {
   droidSessionIdFromPath,
   resolveDroidModel,
   bucketKey,
+  groupBucketKey,
   toUtcHalfHourStart,
   totalsKey,
   claudeMessageDedupKey,
@@ -322,6 +325,9 @@ async function cmdSync(argv) {
 
     // OpenClaw session plugin integration: lifecycle hooks request an
     // OpenClaw-only auto sync so unrelated providers do not get walked.
+    const configuredOpenclawHome =
+      normalizeString(process.env.TOKENTRACKER_OPENCLAW_HOME) ||
+      path.join(home, ".openclaw");
     const openclawSignal = opts.fromOpenclaw
       ? resolveOpenclawSignal({ home, env: process.env })
       : null;
@@ -437,6 +443,7 @@ async function cmdSync(argv) {
         queuePath,
         queueStatePath,
         sessionFiles: openclawFiles,
+        openclawRoots: [configuredOpenclawHome],
       });
     }
 
@@ -1807,6 +1814,13 @@ async function cmdSync(argv) {
 
     cursors.updatedAt = new Date().toISOString();
     await writeJson(cursorsPath, cursors);
+    if (
+      ["done", "noop"].includes(
+        cursors.migrations?.[OPENCLAW_RESCAN_REPAIR_KEY]?.status,
+      )
+    ) {
+      await fs.rm(openclawRepairMarkerPath(queuePath), { force: true });
+    }
     if (grokHookSignalConsumed && grokHookSignalPath) {
       await fs.unlink(grokHookSignalPath).catch(() => {});
     }
@@ -3113,13 +3127,28 @@ async function migrateRolloutCumulativeDeltaBuckets({ cursors, queuePath, rollou
   cursors.migrations[ROLLOUT_CUMULATIVE_DELTA_MIGRATION_KEY] = new Date().toISOString();
 }
 
-function isOpenclawTrackedUsagePath(filePath) {
+function normalizeOpenclawRepairPath(filePath) {
+  if (typeof filePath !== "string") return "";
+  return filePath.replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
+function isOpenclawTrackedUsagePath(filePath, cursor, openclawRoots = []) {
   if (typeof filePath !== "string") return false;
-  const normalized = filePath.replace(/\\/g, "/");
-  return (
-    /\/\.openclaw\/agents\/[^/]+\/sessions\/[^/]+\.jsonl$/i.test(normalized) ||
-    normalized.toLowerCase().endsWith("/openclaw.fallback.jsonl")
-  );
+  if (cursor?.provider === "openclaw") return true;
+  const normalized = normalizeOpenclawRepairPath(filePath);
+  const lower = normalized.toLowerCase();
+  if (lower.endsWith("/openclaw.fallback.jsonl")) return true;
+  if (/\/\.openclaw\/agents\/[^/]+\/sessions\/[^/]+\.jsonl$/i.test(normalized)) {
+    return true;
+  }
+  return openclawRoots.some((root) => {
+    const normalizedRoot = normalizeOpenclawRepairPath(root).toLowerCase();
+    return (
+      normalizedRoot &&
+      lower.startsWith(`${normalizedRoot}/agents/`) &&
+      /\/sessions\/[^/]+\.jsonl$/i.test(normalized)
+    );
+  });
 }
 
 function openclawRepairRow(key, bucket) {
@@ -3165,8 +3194,8 @@ async function readOpenclawQueueState(queuePath, queueStatePath) {
   return { queue, offset, validOffset };
 }
 
-function openclawKeysFromQueueBuffer(queue) {
-  const keys = new Set();
+function openclawRowsByKey(queue) {
+  const rowsByKey = new Map();
   for (const line of queue.toString("utf8").split("\n")) {
     if (!line.trim()) continue;
     let row;
@@ -3177,9 +3206,117 @@ function openclawKeysFromQueueBuffer(queue) {
     }
     if (row?.source !== "openclaw") continue;
     if (typeof row.model !== "string" || typeof row.hour_start !== "string") continue;
-    keys.add(bucketKey("openclaw", row.model, row.hour_start));
+    const key = bucketKey("openclaw", row.model, row.hour_start);
+    const rows = rowsByKey.get(key) || [];
+    rows.push(row);
+    rowsByKey.set(key, rows);
   }
-  return keys;
+  return rowsByKey;
+}
+
+const OPENCLAW_REPAIR_TOTAL_FIELDS = [
+  "input_tokens",
+  "cached_input_tokens",
+  "cache_creation_input_tokens",
+  "output_tokens",
+  "reasoning_output_tokens",
+  "total_tokens",
+  "billable_total_tokens",
+  "conversation_count",
+];
+
+function normalizeOpenclawRepairTotals(value) {
+  const totals = {};
+  for (const field of OPENCLAW_REPAIR_TOTAL_FIELDS) {
+    const fallback =
+      field === "billable_total_tokens" ? value?.total_tokens : 0;
+    totals[field] = Number(value?.[field] ?? fallback ?? 0);
+  }
+  return totals;
+}
+
+function subtractOpenclawRepairTotals(current, previous) {
+  const delta = {};
+  for (const field of OPENCLAW_REPAIR_TOTAL_FIELDS) {
+    delta[field] = current[field] - previous[field];
+  }
+  return delta;
+}
+
+function openclawRepairTotalsAreNonNegative(value) {
+  return OPENCLAW_REPAIR_TOTAL_FIELDS.every((field) => value[field] >= 0);
+}
+
+function openclawRepairTotalsDominate(left, right) {
+  return OPENCLAW_REPAIR_TOTAL_FIELDS.every(
+    (field) => left[field] >= right[field],
+  );
+}
+
+function findProvenOpenclawRepairRow(key, rows, rebuiltBucket) {
+  if (!Array.isArray(rows) || rows.length < 3) return null;
+  const rebuiltRow = openclawRepairRow(key, rebuiltBucket);
+  const rebuiltSnapshot = normalizeOpenclawRepairTotals(rebuiltRow);
+  if (
+    rebuiltSnapshot.total_tokens <= 0 ||
+    rebuiltSnapshot.conversation_count <= 0
+  ) {
+    return null;
+  }
+
+  const normalizedRows = rows.map(normalizeOpenclawRepairTotals);
+  const deltas = [];
+  for (let index = 1; index < normalizedRows.length; index += 1) {
+    deltas.push(subtractOpenclawRepairTotals(
+      normalizedRows[index],
+      normalizedRows[index - 1],
+    ));
+  }
+  let suffixStart = deltas.length - 1;
+  if (
+    !openclawRepairTotalsAreNonNegative(deltas[suffixStart]) ||
+    deltas[suffixStart].total_tokens <= 0 ||
+    deltas[suffixStart].conversation_count <= 0
+  ) {
+    return null;
+  }
+  while (suffixStart > 0) {
+    const previous = deltas[suffixStart - 1];
+    const current = deltas[suffixStart];
+    if (
+      !openclawRepairTotalsAreNonNegative(previous) ||
+      !openclawRepairTotalsDominate(current, previous)
+    ) {
+      break;
+    }
+    suffixStart -= 1;
+  }
+  const replayCount = deltas.length - suffixStart;
+  if (replayCount < 2) return null;
+
+  const baselineIndex = suffixStart;
+  const baseline = normalizedRows[baselineIndex];
+  const maximalSnapshot = deltas.at(-1);
+  if (!openclawRepairTotalsDominate(maximalSnapshot, rebuiltSnapshot)) {
+    return null;
+  }
+  const correction = openclawRepairTotalsDominate(baseline, maximalSnapshot)
+    ? baseline
+    : openclawRepairTotalsDominate(maximalSnapshot, baseline)
+      ? maximalSnapshot
+      : null;
+  if (!correction) return null;
+  return {
+    ...rebuiltRow,
+    ...correction,
+  };
+}
+
+function openclawBucketFromRepairRow(row) {
+  return {
+    totals: normalizeOpenclawRepairTotals(row),
+    queuedKey: totalsKey(normalizeOpenclawRepairTotals(row)),
+  };
 }
 
 function filterPendingOpenclawRows(queue, offset, correctedKeys) {
@@ -3206,29 +3343,183 @@ function filterPendingOpenclawRows(queue, offset, correctedKeys) {
   return { prefix, kept };
 }
 
+function openclawRepairMarkerPath(queuePath) {
+  return `${queuePath}.openclaw-repair.json`;
+}
+
+function openclawRepairPlanCorrections(plan) {
+  const corrections = new Map();
+  for (const row of Array.isArray(plan?.corrections) ? plan.corrections : []) {
+    if (
+      row?.source !== "openclaw" ||
+      typeof row.model !== "string" ||
+      typeof row.hour_start !== "string"
+    ) {
+      return null;
+    }
+    corrections.set(
+      bucketKey("openclaw", row.model, row.hour_start),
+      row,
+    );
+  }
+  return corrections.size > 0 ? corrections : null;
+}
+
+function buildPendingOpenclawCorrectionQueue({
+  queueState,
+  corrections,
+}) {
+  const correctedKeys = new Set(corrections.keys());
+  const correctedRows = [...corrections.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, row]) => JSON.stringify(row));
+  const pending = filterPendingOpenclawRows(
+    queueState.queue,
+    queueState.offset,
+    correctedKeys,
+  );
+  const pendingText = pending.kept.length ? `${pending.kept.join("\n")}\n` : "";
+  const correctionsText = `${correctedRows.join("\n")}\n`;
+  return Buffer.concat([
+    pending.prefix,
+    Buffer.from(pendingText, "utf8"),
+    Buffer.from(correctionsText, "utf8"),
+  ]);
+}
+
+async function replacePendingOpenclawCorrections({
+  queuePath,
+  replacement,
+}) {
+  await ensureDir(path.dirname(queuePath));
+  const tmp = `${queuePath}.tmp.${process.pid}.${Date.now()}`;
+  await fs.writeFile(tmp, replacement);
+  await fs.rename(tmp, queuePath);
+}
+
+function openclawRepairPlanWasApplied(queue, plan) {
+  const expectedLength = Number(plan?.replacementLength || 0);
+  const expectedDigest =
+    typeof plan?.replacementDigest === "string"
+      ? plan.replacementDigest
+      : null;
+  if (
+    !Number.isInteger(expectedLength) ||
+    expectedLength <= 0 ||
+    !expectedDigest ||
+    queue.length < expectedLength
+  ) {
+    return false;
+  }
+  const actualDigest = crypto
+    .createHash("sha256")
+    .update(queue.subarray(0, expectedLength))
+    .digest("hex");
+  return actualDigest === expectedDigest;
+}
+
+function applyOpenclawRepairPlanToCursors(cursors, plan, corrections) {
+  const liveHourly = (cursors.hourly ||= {
+    version: 3,
+    buckets: {},
+    groupQueued: {},
+  });
+  liveHourly.version = 3;
+  liveHourly.buckets ||= {};
+  liveHourly.groupQueued ||= {};
+  for (const [key, row] of corrections) {
+    liveHourly.buckets[key] = openclawBucketFromRepairRow(row);
+    const [, , ...hourParts] = key.split("|");
+    delete liveHourly.groupQueued[
+      groupBucketKey("openclaw", hourParts.join("|"))
+    ];
+  }
+  (cursors.migrations ||= {})[OPENCLAW_RESCAN_REPAIR_KEY] = {
+    status: "done",
+    appliedAt: new Date().toISOString(),
+    filesRebuilt: Number(plan.filesRebuilt || 0),
+    correctedBuckets: corrections.size,
+    preservedUnprovenBuckets: Number(plan.preservedUnprovenBuckets || 0),
+  };
+}
+
+function openclawCursorForPath(cursors, filePath) {
+  const direct = cursors.files?.[filePath];
+  if (direct) return direct;
+  const normalized = openclawCursorKey(filePath);
+  for (const [cursorPath, cursor] of Object.entries(cursors.files || {})) {
+    if (openclawCursorKey(cursorPath) === normalized) return cursor;
+  }
+  return null;
+}
+
+function mergeOpenclawRepairBucket(targetBuckets, key, sourceBucket) {
+  const sourceTotals = normalizeOpenclawRepairTotals(sourceBucket?.totals);
+  const target = (targetBuckets[key] ||= {
+    totals: normalizeOpenclawRepairTotals({}),
+  });
+  for (const field of OPENCLAW_REPAIR_TOTAL_FIELDS) {
+    target.totals[field] += sourceTotals[field];
+  }
+}
+
 // One-time repair for OpenClaw's inode-changing session rewrites. The old
 // offset-only cursor replayed the complete file after every atomic rename,
 // repeatedly adding the same assistant usage events to persistent buckets.
 //
 // The repair is intentionally all-or-nothing across tracked OpenClaw inputs:
 // if any session or fallback file is missing, its historical contribution
-// cannot be separated safely, so the migration defers instead of lowering
-// legitimate history. The uploaded queue prefix remains byte-stable; only
-// pending polluted versions are removed before authoritative rows are appended.
+// cannot be separated safely, so the migration defers. Even with every file
+// present, a bucket is lowered only when queue history proves a monotonic suffix
+// of complete-file snapshots. The dominant safe value between the pre-replay
+// baseline and largest proven snapshot preserves compacted historical usage.
+// The uploaded queue prefix remains byte-stable while pending polluted versions
+// for proven keys are replaced by corrected baselines.
 async function repairOpenclawRescanInflation({
   cursors,
   queuePath,
   queueStatePath,
   sessionFiles,
+  openclawRoots,
 } = {}) {
   if (!cursors || typeof cursors !== "object") return false;
   const migrations = (cursors.migrations ||= {});
   const prior = migrations[OPENCLAW_RESCAN_REPAIR_KEY];
-  if (prior && !(typeof prior === "object" && prior.status === "deferred")) return false;
+  const markerPath = openclawRepairMarkerPath(queuePath);
+  const pendingPlan = await readJson(markerPath);
+  if (prior && !(typeof prior === "object" && prior.status === "deferred")) {
+    await fs.rm(markerPath, { force: true });
+    return false;
+  }
+  if (pendingPlan) {
+    const corrections = openclawRepairPlanCorrections(pendingPlan);
+    const queueState = await readOpenclawQueueState(queuePath, queueStatePath);
+    if (!corrections || !queueState.validOffset) {
+      migrations[OPENCLAW_RESCAN_REPAIR_KEY] = {
+        status: "deferred",
+        reason: "openclaw_repair_plan_invalid",
+        at: new Date().toISOString(),
+      };
+      return false;
+    }
+    if (!openclawRepairPlanWasApplied(queueState.queue, pendingPlan)) {
+      const replacement = buildPendingOpenclawCorrectionQueue({
+        queueState,
+        corrections,
+      });
+      await replacePendingOpenclawCorrections({ queuePath, replacement });
+    }
+    applyOpenclawRepairPlanToCursors(cursors, pendingPlan, corrections);
+    return true;
+  }
 
-  const trackedPaths = new Set(
-    Object.keys(cursors.files || {}).filter(isOpenclawTrackedUsagePath),
-  );
+  const roots = Array.isArray(openclawRoots) ? openclawRoots : [];
+  const trackedPaths = new Set();
+  for (const [filePath, cursor] of Object.entries(cursors.files || {})) {
+    if (isOpenclawTrackedUsagePath(filePath, cursor, roots)) {
+      trackedPaths.add(filePath);
+    }
+  }
   for (const entry of Array.isArray(sessionFiles) ? sessionFiles : []) {
     const filePath = typeof entry === "string" ? entry : entry?.path;
     if (typeof filePath === "string" && filePath) trackedPaths.add(filePath);
@@ -3241,7 +3532,8 @@ async function repairOpenclawRescanInflation({
     Object.keys(hourly?.buckets || {}).filter((key) => key.startsWith("openclaw|")),
   );
   const queueState = await readOpenclawQueueState(queuePath, queueStatePath);
-  const queueOpenclawKeys = openclawKeysFromQueueBuffer(queueState.queue);
+  const queueRowsByKey = openclawRowsByKey(queueState.queue);
+  const queueOpenclawKeys = new Set(queueRowsByKey.keys());
   if (trackedPaths.size === 0) {
     if (liveOpenclawKeys.size === 0 && queueOpenclawKeys.size === 0) {
       migrations[OPENCLAW_RESCAN_REPAIR_KEY] = {
@@ -3282,20 +3574,36 @@ async function repairOpenclawRescanInflation({
   }
 
   const tmpQueue = `${queuePath}.openclaw-rebuild.${process.pid}.${Date.now()}`;
-  const rebuiltCursors = {
-    version: 1,
-    files: {},
-    hourly: { version: 3, buckets: {}, groupQueued: {} },
-  };
+  const rebuiltBuckets = {};
+  const rebuiltContributors = new Map();
   try {
-    await parseOpenclawIncremental({
-      sessionFiles: [...trackedPaths].map((filePath) => ({
-        path: filePath,
-        source: "openclaw",
-      })),
-      cursors: rebuiltCursors,
-      queuePath: tmpQueue,
-    });
+    for (const filePath of trackedPaths) {
+      const cursor = openclawCursorForPath(cursors, filePath);
+      const fileCursors = {
+        version: 1,
+        files: {},
+        hourly: { version: 3, buckets: {}, groupQueued: {} },
+      };
+      await parseOpenclawIncremental({
+        sessionFiles: [{
+          path: filePath,
+          source: "openclaw",
+          endOffset: Math.max(0, Number(cursor?.offset || 0)),
+        }],
+        cursors: fileCursors,
+        queuePath: tmpQueue,
+      });
+      for (const [key, bucket] of Object.entries(
+        fileCursors.hourly?.buckets || {},
+      )) {
+        if (!key.startsWith("openclaw|")) continue;
+        mergeOpenclawRepairBucket(rebuiltBuckets, key, bucket);
+        rebuiltContributors.set(
+          key,
+          Number(rebuiltContributors.get(key) || 0) + 1,
+        );
+      }
+    }
   } catch (e) {
     console.error(
       "[sync] OpenClaw rescan repair: rebuild failed, leaving data untouched:",
@@ -3306,7 +3614,6 @@ async function repairOpenclawRescanInflation({
     await fs.rm(tmpQueue, { force: true }).catch(() => {});
   }
 
-  const rebuiltBuckets = rebuiltCursors.hourly?.buckets || {};
   const rebuiltKeys = new Set(
     Object.keys(rebuiltBuckets).filter((key) => key.startsWith("openclaw|")),
   );
@@ -3322,66 +3629,60 @@ async function repairOpenclawRescanInflation({
     return false;
   }
 
-  // Only buckets reproduced by the current files are owned by this repair.
-  // A present file may have been compacted, so an old bucket absent from the
-  // rebuild is not provably stale and must remain untouched.
-  const correctedKeys = rebuiltKeys;
-  const correctedRows = [...correctedKeys]
-    .sort()
-    .map((key) => JSON.stringify(openclawRepairRow(key, rebuiltBuckets[key])));
-  const pending = filterPendingOpenclawRows(
-    queueState.queue,
-    queueState.offset,
-    correctedKeys,
-  );
-  const pendingText = pending.kept.length ? `${pending.kept.join("\n")}\n` : "";
-  const correctionsText = correctedRows.length ? `${correctedRows.join("\n")}\n` : "";
-  await ensureDir(path.dirname(queuePath));
-  const tmp = `${queuePath}.tmp.${process.pid}.${Date.now()}`;
-  await fs.writeFile(
-    tmp,
-    Buffer.concat([
-      pending.prefix,
-      Buffer.from(pendingText, "utf8"),
-      Buffer.from(correctionsText, "utf8"),
-    ]),
-  );
-  await fs.rename(tmp, queuePath);
+  // Rebuilt totals alone are not authoritative: a present file may have been
+  // partially compacted. Require at least two monotonic full-snapshot deltas,
+  // then retain whichever complete value dominates: the pre-replay baseline or
+  // the largest proven snapshot. Crossing totals and multi-file keys defer.
+  const corrections = new Map();
+  for (const key of rebuiltKeys) {
+    if (rebuiltContributors.get(key) !== 1) continue;
+    const row = findProvenOpenclawRepairRow(
+      key,
+      queueRowsByKey.get(key),
+      rebuiltBuckets[key],
+    );
+    if (row) corrections.set(key, row);
+  }
+  const correctedKeys = new Set(corrections.keys());
+  const preservedUnprovenBuckets = [...new Set([
+    ...liveOpenclawKeys,
+    ...queueOpenclawKeys,
+  ])].filter((key) => !correctedKeys.has(key)).length;
+  if (correctedKeys.size > 0) {
+    const replacement = buildPendingOpenclawCorrectionQueue({
+      queueState,
+      corrections,
+    });
+    const plan = {
+      version: 1,
+      migration: OPENCLAW_RESCAN_REPAIR_KEY,
+      preparedAt: new Date().toISOString(),
+      filesRebuilt: trackedPaths.size,
+      preservedUnprovenBuckets,
+      corrections: [...corrections.values()],
+      replacementLength: replacement.length,
+      replacementDigest: crypto
+        .createHash("sha256")
+        .update(replacement)
+        .digest("hex"),
+    };
+    await writeJson(markerPath, plan);
+    await replacePendingOpenclawCorrections({ queuePath, replacement });
+    applyOpenclawRepairPlanToCursors(cursors, plan, corrections);
+    return true;
+  }
 
-  const liveHourly = (cursors.hourly ||= {
-    version: 3,
-    buckets: {},
-    groupQueued: {},
-  });
-  liveHourly.version = 3;
-  liveHourly.buckets ||= {};
-  liveHourly.groupQueued ||= {};
-  for (const [key, bucket] of Object.entries(rebuiltBuckets)) {
-    if (key.startsWith("openclaw|")) liveHourly.buckets[key] = bucket;
-  }
-  for (const [key, queued] of Object.entries(
-    rebuiltCursors.hourly?.groupQueued || {},
-  )) {
-    if (key.startsWith("openclaw|")) liveHourly.groupQueued[key] = queued;
-  }
-
-  cursors.files ||= {};
-  for (const filePath of Object.keys(cursors.files)) {
-    if (isOpenclawTrackedUsagePath(filePath)) delete cursors.files[filePath];
-  }
-  for (const [filePath, cursor] of Object.entries(rebuiltCursors.files || {})) {
-    cursors.files[filePath] = cursor;
-  }
+  // Keep live file offsets unchanged. The rebuild may include bytes appended
+  // after the last live cursor; advancing to its EOF here would make the later
+  // parser skip those not-yet-counted events. The normal OpenClaw parse adopts
+  // the identity baseline while counting only bytes beyond the old offset.
 
   migrations[OPENCLAW_RESCAN_REPAIR_KEY] = {
     status: "done",
     appliedAt: new Date().toISOString(),
     filesRebuilt: trackedPaths.size,
     correctedBuckets: correctedKeys.size,
-    preservedUnreproducedBuckets: [...new Set([
-      ...liveOpenclawKeys,
-      ...queueOpenclawKeys,
-    ])].filter((key) => !rebuiltKeys.has(key)).length,
+    preservedUnprovenBuckets,
   };
   return true;
 }

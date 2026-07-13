@@ -983,13 +983,11 @@ async function parseOpenclawIncremental({
       typeof entry === "string"
         ? defaultSource
         : normalizeSourceInput(entry?.source) || defaultSource;
-    const st = await fs.stat(filePath).catch(() => null);
-    if (!st || !st.isFile()) continue;
-
+    const requestedEndOffset =
+      typeof entry === "object" ? Number(entry?.endOffset) : NaN;
     const key = openclawCursorKey(filePath);
     const previousKey = cursorKeys.get(key);
     const prev = previousKey ? cursors.files[previousKey] : null;
-    const inode = st.ino || 0;
     const prevUsageEvents =
       prev?.usageEvents && typeof prev.usageEvents === "object" ? prev.usageEvents : {};
     const hasUsageEventCursor =
@@ -998,40 +996,138 @@ async function parseOpenclawIncremental({
       prev.usageEvents &&
       typeof prev.usageEvents === "object";
     const legacyCursor = prev && !hasUsageEventCursor;
-    const appendOnly =
-      prev &&
-      Number(prev.offset || 0) <= st.size &&
-      (prev.inode === inode || legacyCursor);
-    const startOffset = appendOnly
-      ? prev.offset || 0
-      : legacyCursor
-        ? st.size
-        : 0;
+    const previousOffset = Number(prev?.offset || 0);
+    let accepted = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const fileHandle = await fs.open(filePath, "r").catch(() => null);
+      if (!fileHandle) break;
+      try {
+        const openedStat = await fileHandle.stat();
+        if (!openedStat.isFile()) break;
+        const fileEndOffset =
+          Number.isFinite(requestedEndOffset) && requestedEndOffset >= 0
+            ? Math.min(openedStat.size, requestedEndOffset)
+            : openedStat.size;
+        let prefixFingerprint = null;
+        let prefixBoundaryMatches = false;
+        if (
+          hasUsageEventCursor &&
+          previousOffset <= fileEndOffset &&
+          prev?.usageFingerprint
+        ) {
+          const prefix = await parseOpenclawSessionFile({
+            filePath,
+            fileHandle,
+            startOffset: 0,
+            endOffsetLimit: previousOffset,
+            previousUsageEvents: {},
+            appendOnly: false,
+            collectOnly: true,
+          });
+          prefixFingerprint = prefix.usageFingerprint;
+          prefixBoundaryMatches = await openclawOffsetEndsAtLineBoundary(
+            fileHandle,
+            previousOffset,
+          );
+        }
+        const appendOnly =
+          prev &&
+          previousOffset <= fileEndOffset &&
+          (legacyCursor ||
+            (prefixBoundaryMatches &&
+              sameOpenclawUsageFingerprint(
+                prefixFingerprint,
+                prev.usageFingerprint,
+              )));
+        const startOffset = appendOnly
+          ? previousOffset
+          : legacyCursor
+            ? fileEndOffset
+            : 0;
+        const attemptHourly = { version: 3, buckets: {}, groupQueued: {} };
+        const attemptTouched = new Set();
+        const result = await parseOpenclawSessionFile({
+          filePath,
+          fileHandle,
+          startOffset,
+          endOffsetLimit: fileEndOffset,
+          previousUsageEvents: prevUsageEvents,
+          appendOnly,
+          hourlyState: attemptHourly,
+          touchedBuckets: attemptTouched,
+          source: fileSource,
+          projectState: null,
+          projectTouchedBuckets: null,
+        });
+        let nextUsageEvents = result.usageEvents;
+        if (legacyCursor) {
+          const baseline = await parseOpenclawSessionFile({
+            filePath,
+            fileHandle,
+            startOffset: 0,
+            endOffsetLimit: Math.min(previousOffset, fileEndOffset),
+            previousUsageEvents: {},
+            appendOnly: false,
+            collectOnly: true,
+          });
+          nextUsageEvents = mergeOpenclawUsageEventCounts(
+            baseline.usageEvents,
+            result.usageEvents,
+          );
+        }
+        const fullPrefix = await parseOpenclawSessionFile({
+          filePath,
+          fileHandle,
+          startOffset: 0,
+          endOffsetLimit: result.endOffset,
+          previousUsageEvents: {},
+          appendOnly: false,
+          collectOnly: true,
+        });
+        const closedStat = await fileHandle.stat();
+        const pathStat = await fs.stat(filePath).catch(() => null);
+        if (
+          !sameOpenclawFileGeneration(openedStat, closedStat) ||
+          !sameOpenclawFileGeneration(closedStat, pathStat)
+        ) {
+          continue;
+        }
+        accepted = {
+          inode: closedStat.ino || 0,
+          result,
+          hourly: attemptHourly,
+          touched: attemptTouched,
+          usageEvents: nextUsageEvents,
+          usageFingerprint: fullPrefix.usageFingerprint,
+        };
+        break;
+      } finally {
+        await fileHandle.close().catch(() => {});
+      }
+    }
+    if (!accepted) {
+      throw new Error(`OpenClaw session changed repeatedly while parsing: ${filePath}`);
+    }
 
-    const result = await parseOpenclawSessionFile({
-      filePath,
-      startOffset,
-      previousUsageEvents: prevUsageEvents,
-      appendOnly,
+    mergeOpenclawAttemptBuckets(
       hourlyState,
       touchedBuckets,
-      source: fileSource,
-      projectState,
-      projectTouchedBuckets,
-    });
-
+      accepted.hourly,
+      accepted.touched,
+    );
     if (previousKey && previousKey !== key) delete cursors.files[previousKey];
-    const nextCursor = {
-      inode,
-      offset: result.endOffset,
+    cursors.files[key] = {
+      provider: "openclaw",
+      inode: accepted.inode,
+      offset: accepted.result.endOffset,
+      usageFingerprint: accepted.usageFingerprint,
       updatedAt: new Date().toISOString(),
+      usageEvents: accepted.usageEvents,
     };
-    if (!legacyCursor) nextCursor.usageEvents = result.usageEvents;
-    cursors.files[key] = nextCursor;
     cursorKeys.set(key, key);
 
     filesProcessed += 1;
-    eventsAggregated += result.eventsAggregated;
+    eventsAggregated += accepted.result.eventsAggregated;
 
     if (cb) {
       cb({
@@ -1067,19 +1163,87 @@ function openclawCursorKey(filePath) {
   return isWindowsPath ? normalized.toLowerCase() : filePath;
 }
 
+function sameOpenclawFileGeneration(left, right) {
+  if (!left || !right || !left.isFile?.() || !right.isFile?.()) return false;
+  const leftInode = Number(left.ino || 0);
+  const rightInode = Number(right.ino || 0);
+  if (leftInode > 0 && rightInode > 0) {
+    if (leftInode !== rightInode || Number(left.dev || 0) !== Number(right.dev || 0)) {
+      return false;
+    }
+  }
+  return (
+    Number(left.size || 0) === Number(right.size || 0) &&
+    Number(left.mtimeMs || 0) === Number(right.mtimeMs || 0) &&
+    Number(left.ctimeMs || 0) === Number(right.ctimeMs || 0)
+  );
+}
+
+async function openclawOffsetEndsAtLineBoundary(fileHandle, offset) {
+  const byteOffset = Math.max(0, Number(offset) || 0);
+  if (byteOffset === 0) return true;
+  const buffer = Buffer.allocUnsafe(1);
+  const { bytesRead } = await fileHandle.read(buffer, 0, 1, byteOffset - 1);
+  return bytesRead === 1 && (buffer[0] === 0x0a || buffer[0] === 0x0d);
+}
+
+function sameOpenclawUsageFingerprint(left, right) {
+  return (
+    left?.version === 1 &&
+    right?.version === 1 &&
+    left.eventCount === right.eventCount &&
+    left.digest === right.digest
+  );
+}
+
+function mergeOpenclawUsageEventCounts(left, right) {
+  const merged = { ...(left || {}) };
+  for (const [key, count] of Object.entries(right || {})) {
+    merged[key] = Number(merged[key] || 0) + Number(count || 0);
+  }
+  return merged;
+}
+
+function mergeOpenclawAttemptBuckets(
+  hourlyState,
+  touchedBuckets,
+  attemptHourly,
+  attemptTouched,
+) {
+  for (const key of attemptTouched) {
+    const parsed = parseBucketKey(key);
+    const attemptBucket = attemptHourly.buckets[key];
+    if (!parsed || !attemptBucket) continue;
+    const bucket = getHourlyBucket(
+      hourlyState,
+      parsed.source,
+      parsed.model,
+      parsed.hourStart,
+    );
+    addTotals(bucket.totals, attemptBucket.totals);
+    touchedBuckets.add(key);
+  }
+}
+
 async function parseOpenclawSessionFile({
   filePath,
+  fileHandle,
   startOffset,
+  endOffsetLimit,
   previousUsageEvents,
   appendOnly,
+  collectOnly = false,
   hourlyState,
   touchedBuckets,
   source,
   projectState,
   projectTouchedBuckets,
 }) {
-  const st = await fs.stat(filePath);
-  const endOffset = st.size;
+  const st = fileHandle ? await fileHandle.stat() : await fs.stat(filePath);
+  const endOffset =
+    Number.isFinite(endOffsetLimit) && endOffsetLimit >= 0
+      ? Math.min(st.size, endOffsetLimit)
+      : st.size;
   const priorCounts =
     previousUsageEvents && typeof previousUsageEvents === "object"
       ? previousUsageEvents
@@ -1089,13 +1253,26 @@ async function parseOpenclawSessionFile({
       endOffset,
       eventsAggregated: 0,
       usageEvents: { ...priorCounts },
+      usageFingerprint: {
+        version: 1,
+        eventCount: 0,
+        digest: crypto.createHash("sha256").digest("hex"),
+      },
     };
   }
 
-  const stream = fssync.createReadStream(filePath, { encoding: "utf8", start: startOffset });
+  const stream = fssync.createReadStream(filePath, {
+    fd: fileHandle?.fd,
+    autoClose: !fileHandle,
+    encoding: "utf8",
+    start: startOffset,
+    end: endOffset - 1,
+  });
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
 
   let eventsAggregated = 0;
+  let fingerprintEventCount = 0;
+  const fingerprintHash = crypto.createHash("sha256");
   const scanCounts = appendOnly ? { ...priorCounts } : {};
   const usageEvents = { ...priorCounts };
   for await (const line of rl) {
@@ -1122,13 +1299,31 @@ async function parseOpenclawSessionFile({
 
     const model = normalizeModelInput(msg.model) || DEFAULT_MODEL;
     const eventIdentity = openclawUsageEventIdentity(obj, msg, usage, model);
+    fingerprintHash.update(
+      `${JSON.stringify(
+        openclawUsageFingerprintMetadata(
+          obj,
+          msg,
+          usage,
+          model,
+          eventIdentity.key,
+        ),
+      )}\n`,
+    );
+    fingerprintEventCount += 1;
     const priorCount = Number(priorCounts[eventIdentity.key] || 0);
     const nextCount = Number(scanCounts[eventIdentity.key] || 0) + 1;
     scanCounts[eventIdentity.key] = nextCount;
     usageEvents[eventIdentity.key] = eventIdentity.unique
       ? 1
       : Math.max(Number(usageEvents[eventIdentity.key] || 0), nextCount);
-    if (eventIdentity.unique ? priorCount > 0 : nextCount <= priorCount) continue;
+    if (
+      eventIdentity.unique
+        ? priorCount > 0 || nextCount > 1
+        : nextCount <= priorCount
+    ) {
+      continue;
+    }
 
     // OpenClaw wraps Codex, so it follows the same OpenAI convention where
     // `input` INCLUDES cached reads. Normalize by subtracting cached from
@@ -1155,18 +1350,55 @@ async function parseOpenclawSessionFile({
     const bucketStart = toUtcHalfHourStart(tokenTimestamp);
     if (!bucketStart) continue;
 
-    const bucket = getHourlyBucket(hourlyState, source, model, bucketStart);
-    addTotals(bucket.totals, delta);
-    touchedBuckets.add(bucketKey(source, model, bucketStart));
+    if (!collectOnly) {
+      const bucket = getHourlyBucket(hourlyState, source, model, bucketStart);
+      addTotals(bucket.totals, delta);
+      touchedBuckets.add(bucketKey(source, model, bucketStart));
+    }
 
     // Project-level OpenClaw attribution is not supported yet (no stable cwd info).
     // If OpenClaw later records cwd per event, we can mirror rollout's project logic.
-    eventsAggregated += 1;
+    if (!collectOnly) eventsAggregated += 1;
   }
 
   rl.close();
-  stream.close?.();
-  return { endOffset, eventsAggregated, usageEvents };
+  if (!fileHandle) stream.close?.();
+  return {
+    endOffset,
+    eventsAggregated,
+    usageEvents,
+    usageFingerprint: {
+      version: 1,
+      eventCount: fingerprintEventCount,
+      digest: fingerprintHash.digest("hex"),
+    },
+  };
+}
+
+function openclawUsageFingerprintMetadata(
+  obj,
+  msg,
+  usage,
+  model,
+  identityKey,
+) {
+  return {
+    identityKey,
+    timestamp: typeof obj?.timestamp === "string" ? obj.timestamp : null,
+    messageTimestamp:
+      typeof msg?.timestamp === "number" || typeof msg?.timestamp === "string"
+        ? msg.timestamp
+        : null,
+    responseId: typeof msg?.responseId === "string" ? msg.responseId : null,
+    model,
+    provider: typeof msg?.provider === "string" ? msg.provider : null,
+    api: typeof msg?.api === "string" ? msg.api : null,
+    input: Number(usage?.input || 0),
+    cacheRead: Number(usage?.cacheRead || 0),
+    cacheWrite: Number(usage?.cacheWrite || 0),
+    output: Number(usage?.output || 0),
+    totalTokens: Number(usage?.totalTokens || 0),
+  };
 }
 
 function openclawUsageEventIdentity(obj, msg, usage, model) {
