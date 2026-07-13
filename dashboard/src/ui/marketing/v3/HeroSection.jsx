@@ -156,7 +156,7 @@ export function HeroSection({
               {copy("landing.v3.hero.stat_label")}
             </p>
             <p
-              className="font-mono text-4xl font-bold tabular-nums leading-none text-white sm:tall:text-5xl"
+              className="whitespace-nowrap font-mono text-4xl font-bold tabular-nums leading-none text-white sm:tall:text-5xl"
               style={{
                 textShadow:
                   "0 2px 24px rgba(0, 0, 0, 0.9), 0 0 90px var(--lv3-accent-faint), 0 0 30px var(--lv3-accent-ghost)",
@@ -166,7 +166,21 @@ export function HeroSection({
                 value={tokenTotal}
                 animate={animate}
                 ratePerSec={tokensPerSec}
-                format={(v) => Math.round(v).toLocaleString("en-US")}
+                format={(v) =>
+                  Math.round(v)
+                    .toLocaleString("en-US")
+                    .split(",")
+                    .map((part, index) => (
+                      <React.Fragment key={`${index}-${part}`}>
+                        {index !== 0 ? (
+                          <span className="-mx-[0.14em] inline-block sm:mx-0">
+                            ,
+                          </span>
+                        ) : null}
+                        {part}
+                      </React.Fragment>
+                    ))
+                }
               />
             </p>
               <p className="font-mono text-sm text-oai-gray-300">

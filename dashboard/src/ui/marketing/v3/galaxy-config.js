@@ -52,9 +52,11 @@ export const DISC = {
   // Compact screens need enough movement to communicate the orbit within a
   // short mobile hero visit. One revolution takes roughly 45 seconds.
   mobileOrbitSpeed: 0.14,
-  mobileCameraZ: 22,
+  // A closer, narrower mobile camera lets the galaxy rim breathe past the
+  // viewport edges while the black-hole focal point remains fixed at 68vh.
+  mobileCameraZ: 20,
   mobileCameraY: 6,
-  mobileCameraFov: 92,
+  mobileCameraFov: 82,
   mobilePointScale: 1.45,
   mobileLensScale: 1.45,
   // The canvas covers the whole hero viewport (so no container edge can ever
@@ -99,7 +101,7 @@ const FRAME_ASPECT = 1.78;
 const ORB_RING = { cx: 50, cy: 43, rx: 40, ry: 34 };
 // Compact screens use a viewport-height galaxy stage, with the shared black
 // hole / counter focal point at 68vh.
-const MOBILE_ORB_RING = { cx: 50, cy: 68, rx: 41, ry: 15 };
+const MOBILE_ORB_RING = { cx: 50, cy: 68, rx: 43, ry: 19 };
 
 // Initial angle of each provider on the orbit, matching the designed slots.
 export function orbBaseAngles() {

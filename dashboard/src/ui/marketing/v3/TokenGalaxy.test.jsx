@@ -63,8 +63,11 @@ describe("TokenGalaxy", () => {
       orbScreenPos(angle, 1, true),
     );
 
-    expect(compactPositions.map(({ top }) => top)).toEqual([68, 53, 68, 83]);
-    expect(compactPositions.every(({ left }) => left >= 9 && left <= 91)).toBe(true);
+    expect(compactPositions.map(({ top }) => top)).toEqual([68, 49, 68, 87]);
+    compactPositions.forEach(({ left }) => {
+      expect(left).toBeGreaterThanOrEqual(7);
+      expect(left).toBeLessThanOrEqual(93);
+    });
     expect(orbScreenPos(0, 1, true, 55).top).toBe(55);
   });
 
@@ -74,6 +77,8 @@ describe("TokenGalaxy", () => {
 
     expect(mobile.cameraFov).toBeGreaterThan(desktop.cameraFov);
     expect(mobile.cameraZ).toBeGreaterThan(desktop.cameraZ);
+    expect(mobile.cameraFov).toBe(82);
+    expect(mobile.cameraZ).toBe(20);
     expect(mobile.pointScale).toBeGreaterThan(1);
     expect(mobile.lensScale).toBeGreaterThan(1);
     expect(mobile.lookAtY).toBe(DISC.yOffset);
