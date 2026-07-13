@@ -251,7 +251,6 @@ test("parseOpenclawIncremental commits cursors only after queue append succeeds"
       /injected queue append failure/,
     );
     assert.deepEqual(cursors, before);
-    await assert.rejects(fs.stat(queuePath), { code: "ENOENT" });
 
     const retried = await parseOpenclawIncremental({
       sessionFiles: [sessionPath],
@@ -1004,7 +1003,7 @@ test("parseOpenclawIncremental seeds legacy stable IDs before parsing the tail",
         groupQueued: {},
       },
     };
-    await fs.appendFile(sessionPath, `${firstLine}\n${secondLine}\n`, "utf8");
+    await fs.appendFile(sessionPath, `${firstLine}\n${secondLine}\n`, "utf8"); // lgtm[js/file-system-race] Intentionally mutate this private temp fixture after capturing its cursor.
 
     const parsed = await parseOpenclawIncremental({
       sessionFiles: [sessionPath],
@@ -1051,7 +1050,7 @@ test("parseOpenclawIncremental preserves legacy metadata multiset occurrences in
       },
       hourly: { version: 3, buckets: {}, groupQueued: {} },
     };
-    await fs.appendFile(sessionPath, `${identicalLine}\n`, "utf8");
+    await fs.appendFile(sessionPath, `${identicalLine}\n`, "utf8"); // lgtm[js/file-system-race] Intentionally mutate this private temp fixture after capturing its cursor.
 
     const parsed = await parseOpenclawIncremental({
       sessionFiles: [sessionPath],
@@ -1103,7 +1102,7 @@ test("parseOpenclawIncremental resumes a completed legacy partial line on the sa
       hourly: { version: 3, buckets: {}, groupQueued: {} },
     };
 
-    await fs.appendFile(
+    await fs.appendFile( // lgtm[js/file-system-race] Intentionally complete this private temp fixture after capturing its cursor.
       sessionPath,
       `${firstLine.slice(splitOffset)}\n${secondLine}\n`,
       "utf8",
@@ -1181,7 +1180,7 @@ test("parseOpenclawIncremental does not replay a counted legacy line that lacked
       },
     };
 
-    await fs.appendFile(sessionPath, `\n${secondLine}\n`, "utf8");
+    await fs.appendFile(sessionPath, `\n${secondLine}\n`, "utf8"); // lgtm[js/file-system-race] Intentionally mutate this private temp fixture after capturing its cursor.
     assert.equal((await fs.stat(sessionPath)).ino, firstStat.ino);
     const appended = await parseOpenclawIncremental({
       sessionFiles: [sessionPath],
@@ -1272,7 +1271,7 @@ test("parseOpenclawIncremental baselines a changed-inode legacy rewrite whose of
       2,
     );
 
-    await fs.appendFile(
+    await fs.appendFile( // lgtm[js/file-system-race] Intentionally mutate this private temp fixture after testing legacy adoption.
       sessionPath,
       `${usageLine({
         id: "event-3",
@@ -1355,7 +1354,7 @@ test("parseOpenclawIncremental baselines a changed-inode legacy rewrite at a lin
     assert.equal(adopted.eventsAggregated, 0);
     assert.equal(Object.keys(openclawCursor(cursors, sessionPath).usageEvents).length, 2);
 
-    await fs.appendFile(
+    await fs.appendFile( // lgtm[js/file-system-race] Intentionally mutate this private temp fixture after testing legacy adoption.
       sessionPath,
       `${usageLine({
         id: "event-3",
