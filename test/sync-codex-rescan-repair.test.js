@@ -83,6 +83,9 @@ async function withTempSyncEnv(fn) {
   const home = await makeTempHome();
   const saved = {
     HOME: process.env.HOME,
+    // os.homedir() reads USERPROFILE on Windows, so isolate it too or the test
+    // writes into the developer's real ~/.tokentracker.
+    USERPROFILE: process.env.USERPROFILE,
     CODEX_HOME: process.env.CODEX_HOME,
     CODE_HOME: process.env.CODE_HOME,
     GEMINI_HOME: process.env.GEMINI_HOME,
@@ -92,6 +95,7 @@ async function withTempSyncEnv(fn) {
   };
   try {
     process.env.HOME = home;
+    process.env.USERPROFILE = home;
     process.env.CODEX_HOME = path.join(home, ".codex");
     process.env.CODE_HOME = path.join(home, ".code");
     process.env.GEMINI_HOME = path.join(home, ".gemini");

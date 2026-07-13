@@ -10,6 +10,11 @@ const cp = require("node:child_process");
 (async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-spawn-"));
   const prevHome = process.env.HOME;
+  // os.homedir() reads USERPROFILE on Windows and ignores HOME, so isolating via
+  // HOME alone leaks cmdInit's config write into the developer's real
+  // ~/.tokentracker on Windows (corrupting config.baseUrl to example.invalid and
+  // breaking cloud upload). Redirect USERPROFILE too.
+  const prevUserProfile = process.env.USERPROFILE;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
   const prevWrite = process.stdout.write;
@@ -19,6 +24,7 @@ const cp = require("node:child_process");
 
   try {
     process.env.HOME = tmp;
+    process.env.USERPROFILE = tmp;
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     delete process.env.TOKENTRACKER_DEVICE_TOKEN;
     await fs.mkdir(process.env.CODEX_HOME, { recursive: true });
@@ -48,6 +54,8 @@ const cp = require("node:child_process");
     process.stdout.write = prevWrite;
     if (prevHome === undefined) delete process.env.HOME;
     else process.env.HOME = prevHome;
+    if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prevUserProfile;
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;

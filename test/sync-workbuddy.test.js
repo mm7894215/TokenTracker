@@ -20,6 +20,9 @@ test("cmdSync ingests WorkBuddy SQLite-only installs without duplicate snapshots
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-sync-workbuddy-"));
   const prevEnv = {
     HOME: process.env.HOME,
+    // os.homedir() reads USERPROFILE on Windows, so isolate it too or the test
+    // writes into the developer's real ~/.tokentracker.
+    USERPROFILE: process.env.USERPROFILE,
     CODEX_HOME: process.env.CODEX_HOME,
     CODE_HOME: process.env.CODE_HOME,
     GEMINI_HOME: process.env.GEMINI_HOME,
@@ -29,6 +32,7 @@ test("cmdSync ingests WorkBuddy SQLite-only installs without duplicate snapshots
   };
   try {
     process.env.HOME = tmp;
+    process.env.USERPROFILE = tmp;
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     process.env.CODE_HOME = path.join(tmp, ".code");
     process.env.GEMINI_HOME = path.join(tmp, ".gemini");

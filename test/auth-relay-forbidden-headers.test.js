@@ -14,6 +14,7 @@ const path = require("node:path");
 const { mkdtemp, rm } = require("node:fs/promises");
 
 const { createLocalApiHandler } = require("../src/lib/local-api.js");
+const { withHome } = require("./helpers/with-home");
 
 function listen(server, host = "127.0.0.1") {
   return new Promise((resolve, reject) => {
@@ -69,7 +70,7 @@ function request(url, { method = "GET", headers = {}, body = "" } = {}) {
 }
 
 test("POST /api/auth/* strips Content-Length before forwarding to fetch", async () => {
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevBase = process.env.TOKENTRACKER_INSFORGE_BASE_URL;
   const tempHome = await mkdtemp(path.join(os.tmpdir(), "tt-auth-relay-"));
 
@@ -97,7 +98,7 @@ test("POST /api/auth/* strips Content-Length before forwarding to fetch", async 
   });
 
   try {
-    process.env.HOME = tempHome;
+    restoreHome = withHome(tempHome);
     const upAddr = await listen(upstream);
     process.env.TOKENTRACKER_INSFORGE_BASE_URL = `http://127.0.0.1:${upAddr.port}`;
     const localAddr = await listen(local);
@@ -122,8 +123,7 @@ test("POST /api/auth/* strips Content-Length before forwarding to fetch", async 
     await closeServer(local);
     await closeServer(upstream);
     await rm(tempHome, { recursive: true, force: true });
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevBase === undefined) delete process.env.TOKENTRACKER_INSFORGE_BASE_URL;
     else process.env.TOKENTRACKER_INSFORGE_BASE_URL = prevBase;
   }

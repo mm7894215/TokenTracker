@@ -5,6 +5,7 @@ const path = require("node:path");
 const { test } = require("node:test");
 
 const { createLocalApiHandler } = require("../src/lib/local-api");
+const { withHome } = require("./helpers/with-home");
 
 function createRequest({ method = "GET", headers = {}, body } = {}) {
   return {
@@ -33,18 +34,17 @@ function createResponse() {
 
 async function withTempHome(run) {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-relay-cookies-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevBaseUrl = process.env.TOKENTRACKER_INSFORGE_BASE_URL;
   const prevFetch = globalThis.fetch;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.TOKENTRACKER_INSFORGE_BASE_URL = "https://example.invalid";
     await run(tmp);
   } finally {
     globalThis.fetch = prevFetch;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevBaseUrl === undefined) delete process.env.TOKENTRACKER_INSFORGE_BASE_URL;
     else process.env.TOKENTRACKER_INSFORGE_BASE_URL = prevBaseUrl;
     await fs.rm(tmp, { recursive: true, force: true });

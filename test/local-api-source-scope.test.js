@@ -5,6 +5,7 @@ const path = require("node:path");
 const { test } = require("node:test");
 
 const { createLocalApiHandler } = require("../src/lib/local-api");
+const { withHome } = require("./helpers/with-home");
 
 async function writeQueue(queuePath, rows) {
   await fs.promises.writeFile(queuePath, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
@@ -227,7 +228,7 @@ test("usage-model-breakdown defaults to all scope and can explicitly exclude acc
 
 test("usage-category-breakdown supports codex source", async () => {
   const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), "tt-localapi-codex-context-"));
-  const oldHome = process.env.HOME;
+  let restoreHome = () => {};
   try {
     const queuePath = path.join(tmp, "queue.jsonl");
     await writeQueue(queuePath, []);
@@ -279,7 +280,7 @@ test("usage-category-breakdown supports codex source", async () => {
       ].join("\n") + "\n",
     );
 
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     const result = await callEndpoint(
       queuePath,
       "/functions/tokentracker-usage-category-breakdown?from=2026-05-08&to=2026-05-08&source=codex",
@@ -292,14 +293,14 @@ test("usage-category-breakdown supports codex source", async () => {
     assert.ok(Array.isArray(result.exec_command_breakdown.by_type));
     assert.ok(Array.isArray(result.exec_command_breakdown.by_exit));
   } finally {
-    process.env.HOME = oldHome;
+    restoreHome();
     await fs.promises.rm(tmp, { recursive: true, force: true });
   }
 });
 
 test("usage-category-breakdown falls back to codex queue totals when rollout sessions are unavailable", async () => {
   const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), "tt-localapi-codex-context-fallback-"));
-  const oldHome = process.env.HOME;
+  let restoreHome = () => {};
   try {
     const queuePath = path.join(tmp, "queue.jsonl");
     await writeQueue(queuePath, [
@@ -317,7 +318,7 @@ test("usage-category-breakdown falls back to codex queue totals when rollout ses
       },
     ]);
 
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     const result = await callEndpoint(
       queuePath,
       "/functions/tokentracker-usage-category-breakdown?from=2026-05-09&to=2026-05-09&source=codex&tz=Asia/Shanghai",
@@ -332,7 +333,7 @@ test("usage-category-breakdown falls back to codex queue totals when rollout ses
     assert.equal(result.totals.cached_input_tokens, 200);
     assert.equal(result.message_count, 2);
   } finally {
-    process.env.HOME = oldHome;
+    restoreHome();
     await fs.promises.rm(tmp, { recursive: true, force: true });
   }
 });
