@@ -563,8 +563,11 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
   // oh-my-pi: passive reader — no hook installation needed.
   // TokenTracker reads ~/.omp/agent/sessions/**/*.jsonl directly.
   {
-    const ompSessions = path.join(resolveOmpAgentDir(process.env), "sessions");
-    if (fssync.existsSync(ompSessions)) {
+    // resolveOmpAgentDir returns null on Windows when ~/.omp doesn't exist (the
+    // win32 path resolver only yields a dir it can see) — null means "not
+    // installed", so skip rather than path.join(null, …) and crash.
+    const ompAgentDir = resolveOmpAgentDir(process.env);
+    if (ompAgentDir && fssync.existsSync(path.join(ompAgentDir, "sessions"))) {
       summary.push({ label: "oh-my-pi", status: "detected", detail: "Passive reader (no hook needed)" });
     }
   }
@@ -573,8 +576,10 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
   // TokenTracker reads ~/.pi/agent/sessions/**/*.jsonl directly. Skip when its
   // agent dir collides with omp's so the summary matches what sync will scan.
   if (!piAgentDirCollidesWithOmp(process.env)) {
-    const piSessions = path.join(resolvePiAgentDir(process.env), "sessions");
-    if (fssync.existsSync(piSessions)) {
+    // Same win32 nullability as oh-my-pi above: resolvePiAgentDir is null when
+    // ~/.pi doesn't exist, so guard before joining.
+    const piAgentDir = resolvePiAgentDir(process.env);
+    if (piAgentDir && fssync.existsSync(path.join(piAgentDir, "sessions"))) {
       summary.push({ label: "pi", status: "detected", detail: "Passive reader (no hook needed)" });
     }
   }
