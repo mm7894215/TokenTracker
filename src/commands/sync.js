@@ -3180,13 +3180,20 @@ async function readOpenclawQueueState(queuePath, queueStatePath) {
   }
 
   let uploadState = {};
+  let validUploadState = true;
   try {
-    uploadState = JSON.parse(await fs.readFile(queueStatePath, "utf8"));
+    const parsed = JSON.parse(await fs.readFile(queueStatePath, "utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      validUploadState = false;
+    } else {
+      uploadState = parsed;
+    }
   } catch (e) {
-    if (e?.code !== "ENOENT") uploadState = {};
+    if (e?.code !== "ENOENT") validUploadState = false;
   }
   const offset = Number(uploadState?.offset || 0);
   const validOffset =
+    validUploadState &&
     Number.isInteger(offset) &&
     offset >= 0 &&
     offset <= queue.length &&

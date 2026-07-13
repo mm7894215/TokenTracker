@@ -92,8 +92,9 @@ test("parseOpenclawIncremental counts only the new event after an atomic session
   }
 });
 
-test("parseOpenclawIncremental keeps the append-only fast path", async () => {
+test("parseOpenclawIncremental keeps the append-only fast path", async (t) => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-openclaw-"));
+  const realCreateReadStream = fssync.createReadStream.bind(fssync);
   try {
     const sessionPath = path.join(tmp, "session.jsonl");
     const queuePath = path.join(tmp, "queue.jsonl");
@@ -115,6 +116,14 @@ test("parseOpenclawIncremental keeps the append-only fast path", async () => {
     });
     const inode = openclawCursor(cursors, sessionPath).inode;
     const offset = openclawCursor(cursors, sessionPath).offset;
+    const scannedRanges = [];
+    mockMethod(t, fssync, "createReadStream", (...args) => {
+      scannedRanges.push({
+        start: args[1]?.start,
+        end: args[1]?.end,
+      });
+      return realCreateReadStream(...args);
+    });
 
     await fs.appendFile(sessionPath, `${secondLine}\n`, "utf8");
     const second = await parseOpenclawIncremental({
@@ -126,6 +135,17 @@ test("parseOpenclawIncremental keeps the append-only fast path", async () => {
     assert.equal(second.eventsAggregated, 1);
     assert.equal(openclawCursor(cursors, sessionPath).inode, inode);
     assert.ok(openclawCursor(cursors, sessionPath).offset > offset);
+    assert.deepEqual(
+      scannedRanges,
+      [
+        { start: 0, end: offset - 1 },
+        {
+          start: offset,
+          end: openclawCursor(cursors, sessionPath).offset - 1,
+        },
+      ],
+      "routine appends should verify the prior prefix once and extend its fingerprint with the tail",
+    );
     const bucket = cursors.hourly.buckets[
       "openclaw|claude-opus-4.7|2026-07-07T13:30:00.000Z"
     ];
@@ -600,6 +620,77 @@ test("parseOpenclawIncremental adopts a legacy offset cursor without replaying h
       "openclaw|claude-opus-4.7|2026-07-07T13:30:00.000Z"
     ];
     assert.equal(bucket.totals.conversation_count, 2);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseOpenclawIncremental extends a legacy fingerprint without a full rescan", async (t) => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-openclaw-"));
+  const realCreateReadStream = fssync.createReadStream.bind(fssync);
+  try {
+    const sessionPath = path.join(tmp, "session.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const firstLine = usageLine({
+      id: "event-1",
+      timestamp: "2026-07-07T13:31:00.000Z",
+    });
+    const secondLine = usageLine({
+      id: "event-2",
+      timestamp: "2026-07-07T13:32:00.000Z",
+    });
+    await writeLines(sessionPath, [firstLine, secondLine]);
+    const stat = await fs.stat(sessionPath);
+    const previousOffset = Buffer.byteLength(`${firstLine}\n`);
+    const cursors = {
+      version: 1,
+      files: {
+        [openclawCursorKey(sessionPath)]: {
+          inode: stat.ino,
+          offset: previousOffset,
+        },
+      },
+      hourly: {
+        version: 3,
+        buckets: {
+          "openclaw|claude-opus-4.7|2026-07-07T13:30:00.000Z": {
+            totals: {
+              input_tokens: 200,
+              cached_input_tokens: 1_000,
+              cache_creation_input_tokens: 81_071,
+              output_tokens: 50,
+              reasoning_output_tokens: 0,
+              total_tokens: 82_321,
+              billable_total_tokens: 82_321,
+              conversation_count: 1,
+            },
+          },
+        },
+        groupQueued: {},
+      },
+    };
+    const scannedRanges = [];
+    mockMethod(t, fssync, "createReadStream", (...args) => {
+      scannedRanges.push({
+        start: args[1]?.start,
+        end: args[1]?.end,
+      });
+      return realCreateReadStream(...args);
+    });
+
+    const adopted = await parseOpenclawIncremental({
+      sessionFiles: [sessionPath],
+      cursors,
+      queuePath,
+    });
+
+    assert.equal(adopted.eventsAggregated, 1);
+    assert.deepEqual(scannedRanges, [
+      { start: 0, end: previousOffset - 1 },
+      { start: previousOffset, end: stat.size - 1 },
+    ]);
+    assert.equal(openclawCursor(cursors, sessionPath).usageFingerprint.eventCount, 2);
+    assert.equal(Object.keys(openclawCursor(cursors, sessionPath).usageEvents).length, 2);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

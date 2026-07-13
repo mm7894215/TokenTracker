@@ -1009,6 +1009,7 @@ async function parseOpenclawIncremental({
             ? Math.min(openedStat.size, requestedEndOffset)
             : openedStat.size;
         let prefixFingerprint = null;
+        let prefixFingerprintState = null;
         let prefixBoundaryMatches = false;
         if (
           hasUsageEventCursor &&
@@ -1025,6 +1026,7 @@ async function parseOpenclawIncremental({
             collectOnly: true,
           });
           prefixFingerprint = prefix.usageFingerprint;
+          prefixFingerprintState = prefix.usageFingerprintState;
           prefixBoundaryMatches = await openclawOffsetEndsAtLineBoundary(
             fileHandle,
             previousOffset,
@@ -1046,6 +1048,17 @@ async function parseOpenclawIncremental({
             : 0;
         const attemptHourly = { version: 3, buckets: {}, groupQueued: {} };
         const attemptTouched = new Set();
+        const legacyBaseline = legacyCursor
+          ? await parseOpenclawSessionFile({
+              filePath,
+              fileHandle,
+              startOffset: 0,
+              endOffsetLimit: Math.min(previousOffset, fileEndOffset),
+              previousUsageEvents: {},
+              appendOnly: false,
+              collectOnly: true,
+            })
+          : null;
         const result = await parseOpenclawSessionFile({
           filePath,
           fileHandle,
@@ -1053,6 +1066,9 @@ async function parseOpenclawIncremental({
           endOffsetLimit: fileEndOffset,
           previousUsageEvents: prevUsageEvents,
           appendOnly,
+          usageFingerprintState:
+            legacyBaseline?.usageFingerprintState ||
+            (appendOnly ? prefixFingerprintState : null),
           hourlyState: attemptHourly,
           touchedBuckets: attemptTouched,
           source: fileSource,
@@ -1061,29 +1077,11 @@ async function parseOpenclawIncremental({
         });
         let nextUsageEvents = result.usageEvents;
         if (legacyCursor) {
-          const baseline = await parseOpenclawSessionFile({
-            filePath,
-            fileHandle,
-            startOffset: 0,
-            endOffsetLimit: Math.min(previousOffset, fileEndOffset),
-            previousUsageEvents: {},
-            appendOnly: false,
-            collectOnly: true,
-          });
           nextUsageEvents = mergeOpenclawUsageEventCounts(
-            baseline.usageEvents,
+            legacyBaseline.usageEvents,
             result.usageEvents,
           );
         }
-        const fullPrefix = await parseOpenclawSessionFile({
-          filePath,
-          fileHandle,
-          startOffset: 0,
-          endOffsetLimit: result.endOffset,
-          previousUsageEvents: {},
-          appendOnly: false,
-          collectOnly: true,
-        });
         const closedStat = await fileHandle.stat();
         const pathStat = await fs.stat(filePath).catch(() => null);
         if (
@@ -1098,7 +1096,7 @@ async function parseOpenclawIncremental({
           hourly: attemptHourly,
           touched: attemptTouched,
           usageEvents: nextUsageEvents,
-          usageFingerprint: fullPrefix.usageFingerprint,
+          usageFingerprint: result.usageFingerprint,
         };
         break;
       } finally {
@@ -1232,6 +1230,7 @@ async function parseOpenclawSessionFile({
   endOffsetLimit,
   previousUsageEvents,
   appendOnly,
+  usageFingerprintState,
   collectOnly = false,
   hourlyState,
   touchedBuckets,
@@ -1248,6 +1247,15 @@ async function parseOpenclawSessionFile({
     previousUsageEvents && typeof previousUsageEvents === "object"
       ? previousUsageEvents
       : {};
+  let fingerprintEventCount =
+    Number.isInteger(usageFingerprintState?.eventCount) &&
+    usageFingerprintState.eventCount >= 0
+      ? usageFingerprintState.eventCount
+      : 0;
+  const fingerprintHash =
+    typeof usageFingerprintState?.hash?.copy === "function"
+      ? usageFingerprintState.hash.copy()
+      : crypto.createHash("sha256");
   if (startOffset >= endOffset) {
     return {
       endOffset,
@@ -1255,8 +1263,12 @@ async function parseOpenclawSessionFile({
       usageEvents: { ...priorCounts },
       usageFingerprint: {
         version: 1,
-        eventCount: 0,
-        digest: crypto.createHash("sha256").digest("hex"),
+        eventCount: fingerprintEventCount,
+        digest: fingerprintHash.copy().digest("hex"),
+      },
+      usageFingerprintState: {
+        eventCount: fingerprintEventCount,
+        hash: fingerprintHash,
       },
     };
   }
@@ -1271,8 +1283,6 @@ async function parseOpenclawSessionFile({
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
 
   let eventsAggregated = 0;
-  let fingerprintEventCount = 0;
-  const fingerprintHash = crypto.createHash("sha256");
   const scanCounts = appendOnly ? { ...priorCounts } : {};
   const usageEvents = { ...priorCounts };
   for await (const line of rl) {
@@ -1370,7 +1380,11 @@ async function parseOpenclawSessionFile({
     usageFingerprint: {
       version: 1,
       eventCount: fingerprintEventCount,
-      digest: fingerprintHash.digest("hex"),
+      digest: fingerprintHash.copy().digest("hex"),
+    },
+    usageFingerprintState: {
+      eventCount: fingerprintEventCount,
+      hash: fingerprintHash,
     },
   };
 }

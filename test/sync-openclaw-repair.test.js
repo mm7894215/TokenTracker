@@ -11,7 +11,10 @@ const {
   cmdSync,
   repairOpenclawRescanInflation,
 } = require("../src/commands/sync");
-const { parseOpenclawIncremental } = require("../src/lib/rollout");
+const {
+  openclawCursorKey,
+  parseOpenclawIncremental,
+} = require("../src/lib/rollout");
 const { mockMethod } = require("./helpers/mock");
 
 function usageLine({
@@ -79,6 +82,10 @@ function latestByKey(rows) {
     latest.set(`${value.source}|${value.model}|${value.hour_start}`, value);
   }
   return latest;
+}
+
+function openclawCursor(cursors, filePath) {
+  return cursors.files[openclawCursorKey(filePath)];
 }
 
 async function makeInflatedInstall({
@@ -391,13 +398,142 @@ test("repairOpenclawRescanInflation defers when any tracked session file is miss
       "a deferred repair must not make a legacy cursor replay history",
     );
     assert.ok(
-      Object.keys(install.cursors.files[install.sessionPath].usageEvents).length >
+      Object.keys(openclawCursor(install.cursors, install.sessionPath).usageEvents)
+        .length >
         0,
       "the legacy cursor should adopt a metadata-only identity baseline",
     );
     assert.equal(
-      install.cursors.files[install.sessionPath].usageFingerprint?.version,
+      openclawCursor(install.cursors, install.sessionPath).usageFingerprint?.version,
       1,
+    );
+  } finally {
+    await fs.rm(install.home, { recursive: true, force: true });
+  }
+});
+
+test("repairOpenclawRescanInflation defers when queue state JSON is malformed", async () => {
+  const install = await makeInflatedInstall();
+  try {
+    await fs.writeFile(install.queueStatePath, "{not-json", "utf8");
+    const queueBefore = await fs.readFile(install.queuePath, "utf8");
+    const usageStateBefore = structuredClone({
+      files: install.cursors.files,
+      hourly: install.cursors.hourly,
+    });
+
+    const changed = await repairOpenclawRescanInflation({
+      cursors: install.cursors,
+      queuePath: install.queuePath,
+      queueStatePath: install.queueStatePath,
+    });
+
+    assert.equal(changed, false);
+    assert.equal(await fs.readFile(install.queuePath, "utf8"), queueBefore);
+    assert.deepEqual(
+      {
+        files: install.cursors.files,
+        hourly: install.cursors.hourly,
+      },
+      usageStateBefore,
+    );
+    assert.deepEqual(
+      {
+        status: install.cursors.migrations[OPENCLAW_RESCAN_REPAIR_KEY].status,
+        reason: install.cursors.migrations[OPENCLAW_RESCAN_REPAIR_KEY].reason,
+      },
+      {
+        status: "deferred",
+        reason: "openclaw_queue_offset_invalid",
+      },
+    );
+  } finally {
+    await fs.rm(install.home, { recursive: true, force: true });
+  }
+});
+
+test("repairOpenclawRescanInflation defers when queue state JSON is not an object", async () => {
+  const install = await makeInflatedInstall();
+  try {
+    await fs.writeFile(install.queueStatePath, "[]", "utf8");
+    const queueBefore = await fs.readFile(install.queuePath, "utf8");
+    const usageStateBefore = structuredClone({
+      files: install.cursors.files,
+      hourly: install.cursors.hourly,
+    });
+
+    const changed = await repairOpenclawRescanInflation({
+      cursors: install.cursors,
+      queuePath: install.queuePath,
+      queueStatePath: install.queueStatePath,
+    });
+
+    assert.equal(changed, false);
+    assert.equal(await fs.readFile(install.queuePath, "utf8"), queueBefore);
+    assert.deepEqual(
+      {
+        files: install.cursors.files,
+        hourly: install.cursors.hourly,
+      },
+      usageStateBefore,
+    );
+    assert.deepEqual(
+      {
+        status: install.cursors.migrations[OPENCLAW_RESCAN_REPAIR_KEY].status,
+        reason: install.cursors.migrations[OPENCLAW_RESCAN_REPAIR_KEY].reason,
+      },
+      {
+        status: "deferred",
+        reason: "openclaw_queue_offset_invalid",
+      },
+    );
+  } finally {
+    await fs.rm(install.home, { recursive: true, force: true });
+  }
+});
+
+test("repairOpenclawRescanInflation defers when queue state cannot be read", async (t) => {
+  const install = await makeInflatedInstall();
+  const realReadFile = fs.readFile.bind(fs);
+  try {
+    const queueBefore = await realReadFile(install.queuePath, "utf8");
+    const usageStateBefore = structuredClone({
+      files: install.cursors.files,
+      hourly: install.cursors.hourly,
+    });
+    mockMethod(t, fs, "readFile", async (filePath, ...args) => {
+      if (path.resolve(String(filePath)) === path.resolve(install.queueStatePath)) {
+        const error = new Error("permission denied");
+        error.code = "EACCES";
+        throw error;
+      }
+      return realReadFile(filePath, ...args);
+    });
+
+    const changed = await repairOpenclawRescanInflation({
+      cursors: install.cursors,
+      queuePath: install.queuePath,
+      queueStatePath: install.queueStatePath,
+    });
+
+    assert.equal(changed, false);
+    assert.equal(await realReadFile(install.queuePath, "utf8"), queueBefore);
+    assert.deepEqual(
+      {
+        files: install.cursors.files,
+        hourly: install.cursors.hourly,
+      },
+      usageStateBefore,
+    );
+    assert.deepEqual(
+      {
+        status: install.cursors.migrations[OPENCLAW_RESCAN_REPAIR_KEY].status,
+        reason: install.cursors.migrations[OPENCLAW_RESCAN_REPAIR_KEY].reason,
+      },
+      {
+        status: "deferred",
+        reason: "openclaw_queue_offset_invalid",
+      },
     );
   } finally {
     await fs.rm(install.home, { recursive: true, force: true });
@@ -582,7 +718,7 @@ test("repairOpenclawRescanInflation preserves partially compacted history in a p
 test("repairOpenclawRescanInflation leaves an uncounted tail for the normal parser", async () => {
   const install = await makeInflatedInstall();
   try {
-    const priorOffset = install.cursors.files[install.sessionPath].offset;
+    const priorOffset = openclawCursor(install.cursors, install.sessionPath).offset;
     await fs.appendFile(
       install.sessionPath,
       `${usageLine({
@@ -598,7 +734,7 @@ test("repairOpenclawRescanInflation leaves an uncounted tail for the normal pars
       queueStatePath: install.queueStatePath,
     });
     assert.equal(
-      install.cursors.files[install.sessionPath].offset,
+      openclawCursor(install.cursors, install.sessionPath).offset,
       priorOffset,
       "repair must not advance past uncounted bytes",
     );

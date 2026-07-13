@@ -72,10 +72,10 @@ jobs:
           node-version: 24
           cache: npm
 
-      - name: Test OpenClaw parser on macOS
+      - name: Test OpenClaw parser and repair on macOS
         run: |
           npm ci
-          node --test test/openclaw-parser.test.js
+          node --test test/openclaw-parser.test.js test/sync-openclaw-repair.test.js
 
       - name: Install xcodegen
         run: brew install xcodegen
@@ -112,10 +112,10 @@ jobs:
           node-version: 24
           cache: npm
 
-      - name: Test OpenClaw parser on Windows
+      - name: Test OpenClaw parser and repair on Windows
         run: |
           npm ci
-          node --test test/openclaw-parser.test.js
+          node --test test/openclaw-parser.test.js test/sync-openclaw-repair.test.js
 
       - name: Build TokenTrackerWin
         run: dotnet build TokenTrackerWin/TokenTrackerWin.csproj --configuration Release
