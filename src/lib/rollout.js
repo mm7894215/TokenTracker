@@ -970,6 +970,10 @@ async function parseOpenclawIncremental({
   if (!cursors.files || typeof cursors.files !== "object") {
     cursors.files = {};
   }
+  const cursorKeys = new Map();
+  for (const existingKey of Object.keys(cursors.files)) {
+    cursorKeys.set(openclawCursorKey(existingKey), existingKey);
+  }
 
   for (let idx = 0; idx < files.length; idx++) {
     const entry = files[idx];
@@ -982,14 +986,33 @@ async function parseOpenclawIncremental({
     const st = await fs.stat(filePath).catch(() => null);
     if (!st || !st.isFile()) continue;
 
-    const key = filePath;
-    const prev = cursors.files[key] || null;
+    const key = openclawCursorKey(filePath);
+    const previousKey = cursorKeys.get(key);
+    const prev = previousKey ? cursors.files[previousKey] : null;
     const inode = st.ino || 0;
-    const startOffset = prev && prev.inode === inode ? prev.offset || 0 : 0;
+    const prevUsageEvents =
+      prev?.usageEvents && typeof prev.usageEvents === "object" ? prev.usageEvents : {};
+    const hasUsageEventCursor =
+      prev &&
+      Object.prototype.hasOwnProperty.call(prev, "usageEvents") &&
+      prev.usageEvents &&
+      typeof prev.usageEvents === "object";
+    const legacyCursor = prev && !hasUsageEventCursor;
+    const appendOnly =
+      prev &&
+      Number(prev.offset || 0) <= st.size &&
+      (prev.inode === inode || legacyCursor);
+    const startOffset = appendOnly
+      ? prev.offset || 0
+      : legacyCursor
+        ? st.size
+        : 0;
 
     const result = await parseOpenclawSessionFile({
       filePath,
       startOffset,
+      previousUsageEvents: prevUsageEvents,
+      appendOnly,
       hourlyState,
       touchedBuckets,
       source: fileSource,
@@ -997,11 +1020,15 @@ async function parseOpenclawIncremental({
       projectTouchedBuckets,
     });
 
-    cursors.files[key] = {
+    if (previousKey && previousKey !== key) delete cursors.files[previousKey];
+    const nextCursor = {
       inode,
       offset: result.endOffset,
       updatedAt: new Date().toISOString(),
     };
+    if (!legacyCursor) nextCursor.usageEvents = result.usageEvents;
+    cursors.files[key] = nextCursor;
+    cursorKeys.set(key, key);
 
     filesProcessed += 1;
     eventsAggregated += result.eventsAggregated;
@@ -1032,9 +1059,19 @@ async function parseOpenclawIncremental({
   return { filesProcessed, eventsAggregated, bucketsQueued, projectBucketsQueued };
 }
 
+function openclawCursorKey(filePath) {
+  if (typeof filePath !== "string") return "";
+  const normalized = filePath.replace(/\\/g, "/");
+  const isWindowsPath =
+    /^[a-zA-Z]:\//.test(normalized) || normalized.startsWith("//");
+  return isWindowsPath ? normalized.toLowerCase() : filePath;
+}
+
 async function parseOpenclawSessionFile({
   filePath,
   startOffset,
+  previousUsageEvents,
+  appendOnly,
   hourlyState,
   touchedBuckets,
   source,
@@ -1043,12 +1080,24 @@ async function parseOpenclawSessionFile({
 }) {
   const st = await fs.stat(filePath);
   const endOffset = st.size;
-  if (startOffset >= endOffset) return { endOffset, eventsAggregated: 0 };
+  const priorCounts =
+    previousUsageEvents && typeof previousUsageEvents === "object"
+      ? previousUsageEvents
+      : {};
+  if (startOffset >= endOffset) {
+    return {
+      endOffset,
+      eventsAggregated: 0,
+      usageEvents: { ...priorCounts },
+    };
+  }
 
   const stream = fssync.createReadStream(filePath, { encoding: "utf8", start: startOffset });
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
 
   let eventsAggregated = 0;
+  const scanCounts = appendOnly ? { ...priorCounts } : {};
+  const usageEvents = { ...priorCounts };
   for await (const line of rl) {
     if (!line) continue;
     // Fast-path filter: OpenClaw assistant messages include message.usage.totalTokens.
@@ -1072,6 +1121,14 @@ async function parseOpenclawSessionFile({
     if (!tokenTimestamp) continue;
 
     const model = normalizeModelInput(msg.model) || DEFAULT_MODEL;
+    const eventIdentity = openclawUsageEventIdentity(obj, msg, usage, model);
+    const priorCount = Number(priorCounts[eventIdentity.key] || 0);
+    const nextCount = Number(scanCounts[eventIdentity.key] || 0) + 1;
+    scanCounts[eventIdentity.key] = nextCount;
+    usageEvents[eventIdentity.key] = eventIdentity.unique
+      ? 1
+      : Math.max(Number(usageEvents[eventIdentity.key] || 0), nextCount);
+    if (eventIdentity.unique ? priorCount > 0 : nextCount <= priorCount) continue;
 
     // OpenClaw wraps Codex, so it follows the same OpenAI convention where
     // `input` INCLUDES cached reads. Normalize by subtracting cached from
@@ -1109,7 +1166,38 @@ async function parseOpenclawSessionFile({
 
   rl.close();
   stream.close?.();
-  return { endOffset, eventsAggregated };
+  return { endOffset, eventsAggregated, usageEvents };
+}
+
+function openclawUsageEventIdentity(obj, msg, usage, model) {
+  const stableId =
+    typeof obj?.id === "string" && obj.id.trim() ? obj.id.trim() : null;
+  if (stableId) {
+    return {
+      key: `id:${crypto.createHash("sha256").update(stableId).digest("hex")}`,
+      unique: true,
+    };
+  }
+
+  const metadata = {
+    timestamp: typeof obj?.timestamp === "string" ? obj.timestamp : null,
+    messageTimestamp: typeof msg?.timestamp === "number" || typeof msg?.timestamp === "string"
+      ? msg.timestamp
+      : null,
+    responseId: typeof msg?.responseId === "string" ? msg.responseId : null,
+    model,
+    provider: typeof msg?.provider === "string" ? msg.provider : null,
+    api: typeof msg?.api === "string" ? msg.api : null,
+    input: Number(usage?.input || 0),
+    cacheRead: Number(usage?.cacheRead || 0),
+    cacheWrite: Number(usage?.cacheWrite || 0),
+    output: Number(usage?.output || 0),
+    totalTokens: Number(usage?.totalTokens || 0),
+  };
+  return {
+    key: `meta:${crypto.createHash("sha256").update(JSON.stringify(metadata)).digest("hex")}`,
+    unique: false,
+  };
 }
 
 /**
@@ -12151,6 +12239,7 @@ module.exports = {
   parseGeminiIncremental,
   parseOpencodeIncremental,
   parseOpencodeDbIncremental,
+  openclawCursorKey,
   parseOpenclawIncremental,
   parseCursorApiIncremental,
   parseKiroIncremental,
