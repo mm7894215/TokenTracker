@@ -33,10 +33,30 @@ function compactNumber(n) {
   return String(Math.round(n));
 }
 
-function formatCost(n) {
-  if (n >= 1000) return "$" + Math.round(n).toLocaleString("en-US");
-  if (n >= 100) return "$" + n.toFixed(0);
-  return "$" + n.toFixed(2);
+function formatEmbedCost(usd, opts) {
+  const { code, symbol, rate } = opts;
+  if (!Number.isFinite(usd)) return `${symbol}0.00`;
+  const converted = code === "USD" ? usd : usd * rate;
+  if (converted >= 1000) return symbol + Math.round(converted).toLocaleString("en-US");
+  if (converted >= 100) return symbol + converted.toFixed(0);
+  return symbol + converted.toFixed(2);
+}
+
+function parseEmbedCurrency(searchParams) {
+  const code = String(searchParams.get("currency") || "USD")
+    .trim()
+    .toUpperCase();
+  const normalized = ["USD", "EUR", "GBP", "CNY", "JPY", "HKD", "INR"].includes(code) ? code : "USD";
+  const symbols = { USD: "$", EUR: "€", GBP: "£", CNY: "¥", JPY: "¥", HKD: "HK$", INR: "₹" };
+  const defaults = { USD: 1, EUR: 0.92, GBP: 0.79, CNY: 7.2, JPY: 155, HKD: 7.8, INR: 83.5 };
+  const rateRaw = searchParams.get("rate");
+  const parsedRate = rateRaw != null && rateRaw.trim() !== "" ? Number(rateRaw) : NaN;
+  const rate = Number.isFinite(parsedRate) && parsedRate > 0 ? parsedRate : defaults[normalized];
+  return { code: normalized, symbol: symbols[normalized], rate };
+}
+
+function formatCost(n, searchParams = new URLSearchParams()) {
+  return formatEmbedCost(n, parseEmbedCurrency(searchParams));
 }
 
 function textWidth(s) {
@@ -97,6 +117,12 @@ test("formatCost rounds large vs small", () => {
   assert.equal(formatCost(99.5), "$99.50");
   assert.equal(formatCost(150), "$150");
   assert.equal(formatCost(9414.84), "$9,415");
+});
+
+test("formatCost supports INR via query params", () => {
+  const params = new URLSearchParams("currency=INR&rate=83.5");
+  assert.equal(formatCost(1, params), "₹83.50");
+  assert.equal(formatCost(100, params), "₹8,350");
 });
 
 test("renderBadgeSvg produces well-formed SVG with brand color", () => {

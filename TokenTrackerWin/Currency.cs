@@ -25,6 +25,7 @@ internal static class Currency
             ["CNY"] = ("¥", 7.2m),
             ["JPY"] = ("¥", 155m),
             ["HKD"] = ("HK$", 7.8m),
+            ["INR"] = ("₹", 83.5m),
         };
 
     public static string Symbol(string? code) =>

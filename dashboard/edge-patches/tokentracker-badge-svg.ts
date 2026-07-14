@@ -10,6 +10,8 @@
  *   user_id  (required) – UUID of the user (from tokentracker_leaderboard_snapshots)
  *   metric   tokens | cost | rank        (default: tokens)
  *   period   week | month | total         (default: total)
+ *   currency ISO code (USD default; supports INR, EUR, …)
+ *   rate     optional USD→currency multiplier (bundled default when omitted)
  *   style    flat | flat-square           (default: flat)
  *   compact  1 to shorten numbers (1.2B vs 1,234,567,890)
  *   label    custom left-side label (default: "tokentracker" or the metric name)
@@ -21,6 +23,7 @@
  * Caching: 60s ISR (Cache-Control: public, max-age=60).
  */
 import { createClient } from "npm:@insforge/sdk";
+import { formatEmbedCost, parseEmbedCurrency } from "./embed-currency.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -73,12 +76,6 @@ function compactNumber(n: number): string {
   if (abs >= 1e6) return (n / 1e6).toFixed(2).replace(/\.?0+$/, "") + "M";
   if (abs >= 1e3) return (n / 1e3).toFixed(2).replace(/\.?0+$/, "") + "K";
   return String(Math.round(n));
-}
-
-function formatCost(n: number): string {
-  if (n >= 1000) return "$" + Math.round(n).toLocaleString("en-US");
-  if (n >= 100) return "$" + n.toFixed(0);
-  return "$" + n.toFixed(2);
 }
 
 // Rough text width for "Verdana, DejaVu Sans, sans-serif" at 11px,
@@ -204,6 +201,7 @@ export default async function (req: Request): Promise<Response> {
   const compact = url.searchParams.get("compact") !== "0";
   const customLabel = url.searchParams.get("label");
   const customColor = url.searchParams.get("color");
+  const currencyOpts = parseEmbedCurrency(url.searchParams);
 
   if (!userId || !isUuid(userId)) {
     return svgResponse(renderErrorBadge("tokentracker", "bad user_id"), 400, 0);
@@ -274,7 +272,7 @@ export default async function (req: Request): Promise<Response> {
     const n = Number(row.total_tokens ?? 0);
     value = compact ? `${compactNumber(n)} tokens` : `${n.toLocaleString("en-US")} tokens`;
   } else if (metric === "cost") {
-    value = formatCost(Number(row.estimated_cost_usd ?? 0));
+    value = formatEmbedCost(Number(row.estimated_cost_usd ?? 0), currencyOpts);
   } else {
     value = `#${row.rank ?? "?"}`;
   }

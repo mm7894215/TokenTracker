@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { copy } from "../../lib/copy";
 import { formatCompactNumber, formatUsdCurrency } from "../../lib/format";
+import { CURRENCY_USD, getCurrencySymbol } from "../../lib/currency";
 import { useCurrency } from "../../hooks/useCurrency.js";
 import { getLeaderboardProfile } from "../../lib/api";
 import { resolveAuthAccessTokenWithRetry } from "../../lib/auth-token";
@@ -28,8 +29,9 @@ const BadgeDetailModal = React.lazy(() => import("../../ui/achievements/BadgeDet
 function formatCost(value, currency, rate) {
   const n = Number(value);
   if (!Number.isFinite(n) || n < 0) return "—";
-  if (n > 0 && n < 0.01) {
-    const symbol = currency === "USD" ? "$" : "";
+  const symbol = getCurrencySymbol(currency);
+  const converted = currency === CURRENCY_USD || !rate ? n : n * rate;
+  if (converted > 0 && converted < 0.01) {
     return `<${symbol}0.01`;
   }
   return formatUsdCurrency(n, { decimals: 2, currency, rate });
@@ -45,7 +47,7 @@ function formatCostCompact(value, currency, rate) {
   if (!Number.isFinite(n) || n < 0) return "—";
   if (n < 1000) return formatCost(n, currency, rate);
   const converted = currency === "USD" ? n : n * (rate || 1);
-  const symbol = currency === "USD" ? "$" : "";
+  const symbol = getCurrencySymbol(currency);
   return `${symbol}${formatCompactNumber(converted, { decimals: 1 })}`;
 }
 
@@ -461,7 +463,7 @@ export function ProfileContent({ data, currency, rate, onClose, variant = "modal
   const isOwnProfile = Boolean(auth?.user?.id && user?.user_id && auth.user.id === user.user_id);
   const profileUrl = user?.user_id ? `https://www.tokentracker.cc/u/${user.user_id}` : null;
   const badgeSnippet = user?.user_id
-    ? `[![My AI coding usage](${getInsforgeRemoteUrl()}/functions/tokentracker-embed-svg?user_id=${user.user_id}&theme=dark)](${profileUrl}?ref=readme)`
+    ? `[![My AI coding usage](${getInsforgeRemoteUrl()}/functions/tokentracker-embed-svg?user_id=${user.user_id}&theme=dark&currency=${encodeURIComponent(currency)}&rate=${encodeURIComponent(rate)})](${profileUrl}?ref=readme)`
     : null;
 
   return (

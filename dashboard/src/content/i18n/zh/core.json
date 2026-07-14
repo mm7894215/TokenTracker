@@ -384,6 +384,7 @@
   "settings.appearance.currency.opt.cny": "人民币 (¥)",
   "settings.appearance.currency.opt.jpy": "日元 (¥)",
   "settings.appearance.currency.opt.hkd": "港币 (HK$)",
+  "settings.appearance.currency.opt.inr": "印度卢比 (₹)",
   "settings.appearance.currency.rate_source.default": "内置默认汇率",
   "settings.appearance.currency.rate_source.fetched": "数据源：open.er-api.com",
   "settings.appearance.currency.rate_updated": "更新于 {{when}}",

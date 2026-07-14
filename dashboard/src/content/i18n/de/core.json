@@ -164,6 +164,7 @@
   "settings.appearance.currency.opt.cny": "Chinesischer Yuan (¥)",
   "settings.appearance.currency.opt.jpy": "Japanischer Yen (¥)",
   "settings.appearance.currency.opt.hkd": "Hongkong-Dollar (HK$)",
+  "settings.appearance.currency.opt.inr": "Indische Rupie (₹)",
   "settings.appearance.currency.rate_source.default": "Integrierte Standard-Wechselkurse",
   "settings.appearance.currency.rate_source.fetched": "Datenquelle: open.er-api.com",
   "settings.appearance.currency.rate_updated": "Aktualisiert {{when}}",

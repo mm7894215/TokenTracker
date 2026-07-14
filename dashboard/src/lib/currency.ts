@@ -4,7 +4,7 @@ export const CURRENCY_USD = "USD";
 // Back-compat alias — some legacy callers still reference this constant by name.
 export const CURRENCY_CNY = "CNY";
 
-export const SUPPORTED_CURRENCY_CODES = ["USD", "EUR", "GBP", "CNY", "JPY", "HKD"] as const;
+export const SUPPORTED_CURRENCY_CODES = ["USD", "EUR", "GBP", "CNY", "JPY", "HKD", "INR"] as const;
 export type CurrencyCode = (typeof SUPPORTED_CURRENCY_CODES)[number];
 
 interface CurrencyMeta {
@@ -19,6 +19,7 @@ const CURRENCY_META: Record<CurrencyCode, CurrencyMeta> = {
   CNY: { symbol: "¥", labelKey: "settings.appearance.currency.opt.cny" },
   JPY: { symbol: "¥", labelKey: "settings.appearance.currency.opt.jpy" },
   HKD: { symbol: "HK$", labelKey: "settings.appearance.currency.opt.hkd" },
+  INR: { symbol: "₹", labelKey: "settings.appearance.currency.opt.inr" },
 };
 
 // Bundled defaults — last known good snapshot, used until the live fetch lands.
@@ -30,6 +31,7 @@ export const DEFAULT_RATES: Record<CurrencyCode, number> = {
   CNY: 7.2,
   JPY: 155,
   HKD: 7.8,
+  INR: 83.5,
 };
 
 export const CURRENCY_STORAGE_KEY = "tokentracker-currency";
@@ -74,8 +76,40 @@ export function getSupportedCurrencies(): Array<{
   return SUPPORTED_CURRENCY_CODES.map((code) => ({ code, ...CURRENCY_META[code] }));
 }
 
+function getNavigatorLanguages(): string[] {
+  if (typeof navigator === "undefined") return [];
+  if (Array.isArray(navigator.languages) && navigator.languages.length) {
+    return navigator.languages.filter((value) => typeof value === "string");
+  }
+  return typeof navigator.language === "string" ? [navigator.language] : [];
+}
+
+/**
+ * When the user has never picked a currency, default INR for India-region
+ * browser locales (en-IN, hi-IN, …). Otherwise USD.
+ */
+export function inferDefaultCurrencyFromLocale(
+  languages: string[] = getNavigatorLanguages(),
+): CurrencyCode {
+  for (const tag of languages) {
+    const normalized = String(tag || "").trim();
+    if (!normalized) continue;
+    try {
+      const locale = new Intl.Locale(normalized);
+      if (locale.region === "IN") return "INR";
+    } catch {
+      if (/-IN$/i.test(normalized)) return "INR";
+    }
+  }
+  return CURRENCY_USD;
+}
+
 export function getInitialCurrency(): CurrencyCode {
-  return normalizeCurrency(safeGetItem(CURRENCY_STORAGE_KEY));
+  const stored = safeGetItem(CURRENCY_STORAGE_KEY);
+  if (stored != null && String(stored).trim() !== "") {
+    return normalizeCurrency(stored);
+  }
+  return inferDefaultCurrencyFromLocale();
 }
 
 export function persistCurrency(value: any): boolean {

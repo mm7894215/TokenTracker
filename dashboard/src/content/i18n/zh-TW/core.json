@@ -370,6 +370,7 @@
   "settings.appearance.currency.opt.cny": "人民幣 (¥)",
   "settings.appearance.currency.opt.jpy": "日元 (¥)",
   "settings.appearance.currency.opt.hkd": "港幣 (HK$)",
+  "settings.appearance.currency.opt.inr": "印度盧比 (₹)",
   "settings.appearance.currency.rate_source.default": "內建預設匯率",
   "settings.appearance.currency.rate_source.fetched": "資料來源：open.er-api.com",
   "settings.appearance.currency.rate_updated": "更新於 {{when}}",

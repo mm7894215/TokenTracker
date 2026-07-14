@@ -1,13 +1,17 @@
 import React from "react";
 import { Card } from "../../components";
 import { copy } from "../../../lib/copy";
+import { CURRENCY_USD } from "../../../lib/currency";
+import { formatUsdCurrency } from "../../../lib/format";
+import { useCurrency } from "../../../hooks/useCurrency.js";
 import { useQualityPerDollarPref } from "../../../hooks/use-quality-per-dollar-pref.js";
 import { useQualityPerDollar } from "../../../hooks/use-quality-per-dollar";
 
-function money(n) {
+function formatMoney(n, currency, rate) {
   if (n == null) return "—";
-  if (n === 0) return "$0";
-  return n < 1 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
+  const converted = currency === CURRENCY_USD || !rate ? n : n * rate;
+  const decimals = converted === 0 ? 2 : Math.abs(converted) < 1 ? 4 : 2;
+  return formatUsdCurrency(n, { currency, rate, decimals });
 }
 
 function compactTokens(n) {
@@ -21,27 +25,27 @@ function pct(rate) {
   return rate == null ? "—" : `${Math.round(rate * 100)}%`;
 }
 
-// Calculate the average token cost per accepted outcome (PR).
-// Highly intuitive alternative to raw Qual/$.
-function avgCostPerAcc(cost_usd, accepted) {
+function avgCostPerAcc(cost_usd, accepted, currency, rate) {
   if (accepted == null || accepted === 0) return "—";
   if (cost_usd == null || cost_usd === 0) return "—";
   const perAcc = cost_usd / accepted;
-  return perAcc < 1 ? `$${perAcc.toFixed(4)}` : `$${perAcc.toFixed(2)}`;
+  const convertedPerAcc = currency === CURRENCY_USD || !rate ? perAcc : perAcc * rate;
+  const decimals = Math.abs(convertedPerAcc) < 1 ? 4 : 2;
+  return formatUsdCurrency(perAcc, { currency, rate, decimals });
 }
 
-function Row({ row }) {
+function Row({ row, currency, rate }) {
   return (
     <tr className="border-t border-oai-gray-100 dark:border-oai-gray-800/60 hover:bg-oai-gray-50/40 dark:hover:bg-oai-gray-800/10 transition-colors">
       <td className="py-2.5 pr-2 font-mono text-[11px] text-oai-gray-700 dark:text-oai-gray-300 truncate max-w-[80px] xs:max-w-[110px] sm:max-w-[140px]" title={row.key}>
         {row.key}
       </td>
-      <td className="py-2.5 px-1.5 text-right tabular-nums text-oai-gray-600 dark:text-oai-gray-400">{money(row.cost_usd)}</td>
+      <td className="py-2.5 px-1.5 text-right tabular-nums text-oai-gray-600 dark:text-oai-gray-400">{formatMoney(row.cost_usd, currency, rate)}</td>
       <td className="py-2.5 px-1.5 text-right tabular-nums text-oai-gray-600 dark:text-oai-gray-400">
         {row.accepted}/{row.outcomes}
       </td>
       <td className="py-2.5 px-1.5 text-right tabular-nums text-oai-gray-600 dark:text-oai-gray-400">{pct(row.acceptance_rate)}</td>
-      <td className="py-2.5 pl-2 pr-2 text-right tabular-nums font-semibold text-oai-black dark:text-oai-white">{avgCostPerAcc(row.cost_usd, row.accepted)}</td>
+      <td className="py-2.5 pl-2 pr-2 text-right tabular-nums font-semibold text-oai-black dark:text-oai-white">{avgCostPerAcc(row.cost_usd, row.accepted, currency, rate)}</td>
     </tr>
   );
 }
@@ -56,6 +60,7 @@ function Row({ row }) {
 export function QualityPerDollarCard({ from, to, deviceId = null }) {
   const { enabled } = useQualityPerDollarPref();
   const { data, loading } = useQualityPerDollar({ enabled, from, to, deviceId });
+  const { currency, rate } = useCurrency();
 
   if (!enabled) return null;
   const models = (data && data.available && Array.isArray(data.by_model) ? data.by_model : []).filter(
@@ -90,7 +95,7 @@ export function QualityPerDollarCard({ from, to, deviceId = null }) {
           </thead>
           <tbody>
             {top.map((row) => (
-              <Row key={row.key} row={row} />
+              <Row key={row.key} row={row} currency={currency} rate={rate} />
             ))}
           </tbody>
         </table>
@@ -101,7 +106,7 @@ export function QualityPerDollarCard({ from, to, deviceId = null }) {
           {copy("qpd.card.totals", {
             accepted: totals.accepted ?? 0,
             outcomes: totals.outcomes ?? 0,
-            cost: money(totals.cost_usd),
+            cost: formatMoney(totals.cost_usd, currency, rate),
           })}
         </span>
         <span title={copy("qpd.card.et_tooltip")}>

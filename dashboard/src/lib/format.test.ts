@@ -63,6 +63,7 @@ describe("formatUsdCurrency — non-USD conversion", () => {
     expect(formatUsdCurrency(1, { currency: "GBP", rate: 0.79 })).toBe("£0.79");
     expect(formatUsdCurrency(1, { currency: "JPY", rate: 155 })).toBe("¥155.00");
     expect(formatUsdCurrency(1, { currency: "HKD", rate: 7.8 })).toBe("HK$7.80");
+    expect(formatUsdCurrency(1, { currency: "INR", rate: 83.5 })).toBe("₹83.50");
   });
 
   it("falls back to no conversion for invalid rate", () => {
