@@ -7,6 +7,7 @@ const path = require("node:path");
 const cp = require("node:child_process");
 
 const { cmdSync } = require("../src/commands/sync");
+const { withHome } = require("./helpers/with-home");
 
 async function readJsonLines(filePath) {
   const raw = await fs.readFile(filePath, "utf8").catch(() => "");
@@ -19,10 +20,6 @@ async function readJsonLines(filePath) {
 test("cmdSync ingests WorkBuddy SQLite-only installs without duplicate snapshots", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-sync-workbuddy-"));
   const prevEnv = {
-    HOME: process.env.HOME,
-    // os.homedir() reads USERPROFILE on Windows, so isolate it too or the test
-    // writes into the developer's real ~/.tokentracker.
-    USERPROFILE: process.env.USERPROFILE,
     CODEX_HOME: process.env.CODEX_HOME,
     CODE_HOME: process.env.CODE_HOME,
     GEMINI_HOME: process.env.GEMINI_HOME,
@@ -30,9 +27,8 @@ test("cmdSync ingests WorkBuddy SQLite-only installs without duplicate snapshots
     XDG_DATA_HOME: process.env.XDG_DATA_HOME,
     WORKBUDDY_HOME: process.env.WORKBUDDY_HOME,
   };
+  const restoreHome = withHome(tmp);
   try {
-    process.env.HOME = tmp;
-    process.env.USERPROFILE = tmp;
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     process.env.CODE_HOME = path.join(tmp, ".code");
     process.env.GEMINI_HOME = path.join(tmp, ".gemini");
@@ -74,6 +70,7 @@ test("cmdSync ingests WorkBuddy SQLite-only installs without duplicate snapshots
     assert.equal(rows[1].input_tokens, 150);
     assert.equal(rows[1].total_tokens, 150);
   } finally {
+    restoreHome();
     for (const [key, value] of Object.entries(prevEnv)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
