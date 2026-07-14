@@ -6,6 +6,7 @@ const { test } = require("node:test");
 
 const { cmdInit } = require("../src/commands/init");
 const { resolveOpencodePluginDir, DEFAULT_PLUGIN_NAME } = require("../src/lib/opencode-config");
+const { withHome } = require("./helpers/with-home");
 
 function stripAnsi(text) {
   return String(text || "").replace(/\x1b\[[0-9;]*m/g, "");
@@ -13,7 +14,7 @@ function stripAnsi(text) {
 
 test("dry-run preview reports opencode install when config is missing", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-dry-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
   const prevWrite = process.stdout.write;
@@ -21,7 +22,7 @@ test("dry-run preview reports opencode install when config is missing", async ()
   let output = "";
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.OPENCODE_CONFIG_DIR = path.join(tmp, ".config", "opencode");
     delete process.env.TOKENTRACKER_DEVICE_TOKEN;
 
@@ -50,8 +51,7 @@ test("dry-run preview reports opencode install when config is missing", async ()
     await assert.rejects(fs.stat(pluginPath), /ENOENT/);
   } finally {
     process.stdout.write = prevWrite;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevOpencodeConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
     else process.env.OPENCODE_CONFIG_DIR = prevOpencodeConfigDir;
     if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;

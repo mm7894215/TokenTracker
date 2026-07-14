@@ -4,6 +4,7 @@ const fs = require("node:fs/promises");
 const fssync = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { withHome } = require("./helpers/with-home");
 
 const {
   cmdSync,
@@ -417,14 +418,14 @@ describe("repairGrokQueueFromSessionSnapshots", () => {
 
   it("regular sync does not run Grok history repair unless explicitly requested", async () => {
     const dir = await makeTempDir();
-    const prevHome = process.env.HOME;
+    let restoreHome = () => {};
     const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
     const prevCodexHome = process.env.CODEX_HOME;
     const prevCodeHome = process.env.CODE_HOME;
     const prevGrokHome = process.env.GROK_HOME;
     const prevTrackerGrokHome = process.env.TOKENTRACKER_GROK_HOME;
     try {
-      process.env.HOME = dir;
+      restoreHome = withHome(dir);
       delete process.env.TOKENTRACKER_DEVICE_TOKEN;
       process.env.CODEX_HOME = path.join(dir, ".codex");
       process.env.CODE_HOME = path.join(dir, ".code");
@@ -471,8 +472,7 @@ describe("repairGrokQueueFromSessionSnapshots", () => {
         undefined,
       );
     } finally {
-      if (prevHome === undefined) delete process.env.HOME;
-      else process.env.HOME = prevHome;
+      restoreHome();
       if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;
       else process.env.TOKENTRACKER_DEVICE_TOKEN = prevToken;
       if (prevCodexHome === undefined) delete process.env.CODEX_HOME;

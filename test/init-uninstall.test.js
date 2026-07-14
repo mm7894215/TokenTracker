@@ -10,6 +10,7 @@ const {
   repairCodexNotifyIntegration,
 } = require("../src/commands/init");
 const { cmdUninstall } = require("../src/commands/uninstall");
+const { withHome } = require("./helpers/with-home");
 const { buildClaudeHookCommand } = require("../src/lib/claude-config");
 const { buildGeminiHookCommand } = require("../src/lib/gemini-config");
 const {
@@ -378,11 +379,11 @@ test("serve-time Codex notify repair refreshes stale backup when active notify i
 
 test("serve-time Codex notify repair clears stale backup when active notify is absent", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-notify-repair-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevWrite = process.stdout.write;
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     const trackerDir = path.join(tmp, ".tokentracker", "tracker");
     const binDir = path.join(tmp, ".tokentracker", "bin");
@@ -418,8 +419,7 @@ test("serve-time Codex notify repair clears stale backup when active notify is a
     assert.doesNotMatch(restored, /old-notify/);
   } finally {
     process.stdout.write = prevWrite;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     await fs.rm(tmp, { recursive: true, force: true });
@@ -523,14 +523,14 @@ test("notify handler still chains normal original notify commands", async () => 
 
 test("init preserves existing config fields and custom URLs", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-config-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
   const prevOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
   const prevWrite = process.stdout.write;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     delete process.env.TOKENTRACKER_DEVICE_TOKEN;
     process.env.OPENCODE_CONFIG_DIR = path.join(tmp, ".config", "opencode");
@@ -566,8 +566,7 @@ test("init preserves existing config fields and custom URLs", async () => {
     assert.equal(config.customFlag, true);
   } finally {
     process.stdout.write = prevWrite;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -580,14 +579,14 @@ test("init preserves existing config fields and custom URLs", async () => {
 
 test("init then uninstall restores original Codex notify (when pre-existing notify exists)", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
   const prevOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
   const prevWrite = process.stdout.write;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex-alt");
     delete process.env.TOKENTRACKER_DEVICE_TOKEN;
     process.env.OPENCODE_CONFIG_DIR = path.join(tmp, ".config", "opencode");
@@ -622,8 +621,7 @@ test("init then uninstall restores original Codex notify (when pre-existing noti
     await assert.rejects(fs.stat(notifyHandlerPath), /ENOENT/);
   } finally {
     process.stdout.write = prevWrite;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -636,14 +634,14 @@ test("init then uninstall restores original Codex notify (when pre-existing noti
 
 test("init refreshes stale Codex backup when current notify is external", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-refresh-backup-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
   const prevOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
   const prevWrite = process.stdout.write;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     delete process.env.TOKENTRACKER_DEVICE_TOKEN;
     process.env.OPENCODE_CONFIG_DIR = path.join(tmp, ".config", "opencode");
@@ -675,8 +673,7 @@ test("init refreshes stale Codex backup when current notify is external", async 
     assert.doesNotMatch(restored, /old-notify/);
   } finally {
     process.stdout.write = prevWrite;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -689,14 +686,14 @@ test("init refreshes stale Codex backup when current notify is external", async 
 
 test("init clears stale Codex backup when current notify is absent", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-clear-backup-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
   const prevOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
   const prevWrite = process.stdout.write;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     delete process.env.TOKENTRACKER_DEVICE_TOKEN;
     process.env.OPENCODE_CONFIG_DIR = path.join(tmp, ".config", "opencode");
@@ -727,8 +724,7 @@ test("init clears stale Codex backup when current notify is absent", async () =>
     assert.doesNotMatch(restored, /old-notify/);
   } finally {
     process.stdout.write = prevWrite;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -753,14 +749,14 @@ test("opencode config exports plugin constants", () => {
 
 test("init then uninstall removes notify when none existed", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
   const prevOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
   const prevWrite = process.stdout.write;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     delete process.env.TOKENTRACKER_DEVICE_TOKEN;
     process.env.OPENCODE_CONFIG_DIR = path.join(tmp, ".config", "opencode");
@@ -784,8 +780,7 @@ test("init then uninstall removes notify when none existed", async () => {
     );
   } finally {
     process.stdout.write = prevWrite;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -798,14 +793,14 @@ test("init then uninstall removes notify when none existed", async () => {
 
 test("uninstall does not restore stale backup over active third-party Codex notify", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
   const prevOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
   const prevWrite = process.stdout.write;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     delete process.env.TOKENTRACKER_DEVICE_TOKEN;
     process.env.OPENCODE_CONFIG_DIR = path.join(tmp, ".config", "opencode");
@@ -828,8 +823,7 @@ test("uninstall does not restore stale backup over active third-party Codex noti
     assert.equal(restored, 'notify = ["third-party-notify", "new"]\n');
   } finally {
     process.stdout.write = prevWrite;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -842,7 +836,7 @@ test("uninstall does not restore stale backup over active third-party Codex noti
 
 test("init skips Codex notify when config is missing", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
   const prevOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
@@ -850,7 +844,7 @@ test("init skips Codex notify when config is missing", async () => {
   const prevWrite = process.stdout.write;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     process.env.GEMINI_HOME = path.join(tmp, ".gemini");
     delete process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -863,8 +857,7 @@ test("init skips Codex notify when config is missing", async () => {
     await assert.rejects(fs.stat(codexConfigPath), /ENOENT/);
   } finally {
     process.stdout.write = prevWrite;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -879,7 +872,7 @@ test("init skips Codex notify when config is missing", async () => {
 
 test("init then uninstall restores original Every Code notify (when config exists)", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevCodeHome = process.env.CODE_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -887,7 +880,7 @@ test("init then uninstall restores original Every Code notify (when config exist
   const prevWrite = process.stdout.write;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     process.env.CODE_HOME = path.join(tmp, ".code");
     delete process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -921,8 +914,7 @@ test("init then uninstall restores original Every Code notify (when config exist
     );
   } finally {
     process.stdout.write = prevWrite;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevCodeHome === undefined) delete process.env.CODE_HOME;
@@ -937,7 +929,7 @@ test("init then uninstall restores original Every Code notify (when config exist
 
 test("init clears stale Every Code backup when current notify is absent", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevCodeHome = process.env.CODE_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -945,7 +937,7 @@ test("init clears stale Every Code backup when current notify is absent", async 
   const prevWrite = process.stdout.write;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     process.env.CODE_HOME = path.join(tmp, ".code");
     delete process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -981,8 +973,7 @@ test("init clears stale Every Code backup when current notify is absent", async 
     assert.doesNotMatch(restored, /old-code-notify/);
   } finally {
     process.stdout.write = prevWrite;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevCodeHome === undefined) delete process.env.CODE_HOME;
@@ -997,7 +988,7 @@ test("init clears stale Every Code backup when current notify is absent", async 
 
 test("init refreshes stale Every Code backup when current notify is external", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevCodeHome = process.env.CODE_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -1005,7 +996,7 @@ test("init refreshes stale Every Code backup when current notify is external", a
   const prevWrite = process.stdout.write;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     process.env.CODE_HOME = path.join(tmp, ".code");
     delete process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -1041,8 +1032,7 @@ test("init refreshes stale Every Code backup when current notify is external", a
     assert.doesNotMatch(restored, /old-code-notify/);
   } finally {
     process.stdout.write = prevWrite;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevCodeHome === undefined) delete process.env.CODE_HOME;
@@ -1057,7 +1047,7 @@ test("init refreshes stale Every Code backup when current notify is external", a
 
 test("init skips Every Code notify when config is missing", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevCodeHome = process.env.CODE_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -1065,7 +1055,7 @@ test("init skips Every Code notify when config is missing", async () => {
   const prevWrite = process.stdout.write;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     process.env.CODE_HOME = path.join(tmp, ".code");
     delete process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -1083,8 +1073,7 @@ test("init skips Every Code notify when config is missing", async () => {
     await assert.rejects(fs.stat(codeConfigPath), /ENOENT/);
   } finally {
     process.stdout.write = prevWrite;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevCodeHome === undefined) delete process.env.CODE_HOME;
@@ -1099,14 +1088,14 @@ test("init skips Every Code notify when config is missing", async () => {
 
 test("uninstall skips notify restore when no backup and notify not installed", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevCodeHome = process.env.CODE_HOME;
   const prevOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
   const prevWrite = process.stdout.write;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     process.env.CODE_HOME = path.join(tmp, ".code");
     process.env.OPENCODE_CONFIG_DIR = path.join(tmp, ".config", "opencode");
@@ -1127,8 +1116,7 @@ test("uninstall skips notify restore when no backup and notify not installed", a
     assert.ok(codeAfter.includes('notify = ["echo", "custom-code"]'));
   } finally {
     process.stdout.write = prevWrite;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevCodeHome === undefined) delete process.env.CODE_HOME;
@@ -1141,12 +1129,12 @@ test("uninstall skips notify restore when no backup and notify not installed", a
 
 test("uninstall removes Grok Build hook and handler", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-grok-uninstall-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevGrokHome = process.env.GROK_HOME;
   const prevWrite = process.stdout.write;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.GROK_HOME = path.join(tmp, ".grok");
     const trackerDir = path.join(tmp, ".tokentracker", "tracker");
     const hookPath = path.join(process.env.GROK_HOME, "hooks", GROK_HOOK_FILENAME);
@@ -1178,8 +1166,7 @@ test("uninstall removes Grok Build hook and handler", async () => {
     await assert.rejects(fs.stat(legacyHandlerPath), /ENOENT/);
   } finally {
     process.stdout.write = prevWrite;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevGrokHome === undefined) delete process.env.GROK_HOME;
     else process.env.GROK_HOME = prevGrokHome;
     await fs.rm(tmp, { recursive: true, force: true });
@@ -1188,14 +1175,14 @@ test("uninstall removes Grok Build hook and handler", async () => {
 
 test("init then uninstall manages Claude hooks without removing existing hooks", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
   const prevOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
   const prevWrite = process.stdout.write;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     delete process.env.TOKENTRACKER_DEVICE_TOKEN;
     process.env.OPENCODE_CONFIG_DIR = path.join(tmp, ".config", "opencode");
@@ -1251,8 +1238,7 @@ test("init then uninstall manages Claude hooks without removing existing hooks",
     );
   } finally {
     process.stdout.write = prevWrite;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -1265,7 +1251,7 @@ test("init then uninstall manages Claude hooks without removing existing hooks",
 
 test("init then uninstall manages Gemini hooks without removing existing hooks", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
   const prevOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
@@ -1273,7 +1259,7 @@ test("init then uninstall manages Gemini hooks without removing existing hooks",
   const prevWrite = process.stdout.write;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     process.env.GEMINI_HOME = path.join(tmp, ".gemini");
     delete process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -1338,8 +1324,7 @@ test("init then uninstall manages Gemini hooks without removing existing hooks",
     );
   } finally {
     process.stdout.write = prevWrite;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -1354,7 +1339,7 @@ test("init then uninstall manages Gemini hooks without removing existing hooks",
 
 test("init skips Gemini hooks when config directory is missing", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
   const prevOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
@@ -1362,7 +1347,7 @@ test("init skips Gemini hooks when config directory is missing", async () => {
   const prevWrite = process.stdout.write;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     process.env.GEMINI_HOME = path.join(tmp, ".gemini-missing");
     delete process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -1378,8 +1363,7 @@ test("init skips Gemini hooks when config directory is missing", async () => {
     await assert.rejects(fs.stat(process.env.GEMINI_HOME), /ENOENT/);
   } finally {
     process.stdout.write = prevWrite;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -1394,7 +1378,7 @@ test("init skips Gemini hooks when config directory is missing", async () => {
 
 test("init creates Gemini settings when directory exists but file is missing", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
   const prevOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
@@ -1402,7 +1386,7 @@ test("init creates Gemini settings when directory exists but file is missing", a
   const prevWrite = process.stdout.write;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     process.env.GEMINI_HOME = path.join(tmp, ".gemini");
     delete process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -1428,8 +1412,7 @@ test("init creates Gemini settings when directory exists but file is missing", a
     assert.ok(hasTracker, "expected tracker Gemini hook to be created in settings.json");
   } finally {
     process.stdout.write = prevWrite;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -1444,14 +1427,14 @@ test("init creates Gemini settings when directory exists but file is missing", a
 
 test("init then uninstall manages Opencode plugin without removing other plugins", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
   const prevOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
   const prevWrite = process.stdout.write;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     delete process.env.TOKENTRACKER_DEVICE_TOKEN;
     process.env.OPENCODE_CONFIG_DIR = path.join(tmp, ".config", "opencode");
@@ -1480,8 +1463,7 @@ test("init then uninstall manages Opencode plugin without removing other plugins
     assert.ok(existing.includes("existing"));
   } finally {
     process.stdout.write = prevWrite;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;
@@ -1494,14 +1476,14 @@ test("init then uninstall manages Opencode plugin without removing other plugins
 
 test("init installs Opencode plugin when config dir is missing", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-uninstall-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
   const prevOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
   const prevWrite = process.stdout.write;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     delete process.env.TOKENTRACKER_DEVICE_TOKEN;
     process.env.OPENCODE_CONFIG_DIR = path.join(tmp, ".config", "opencode");
@@ -1518,8 +1500,7 @@ test("init installs Opencode plugin when config dir is missing", async () => {
     assert.match(installed, /TOKENTRACKER_PLUGIN/);
   } finally {
     process.stdout.write = prevWrite;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevToken === undefined) delete process.env.TOKENTRACKER_DEVICE_TOKEN;

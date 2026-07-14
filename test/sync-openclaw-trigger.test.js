@@ -5,6 +5,7 @@ const fs = require("node:fs/promises");
 const { test } = require("node:test");
 
 const { cmdSync } = require("../src/commands/sync");
+const { withHome } = require("./helpers/with-home");
 
 async function readJsonl(filePath) {
   const raw = await fs.readFile(filePath, "utf8").catch(() => "");
@@ -17,14 +18,14 @@ async function readJsonl(filePath) {
 
 test("sync --from-openclaw records last OpenClaw trigger marker", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-sync-openclaw-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevCodeHome = process.env.CODE_HOME;
   const prevGeminiHome = process.env.GEMINI_HOME;
   const prevOpencodeHome = process.env.OPENCODE_HOME;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     process.env.CODE_HOME = path.join(tmp, ".code");
     process.env.GEMINI_HOME = path.join(tmp, ".gemini");
@@ -37,8 +38,7 @@ test("sync --from-openclaw records last OpenClaw trigger marker", async () => {
     assert.ok(marker.length > 0, "expected openclaw marker to be written");
     assert.ok(!Number.isNaN(Date.parse(marker)), "expected openclaw marker to be ISO timestamp");
   } finally {
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevCodeHome === undefined) delete process.env.CODE_HOME;
@@ -53,7 +53,7 @@ test("sync --from-openclaw records last OpenClaw trigger marker", async () => {
 
 test("sync keeps Grok hook signal when another sync owns the lock", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-sync-grok-lock-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevCodeHome = process.env.CODE_HOME;
   const prevGeminiHome = process.env.GEMINI_HOME;
@@ -63,7 +63,7 @@ test("sync keeps Grok hook signal when another sync owns the lock", async () => 
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     process.env.CODE_HOME = path.join(tmp, ".code");
     process.env.GEMINI_HOME = path.join(tmp, ".gemini");
@@ -94,8 +94,7 @@ test("sync keeps Grok hook signal when another sync owns the lock", async () => 
     const signal = JSON.parse(await fs.readFile(signalPath, "utf8"));
     assert.equal(signal.sessionId, "grok-locked");
   } finally {
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevCodeHome === undefined) delete process.env.CODE_HOME;
@@ -116,7 +115,7 @@ test("sync keeps Grok hook signal when another sync owns the lock", async () => 
 
 test("sync queues and consumes Grok hook signal after cursor persistence", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-sync-grok-signal-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevCodeHome = process.env.CODE_HOME;
   const prevGeminiHome = process.env.GEMINI_HOME;
@@ -126,7 +125,7 @@ test("sync queues and consumes Grok hook signal after cursor persistence", async
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     process.env.CODE_HOME = path.join(tmp, ".code");
     process.env.GEMINI_HOME = path.join(tmp, ".gemini");
@@ -177,8 +176,7 @@ test("sync queues and consumes Grok hook signal after cursor persistence", async
     );
     assert.deepEqual(cursorsAfterSecondSync.grok.sessionSnapshots, firstSnapshots);
   } finally {
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevCodeHome === undefined) delete process.env.CODE_HOME;
@@ -199,7 +197,7 @@ test("sync queues and consumes Grok hook signal after cursor persistence", async
 
 test("sync keeps malformed Grok hook signal without a session id", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-sync-grok-bad-signal-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevCodeHome = process.env.CODE_HOME;
   const prevGeminiHome = process.env.GEMINI_HOME;
@@ -209,7 +207,7 @@ test("sync keeps malformed Grok hook signal without a session id", async () => {
   const prevToken = process.env.TOKENTRACKER_DEVICE_TOKEN;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     process.env.CODE_HOME = path.join(tmp, ".code");
     process.env.GEMINI_HOME = path.join(tmp, ".gemini");
@@ -245,8 +243,7 @@ test("sync keeps malformed Grok hook signal without a session id", async () => {
     assert.equal(signal.totalTokens, 99);
     assert.deepEqual(await readJsonl(path.join(trackerDir, "queue.jsonl")), []);
   } finally {
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevCodeHome === undefined) delete process.env.CODE_HOME;
@@ -267,7 +264,7 @@ test("sync keeps malformed Grok hook signal without a session id", async () => {
 
 test("sync --from-openclaw falls back to previous session totals when jsonl has zero usage", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-sync-openclaw-fallback-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevCodeHome = process.env.CODE_HOME;
   const prevGeminiHome = process.env.GEMINI_HOME;
@@ -282,7 +279,7 @@ test("sync --from-openclaw falls back to previous session totals when jsonl has 
   const prevUpdatedAt = process.env.TOKENTRACKER_OPENCLAW_PREV_UPDATED_AT;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     process.env.CODE_HOME = path.join(tmp, ".code");
     process.env.GEMINI_HOME = path.join(tmp, ".gemini");
@@ -354,8 +351,7 @@ test("sync --from-openclaw falls back to previous session totals when jsonl has 
     assert.equal(thirdLast.input_tokens, 98);
     assert.equal(thirdLast.output_tokens, 42);
   } finally {
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevCodeHome === undefined) delete process.env.CODE_HOME;

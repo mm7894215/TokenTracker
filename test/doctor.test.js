@@ -6,6 +6,7 @@ const { test } = require("node:test");
 
 const { buildDoctorReport } = require("../src/lib/doctor");
 const { cmdDoctor } = require("../src/commands/doctor");
+const { withHome } = require("./helpers/with-home");
 
 test("doctor treats any HTTP response as reachable", async () => {
   const report = await buildDoctorReport({
@@ -78,7 +79,7 @@ test("doctor marks invalid config.json as critical", async () => {
 
 test("doctor --out writes json to file and stdout", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-doctor-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCwd = process.cwd();
   const prevFetch = globalThis.fetch;
   const prevWrite = process.stdout.write;
@@ -86,7 +87,7 @@ test("doctor --out writes json to file and stdout", async () => {
   const prevExit = process.exitCode;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.chdir(tmp);
     globalThis.fetch = async () => ({ status: 204 });
     const outCapture = createWriteCapture();
@@ -107,8 +108,7 @@ test("doctor --out writes json to file and stdout", async () => {
   } finally {
     process.stdout.write = prevWrite;
     process.stderr.write = prevErr;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     process.chdir(prevCwd);
     globalThis.fetch = prevFetch;
     process.exitCode = prevExit;
@@ -118,14 +118,14 @@ test("doctor --out writes json to file and stdout", async () => {
 
 test("doctor sets exitCode on critical failures", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-doctor-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevFetch = globalThis.fetch;
   const prevWrite = process.stdout.write;
   const prevErr = process.stderr.write;
   const prevExit = process.exitCode;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     const trackerDir = path.join(tmp, ".tokentracker", "tracker");
     await fs.mkdir(trackerDir, { recursive: true });
     await fs.writeFile(path.join(trackerDir, "config.json"), "{bad", "utf8");
@@ -142,8 +142,7 @@ test("doctor sets exitCode on critical failures", async () => {
   } finally {
     process.stdout.write = prevWrite;
     process.stderr.write = prevErr;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     globalThis.fetch = prevFetch;
     process.exitCode = prevExit;
     await fs.rm(tmp, { recursive: true, force: true });
@@ -152,14 +151,14 @@ test("doctor sets exitCode on critical failures", async () => {
 
 test("doctor supports CLI base-url override", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-doctor-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevFetch = globalThis.fetch;
   const prevWrite = process.stdout.write;
   const prevErr = process.stderr.write;
   const prevExit = process.exitCode;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     const trackerDir = path.join(tmp, ".tokentracker", "tracker");
     await fs.mkdir(trackerDir, { recursive: true });
     await fs.writeFile(
@@ -182,8 +181,7 @@ test("doctor supports CLI base-url override", async () => {
   } finally {
     process.stdout.write = prevWrite;
     process.stderr.write = prevErr;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     globalThis.fetch = prevFetch;
     process.exitCode = prevExit;
     await fs.rm(tmp, { recursive: true, force: true });
@@ -192,14 +190,14 @@ test("doctor supports CLI base-url override", async () => {
 
 test("doctor tolerates null config.json payload", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-doctor-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevFetch = globalThis.fetch;
   const prevWrite = process.stdout.write;
   const prevErr = process.stderr.write;
   const prevExit = process.exitCode;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     const trackerDir = path.join(tmp, ".tokentracker", "tracker");
     await fs.mkdir(trackerDir, { recursive: true });
     await fs.writeFile(path.join(trackerDir, "config.json"), "null", "utf8");
@@ -217,8 +215,7 @@ test("doctor tolerates null config.json payload", async () => {
   } finally {
     process.stdout.write = prevWrite;
     process.stderr.write = prevErr;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     globalThis.fetch = prevFetch;
     process.exitCode = prevExit;
     await fs.rm(tmp, { recursive: true, force: true });

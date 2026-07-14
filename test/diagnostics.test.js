@@ -6,17 +6,18 @@ const { test } = require("node:test");
 
 const { cmdDiagnostics } = require("../src/commands/diagnostics");
 const { collectTrackerDiagnostics } = require("../src/lib/diagnostics");
+const { withHome } = require("./helpers/with-home");
 
 test("diagnostics redacts device token and home paths", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-diagnostics-"));
-  const prevHome = process.env.HOME;
+  let restoreHome = () => {};
   const prevCodexHome = process.env.CODEX_HOME;
   const prevTokenTrackerGrokHome = process.env.TOKENTRACKER_GROK_HOME;
   const prevGrokHome = process.env.GROK_HOME;
   const prevWrite = process.stdout.write;
 
   try {
-    process.env.HOME = tmp;
+    restoreHome = withHome(tmp);
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     delete process.env.TOKENTRACKER_GROK_HOME;
     process.env.GROK_HOME = path.join(tmp, ".grok");
@@ -114,8 +115,7 @@ test("diagnostics redacts device token and home paths", async () => {
     assert.equal(data?.auto_retry?.next_retry_at, new Date(retryAtMs).toISOString());
   } finally {
     process.stdout.write = prevWrite;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
+    restoreHome();
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     if (prevTokenTrackerGrokHome === undefined) delete process.env.TOKENTRACKER_GROK_HOME;
