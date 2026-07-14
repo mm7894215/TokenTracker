@@ -7793,6 +7793,8 @@ async function parseZedIncremental({
 // text, sources, and attachments never leave SQLite.
 // ─────────────────────────────────────────────────────────────────────────────
 
+const ANYTHINGLLM_PENDING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 function resolveAnythingllmDbPath(env = process.env, platform = process.platform) {
   const override = typeof env.TOKENTRACKER_ANYTHINGLLM_DB === "string"
     ? env.TOKENTRACKER_ANYTHINGLLM_DB.trim()
@@ -7823,8 +7825,21 @@ function resolveAnythingllmDbPath(env = process.env, platform = process.platform
 }
 
 function parseAnythingllmTimestamp(value) {
+  const epochIso = (epochValue) => {
+    if (!Number.isFinite(epochValue)) return null;
+    // Prisma stores SQLite DateTime values as epoch milliseconds. Accept
+    // seconds as well for compatibility with databases created by other
+    // SQLite clients.
+    const epochMs = Math.abs(epochValue) < 100_000_000_000
+      ? epochValue * 1000
+      : epochValue;
+    const parsed = new Date(epochMs);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  };
+  if (typeof value === "number") return epochIso(value);
   if (typeof value !== "string" || !value.trim()) return null;
   const trimmed = value.trim();
+  if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) return epochIso(Number(trimmed));
   const naive = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?$/.exec(trimmed);
   if (naive) {
     const millis = String(naive[7] || "0").padEnd(3, "0");
@@ -7849,6 +7864,7 @@ function readAnythingllmUsageRowsWhere(dbPath, whereClause, sqliteOptions = {}) 
   const sql = `
     SELECT
       id,
+      include,
       createdAt,
       lastUpdatedAt,
       ${metric("$.metrics.prompt_tokens", "prompt_tokens")},
@@ -7916,6 +7932,7 @@ async function parseAnythingllmIncremental({
   onProgress,
   env,
   sqliteOptions,
+  nowMs = Date.now(),
 } = {}) {
   await ensureDir(path.dirname(queuePath));
   const resolvedDb = dbPath || resolveAnythingllmDbPath(env || process.env);
@@ -7928,6 +7945,8 @@ async function parseAnythingllmIncremental({
       .map(toNonNegativeInt)
       .filter((id) => id > 0),
   );
+  const pendingCutoffMs = (Number.isFinite(nowMs) ? nowMs : Date.now())
+    - ANYTHINGLLM_PENDING_MAX_AGE_MS;
 
   if (!resolvedDb || !fssync.existsSync(resolvedDb)) {
     cursors.anythingllm = {
@@ -7985,7 +8004,15 @@ async function parseAnythingllmIncremental({
     const outputTokens = toNonNegativeInt(row?.completion_tokens);
     const reportedTotal = toNonNegativeInt(row?.total_tokens);
     if (inputTokens === 0 && outputTokens === 0) {
-      if (rowId > 0) pendingChatIds.add(rowId);
+      const pendingTimestamp = parseAnythingllmTimestamp(row?.lastUpdatedAt)
+        || parseAnythingllmTimestamp(row?.createdAt);
+      const pendingTimestampMs = pendingTimestamp ? Date.parse(pendingTimestamp) : NaN;
+      const shouldRetry =
+        toNonNegativeInt(row?.include) === 0
+        && Number.isFinite(pendingTimestampMs)
+        && pendingTimestampMs >= pendingCutoffMs;
+      if (rowId > 0 && shouldRetry) pendingChatIds.add(rowId);
+      else if (rowId > 0) pendingChatIds.delete(rowId);
       reportProgress(i + 1);
       continue;
     }
@@ -7994,7 +8021,7 @@ async function parseAnythingllmIncremental({
       || parseAnythingllmTimestamp(row?.lastUpdatedAt);
     const bucketStart = timestamp ? toUtcHalfHourStart(timestamp) : null;
     if (!bucketStart) {
-      if (rowId > 0) pendingChatIds.add(rowId);
+      if (rowId > 0) pendingChatIds.delete(rowId);
       reportProgress(i + 1);
       continue;
     }

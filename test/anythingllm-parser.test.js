@@ -51,11 +51,16 @@ function executeSql(dbPath, sql) {
   cp.execFileSync("sqlite3", [dbPath, sql]);
 }
 
-function insertChat(dbPath, { prompt, response, createdAt }) {
+function sqlValue(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function insertChat(dbPath, { prompt, response, createdAt, include = true }) {
   const quote = (value) => `'${String(value).replace(/'/g, "''")}'`;
   executeSql(dbPath, `
-    INSERT INTO workspace_chats (workspaceId, prompt, response, createdAt, lastUpdatedAt)
-    VALUES (1, ${quote(prompt)}, ${quote(response)}, ${quote(createdAt)}, ${quote(createdAt)});
+    INSERT INTO workspace_chats (workspaceId, prompt, response, include, createdAt, lastUpdatedAt)
+    VALUES (1, ${quote(prompt)}, ${quote(response)}, ${include ? 1 : 0}, ${sqlValue(createdAt)}, ${sqlValue(createdAt)});
   `);
 }
 
@@ -63,7 +68,7 @@ function updateChatResponse(dbPath, id, response, lastUpdatedAt) {
   const quote = (value) => `'${String(value).replace(/'/g, "''")}'`;
   executeSql(dbPath, `
     UPDATE workspace_chats
-    SET response = ${quote(response)}, lastUpdatedAt = ${quote(lastUpdatedAt)}
+    SET response = ${quote(response)}, include = 1, lastUpdatedAt = ${sqlValue(lastUpdatedAt)}
     WHERE id = ${Math.max(0, Math.trunc(Number(id) || 0))};
   `);
 }
@@ -99,6 +104,8 @@ test("resolveAnythingllmDbPath resolves official desktop paths and override", ()
 test("parseAnythingllmTimestamp treats SQLite timestamps as UTC", () => {
   assert.equal(parseAnythingllmTimestamp("2026-07-14 08:09:10"), "2026-07-14T08:09:10.000Z");
   assert.equal(parseAnythingllmTimestamp("2026-07-14T08:09:10.25"), "2026-07-14T08:09:10.250Z");
+  assert.equal(parseAnythingllmTimestamp(1783905543951), "2026-07-13T01:19:03.951Z");
+  assert.equal(parseAnythingllmTimestamp("1783905543951"), "2026-07-13T01:19:03.951Z");
   assert.equal(parseAnythingllmTimestamp("not-a-date"), null);
 });
 
@@ -118,7 +125,7 @@ test("AnythingLLM parser reads metrics only, aggregates incrementally, and stays
           provider: "DeepSeek",
         },
       }),
-      createdAt: "2026-07-14 14:05:00",
+      createdAt: Date.parse("2026-07-14T14:05:00.000Z"),
     });
     insertChat(dbPath, {
       prompt: "another private prompt",
@@ -132,6 +139,7 @@ test("AnythingLLM parser reads metrics only, aggregates incrementally, and stays
       "completion_tokens",
       "createdAt",
       "id",
+      "include",
       "lastUpdatedAt",
       "model",
       "prompt_tokens",
@@ -151,7 +159,7 @@ test("AnythingLLM parser reads metrics only, aggregates incrementally, and stays
     assert.deepEqual(first, { recordsProcessed: 2, eventsAggregated: 1, bucketsQueued: 1 });
     assert.deepEqual(progressIndexes, [1, 2]);
     assert.equal(cursors.anythingllm.lastChatId, 2, "invalid rows still advance the append-only cursor");
-    assert.deepEqual(cursors.anythingllm.pendingChatIds, [2]);
+    assert.deepEqual(cursors.anythingllm.pendingChatIds, []);
 
     let queueRows = readQueue(queuePath);
     assert.equal(queueRows.length, 1);
@@ -164,7 +172,7 @@ test("AnythingLLM parser reads metrics only, aggregates incrementally, and stays
     assert.equal(queueRows[0].conversation_count, 1);
 
     const second = await parseAnythingllmIncremental({ dbPath, cursors, queuePath });
-    assert.deepEqual(second, { recordsProcessed: 1, eventsAggregated: 0, bucketsQueued: 0 });
+    assert.deepEqual(second, { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 });
 
     insertChat(dbPath, {
       prompt: "private follow-up",
@@ -182,7 +190,7 @@ test("AnythingLLM parser reads metrics only, aggregates incrementally, and stays
     });
 
     const third = await parseAnythingllmIncremental({ dbPath, cursors, queuePath });
-    assert.deepEqual(third, { recordsProcessed: 2, eventsAggregated: 1, bucketsQueued: 1 });
+    assert.deepEqual(third, { recordsProcessed: 1, eventsAggregated: 1, bucketsQueued: 1 });
     assert.equal(cursors.anythingllm.lastChatId, 3);
 
     queueRows = readQueue(queuePath);
@@ -197,15 +205,17 @@ test("AnythingLLM parser reads metrics only, aggregates incrementally, and stays
 test("AnythingLLM parser retries an in-progress chat and counts its completed metrics once", async () => {
   const { dir, dbPath } = createAnythingllmDb();
   try {
+    const nowMs = Date.parse("2026-07-14T16:10:00.000Z");
     insertChat(dbPath, {
       prompt: "private agent prompt",
       response: "{}",
-      createdAt: "2026-07-14 16:05:00",
+      include: false,
+      createdAt: Date.parse("2026-07-14T16:05:00.000Z"),
     });
 
     const queuePath = path.join(dir, "queue.jsonl");
     const cursors = {};
-    const first = await parseAnythingllmIncremental({ dbPath, cursors, queuePath });
+    const first = await parseAnythingllmIncremental({ dbPath, cursors, queuePath, nowMs });
     assert.deepEqual(first, { recordsProcessed: 1, eventsAggregated: 0, bucketsQueued: 0 });
     assert.equal(cursors.anythingllm.lastChatId, 1);
     assert.deepEqual(cursors.anythingllm.pendingChatIds, [1]);
@@ -223,10 +233,10 @@ test("AnythingLLM parser retries an in-progress chat and counts its completed me
           model: "agent-model",
         },
       }),
-      "2026-07-14 16:06:00",
+      Date.parse("2026-07-14T16:06:00.000Z"),
     );
 
-    const second = await parseAnythingllmIncremental({ dbPath, cursors, queuePath });
+    const second = await parseAnythingllmIncremental({ dbPath, cursors, queuePath, nowMs });
     assert.deepEqual(second, { recordsProcessed: 1, eventsAggregated: 1, bucketsQueued: 1 });
     assert.deepEqual(cursors.anythingllm.pendingChatIds, []);
     const queueAfterCompletion = readQueue(queuePath);
@@ -234,10 +244,43 @@ test("AnythingLLM parser retries an in-progress chat and counts its completed me
     assert.equal(queueAfterCompletion[0].total_tokens, 150);
     assert.equal(queueAfterCompletion[0].conversation_count, 1);
 
-    const third = await parseAnythingllmIncremental({ dbPath, cursors, queuePath });
+    const third = await parseAnythingllmIncremental({ dbPath, cursors, queuePath, nowMs });
     assert.deepEqual(third, { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 });
     assert.deepEqual(cursors.anythingllm.pendingChatIds, []);
     assert.deepEqual(readQueue(queuePath), queueAfterCompletion);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AnythingLLM parser does not retry completed invalid rows or stale aborted agents", async () => {
+  const { dir, dbPath } = createAnythingllmDb();
+  try {
+    const nowMs = Date.parse("2026-07-14T16:10:00.000Z");
+    insertChat(dbPath, {
+      prompt: "completed row without metrics",
+      response: "not-json",
+      include: true,
+      createdAt: nowMs - 60_000,
+    });
+    insertChat(dbPath, {
+      prompt: "stale aborted agent",
+      response: "{}",
+      include: false,
+      createdAt: nowMs - 25 * 60 * 60 * 1000,
+    });
+
+    const queuePath = path.join(dir, "queue.jsonl");
+    const cursors = {};
+    const first = await parseAnythingllmIncremental({ dbPath, cursors, queuePath, nowMs });
+    assert.deepEqual(first, { recordsProcessed: 2, eventsAggregated: 0, bucketsQueued: 0 });
+    assert.equal(cursors.anythingllm.lastChatId, 2);
+    assert.deepEqual(cursors.anythingllm.pendingChatIds, []);
+
+    const second = await parseAnythingllmIncremental({ dbPath, cursors, queuePath, nowMs });
+    assert.deepEqual(second, { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 });
+    assert.deepEqual(cursors.anythingllm.pendingChatIds, []);
+    assert.deepEqual(readQueue(queuePath), []);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
