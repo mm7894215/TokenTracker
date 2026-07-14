@@ -485,8 +485,12 @@ Renders shields.io-compatible badges with your current totals (60s cache):
 
 ## ⭐ Star History
 
-<a href="https://star-history.com/#mm7894215/TokenTracker&Date">
-  <img src="https://api.star-history.com/svg?repos=mm7894215/TokenTracker&type=Date" alt="Star History Chart" width="600" />
+<a href="https://www.star-history.com/?type=date&repos=mm7894215%2FTokenTracker">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=mm7894215/TokenTracker&type=date&theme=dark&legend=top-left&sealed_token=Xb4biZj6WI7GnAYqiQdvOITTTMcqLjMHZTNJ2UzckXkd4FdNyLLNwz0K6wG1hDug6G3HxW4K4bmIETMQTXK74rD4Io0eTU6igxPnSeLgP-NkOnZz7rlCePm6aVMFVm2JCuPoi92rcR6OhEmdYqopiFIxHt4iwzOa-L1-YcLplRoLIdtjTyjUotxai-QH" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=mm7894215/TokenTracker&type=date&legend=top-left&sealed_token=Xb4biZj6WI7GnAYqiQdvOITTTMcqLjMHZTNJ2UzckXkd4FdNyLLNwz0K6wG1hDug6G3HxW4K4bmIETMQTXK74rD4Io0eTU6igxPnSeLgP-NkOnZz7rlCePm6aVMFVm2JCuPoi92rcR6OhEmdYqopiFIxHt4iwzOa-L1-YcLplRoLIdtjTyjUotxai-QH" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=mm7894215/TokenTracker&type=date&legend=top-left&sealed_token=Xb4biZj6WI7GnAYqiQdvOITTTMcqLjMHZTNJ2UzckXkd4FdNyLLNwz0K6wG1hDug6G3HxW4K4bmIETMQTXK74rD4Io0eTU6igxPnSeLgP-NkOnZz7rlCePm6aVMFVm2JCuPoi92rcR6OhEmdYqopiFIxHt4iwzOa-L1-YcLplRoLIdtjTyjUotxai-QH" />
+  </picture>
 </a>
 
 ---
