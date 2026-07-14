@@ -296,6 +296,7 @@ const PROVIDER_ICON_MAP = {
 // inherit the surrounding text color, since <img> doesn't resolve currentColor.
 const PROVIDER_LOGO_MAP = {
   ANTIGRAVITY: "/brand-logos/antigravity.svg",
+  ANYTHINGLLM: "/brand-logos/anythingllm.svg",
   CLAUDE: "/brand-logos/claude-code.svg",
   CODEX: "/brand-logos/codex.svg",
   DEEPSEEK: "/brand-logos/deepseek.svg",
@@ -305,6 +306,13 @@ const PROVIDER_LOGO_MAP = {
   MIMO: "/brand-logos/mimo.svg",
   OPENCLAW: "/brand-logos/openclaw.svg",
   OPENCODE: "/brand-logos/opencode.svg",
+};
+
+// AnythingLLM publishes this compact mark in white. Keep the official asset
+// and switch its luminance at the <img> boundary so app-controlled dark mode
+// (which may differ from the OS preference) always has sufficient contrast.
+const PROVIDER_LOGO_CLASS_MAP = {
+  ANYTHINGLLM: "brightness-0 dark:brightness-100",
 };
 
 function PlaceholderIcon({ size = 16, className = "" }) {
@@ -334,13 +342,14 @@ export function ProviderIcon({ provider, size = 16, color, className = "" }) {
   const logoSrc = PROVIDER_LOGO_MAP[normalized];
 
   if (logoSrc) {
+    const logoClassName = `${PROVIDER_LOGO_CLASS_MAP[normalized] || ""} ${className}`.trim();
     return (
       <img
         src={logoSrc}
         alt=""
         width={size}
         height={size}
-        className={className}
+        className={logoClassName}
         style={{ width: size, height: size, objectFit: "contain" }}
         aria-hidden
       />

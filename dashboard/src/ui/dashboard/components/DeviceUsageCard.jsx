@@ -4,13 +4,8 @@ import { Card } from "../../components";
 import { copy } from "../../../lib/copy";
 import { formatCompactNumber } from "../../../lib/format";
 import { formatDeviceLabel } from "../../../lib/device-label";
+import { formatProviderDisplayName } from "../../../lib/provider-display";
 import { ProviderIcon } from "./ProviderIcon";
-
-// "cursor" -> "Cursor" (account-level source rows carry a raw source key).
-function formatSourceLabel(source) {
-  const s = String(source || "");
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
 
 const DOT_DIVIDER = " · ";
 const PCT_SIGN = "%";
@@ -287,7 +282,7 @@ export function DeviceUsageCard({ devices = [], accountSources = [], selectedDev
                     <ProviderIcon provider={s.source} size={14} />
                   </span>
                   <span className="block truncate text-[13px] font-medium text-oai-black dark:text-oai-white">
-                    {formatSourceLabel(s.source)}
+                    {formatProviderDisplayName(s.source)}
                   </span>
                   <span className="shrink-0 text-[10px] uppercase tracking-wide text-oai-gray-400 dark:text-oai-gray-500">
                     {copy("dashboard.device_card.account_scope")}

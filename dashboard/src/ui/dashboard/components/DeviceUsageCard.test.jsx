@@ -109,4 +109,18 @@ describe("DeviceUsageCard", () => {
     await userEvent.click(row);
     expect(onSelectDevice).not.toHaveBeenCalled();
   });
+
+  it("uses the official AnythingLLM name and provider icon", () => {
+    const { container } = render(
+      <DeviceUsageCard
+        devices={[]}
+        accountSources={[{ source: "anythingllm", total_tokens: 1000 }]}
+        selectedDeviceId=""
+        onSelectDevice={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("AnythingLLM")).toBeTruthy();
+    expect(container.querySelector('img[src="/brand-logos/anythingllm.svg"]')).not.toBeNull();
+  });
 });

@@ -8,6 +8,7 @@ import { useTheme } from "../../../hooks/useTheme.js";
 import { useCurrency } from "../../../hooks/useCurrency.js";
 import { copy, getCopyLocale } from "../../../lib/copy";
 import { CURRENCY_USD, getCurrencySymbol } from "../../../lib/currency";
+import { formatProviderDisplayName } from "../../../lib/provider-display";
 import { DateRangePopover, formatDateShort, getDateFnsLocale } from "./DateRangePopover.jsx";
 import { ProviderIcon } from "./ProviderIcon.jsx";
 import { formatCompactNumber, formatUsdCurrency } from "../../../lib/format";
@@ -59,6 +60,7 @@ const PROVIDER_COLORS = {
   MIMO: "#ff6900",         // Xiaomi MiMo brand orange
   DROID: "#ef4444",        // red-500 (Factory brand)
   ZCODE: "#14b8a6",        // teal-500 (Z.ai / GLM — distinct from the blues)
+  ANYTHINGLLM: "var(--provider-anythingllm)", // AnythingLLM primary cyan
 };
 
 function getProviderColor(label, index) {
@@ -345,7 +347,7 @@ export function UsageOverview({
                 items: providers
                   .map((provider) =>
                     copy("usage.overview.distribution_item", {
-                      label: provider.label,
+                      label: formatProviderDisplayName(provider.label),
                       percent: provider.totalPercent,
                     }),
                   )
@@ -355,6 +357,7 @@ export function UsageOverview({
             >
               {providers.map((provider, idx) => {
                 const color = getProviderColor(provider.label, idx);
+                const displayLabel = formatProviderDisplayName(provider.label);
                 return (
                   <motion.div
                     key={provider.label}
@@ -363,7 +366,7 @@ export function UsageOverview({
                     transition={{ duration: 0.5, delay: 0.45 + idx * 0.04, ease: [0.16, 1, 0.3, 1] }}
                     className="h-full"
                     style={{ backgroundColor: color }}
-                    title={`${provider.label}: ${provider.totalPercent}%`}
+                    title={`${displayLabel}: ${provider.totalPercent}%`}
                   />
                 );
               })}
@@ -375,6 +378,7 @@ export function UsageOverview({
               {providers.map((provider, idx) => {
                 const color = getProviderColor(provider.label, idx);
                 const isExpanded = expandedProvider === provider.label;
+                const displayLabel = formatProviderDisplayName(provider.label);
 
                 return (
                   <button
@@ -382,7 +386,7 @@ export function UsageOverview({
                     aria-expanded={isExpanded}
                     aria-controls={`provider-details-${provider.label}`}
                     aria-label={copy("usage.overview.provider_card_aria", {
-                      provider: provider.label,
+                      provider: displayLabel,
                       percent: provider.totalPercent,
                       tokens: formatTokens(provider.usage) || "0",
                       cost: formatCost(provider.usd, currency, rate) || `${getCurrencySymbol(currency)}0`,
@@ -397,7 +401,7 @@ export function UsageOverview({
                   >
                     <div className="flex items-center gap-1.5 mb-1">
                       <ProviderIcon provider={provider.label} size={15} color={color} className="text-oai-gray-700 dark:text-oai-gray-300 shrink-0" />
-                      <span className="text-sm font-medium text-oai-black dark:text-oai-white">{provider.label}</span>
+                      <span className="text-sm font-medium text-oai-black dark:text-oai-white">{displayLabel}</span>
                     </div>
                     <div className="text-lg font-semibold text-oai-black dark:text-oai-white tabular-nums">
                       {provider.totalPercent}%
@@ -431,7 +435,7 @@ export function UsageOverview({
 
                     const providerHeading = contextSource
                       ? `${contextSource === "claude" ? "Claude" : "Codex"} Context Breakdown`
-                      : provider.label;
+                      : formatProviderDisplayName(provider.label);
                     return (
                       <ProviderExpandedSection
                         key={provider.label}

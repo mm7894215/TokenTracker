@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { copy } from "../../lib/copy";
 import { formatCompactNumber, formatUsdCurrency } from "../../lib/format";
+import { formatProviderDisplayName } from "../../lib/provider-display";
 import { useCurrency } from "../../hooks/useCurrency.js";
 import { getLeaderboardProfile } from "../../lib/api";
 import { resolveAuthAccessTokenWithRetry } from "../../lib/auth-token";
@@ -377,8 +378,8 @@ function ProviderList({ data }) {
             <span className="shrink-0 inline-flex items-center justify-center w-4 h-4">
               <ProviderIcon provider={String(p.source).toUpperCase()} size={14} />
             </span>
-            <span className="shrink-0 capitalize w-16 text-oai-gray-700 dark:text-oai-gray-300">
-              {p.source}
+            <span className="w-20 shrink-0 text-oai-gray-700 dark:text-oai-gray-300">
+              {formatProviderDisplayName(p.source)}
             </span>
             <span className="flex-1 h-[3px] rounded-full bg-oai-gray-200/60 dark:bg-oai-gray-800/80 overflow-hidden">
               <span

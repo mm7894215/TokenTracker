@@ -17,6 +17,38 @@ vi.mock("../../../../hooks/useTheme.js", () => ({
 }));
 
 describe("UsageOverview", () => {
+  it("renders AnythingLLM with its official name, icon, and stable accent", () => {
+    const { container } = render(
+      <UsageOverview
+        period="month"
+        periods={[]}
+        summaryLabel="Total"
+        summaryValue="123"
+        fleetData={[
+          {
+            source: "anythingllm",
+            label: "anythingllm",
+            totalPercent: "100.0",
+            usage: 123,
+            usd: 0,
+            models: [{ id: "deepseek-v4", name: "deepseek-v4", share: 100, usage: 123, cost: 0 }],
+          },
+        ]}
+        from="2026-07-01"
+        to="2026-07-31"
+      />,
+    );
+
+    expect(screen.getByText("AnythingLLM")).toBeTruthy();
+    expect(container.querySelector('img[src="/brand-logos/anythingllm.svg"]')).toHaveClass(
+      "brightness-0",
+      "dark:brightness-100",
+    );
+    expect(container.querySelector('[title="AnythingLLM: 100.0%"]')).toHaveStyle({
+      backgroundColor: "var(--provider-anythingllm)",
+    });
+  });
+
   it("passes the overview usage range to Codex context breakdown", async () => {
     breakdownProps.length = 0;
     const user = userEvent.setup();

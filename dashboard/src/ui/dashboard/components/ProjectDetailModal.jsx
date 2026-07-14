@@ -3,6 +3,7 @@ import { GitBranch, X } from "lucide-react";
 import { copy } from "../../../lib/copy";
 import { cn } from "../../../lib/cn";
 import { formatCompactNumber, toDisplayNumber, toFiniteNumber } from "../../../lib/format";
+import { formatProviderDisplayName } from "../../../lib/provider-display";
 import { useProjectUsageDetail } from "../../../hooks/use-project-usage-detail";
 import { getLocalDayKey } from "../../../lib/timezone";
 import { ProviderIcon } from "./ProviderIcon";
@@ -398,7 +399,7 @@ export function ProjectDetailModal({ entry, query = {}, onClose }) {
                               className="flex-shrink-0"
                             />
                             <span className="text-[11px] font-bold uppercase tracking-wide text-zinc-900 dark:text-zinc-50 truncate">
-                              {src.source}
+                              {formatProviderDisplayName(src.source)}
                             </span>
                             <span className="hidden text-[10px] font-mono text-zinc-400 dark:text-zinc-500 tabular-nums whitespace-nowrap sm:inline">
                               {copy("dashboard.projects.detail.source_days", {

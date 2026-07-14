@@ -68,6 +68,9 @@
   --oai-error: #ef4444;
   --oai-info: #059669;
 
+  /* Provider accents */
+  --provider-anythingllm: #0ba5ec;
+
   /* Typography - Font Families */
   --oai-font-sans: -apple-system, blinkmacsystemfont, "Segoe UI", roboto, oxygen, ubuntu, sans-serif;
   --oai-font-mono: "SF Mono", sfmono-regular, ui-monospace, menlo, monaco, consolas, monospace;
