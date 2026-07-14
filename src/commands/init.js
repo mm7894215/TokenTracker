@@ -56,6 +56,7 @@ const {
   resolveOmpAgentDir,
   resolvePiAgentDir,
   piAgentDirCollidesWithOmp,
+  resolveAnythingllmDbPath,
 } = require("../lib/rollout");
 const { resolveRuntimeConfig, DEFAULT_BASE_URL } = require("../lib/runtime-config");
 const {
@@ -116,6 +117,7 @@ const SUPPORTED_PROVIDERS = [
   "Goose",
   "Mimo",
   "ZCode",
+  "AnythingLLM Desktop",
 ];
 
 async function cmdInit(argv) {
@@ -632,6 +634,18 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
     const mimoDbPath = path.join(mimoHome, "mimocode.db");
     if (fssync.existsSync(mimoDbPath)) {
       summary.push({ label: "Mimo", status: "detected", detail: "Passive reader (no hook needed)" });
+    }
+  }
+
+  // AnythingLLM Desktop: passive SQLite reader — no hook installation needed.
+  {
+    const anythingllmDbPath = resolveAnythingllmDbPath(process.env);
+    if (anythingllmDbPath && fssync.existsSync(anythingllmDbPath)) {
+      summary.push({
+        label: "AnythingLLM Desktop",
+        status: "detected",
+        detail: "Passive reader (no hook needed)",
+      });
     }
   }
 

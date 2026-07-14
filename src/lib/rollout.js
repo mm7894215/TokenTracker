@@ -7779,6 +7779,209 @@ async function parseZedIncremental({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// AnythingLLM Desktop (Mintplex Labs)
+//
+// Data: SQLite at
+//   macOS:   ~/Library/Application Support/anythingllm-desktop/storage/anythingllm.db
+//   Linux:   $XDG_CONFIG_HOME/anythingllm-desktop/storage/anythingllm.db
+//   Windows: %APPDATA%\anythingllm-desktop\storage\anythingllm.db
+//   Override: $TOKENTRACKER_ANYTHINGLLM_DB
+//
+// AnythingLLM >= 1.7.1 stores per-message prompt/completion/total counts in
+// workspace_chats.response.metrics. The SQL projection below extracts only
+// those numeric metrics and the model identifier — prompts, response
+// text, sources, and attachments never leave SQLite.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function resolveAnythingllmDbPath(env = process.env, platform = process.platform) {
+  const override = typeof env.TOKENTRACKER_ANYTHINGLLM_DB === "string"
+    ? env.TOKENTRACKER_ANYTHINGLLM_DB.trim()
+    : "";
+  if (override) return override;
+
+  const os = require("node:os");
+  if (platform === "win32") {
+    const home = env.USERPROFILE || os.homedir();
+    const appData = env.APPDATA || path.join(home, "AppData", "Roaming");
+    return path.join(appData, "anythingllm-desktop", "storage", "anythingllm.db");
+  }
+
+  const home = env.HOME || os.homedir();
+  if (platform === "darwin") {
+    return path.join(
+      home,
+      "Library",
+      "Application Support",
+      "anythingllm-desktop",
+      "storage",
+      "anythingllm.db",
+    );
+  }
+
+  const configHome = env.XDG_CONFIG_HOME || path.join(home, ".config");
+  return path.join(configHome, "anythingllm-desktop", "storage", "anythingllm.db");
+}
+
+function parseAnythingllmTimestamp(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const trimmed = value.trim();
+  const naive = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?$/.exec(trimmed);
+  if (naive) {
+    const millis = String(naive[7] || "0").padEnd(3, "0");
+    return new Date(Date.UTC(
+      +naive[1],
+      +naive[2] - 1,
+      +naive[3],
+      +naive[4],
+      +naive[5],
+      +naive[6],
+      +millis,
+    )).toISOString();
+  }
+  const parsed = new Date(trimmed);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+function readAnythingllmUsageRows(dbPath, sinceId = 0, sqliteOptions = {}) {
+  if (!dbPath || !fssync.existsSync(dbPath)) return [];
+  const safeSinceId = Math.max(0, Math.trunc(Number(sinceId) || 0));
+  const metric = (jsonPath, alias) =>
+    `CASE WHEN json_valid(response) THEN json_extract(response, '${jsonPath}') ELSE NULL END AS ${alias}`;
+  const sql = `
+    SELECT
+      id,
+      createdAt,
+      lastUpdatedAt,
+      ${metric("$.metrics.prompt_tokens", "prompt_tokens")},
+      ${metric("$.metrics.completion_tokens", "completion_tokens")},
+      ${metric("$.metrics.total_tokens", "total_tokens")},
+      ${metric("$.metrics.model", "model")}
+    FROM workspace_chats
+    WHERE id > ${safeSinceId}
+    ORDER BY id ASC
+  `.trim();
+
+  let snapshot = null;
+  let effectiveDbPath = dbPath;
+  if (isUncPath(dbPath)) {
+    try {
+      snapshot = snapshotSqliteDb(dbPath);
+      effectiveDbPath = snapshot.path;
+    } catch (_e) { }
+  }
+
+  try {
+    return readSqliteJsonRows(effectiveDbPath, sql, {
+      label: "AnythingLLM",
+      maxBuffer: 32 * 1024 * 1024,
+      timeout: 30_000,
+      readOnly: true,
+      ...sqliteOptions,
+    });
+  } finally {
+    if (snapshot) snapshot.cleanup();
+  }
+}
+
+async function parseAnythingllmIncremental({
+  dbPath,
+  cursors,
+  queuePath,
+  onProgress,
+  env,
+  sqliteOptions,
+} = {}) {
+  await ensureDir(path.dirname(queuePath));
+  const resolvedDb = dbPath || resolveAnythingllmDbPath(env || process.env);
+  const priorState = cursors.anythingllm && typeof cursors.anythingllm === "object"
+    ? cursors.anythingllm
+    : {};
+  const lastChatId = Math.max(0, Math.trunc(Number(priorState.lastChatId) || 0));
+
+  if (!resolvedDb || !fssync.existsSync(resolvedDb)) {
+    cursors.anythingllm = {
+      ...priorState,
+      lastChatId,
+      updatedAt: new Date().toISOString(),
+    };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
+
+  const rows = readAnythingllmUsageRows(resolvedDb, lastChatId, sqliteOptions);
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const touchedBuckets = new Set();
+  const cb = typeof onProgress === "function" ? onProgress : null;
+  let maxSeenId = lastChatId;
+  let recordsProcessed = 0;
+  let eventsAggregated = 0;
+  const reportProgress = (index) => {
+    if (!cb) return;
+    cb({
+      index,
+      total: rows.length,
+      recordsProcessed,
+      eventsAggregated,
+      bucketsQueued: touchedBuckets.size,
+    });
+  };
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    recordsProcessed += 1;
+    const rowId = Math.max(0, Math.trunc(Number(row?.id) || 0));
+    if (rowId > maxSeenId) maxSeenId = rowId;
+
+    const inputTokens = toNonNegativeInt(row?.prompt_tokens);
+    const outputTokens = toNonNegativeInt(row?.completion_tokens);
+    const reportedTotal = toNonNegativeInt(row?.total_tokens);
+    if (inputTokens === 0 && outputTokens === 0) {
+      reportProgress(i + 1);
+      continue;
+    }
+
+    const timestamp = parseAnythingllmTimestamp(row?.createdAt)
+      || parseAnythingllmTimestamp(row?.lastUpdatedAt);
+    const bucketStart = timestamp ? toUtcHalfHourStart(timestamp) : null;
+    if (!bucketStart) {
+      reportProgress(i + 1);
+      continue;
+    }
+
+    const model = normalizeModelInput(row?.model) || "anythingllm-unknown";
+    const accounted = inputTokens + outputTokens;
+    const reasoningTokens = Math.max(0, reportedTotal - accounted);
+    const delta = {
+      input_tokens: inputTokens,
+      cached_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      output_tokens: outputTokens,
+      reasoning_output_tokens: reasoningTokens,
+      total_tokens: accounted + reasoningTokens,
+      conversation_count: 1,
+    };
+
+    const bucket = getHourlyBucket(hourlyState, "anythingllm", model, bucketStart);
+    addTotals(bucket.totals, delta);
+    touchedBuckets.add(bucketKey("anythingllm", model, bucketStart));
+    eventsAggregated += 1;
+
+    reportProgress(i + 1);
+  }
+
+  const bucketsQueued = await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets });
+  const updatedAt = new Date().toISOString();
+  hourlyState.updatedAt = updatedAt;
+  cursors.hourly = hourlyState;
+  cursors.anythingllm = {
+    ...priorState,
+    lastChatId: maxSeenId,
+    updatedAt,
+  };
+
+  return { recordsProcessed, eventsAggregated, bucketsQueued };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Goose (Block AI agent — github.com/block/goose)
 //
 // Data: SQLite at
@@ -12553,6 +12756,10 @@ module.exports = {
   sumZedRequestUsage,
   readZedUsage,
   parseZedIncremental,
+  resolveAnythingllmDbPath,
+  parseAnythingllmTimestamp,
+  readAnythingllmUsageRows,
+  parseAnythingllmIncremental,
   resolveGooseDbPath,
   parseGooseModelName,
   parseGooseCreatedAt,

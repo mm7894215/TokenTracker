@@ -54,6 +54,7 @@ const {
   resolveKilocodeTaskFiles,
   resolveRoocodeTaskFiles,
   resolveZedDbPath,
+  resolveAnythingllmDbPath,
   resolveGooseDbPath,
   listDroidSettingsFiles,
   resolveDroidSessionsDir,
@@ -224,6 +225,12 @@ async function cmdStatus(argv = []) {
   // surfaces the CLI sub-path separately for operators.
   const kiroCliDbPath = resolveKiroCliDbPath(process.env);
   const kiroCliInstalled = fssync.existsSync(kiroCliDbPath);
+
+  // AnythingLLM Desktop — per-message token metrics in workspace_chats.
+  const anythingllmDbPath = resolveAnythingllmDbPath(process.env);
+  const anythingllmInstalled = Boolean(
+    anythingllmDbPath && fssync.existsSync(anythingllmDbPath),
+  );
 
   // CodeBuddy — passive scan only (no hooks). Surface the file count so
   // operators can confirm JSONL sessions and extension logs are discovered.
@@ -634,6 +641,9 @@ async function cmdStatus(argv = []) {
         craft: craftInstalled
           ? { installed: true, files: craftFiles.length }
           : { installed: false },
+        anythingllm: anythingllmInstalled
+          ? { installed: true, detail: anythingllmDbPath }
+          : { installed: false },
         kilo_cli: kiloInstalled
           ? { installed: true, detail: kiloDbPath }
           : { installed: false },
@@ -742,6 +752,9 @@ async function cmdStatus(argv = []) {
         : null,
       craftInstalled
         ? `- Craft Agents: passive reader (${craftFiles.length} session jsonl file${craftFiles.length !== 1 ? "s" : ""} found)`
+        : null,
+      anythingllmInstalled
+        ? `- AnythingLLM Desktop: passive reader (${anythingllmDbPath})`
         : null,
       kiloInstalled
         ? `- Kilo CLI: passive reader (${kiloDbPath})`

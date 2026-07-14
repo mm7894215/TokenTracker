@@ -76,6 +76,8 @@ const {
   parseRoocodeIncremental,
   resolveZedDbPath,
   parseZedIncremental,
+  resolveAnythingllmDbPath,
+  parseAnythingllmIncremental,
   resolveGooseDbPath,
   parseGooseIncremental,
   listDroidSettingsFiles,
@@ -188,6 +190,7 @@ const AUTO_SYNC_SOURCE_ALIASES = new Map([
 ]);
 const AUTO_SYNC_SOURCES = new Set([
   "antigravity",
+  "anythingllm",
   "claude",
   "codebuddy",
   "codex",
@@ -820,6 +823,25 @@ async function cmdSync(argv) {
           `Parsing ${label} ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} records | buckets ${formatNumber(p.bucketsQueued)}`,
         );
       };
+    }
+
+    // ── AnythingLLM Desktop (workspace_chats.response.metrics) ──
+    let anythingllmResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    if (sourceAllowed("anythingllm")) {
+      const anythingllmDbPath = resolveAnythingllmDbPath(process.env);
+      if (anythingllmDbPath && fssync.existsSync(anythingllmDbPath)) {
+        if (progress?.enabled) progress.start(`Parsing AnythingLLM ${renderBar(0)} | buckets 0`);
+        try {
+          anythingllmResult = await parseAnythingllmIncremental({
+            dbPath: anythingllmDbPath,
+            cursors,
+            queuePath,
+            onProgress: makeProviderProgress("AnythingLLM"),
+          });
+        } catch (err) {
+          warnProviderParseFailure("AnythingLLM", err, opts);
+        }
+      }
     }
 
     // ── Kilo Code VS Code extension (Cline-style ui_messages.json) ──
@@ -1898,6 +1920,7 @@ async function cmdSync(argv) {
         craftResult.recordsProcessed +
         grokResult.recordsProcessed +
         copilotResult.recordsProcessed +
+        anythingllmResult.recordsProcessed +
         kiloResult.recordsProcessed +
         mimoResult.recordsProcessed +
         zcodeResult.recordsProcessed +
@@ -1926,6 +1949,7 @@ async function cmdSync(argv) {
         craftResult.bucketsQueued +
         grokResult.bucketsQueued +
         copilotResult.bucketsQueued +
+        anythingllmResult.bucketsQueued +
         kiloResult.bucketsQueued +
         mimoResult.bucketsQueued +
         zcodeResult.bucketsQueued +
