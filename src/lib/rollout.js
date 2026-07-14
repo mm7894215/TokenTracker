@@ -7842,9 +7842,8 @@ function parseAnythingllmTimestamp(value) {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
-function readAnythingllmUsageRows(dbPath, sinceId = 0, sqliteOptions = {}) {
+function readAnythingllmUsageRowsWhere(dbPath, whereClause, sqliteOptions = {}) {
   if (!dbPath || !fssync.existsSync(dbPath)) return [];
-  const safeSinceId = Math.max(0, Math.trunc(Number(sinceId) || 0));
   const metric = (jsonPath, alias) =>
     `CASE WHEN json_valid(response) THEN json_extract(response, '${jsonPath}') ELSE NULL END AS ${alias}`;
   const sql = `
@@ -7857,7 +7856,7 @@ function readAnythingllmUsageRows(dbPath, sinceId = 0, sqliteOptions = {}) {
       ${metric("$.metrics.total_tokens", "total_tokens")},
       ${metric("$.metrics.model", "model")}
     FROM workspace_chats
-    WHERE id > ${safeSinceId}
+    WHERE ${whereClause}
     ORDER BY id ASC
   `.trim();
 
@@ -7883,6 +7882,33 @@ function readAnythingllmUsageRows(dbPath, sinceId = 0, sqliteOptions = {}) {
   }
 }
 
+function readAnythingllmUsageRows(dbPath, sinceId = 0, sqliteOptions = {}) {
+  const safeSinceId = Math.max(0, Math.trunc(Number(sinceId) || 0));
+  return readAnythingllmUsageRowsWhere(dbPath, `id > ${safeSinceId}`, sqliteOptions);
+}
+
+function readAnythingllmUsageRowsByIds(dbPath, ids, sqliteOptions = {}) {
+  const normalizedIds = [
+    ...new Set(
+      (Array.isArray(ids) ? ids : [])
+        .map(toNonNegativeInt)
+        .filter((id) => id > 0),
+    ),
+  ];
+  const rows = [];
+  for (let start = 0; start < normalizedIds.length; start += 500) {
+    const chunk = normalizedIds.slice(start, start + 500);
+    rows.push(
+      ...readAnythingllmUsageRowsWhere(
+        dbPath,
+        `id IN (${chunk.join(",")})`,
+        sqliteOptions,
+      ),
+    );
+  }
+  return rows.sort((a, b) => toNonNegativeInt(a?.id) - toNonNegativeInt(b?.id));
+}
+
 async function parseAnythingllmIncremental({
   dbPath,
   cursors,
@@ -7897,17 +7923,41 @@ async function parseAnythingllmIncremental({
     ? cursors.anythingllm
     : {};
   const lastChatId = Math.max(0, Math.trunc(Number(priorState.lastChatId) || 0));
+  const pendingChatIds = new Set(
+    (Array.isArray(priorState.pendingChatIds) ? priorState.pendingChatIds : [])
+      .map(toNonNegativeInt)
+      .filter((id) => id > 0),
+  );
 
   if (!resolvedDb || !fssync.existsSync(resolvedDb)) {
     cursors.anythingllm = {
       ...priorState,
       lastChatId,
+      pendingChatIds: [...pendingChatIds].sort((a, b) => a - b),
       updatedAt: new Date().toISOString(),
     };
     return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
   }
 
-  const rows = readAnythingllmUsageRows(resolvedDb, lastChatId, sqliteOptions);
+  const incrementalRows = readAnythingllmUsageRows(resolvedDb, lastChatId, sqliteOptions);
+  const pendingRetryRows = readAnythingllmUsageRowsByIds(
+    resolvedDb,
+    [...pendingChatIds],
+    sqliteOptions,
+  );
+  const pendingRetryIds = new Set(
+    pendingRetryRows.map((row) => toNonNegativeInt(row?.id)),
+  );
+  for (const pendingId of pendingChatIds) {
+    if (!pendingRetryIds.has(pendingId)) pendingChatIds.delete(pendingId);
+  }
+  const rowsById = new Map();
+  for (const row of [...pendingRetryRows, ...incrementalRows]) {
+    rowsById.set(toNonNegativeInt(row?.id), row);
+  }
+  const rows = Array.from(rowsById.values()).sort(
+    (a, b) => toNonNegativeInt(a?.id) - toNonNegativeInt(b?.id),
+  );
   const hourlyState = normalizeHourlyState(cursors?.hourly);
   const touchedBuckets = new Set();
   const cb = typeof onProgress === "function" ? onProgress : null;
@@ -7935,6 +7985,7 @@ async function parseAnythingllmIncremental({
     const outputTokens = toNonNegativeInt(row?.completion_tokens);
     const reportedTotal = toNonNegativeInt(row?.total_tokens);
     if (inputTokens === 0 && outputTokens === 0) {
+      if (rowId > 0) pendingChatIds.add(rowId);
       reportProgress(i + 1);
       continue;
     }
@@ -7943,9 +7994,11 @@ async function parseAnythingllmIncremental({
       || parseAnythingllmTimestamp(row?.lastUpdatedAt);
     const bucketStart = timestamp ? toUtcHalfHourStart(timestamp) : null;
     if (!bucketStart) {
+      if (rowId > 0) pendingChatIds.add(rowId);
       reportProgress(i + 1);
       continue;
     }
+    if (rowId > 0) pendingChatIds.delete(rowId);
 
     const model = normalizeModelInput(row?.model) || "anythingllm-unknown";
     const accounted = inputTokens + outputTokens;
@@ -7975,6 +8028,7 @@ async function parseAnythingllmIncremental({
   cursors.anythingllm = {
     ...priorState,
     lastChatId: maxSeenId,
+    pendingChatIds: [...pendingChatIds].sort((a, b) => a - b),
     updatedAt,
   };
 

@@ -59,6 +59,15 @@ function insertChat(dbPath, { prompt, response, createdAt }) {
   `);
 }
 
+function updateChatResponse(dbPath, id, response, lastUpdatedAt) {
+  const quote = (value) => `'${String(value).replace(/'/g, "''")}'`;
+  executeSql(dbPath, `
+    UPDATE workspace_chats
+    SET response = ${quote(response)}, lastUpdatedAt = ${quote(lastUpdatedAt)}
+    WHERE id = ${Math.max(0, Math.trunc(Number(id) || 0))};
+  `);
+}
+
 function readQueue(queuePath) {
   if (!fs.existsSync(queuePath)) return [];
   return fs.readFileSync(queuePath, "utf8")
@@ -142,6 +151,7 @@ test("AnythingLLM parser reads metrics only, aggregates incrementally, and stays
     assert.deepEqual(first, { recordsProcessed: 2, eventsAggregated: 1, bucketsQueued: 1 });
     assert.deepEqual(progressIndexes, [1, 2]);
     assert.equal(cursors.anythingllm.lastChatId, 2, "invalid rows still advance the append-only cursor");
+    assert.deepEqual(cursors.anythingllm.pendingChatIds, [2]);
 
     let queueRows = readQueue(queuePath);
     assert.equal(queueRows.length, 1);
@@ -154,7 +164,7 @@ test("AnythingLLM parser reads metrics only, aggregates incrementally, and stays
     assert.equal(queueRows[0].conversation_count, 1);
 
     const second = await parseAnythingllmIncremental({ dbPath, cursors, queuePath });
-    assert.deepEqual(second, { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 });
+    assert.deepEqual(second, { recordsProcessed: 1, eventsAggregated: 0, bucketsQueued: 0 });
 
     insertChat(dbPath, {
       prompt: "private follow-up",
@@ -172,13 +182,62 @@ test("AnythingLLM parser reads metrics only, aggregates incrementally, and stays
     });
 
     const third = await parseAnythingllmIncremental({ dbPath, cursors, queuePath });
-    assert.deepEqual(third, { recordsProcessed: 1, eventsAggregated: 1, bucketsQueued: 1 });
+    assert.deepEqual(third, { recordsProcessed: 2, eventsAggregated: 1, bucketsQueued: 1 });
     assert.equal(cursors.anythingllm.lastChatId, 3);
 
     queueRows = readQueue(queuePath);
     const latest = queueRows.at(-1);
     assert.equal(latest.total_tokens, 190, "latest bucket contains both AnythingLLM messages");
     assert.equal(latest.conversation_count, 2);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AnythingLLM parser retries an in-progress chat and counts its completed metrics once", async () => {
+  const { dir, dbPath } = createAnythingllmDb();
+  try {
+    insertChat(dbPath, {
+      prompt: "private agent prompt",
+      response: "{}",
+      createdAt: "2026-07-14 16:05:00",
+    });
+
+    const queuePath = path.join(dir, "queue.jsonl");
+    const cursors = {};
+    const first = await parseAnythingllmIncremental({ dbPath, cursors, queuePath });
+    assert.deepEqual(first, { recordsProcessed: 1, eventsAggregated: 0, bucketsQueued: 0 });
+    assert.equal(cursors.anythingllm.lastChatId, 1);
+    assert.deepEqual(cursors.anythingllm.pendingChatIds, [1]);
+    assert.deepEqual(readQueue(queuePath), []);
+
+    updateChatResponse(
+      dbPath,
+      1,
+      JSON.stringify({
+        text: "private agent response",
+        metrics: {
+          prompt_tokens: 120,
+          completion_tokens: 30,
+          total_tokens: 150,
+          model: "agent-model",
+        },
+      }),
+      "2026-07-14 16:06:00",
+    );
+
+    const second = await parseAnythingllmIncremental({ dbPath, cursors, queuePath });
+    assert.deepEqual(second, { recordsProcessed: 1, eventsAggregated: 1, bucketsQueued: 1 });
+    assert.deepEqual(cursors.anythingllm.pendingChatIds, []);
+    const queueAfterCompletion = readQueue(queuePath);
+    assert.equal(queueAfterCompletion.length, 1);
+    assert.equal(queueAfterCompletion[0].total_tokens, 150);
+    assert.equal(queueAfterCompletion[0].conversation_count, 1);
+
+    const third = await parseAnythingllmIncremental({ dbPath, cursors, queuePath });
+    assert.deepEqual(third, { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 });
+    assert.deepEqual(cursors.anythingllm.pendingChatIds, []);
+    assert.deepEqual(readQueue(queuePath), queueAfterCompletion);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
