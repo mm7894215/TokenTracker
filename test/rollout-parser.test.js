@@ -5,20 +5,7 @@ const fs = require("node:fs/promises");
 const fssync = require("node:fs");
 const { test } = require("node:test");
 
-// This suite only uses child_process to run `sqlite3 <db> <sql>` writes when
-// building fixtures. Route those through in-process node:sqlite instead of
-// spawning the CLI per statement — the spawns dominated the suite's wall time.
-// Call sites stay `cp.execFileSync("sqlite3", [dbPath, sql])`; nothing else uses cp.
-const { runSql: runSqliteWrite } = require("./helpers/sqlite-write");
-const cp = {
-  execFileSync(bin, args) {
-    if (bin === "sqlite3") {
-      runSqliteWrite(args[0], args[1]);
-      return "";
-    }
-    throw new Error(`unexpected cp.execFileSync("${bin}") in rollout-parser test`);
-  },
-};
+const cp = require("node:child_process");
 const {
   parseRolloutIncremental,
   parseClaudeIncremental,
