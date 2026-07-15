@@ -77,8 +77,8 @@ landing.cta.secondary,landing,LandingPage,LandingPage,cta_secondary,"GitHub",,ac
 
 
 
-landing.v2.hero.title_line1,landing,LandingPage,MarketingLanding,hero_title_1,"YOUR AI USAGE",,active
-landing.v2.hero.title_line2,landing,LandingPage,MarketingLanding,hero_title_2,"BROUGHT TO LIFE",,active
+landing.v2.hero.title_line1,landing,LandingPage,MarketingLanding,hero_title_1,"TRACK EVERY",,active
+landing.v2.hero.title_line2,landing,LandingPage,MarketingLanding,hero_title_2,"AI TOKEN",,active
 landing.v2.install.mac_cta,landing,LandingPage,MarketingLanding,mac_cta,"Download for macOS",,active
 landing.v2.install.win_cta,landing,LandingPage,MarketingLanding,win_cta,"Download for Windows",,active
 landing.v2.install.desktop_cta,landing,LandingPage,MarketingLanding,desktop_cta,"Download desktop app",,active

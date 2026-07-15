@@ -4,9 +4,9 @@
 
 **English** · [简体中文](./README.zh-CN.md) · [日本語](./README.ja.md) · [한국어](./README.ko.md) · [Deutsch](./README.de.md)
 
-### Your AI usage, brought to life on your desktop
+### Track every AI token — then bring your usage to life
 
-A desktop pet that reacts to your real token activity, **4 native widgets**, and **15 achievement tracks** — powered by accurate, local usage data from **27 AI coding tools**. No cloud account, no API keys, no setup.
+An accurate, local-first token usage and cost dashboard for **27 AI coding tools** — plus a desktop pet, **4 native widgets**, and **15 achievement tracks**. No cloud account, no API keys, no setup.
 
 [![npm version](https://img.shields.io/npm/v/tokentracker-cli.svg?color=blue)](https://www.npmjs.com/package/tokentracker-cli)
 [![npm downloads](https://img.shields.io/npm/dm/tokentracker-cli.svg?color=brightgreen)](https://www.npmjs.com/package/tokentracker-cli)
@@ -20,6 +20,14 @@ A desktop pet that reacts to your real token activity, **4 native widgets**, and
 [![Author tokens](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=0652839f-d19f-4f67-af85-6b7675875443&metric=tokens&compact=1&label=author%20tokens)](https://github.com/mm7894215/TokenTracker)
 
 <br/>
+
+<strong>📊 See the token dashboard in action</strong>
+
+<br/><br/>
+
+<video src="https://github.com/user-attachments/assets/3275979d-bbed-4639-83e2-8b7d83bed6af" controls muted playsinline poster="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-light.png" width="820"></video>
+
+<br/><br/>
 
 <table>
 <tr>
@@ -44,11 +52,13 @@ A desktop pet that reacts to your real token activity, **4 native widgets**, and
 
 <br/><br/>
 
+<strong>🎬 Meet TokenTracker</strong>
+
+<br/><br/>
+
 <video src="https://github.com/user-attachments/assets/5e709422-5af8-4e4c-8109-f5bb711eb3f8" controls muted playsinline poster="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-dark.png" width="820">
   <img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-dark.png" alt="Token Tracker Dashboard" width="820" />
 </video>
-
-<video src="https://github.com/user-attachments/assets/3275979d-bbed-4639-83e2-8b7d83bed6af" controls muted playsinline poster="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-light.png" width="820"></video>
 
 <br/><br/>
 
