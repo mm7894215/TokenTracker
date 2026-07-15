@@ -29,7 +29,7 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           # Node 20 matches the engines field: build + publish on the minimum
           # supported runtime so the published artifact is verified against it.

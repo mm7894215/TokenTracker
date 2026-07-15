@@ -36,7 +36,7 @@ jobs:
           # so don't persist the checkout token into local git config.
           persist-credentials: false
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
 
