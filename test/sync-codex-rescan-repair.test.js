@@ -913,3 +913,207 @@ describe("repairCodexRescanInflation (#187) — atomic guarded rebuild", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// #169 follow-up: fork-replay historical repair. Re-runs the guarded rebuild
+// under CODEX_FORK_REPLAY_REPAIR_KEY so history parsed before the same-day
+// fork burst detector landed gets rebuilt with the fork-aware parser.
+// ---------------------------------------------------------------------------
+
+const {
+  repairCodexForkReplayInflation,
+  CODEX_FORK_REPLAY_REPAIR_KEY,
+} = require("../src/commands/sync");
+
+// A same-day forked rollout: 2 replay rows in one flush (1ms apart), then one
+// live turn 30s later. Old parser counted all 3 (total 250+150=400 inflated
+// ... replay 100+150, live 50 → phantom 150); fork-aware parser counts the
+// first-of-run replay row (no lookahead) + the live turn.
+const FORK_R1 = { input_tokens: 60, cached_input_tokens: 0, output_tokens: 40, reasoning_output_tokens: 0, total_tokens: 100 };
+const FORK_R2 = { input_tokens: 90, cached_input_tokens: 0, output_tokens: 60, reasoning_output_tokens: 0, total_tokens: 150 };
+const FORK_LIVE = { input_tokens: 30, cached_input_tokens: 0, output_tokens: 20, reasoning_output_tokens: 0, total_tokens: 50 };
+const FORK_T2 = { input_tokens: 150, cached_input_tokens: 0, output_tokens: 100, reasoning_output_tokens: 0, total_tokens: 250 };
+const FORK_T3 = { input_tokens: 180, cached_input_tokens: 0, output_tokens: 120, reasoning_output_tokens: 0, total_tokens: 300 };
+// first-of-run replay row (100) + live (50): the bounded residual documented at the skip site
+const FORK_TRUE_TOTAL = FORK_R1.total_tokens + FORK_LIVE.total_tokens;
+const FORK_INFLATED_TOTAL = FORK_R1.total_tokens + FORK_R2.total_tokens + FORK_LIVE.total_tokens;
+
+async function writeForkedCodexFile(home, uuid = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff") {
+  const dir = path.join(home, ".codex", "sessions", "2025", "12", "17");
+  await fs.mkdir(dir, { recursive: true });
+  const fp = path.join(dir, `rollout-2025-12-17T00-00-00-${uuid}.jsonl`);
+  const lines = [
+    JSON.stringify({
+      type: "session_meta",
+      payload: { id: uuid, forked_from_id: "019e095c-c041-7b40-b7cb-43ddb153086c", model: "gpt-4" },
+    }),
+    JSON.stringify({ type: "turn_context", payload: { model: "gpt-4", current_date: "2025-12-17" } }),
+    tokenCountLine({ ts: "2025-12-17T00:00:00.100Z", last: FORK_R1, total: FORK_R1 }),
+    tokenCountLine({ ts: "2025-12-17T00:00:00.101Z", last: FORK_R2, total: FORK_T2 }),
+    tokenCountLine({ ts: "2025-12-17T00:00:30.101Z", last: FORK_LIVE, total: FORK_T3 }),
+  ];
+  await fs.writeFile(fp, lines.join("\n") + "\n", "utf8");
+  return fp;
+}
+
+describe("repairCodexForkReplayInflation (#169 follow-up) — fork replay historical repair", () => {
+  it("rebuilds fork-replay-inflated codex history with the fork-aware parser", async () => {
+    const home = await makeTempHome();
+    try {
+      const forkedFile = await writeForkedCodexFile(home);
+      const queuePath = path.join(home, "queue.jsonl");
+      const queueStatePath = path.join(home, "queue.state.json");
+
+      // INFLATED state: old parser counted the replay rows.
+      await fs.writeFile(
+        queuePath,
+        [
+          JSON.stringify({ source: "codex", model: "gpt-4", hour_start: "2025-12-17T00:00:00.000Z", total_tokens: FORK_INFLATED_TOTAL }),
+          JSON.stringify({ source: "claude", model: "opus", hour_start: "2025-12-17T00:00:00.000Z", total_tokens: 5000 }),
+        ].join("\n") + "\n",
+        "utf8",
+      );
+      await fs.writeFile(queueStatePath, JSON.stringify({ offset: 4321 }), "utf8");
+
+      const cursors = {
+        hourly: {
+          buckets: {
+            "codex|gpt-4|2025-12-17T00:00:00.000Z": { totals: { total_tokens: FORK_INFLATED_TOTAL } },
+            "claude|opus|2025-12-17T00:00:00.000Z": { totals: { total_tokens: 5000 } },
+          },
+          groupQueued: {},
+        },
+        files: { [forkedFile]: { inode: 1, offset: 5, lastTotal: { total_tokens: FORK_T3.total_tokens } } },
+        codexHashes: [],
+        // #187 repair long completed — only the fork key triggers this rebuild.
+        migrations: { [CODEX_RESCAN_DEDUP_REPAIR_KEY]: "2026-06-15T00:00:00.000Z" },
+      };
+
+      const ran = await repairCodexForkReplayInflation({
+        cursors,
+        queuePath,
+        queueStatePath,
+        rolloutFiles: [{ path: forkedFile, source: "codex" }],
+      });
+      assert.equal(ran, true);
+
+      assert.equal(codexBucketTotal(cursors), FORK_TRUE_TOTAL);
+      assert.equal(cursors.hourly.buckets["claude|opus|2025-12-17T00:00:00.000Z"].totals.total_tokens, 5000);
+
+      const q = await queueRowsBySource(queuePath);
+      assert.equal(q.codex.total, FORK_TRUE_TOTAL, "queue codex rebuilt without replay phantom");
+      assert.equal(q.claude.total, 5000);
+
+      assert.equal(JSON.parse(await fs.readFile(queueStatePath, "utf8")).offset, 0);
+      assert.ok(cursors.migrations[CODEX_FORK_REPLAY_REPAIR_KEY]);
+      // #187 key untouched
+      assert.equal(cursors.migrations[CODEX_RESCAN_DEDUP_REPAIR_KEY], "2026-06-15T00:00:00.000Z");
+
+      // idempotent
+      assert.equal(
+        await repairCodexForkReplayInflation({
+          cursors,
+          queuePath,
+          queueStatePath,
+          rolloutFiles: [{ path: forkedFile, source: "codex" }],
+        }),
+        false,
+      );
+      assert.equal(codexBucketTotal(cursors), FORK_TRUE_TOTAL);
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("marks done without a rebuild when no forked rollout exists (pre-gate)", async () => {
+    const home = await makeTempHome();
+    try {
+      const codexFile = await writeCodexFile(home); // NOT forked
+      const queuePath = path.join(home, "queue.jsonl");
+      const queueStatePath = path.join(home, "queue.state.json");
+      await fs.writeFile(
+        queuePath,
+        JSON.stringify({ source: "codex", model: "unknown", hour_start: "2025-12-17T00:00:00.000Z", total_tokens: 250 }) + "\n",
+        "utf8",
+      );
+      await fs.writeFile(queueStatePath, JSON.stringify({ offset: 777 }), "utf8");
+      const cursors = {
+        hourly: {
+          buckets: { "codex|unknown|2025-12-17T00:00:00.000Z": { totals: { total_tokens: 250 } } },
+          groupQueued: {},
+        },
+        files: { [codexFile]: { inode: 1, offset: 500 } },
+        codexHashes: ["keep:me"],
+        migrations: {},
+      };
+
+      const ran = await repairCodexForkReplayInflation({
+        cursors,
+        queuePath,
+        queueStatePath,
+        rolloutFiles: [{ path: codexFile, source: "codex" }],
+      });
+      assert.equal(ran, false);
+      // nothing touched, key finalized
+      assert.equal(codexBucketTotal(cursors), 250);
+      assert.equal(JSON.parse(await fs.readFile(queueStatePath, "utf8")).offset, 777);
+      assert.deepEqual(cursors.codexHashes, ["keep:me"]);
+      assert.equal(typeof cursors.migrations[CODEX_FORK_REPLAY_REPAIR_KEY], "string");
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("marks done without a rebuild when the #187 repair rebuilt in the same sync", async () => {
+    const home = await makeTempHome();
+    try {
+      const forkedFile = await writeForkedCodexFile(home);
+      const cursors = { hourly: { buckets: {}, groupQueued: {} }, files: {}, codexHashes: [], migrations: {} };
+      const ran = await repairCodexForkReplayInflation({
+        cursors,
+        queuePath: path.join(home, "queue.jsonl"),
+        queueStatePath: path.join(home, "queue.state.json"),
+        rolloutFiles: [{ path: forkedFile, source: "codex" }],
+        legacyRepairRan: true,
+      });
+      assert.equal(ran, false);
+      assert.equal(typeof cursors.migrations[CODEX_FORK_REPLAY_REPAIR_KEY], "string");
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("defers via the reproducibility guard when a previously-counted session is gone", async () => {
+    const home = await makeTempHome();
+    try {
+      const forkedFile = await writeForkedCodexFile(home);
+      const deletedPath = path.join(
+        home, ".codex", "sessions", "2025", "12", "10",
+        "rollout-2025-12-10T00-00-00-99999999-9999-9999-9999-999999999999.jsonl",
+      );
+      const queuePath = path.join(home, "queue.jsonl");
+      const queueStatePath = path.join(home, "queue.state.json");
+      await fs.writeFile(queuePath, "", "utf8");
+      await fs.writeFile(queueStatePath, JSON.stringify({ offset: 55 }), "utf8");
+      const cursors = {
+        hourly: { buckets: { "codex|gpt-4|2025-12-17T00:00:00.000Z": { totals: { total_tokens: 300 } } }, groupQueued: {} },
+        files: { [forkedFile]: { inode: 1, offset: 5 }, [deletedPath]: { inode: 2, offset: 5 } },
+        codexHashes: [],
+        migrations: {},
+      };
+
+      const ran = await repairCodexForkReplayInflation({
+        cursors,
+        queuePath,
+        queueStatePath,
+        rolloutFiles: [{ path: forkedFile, source: "codex" }],
+      });
+      assert.equal(ran, false);
+      assert.equal(codexBucketTotal(cursors), 300);
+      assert.equal(JSON.parse(await fs.readFile(queueStatePath, "utf8")).offset, 55);
+      assert.equal(cursors.migrations[CODEX_FORK_REPLAY_REPAIR_KEY].skipped, true);
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+});

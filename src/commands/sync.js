@@ -172,6 +172,18 @@ const CLOUD_CONVERSATIONS_BACKFILL_KEY = "cloudConversationsBackfill_2026_06";
 // ~/.codex/archived_sessions/ which sync does not scan) — clearing its bucket
 // would lose that history (ref the v6 ground-truth-repair data-loss incident).
 const CODEX_RESCAN_DEDUP_REPAIR_KEY = "codexRescanDedupRepair_2026_06";
+// One-time repair (#169 follow-up): forked Codex rollouts replay the parent
+// session's token history into the child file, and until the same-day burst
+// detector landed in rollout.js the parser counted those replayed rows as live
+// usage (PR #169's date guard only caught cross-day forks). Cursors sit at EOF
+// on every already-parsed file, so the forward fix alone never corrects the
+// inflated history. This re-runs the exact #187 guarded rebuild under a new key
+// — the rebuild re-parses every codex file with the CURRENT (fork-aware)
+// parser, so replay rows are excluded — and inherits all its safety properties
+// (unreproducible-session skip, atomic throwaway rebuild, queue strip, upload
+// offset reset for the cloud overwrite). Pre-gated: installs with no forked
+// rollout on disk carry no fork phantom and mark done without the rebuild.
+const CODEX_FORK_REPLAY_REPAIR_KEY = "codexForkReplayRepair_2026_07";
 const DROID_DUP_SESSION_REPAIR_KEY = "droidDupSessionInflationRepair_2026_06";
 const CODEX_COLD_SCAN_AUDIT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const CODEX_COLD_SCAN_AUDIT_MAX_SYNCS = 288;
@@ -405,13 +417,22 @@ async function cmdSync(argv) {
 
     if (isFullSourceScan) {
       await migrateRolloutCumulativeDeltaBuckets({ cursors, queuePath, rolloutFiles });
-      await repairCodexRescanInflation({
+      const codexRescanRepairRan = await repairCodexRescanInflation({
         cursors,
         queuePath,
         queueStatePath,
         projectQueuePath,
         projectQueueStatePath,
         rolloutFiles,
+      });
+      await repairCodexForkReplayInflation({
+        cursors,
+        queuePath,
+        queueStatePath,
+        projectQueuePath,
+        projectQueueStatePath,
+        rolloutFiles,
+        legacyRepairRan: codexRescanRepairRan,
       });
       await repairDroidDuplicateSessionInflation({ cursors, queuePath, queueStatePath });
       await repairMimoClaudeMislabel({
@@ -2097,6 +2118,7 @@ module.exports = {
   migrateCursorUnknownBuckets,
   migrateRolloutCumulativeDeltaBuckets,
   repairCodexRescanInflation,
+  repairCodexForkReplayInflation,
   repairDroidDuplicateSessionInflation,
   repairMimoClaudeMislabel,
   reincludeClaudeMemObserverFiles,
@@ -2109,6 +2131,7 @@ module.exports = {
   CURSOR_UNKNOWN_MIGRATION_KEY,
   ROLLOUT_CUMULATIVE_DELTA_MIGRATION_KEY,
   CODEX_RESCAN_DEDUP_REPAIR_KEY,
+  CODEX_FORK_REPLAY_REPAIR_KEY,
   DROID_DUP_SESSION_REPAIR_KEY,
   CLAUDE_MEM_OBSERVER_REINCLUDE_KEY,
   GROK_APPEND_ONLY_REPAIR_MIGRATION_KEY,
@@ -3157,6 +3180,11 @@ async function repairCodexRescanInflation({
   projectQueuePath,
   projectQueueStatePath,
   rolloutFiles,
+  // The fork-replay repair (#169 follow-up) re-runs this exact rebuild under
+  // its own key: the rebuild always uses the CURRENT parser, so any parser fix
+  // shipped since the last run is applied to the rebuilt history.
+  migrationKey = CODEX_RESCAN_DEDUP_REPAIR_KEY,
+  uploadNote = "reset_after_codex_rescan_dedup_2026_06",
 }) {
   if (!cursors || typeof cursors !== "object") return false;
   const migrations = (cursors.migrations ||= {});
@@ -3167,7 +3195,7 @@ async function repairCodexRescanInflation({
   // found). Treating the skip sentinel as "done" is what left users like #187
   // permanently stuck on the inflated value after upgrading (the key was truthy
   // so the guard never got a second chance).
-  const priorRepair = migrations[CODEX_RESCAN_DEDUP_REPAIR_KEY];
+  const priorRepair = migrations[migrationKey];
   if (priorRepair && !(typeof priorRepair === "object" && priorRepair.skipped)) return false;
 
   // Codex session files THIS sync discovered (source === "codex").
@@ -3203,7 +3231,7 @@ async function repairCodexRescanInflation({
       if (codexFileSet.has(fp)) continue; // exact file re-scanned this run
       const id = codexSessionIdFromPath(fp);
       if (id && scannedSessionIds.has(id)) continue; // same session scanned elsewhere (moved)
-      migrations[CODEX_RESCAN_DEDUP_REPAIR_KEY] = {
+      migrations[migrationKey] = {
         skipped: true,
         reason: "codex_session_unreproducible",
         at: new Date().toISOString(),
@@ -3462,7 +3490,7 @@ async function repairCodexRescanInflation({
     }
     uploadState.offset = 0;
     uploadState.updatedAt = new Date().toISOString();
-    uploadState.note = "reset_after_codex_rescan_dedup_2026_06";
+    uploadState.note = uploadNote;
     await fs.writeFile(queueStatePath, JSON.stringify(uploadState));
   }
   if (projectRepairEnabled && typeof projectQueueStatePath === "string" && projectQueueStatePath) {
@@ -3474,12 +3502,89 @@ async function repairCodexRescanInflation({
     }
     uploadState.offset = 0;
     uploadState.updatedAt = new Date().toISOString();
-    uploadState.note = "reset_after_codex_rescan_dedup_2026_06";
+    uploadState.note = uploadNote;
     await fs.writeFile(projectQueueStatePath, JSON.stringify(uploadState));
   }
 
-  migrations[CODEX_RESCAN_DEDUP_REPAIR_KEY] = new Date().toISOString();
+  migrations[migrationKey] = new Date().toISOString();
   return true;
+}
+
+// #169 follow-up: repair the historical inflation left by same-day forked
+// Codex rollout replays (see CODEX_FORK_REPLAY_REPAIR_KEY). Delegates to the
+// #187 guarded rebuild with the fork-repair key.
+async function repairCodexForkReplayInflation({
+  cursors,
+  queuePath,
+  queueStatePath,
+  projectQueuePath,
+  projectQueueStatePath,
+  rolloutFiles,
+  // True when the #187 repair ran its rebuild earlier in THIS sync: that
+  // rebuild already used the fork-aware parser, so the history is clean and a
+  // second rebuild would be pure waste.
+  legacyRepairRan = false,
+}) {
+  if (!cursors || typeof cursors !== "object") return false;
+  const migrations = (cursors.migrations ||= {});
+  // Same completed-vs-skipped semantics as the #187 repair: an ISO string is
+  // final, a {skipped:true} sentinel retries (the skip condition can clear).
+  const prior = migrations[CODEX_FORK_REPLAY_REPAIR_KEY];
+  if (prior && !(typeof prior === "object" && prior.skipped)) return false;
+
+  if (legacyRepairRan) {
+    migrations[CODEX_FORK_REPLAY_REPAIR_KEY] = new Date().toISOString();
+    return false;
+  }
+
+  // Pre-gate: fork phantom can only exist on installs that have (or had) a
+  // forked rollout. Scanning file heads is cheap; the rebuild re-parses every
+  // codex file. A forked rollout that was deleted before this repair runs is
+  // unreproducible anyway — the #187 reproducibility guard would defer forever
+  // — so gating on what is on disk loses nothing. Files forked AFTER the parser
+  // fix shipped never accrue phantom, so marking done here is final.
+  if (!(await hasForkedCodexRollout(rolloutFiles))) {
+    migrations[CODEX_FORK_REPLAY_REPAIR_KEY] = new Date().toISOString();
+    return false;
+  }
+
+  return repairCodexRescanInflation({
+    cursors,
+    queuePath,
+    queueStatePath,
+    projectQueuePath,
+    projectQueueStatePath,
+    rolloutFiles,
+    migrationKey: CODEX_FORK_REPLAY_REPAIR_KEY,
+    uploadNote: "reset_after_codex_fork_replay_2026_07",
+  });
+}
+
+// True when any codex rollout's head contains the fork marker. The child
+// session_meta (with forked_from_id) is the FIRST line of a forked rollout —
+// observed at byte offset ≤169 across every local sample — so a bounded head
+// read is sufficient. 64KB leaves ample margin for long base_instructions
+// preceding it; a substring false positive (the marker quoted in unrelated
+// head content) only costs one redundant guarded rebuild, never data.
+async function hasForkedCodexRollout(rolloutFiles) {
+  const HEAD_BYTES = 65536;
+  for (const entry of Array.isArray(rolloutFiles) ? rolloutFiles : []) {
+    const fp = typeof entry === "string" ? entry : entry?.path;
+    const src = typeof entry === "string" ? "codex" : String(entry?.source || "codex");
+    if (!fp || src !== "codex") continue;
+    let fh = null;
+    try {
+      fh = await fs.open(fp, "r");
+      const buf = Buffer.alloc(HEAD_BYTES);
+      const { bytesRead } = await fh.read(buf, 0, HEAD_BYTES, 0);
+      if (buf.toString("utf8", 0, bytesRead).includes('"forked_from_id"')) return true;
+    } catch (_e) {
+      // unreadable file: let the rebuild's own guards decide
+    } finally {
+      if (fh) await fh.close().catch(() => {});
+    }
+  }
+  return false;
 }
 
 function isCodexSessionCursorPath(filePath) {

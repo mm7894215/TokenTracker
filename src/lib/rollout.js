@@ -1514,6 +1514,8 @@ async function parseRolloutFile({
   let currentCwd = null;
   let currentDate = null;
   let isForkedRollout = false;
+  let replayPrefixActive = true;
+  let prevForkedTokenMs = null;
   const rolloutDate = rolloutDateFromPath(filePath);
   let currentProjectRef = projectRef || null;
   let currentProjectKey = projectKey || null;
@@ -1591,8 +1593,43 @@ async function parseRolloutFile({
       totals = totalUsage;
     }
 
-    // date matching is conservative; same-day fork replays are still counted.
-    if (isForkedReplayToken({ isForkedRollout, rolloutDate, currentDate })) continue;
+    // Forked Codex rollouts replay the parent session's entire token history
+    // into the child file the moment the fork is created. The date guard below
+    // (current_date < rolloutDate) catches cross-day forks, but same-day forks
+    // share the parent's current_date and slip through it. The replay is written
+    // in a single flush, so its rows carry near-identical timestamps (sub-ms to a
+    // few ms apart across observed 0.129–0.137 samples), while the first genuine
+    // live turn lands seconds later (≥11s in every sampled fork). We therefore
+    // skip the *leading* run of densely-spaced token_count rows and latch off
+    // permanently at the first multi-second gap: a lone fast turn (always
+    // preceded by a large gap) is never dropped, and an arbitrarily large replay
+    // is fully skipped regardless of length. The threshold sits far above the
+    // flush spacing and well below genuine turn cadence (≥~4.6s observed). The
+    // first replayed row cannot be identified without lookahead, so it is still
+    // counted (a bounded, <1% residual over-count); dropping real usage is the
+    // worse failure, so we bias against it. `totals` is already advanced above,
+    // keeping the cumulative-delta baseline correct for the live turns we keep.
+    // Scoped to forked codex rollouts. (issue #169 follow-up.)
+    let forkedReplaySkip = false;
+    if (isForkedRollout && source === DEFAULT_SOURCE) {
+      const tokenMs = Date.parse(tokenTimestamp);
+      if (Number.isFinite(tokenMs)) {
+        if (prevForkedTokenMs !== null && tokenMs - prevForkedTokenMs >= CODEX_FORK_REPLAY_GAP_MS) {
+          replayPrefixActive = false;
+        }
+        forkedReplaySkip =
+          replayPrefixActive &&
+          prevForkedTokenMs !== null &&
+          tokenMs - prevForkedTokenMs < CODEX_FORK_REPLAY_GAP_MS;
+        prevForkedTokenMs = tokenMs;
+      }
+    }
+
+    // date matching is conservative; same-day fork replays are caught by the
+    // burst detector above rather than this cross-day date guard.
+    if (forkedReplaySkip || isForkedReplayToken({ isForkedRollout, rolloutDate, currentDate })) {
+      continue;
+    }
 
     const bucketStart = toUtcHalfHourStart(tokenTimestamp);
     if (!bucketStart) continue;
@@ -2693,6 +2730,15 @@ function normalizeIsoDate(value) {
   const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
   return match ? match[1] : null;
 }
+
+// Max inter-row gap (ms) still treated as part of a forked rollout's replay
+// burst. Empirically the replay flush spaces rows sub-ms to a few ms apart while
+// genuine live turns arrive ≥~4.6s apart and the replay→live break is ≥11s, so
+// any value in the ~0.25–2s band separates them with a wide margin; 500ms biases
+// toward the low end because merging a real fast turn (under-count) is worse than
+// leaving a slow replay counted (bounded over-count). See the skip site in
+// parseRolloutFile. (issue #169 follow-up.)
+const CODEX_FORK_REPLAY_GAP_MS = 500;
 
 function isForkedReplayToken({ isForkedRollout, rolloutDate, currentDate }) {
   return Boolean(isForkedRollout && rolloutDate && currentDate && currentDate < rolloutDate);

@@ -1580,6 +1580,130 @@ test("parseRolloutIncremental skips historical replay tokens in forked Codex rol
   }
 });
 
+test("parseRolloutIncremental skips same-day forked replay burst (issue #169 follow-up)", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  try {
+    const rolloutPath = path.join(tmp, "rollout-2026-06-09T20-46-23-fork.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    // Three replay rows written in a single flush (~1ms apart), then one genuine
+    // live turn 30s later. current_date matches the rollout date, so the
+    // cross-day date guard is inert — only the burst detector can catch this.
+    const r0 = { input_tokens: 100, cached_input_tokens: 0, output_tokens: 10, reasoning_output_tokens: 0, total_tokens: 110 };
+    const r1 = { input_tokens: 200, cached_input_tokens: 0, output_tokens: 20, reasoning_output_tokens: 0, total_tokens: 220 };
+    const r2 = { input_tokens: 300, cached_input_tokens: 0, output_tokens: 30, reasoning_output_tokens: 0, total_tokens: 330 };
+    const live = { input_tokens: 7, cached_input_tokens: 0, output_tokens: 3, reasoning_output_tokens: 0, total_tokens: 10 };
+    const cum = (...xs) => xs.reduce((a, x) => ({
+      input_tokens: a.input_tokens + x.input_tokens,
+      cached_input_tokens: 0,
+      output_tokens: a.output_tokens + x.output_tokens,
+      reasoning_output_tokens: 0,
+      total_tokens: a.total_tokens + x.total_tokens,
+    }), { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0, total_tokens: 0 });
+
+    const lines = [
+      buildSessionMetaLine({ model: "gpt-5.5", cwd: tmp, forkedFromId: "019e095c-c041-7b40-b7cb-43ddb153086c" }),
+      buildTurnContextLine({ model: "gpt-5.5", cwd: tmp, currentDate: "2026-06-09" }),
+      buildTokenCountLine({ ts: "2026-06-09T20:46:23.100Z", last: r0, total: cum(r0) }),
+      buildTokenCountLine({ ts: "2026-06-09T20:46:23.101Z", last: r1, total: cum(r0, r1) }),
+      buildTokenCountLine({ ts: "2026-06-09T20:46:23.102Z", last: r2, total: cum(r0, r1, r2) }),
+      buildTokenCountLine({ ts: "2026-06-09T20:46:53.102Z", last: live, total: cum(r0, r1, r2, live) }),
+    ];
+    await fs.writeFile(rolloutPath, lines.join("\n") + "\n", "utf8");
+
+    const res = await parseRolloutIncremental({ rolloutFiles: [rolloutPath], cursors, queuePath });
+    assert.equal(res.filesProcessed, 1);
+    // r1 + r2 (the replay burst tail) are skipped; the first-of-run row cannot be
+    // identified without lookahead so it is still counted, plus the live turn.
+    assert.equal(res.eventsAggregated, 2);
+
+    const queued = await readJsonLines(queuePath);
+    const total = queued.reduce((n, q) => n + q.total_tokens, 0);
+    // Without the fix this would be r0+r1+r2+live = 670; the burst tail (550) is dropped.
+    assert.equal(total, r0.total_tokens + live.total_tokens);
+    // Cumulative baseline advanced across the skipped rows so the live delta is intact.
+    assert.deepEqual(cursors.files[rolloutPath].lastTotal, cum(r0, r1, r2, live));
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseRolloutIncremental latches off after the replay burst, keeping fast live turns", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  try {
+    const rolloutPath = path.join(tmp, "rollout-2026-06-09T20-46-23-fork.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const u = (i, o) => ({ input_tokens: i, cached_input_tokens: 0, output_tokens: o, reasoning_output_tokens: 0, total_tokens: i + o });
+    const r0 = u(100, 10);
+    const r1 = u(200, 20);
+    const l0 = u(5, 5);
+    const l1 = u(6, 6); // second live turn only 120ms after l0 — must NOT be dropped
+    const add = (a, b) => ({
+      input_tokens: a.input_tokens + b.input_tokens,
+      cached_input_tokens: 0,
+      output_tokens: a.output_tokens + b.output_tokens,
+      reasoning_output_tokens: 0,
+      total_tokens: a.total_tokens + b.total_tokens,
+    });
+    const t0 = r0, t1 = add(t0, r1), t2 = add(t1, l0), t3 = add(t2, l1);
+
+    const lines = [
+      buildSessionMetaLine({ model: "gpt-5.5", cwd: tmp, forkedFromId: "019e095c-c041-7b40-b7cb-43ddb153086c" }),
+      buildTurnContextLine({ model: "gpt-5.5", cwd: tmp, currentDate: "2026-06-09" }),
+      buildTokenCountLine({ ts: "2026-06-09T20:46:23.100Z", last: r0, total: t0 }),
+      buildTokenCountLine({ ts: "2026-06-09T20:46:23.101Z", last: r1, total: t1 }),
+      buildTokenCountLine({ ts: "2026-06-09T20:46:53.000Z", last: l0, total: t2 }),
+      buildTokenCountLine({ ts: "2026-06-09T20:46:53.120Z", last: l1, total: t3 }),
+    ];
+    await fs.writeFile(rolloutPath, lines.join("\n") + "\n", "utf8");
+
+    const res = await parseRolloutIncremental({ rolloutFiles: [rolloutPath], cursors, queuePath });
+    // r1 skipped (burst tail); r0 (first-of-run), l0, and l1 all counted.
+    assert.equal(res.eventsAggregated, 3);
+    const queued = await readJsonLines(queuePath);
+    const total = queued.reduce((n, q) => n + q.total_tokens, 0);
+    assert.equal(total, r0.total_tokens + l0.total_tokens + l1.total_tokens);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseRolloutIncremental never drops genuine turns in a replay-free fork", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  try {
+    const rolloutPath = path.join(tmp, "rollout-2026-06-09T20-46-23-fork.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    // A forked session that carries no replayed history: every token_count row is
+    // a genuine turn spaced multi-second apart. Nothing may be skipped.
+    const u = (i, o) => ({ input_tokens: i, cached_input_tokens: 0, output_tokens: o, reasoning_output_tokens: 0, total_tokens: i + o });
+    const a = u(50, 5);
+    const b = u(60, 6);
+    const totalA = a;
+    const totalB = { input_tokens: 110, cached_input_tokens: 0, output_tokens: 11, reasoning_output_tokens: 0, total_tokens: 121 };
+
+    const lines = [
+      buildSessionMetaLine({ model: "gpt-5.5", cwd: tmp, forkedFromId: "019e095c-c041-7b40-b7cb-43ddb153086c" }),
+      buildTurnContextLine({ model: "gpt-5.5", cwd: tmp, currentDate: "2026-06-09" }),
+      buildTokenCountLine({ ts: "2026-06-09T20:46:28.000Z", last: a, total: totalA }),
+      buildTokenCountLine({ ts: "2026-06-09T20:46:33.000Z", last: b, total: totalB }),
+    ];
+    await fs.writeFile(rolloutPath, lines.join("\n") + "\n", "utf8");
+
+    const res = await parseRolloutIncremental({ rolloutFiles: [rolloutPath], cursors, queuePath });
+    assert.equal(res.eventsAggregated, 2);
+    const queued = await readJsonLines(queuePath);
+    const total = queued.reduce((n, q) => n + q.total_tokens, 0);
+    assert.equal(total, a.total_tokens + b.total_tokens);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseRolloutIncremental migrates v1 hourly buckets without resetting totals", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
   try {
