@@ -408,11 +408,11 @@ async function runSyncAppendWorker({ repoRoot, corpusRoot, hashCount }) {
       "rollout-2030-06-02T01-00-00-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jsonl",
       [tokenCount("2030-06-02T01:00:00.000Z", baselineUsage)],
     );
-    const fileStat = await fsp.stat(filePath);
     await fsp.appendFile(
       filePath,
       `${JSON.stringify(tokenCount("2030-06-02T01:05:00.000Z", targetUsage))}\n`,
     );
+    const fileStat = await fsp.stat(filePath);
     const hashes = buildHashes(hashCount);
     const cursorJsonBytes = Buffer.byteLength(JSON.stringify({ codexHashes: hashes }));
     const observedHashes = observeWholeArrayReads(hashes);

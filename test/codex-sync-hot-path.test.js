@@ -218,8 +218,8 @@ test("a production-scale same-inode append avoids the historical Codex hash Set"
     };
     const baselineLine = `${JSON.stringify(baseline)}\n`;
     await fs.writeFile(rolloutPath, baselineLine, "utf8");
-    const stat = await fs.stat(rolloutPath);
     await fs.appendFile(rolloutPath, `${JSON.stringify(appended)}\n`, "utf8");
+    const stat = await fs.stat(rolloutPath);
     const cursors = {
       version: 1,
       files: {
@@ -305,12 +305,12 @@ test("a legacy same-inode append without lastTotal rebuilds its cumulative basel
     });
     const baselineLine = `${JSON.stringify(event(baselineTimestamp, baselineUsage))}\n`;
     await fs.writeFile(rolloutPath, baselineLine, "utf8");
-    const stat = await fs.stat(rolloutPath);
     await fs.appendFile(
       rolloutPath,
       `${JSON.stringify(event(targetTimestamp, targetUsage))}\n`,
       "utf8",
     );
+    const stat = await fs.stat(rolloutPath);
     const cursors = {
       version: 1,
       files: {
