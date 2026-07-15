@@ -274,6 +274,7 @@ const PROVIDER_ICON_MAP = {
   CURSOR: CursorIcon,
   DEEPSEEK: DeepSeekIcon,
   DROID: DroidIcon,
+  "EVERY-CODE": CodexIcon,
   GEMINI: GeminiIcon,
   GITHUB: GithubIcon,
   GITLAB: GitlabIcon,

@@ -112,7 +112,11 @@ export function HeroSection({
               </span>
             </h1>
 
-            <div className="mt-8 sm:mt-10 w-full xtall:mt-12">
+            <p className="mt-5 max-w-2xl text-balance text-sm leading-6 text-oai-gray-300 sm:text-base sm:leading-7">
+              {copy("landing.v3.hero.subtitle")}
+            </p>
+
+            <div className="mt-6 w-full sm:mt-8 xtall:mt-9">
               <InstallCommand
                 copy={copy}
                 installCommand={installCommand}
@@ -136,7 +140,7 @@ export function HeroSection({
 
           {/* Outer div owns the centering; GSAP animates the inner one so the
               -50% translate never gets clobbered by the tween's transform. */}
-          <div className="pointer-events-none absolute left-1/2 top-[68vh] z-10 -translate-x-1/2 -translate-y-1/2">
+          <div className="pointer-events-none absolute left-1/2 top-[76vh] z-10 -translate-x-1/2 -translate-y-1/2 tall:top-[82vh]">
             <div ref={statRef} className="flex flex-col items-center gap-2">
             {/* Frosted dark pad: blurs the particles directly behind the
                 counter and dims them, with a radial mask so it melts into the

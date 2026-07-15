@@ -77,8 +77,8 @@ landing.cta.secondary,landing,LandingPage,LandingPage,cta_secondary,"GitHub",,ac
 
 
 
-landing.v2.hero.title_line1,landing,LandingPage,MarketingLanding,hero_title_1,"TRACK ALL YOUR",,active
-landing.v2.hero.title_line2,landing,LandingPage,MarketingLanding,hero_title_2,"AI TOKENS",,active
+landing.v2.hero.title_line1,landing,LandingPage,MarketingLanding,hero_title_1,"YOUR AI USAGE",,active
+landing.v2.hero.title_line2,landing,LandingPage,MarketingLanding,hero_title_2,"BROUGHT TO LIFE",,active
 landing.v2.install.mac_cta,landing,LandingPage,MarketingLanding,mac_cta,"Download for macOS",,active
 landing.v2.install.win_cta,landing,LandingPage,MarketingLanding,win_cta,"Download for Windows",,active
 landing.v2.install.desktop_cta,landing,LandingPage,MarketingLanding,desktop_cta,"Download desktop app",,active
@@ -92,7 +92,8 @@ landing.v2.nav.status,landing,LandingPage,MarketingLanding,nav_status,"Status",,
 landing.v2.nav.github,landing,LandingPage,MarketingLanding,nav_github,"GitHub",,active
 landing.v2.cta.primary,landing,LandingPage,MarketingLanding,cta_primary,"Dashboard",,active
 landing.v2.hero.subtagline,landing,LandingPage,MarketingLanding,hero_subtagline,"Automatically monitor token usage across Claude Code, Cursor, Codex, and more. Local-first, privacy-focused, and zero manual configuration.",,active
-landing.v3.hero.kicker,landing,LandingPage,HeroSection,hero_kicker,"Open source · Local-first · Realtime",,active
+landing.v3.hero.kicker,landing,LandingPage,HeroSection,hero_kicker,"Desktop pet · 4 widgets · Achievements",,active
+landing.v3.hero.subtitle,landing,LandingPage,HeroSection,hero_subtitle,"A living desktop companion powered by real activity from 27 AI coding tools — local-first, open source, and private by design.",,active
 landing.v3.hero.stat_label,landing,LandingPage,HeroSection,hero_stat_label,"Tokens tracked by the community",,active
 landing.v3.hero.scroll_hint,landing,LandingPage,HeroSection,hero_scroll_hint,"Scroll",,active
 landing.v3.stats.devs_syncing,landing,LandingPage,HeroSection,stats_devs_syncing,"{{count}} developers syncing",,active
