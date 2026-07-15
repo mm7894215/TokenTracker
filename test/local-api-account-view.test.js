@@ -101,12 +101,12 @@ const SAMPLE_ROW = {
   conversation_count: 1,
 };
 
-test("cloud-sync-pref defaults to disabled and reports account unavailable", async () => {
+test("cloud-sync-pref defaults to enabled; account stays unavailable while signed out", async () => {
   const queuePath = path.join(tmpHome, "queue.jsonl");
   writeQueue(queuePath, [SAMPLE_ROW]);
   const handler = freshHandler(queuePath);
   const res = await call(handler, { endpoint: "/functions/tokentracker-cloud-sync-pref" });
-  assert.deepEqual(res.json(), { enabled: false, account_available: false });
+  assert.deepEqual(res.json(), { enabled: true, account_available: false });
 });
 
 test("user-status exposes account aggregation state", async () => {
@@ -117,7 +117,9 @@ test("user-status exposes account aggregation state", async () => {
   const body = res.json();
   assert.deepEqual(body.account, {
     available: false,
-    cloud_sync_enabled: false,
+    // Pref defaults ON, but the account view still requires a signed-in
+    // session (relayed refresh token) — absent here, so no cross-device view.
+    cloud_sync_enabled: true,
     account_view: false,
   });
 });

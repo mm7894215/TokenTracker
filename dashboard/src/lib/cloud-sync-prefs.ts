@@ -26,14 +26,18 @@ export function isLocalDashboardHost(): boolean {
   return h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]";
 }
 
-/** 默认关闭：需用户手动开启后才同步到云端 */
+/**
+ * 默认开启：已登录用户无需手动开启即同步到云端；显式关闭("0")仍被尊重。
+ * Every consumer additionally gates on a signed-in session (refresh token /
+ * insforge.signedIn), so this default has no effect while signed out.
+ */
 export function getCloudSyncEnabled(): boolean {
   try {
     const v = localStorage.getItem(KEY_ENABLED);
-    if (v === null || v === "") return false;
+    if (v === null || v === "") return true;
     return v === "1" || v === "true";
   } catch {
-    return false;
+    return true;
   }
 }
 

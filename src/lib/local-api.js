@@ -1054,15 +1054,17 @@ function createLocalApiHandler({ queuePath }) {
   // sync is on. Cloud sync is a dashboard (WebView) preference persisted in
   // localStorage; the dashboard mirrors it here via POST
   // /functions/tokentracker-cloud-sync-pref so the auth-unaware popover can key
-  // off the same flag. Defaults OFF, exactly like the dashboard toggle.
+  // off the same flag. Defaults ON, exactly like the dashboard toggle — every
+  // consumer additionally requires a relayed refresh token, so the default only
+  // takes effect for signed-in users; an explicit {enabled:false} still wins.
   const cloudSyncPrefPath = path.join(trackerDataDir, "cloud-sync-pref.json");
   let cloudSyncPrefCache;
   function getCloudSyncPref() {
     if (cloudSyncPrefCache === undefined) {
       try {
-        cloudSyncPrefCache = JSON.parse(fs.readFileSync(cloudSyncPrefPath, "utf8"))?.enabled === true;
+        cloudSyncPrefCache = JSON.parse(fs.readFileSync(cloudSyncPrefPath, "utf8"))?.enabled !== false;
       } catch {
-        cloudSyncPrefCache = false;
+        cloudSyncPrefCache = true;
       }
     }
     return cloudSyncPrefCache;
