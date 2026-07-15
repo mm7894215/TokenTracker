@@ -273,8 +273,10 @@ function mergeCopilotAppDbStates(primary = {}, alias = {}) {
   return { ...primary, ...newer, sessionTotals };
 }
 
-async function cmdSync(argv) {
+async function cmdSync(argv, context = {}) {
   const opts = parseArgs(argv);
+  const diagnostics = context && typeof context === "object" ? context.diagnostics : null;
+  const syncDiagnostics = diagnostics && typeof diagnostics === "object" ? diagnostics : null;
   const home = os.homedir();
   const { trackerDir } = await resolveTrackerPaths({ home });
 
@@ -426,6 +428,7 @@ async function cmdSync(argv) {
           cursors,
           projectEnabled: true,
           auditDue: codexColdAuditDue,
+          diagnostics: syncDiagnostics,
         })
       : { rolloutFiles, skipped: 0 };
     const rolloutFilesForParse = codexColdFilter.rolloutFiles;
@@ -448,6 +451,7 @@ async function cmdSync(argv) {
         cursors,
         queuePath,
         projectQueuePath,
+        diagnostics: syncDiagnostics,
         onProgress: (p) => {
           if (!progress?.enabled) return;
           const pct = p.total > 0 ? p.index / p.total : 1;
@@ -1820,6 +1824,12 @@ async function cmdSync(argv) {
 
     cursors.updatedAt = new Date().toISOString();
     await writeJson(cursorsPath, cursors);
+    if (syncDiagnostics) {
+      const cursorStat = await fs.stat(cursorsPath);
+      syncDiagnostics.cursor_commits = Number(syncDiagnostics.cursor_commits || 0) + 1;
+      syncDiagnostics.cursor_bytes = Number(syncDiagnostics.cursor_bytes || 0) + cursorStat.size;
+      syncDiagnostics.cursor_path = cursorsPath;
+    }
     if (grokHookSignalConsumed && grokHookSignalPath) {
       await fs.unlink(grokHookSignalPath).catch(() => {});
     }
@@ -3082,6 +3092,11 @@ async function migrateRolloutCumulativeDeltaBuckets({ cursors, queuePath, rollou
       delete cursors.files[filePath];
     }
   }
+  // The migration clears Codex buckets and reparses the discovered corpus from
+  // byte zero. Persisted event keys belong to the cleared buckets, so retaining
+  // them can suppress the rebuild when a moved session still has an old path
+  // cursor. Rebuild the hash inventory together with the buckets.
+  cursors.codexHashes = [];
 
   const buckets = cursors.hourly?.buckets;
   const retractions = [];

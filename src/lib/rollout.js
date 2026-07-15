@@ -172,6 +172,7 @@ async function parseRolloutIncremental({
   onProgress,
   source,
   publicRepoResolver,
+  diagnostics,
 }) {
   await ensureDir(path.dirname(queuePath));
   let filesProcessed = 0;
@@ -189,6 +190,13 @@ async function parseRolloutIncremental({
   const projectFreshnessNowMs = Date.now();
   const touchedBuckets = new Set();
   const defaultSource = normalizeSourceInput(source) || DEFAULT_SOURCE;
+  const syncDiagnostics = diagnostics && typeof diagnostics === "object" ? diagnostics : null;
+  const codexParseCandidates = (Array.isArray(rolloutFiles) ? rolloutFiles : []).reduce((count, entry) => {
+    const entrySource = typeof entry === "string"
+      ? defaultSource
+      : normalizeSourceInput(entry?.source) || defaultSource;
+    return count + (entrySource === DEFAULT_SOURCE ? 1 : 0);
+  }, 0);
 
   if (!cursors.files || typeof cursors.files !== "object") {
     cursors.files = {};
@@ -199,7 +207,102 @@ async function parseRolloutIncremental({
   // external rewrite of a session file (Codex-Manager's atomic provider-patch on
   // account switch, issue #187) cannot re-count already-counted events.
   const prevCodexHashes = Array.isArray(cursors?.codexHashes) ? cursors.codexHashes : [];
-  const seenCodexEvents = new Set(prevCodexHashes);
+  if (!Array.isArray(cursors.codexHashes)) cursors.codexHashes = prevCodexHashes;
+  let seenCodexEvents = null;
+  let newCodexEventKeys = null;
+  let newCodexEventKeySet = null;
+  let appendOnlyCodexEvents = null;
+  let historicalCodexEvents = null;
+  let cursorSessionPaths = null;
+  if (syncDiagnostics) {
+    const discoveredRollouts = Number(syncDiagnostics.discovered_rollouts);
+    const cursorKeys = Number(syncDiagnostics.cursor_keys);
+    const coldSkipped = Number(syncDiagnostics.cold_skipped);
+    const parseCandidates = Number(syncDiagnostics.parse_candidates);
+    Object.assign(syncDiagnostics, {
+      discovered_rollouts: Number.isFinite(discoveredRollouts) ? discoveredRollouts : codexParseCandidates,
+      cursor_keys: Number.isFinite(cursorKeys) ? cursorKeys : Object.keys(cursors.files).length,
+      parse_candidates: Number.isFinite(parseCandidates) ? parseCandidates : codexParseCandidates,
+      stat_candidates: 0,
+      cold_skipped: Number.isFinite(coldSkipped) ? coldSkipped : 0,
+      content_files_read: 0,
+      hash_set_constructions: 0,
+      hash_array_materializations: 0,
+      hash_array_materialized_items: 0,
+      codex_hash_count: prevCodexHashes.length,
+    });
+  }
+  const ensureNewCodexEventKeys = () => {
+    if (!newCodexEventKeys) newCodexEventKeys = [];
+    if (!newCodexEventKeySet) newCodexEventKeySet = new Set();
+  };
+  const recordNewCodexEvent = (key) => {
+    ensureNewCodexEventKeys();
+    if (newCodexEventKeySet.has(key)) return;
+    newCodexEventKeySet.add(key);
+    newCodexEventKeys.push(key);
+    if (seenCodexEvents) seenCodexEvents.add(key);
+  };
+  const getAppendOnlyCodexEvents = () => {
+    if (!appendOnlyCodexEvents) {
+      appendOnlyCodexEvents = {
+        has(key) {
+          return Boolean(
+            newCodexEventKeySet?.has(key) ||
+            seenCodexEvents?.has(key)
+          );
+        },
+        add: recordNewCodexEvent,
+      };
+    }
+    return appendOnlyCodexEvents;
+  };
+  const getHistoricalCodexEvents = () => {
+    if (!seenCodexEvents) {
+      seenCodexEvents = new Set(prevCodexHashes);
+      for (const key of newCodexEventKeys || []) seenCodexEvents.add(key);
+      if (syncDiagnostics) syncDiagnostics.hash_set_constructions += 1;
+    }
+    if (!historicalCodexEvents) {
+      historicalCodexEvents = {
+        has: (key) => seenCodexEvents.has(key),
+        add: recordNewCodexEvent,
+      };
+    }
+    return historicalCodexEvents;
+  };
+  const getCursorSessionPaths = () => {
+    if (cursorSessionPaths) return cursorSessionPaths;
+    cursorSessionPaths = new Map();
+    for (const existingPath of Object.keys(cursors.files)) {
+      const sessionId = codexSessionIdFromPath(existingPath);
+      if (!sessionId) continue;
+      if (!cursorSessionPaths.has(sessionId)) cursorSessionPaths.set(sessionId, new Set());
+      cursorSessionPaths.get(sessionId).add(existingPath);
+    }
+    return cursorSessionPaths;
+  };
+  const needsHistoricalCodexDedup = ({
+    filePath,
+    prev,
+    sameInode,
+    truncated,
+    startOffset,
+    rebuildingBaseline,
+  }) => {
+    if (rebuildingBaseline) return true;
+    if (prev && (!sameInode || truncated)) return true;
+    if (sameInode && !truncated && startOffset > 0) return false;
+    if (prev?.lastTotal) return true;
+    const sessionId = codexSessionIdFromPath(filePath);
+    if (!sessionId) return true;
+    const knownPaths = getCursorSessionPaths().get(sessionId);
+    if (!knownPaths) return false;
+    for (const knownPath of knownPaths) {
+      if (knownPath !== filePath) return true;
+    }
+    return false;
+  };
 
   for (let idx = 0; idx < rolloutFiles.length; idx++) {
     const entry = rolloutFiles[idx];
@@ -209,6 +312,7 @@ async function parseRolloutIncremental({
       typeof entry === "string"
         ? defaultSource
         : normalizeSourceInput(entry?.source) || defaultSource;
+    if (syncDiagnostics && fileSource === DEFAULT_SOURCE) syncDiagnostics.stat_candidates += 1;
     const st = await fs.stat(filePath).catch(() => null);
     if (!st || !st.isFile()) continue;
 
@@ -218,8 +322,18 @@ async function parseRolloutIncremental({
     const sameInode = prev && prev.inode === inode;
     const prevOffset = sameInode ? prev.offset || 0 : 0;
     const truncated = sameInode && prevOffset > st.size;
-    const startOffset = sameInode && !truncated ? prevOffset : 0;
-    const lastTotal = sameInode && !truncated ? prev.lastTotal || null : null;
+    const rebuildingCodexBaseline = Boolean(
+      fileSource === DEFAULT_SOURCE &&
+      sameInode &&
+      !truncated &&
+      prevOffset > 0 &&
+      prevOffset < st.size &&
+      (!prev.lastTotal || typeof prev.lastTotal !== "object")
+    );
+    const startOffset = sameInode && !truncated && !rebuildingCodexBaseline ? prevOffset : 0;
+    const lastTotal = sameInode && !truncated && !rebuildingCodexBaseline
+      ? prev.lastTotal || null
+      : null;
     const lastModel = sameInode && !truncated ? prev.lastModel || null : null;
 
     const codexProjectFastPath = projectEnabled && fileSource === DEFAULT_SOURCE;
@@ -270,6 +384,21 @@ async function parseRolloutIncremental({
     const projectRef = projectContext?.projectRef || null;
     const projectKey = projectContext?.projectKey || null;
 
+    if (syncDiagnostics && !projectContextOnlyScan && fileSource === DEFAULT_SOURCE) {
+      syncDiagnostics.content_files_read += 1;
+    }
+    const codexEventTracker = fileSource === DEFAULT_SOURCE
+      ? (needsHistoricalCodexDedup({
+          filePath,
+          prev,
+          sameInode,
+          truncated,
+          startOffset,
+          rebuildingBaseline: rebuildingCodexBaseline,
+        })
+          ? getHistoricalCodexEvents
+          : getAppendOnlyCodexEvents)
+      : null;
     const result = projectContextOnlyScan
       ? await scanRolloutProjectFileContexts({
           filePath,
@@ -299,7 +428,7 @@ async function parseRolloutIncremental({
           publicRepoCache,
           publicRepoResolver,
           projectContext,
-          seenCodexEvents,
+          seenCodexEvents: codexEventTracker,
           sessionId: codexSessionIdFromPath(filePath),
         });
 
@@ -341,7 +470,12 @@ async function parseRolloutIncremental({
   const projectBucketsQueued = projectEnabled
     ? await enqueueTouchedProjectBuckets({ projectQueuePath, projectState, projectTouchedBuckets })
     : 0;
-  cursors.codexHashes = Array.from(seenCodexEvents);
+  for (const key of newCodexEventKeys || []) prevCodexHashes.push(key);
+  if (syncDiagnostics) {
+    syncDiagnostics.codex_hash_count = Array.isArray(cursors.codexHashes)
+      ? cursors.codexHashes.length
+      : prevCodexHashes.length;
+  }
   hourlyState.updatedAt = new Date().toISOString();
   cursors.hourly = hourlyState;
   if (projectState) {
@@ -359,8 +493,23 @@ async function filterColdCodexRolloutFiles({
   auditDue = false,
   nowMs = Date.now(),
   recentDays = DEFAULT_CODEX_COLD_SKIP_RECENT_DAYS,
+  diagnostics = null,
 } = {}) {
   const files = Array.isArray(rolloutFiles) ? rolloutFiles : [];
+  const syncDiagnostics = diagnostics && typeof diagnostics === "object" ? diagnostics : null;
+  const isCodexEntry = (entry) => (
+    typeof entry === "string" || (normalizeSourceInput(entry?.source) || DEFAULT_SOURCE) === DEFAULT_SOURCE
+  );
+  const discoveredRollouts = files.reduce(
+    (count, entry) => count + (isCodexEntry(entry) ? 1 : 0),
+    0,
+  );
+  if (syncDiagnostics) {
+    syncDiagnostics.discovered_rollouts = discoveredRollouts;
+    syncDiagnostics.cursor_keys = Object.keys(cursors?.files || {}).length;
+    syncDiagnostics.cold_skipped = 0;
+    syncDiagnostics.parse_candidates = discoveredRollouts;
+  }
   if (auditDue || !cursors?.files || typeof cursors.files !== "object") {
     return { rolloutFiles: files, skipped: 0 };
   }
@@ -414,6 +563,13 @@ async function filterColdCodexRolloutFiles({
     skipped += 1;
   }
 
+  if (syncDiagnostics) {
+    syncDiagnostics.cold_skipped = skipped;
+    syncDiagnostics.parse_candidates = out.reduce(
+      (count, entry) => count + (isCodexEntry(entry) ? 1 : 0),
+      0,
+    );
+  }
   return { rolloutFiles: out, skipped };
 }
 
@@ -1613,10 +1769,13 @@ async function parseRolloutFile({
     // rewrite) manages Codex. Other rollout-format sources (e.g. every-code) have
     // their own model re-alignment that legitimately re-reads prior events, which
     // this dedup would otherwise suppress.
-    if (seenCodexEvents && source === "codex") {
+    const codexEvents = typeof seenCodexEvents === "function"
+      ? seenCodexEvents()
+      : seenCodexEvents;
+    if (codexEvents && source === "codex") {
       const dedupKey = `${sessionId || filePath}:${tokenTimestamp}`;
-      if (seenCodexEvents.has(dedupKey)) continue;
-      seenCodexEvents.add(dedupKey);
+      if (codexEvents.has(dedupKey)) continue;
+      codexEvents.add(dedupKey);
     }
 
     const bucket = getHourlyBucket(hourlyState, source, model, bucketStart);
