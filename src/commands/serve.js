@@ -22,6 +22,7 @@ const WSL_DEFAULT_PORT = 7681;
 const DEFAULT_MAX_PORT_ATTEMPTS = 20;
 const NPM_PACKAGE_NAME = "tokentracker-cli";
 const LOCAL_BIND_HOST = "127.0.0.1";
+const NATIVE_BACKGROUND_SYNC_INTERVAL_MS = 60_000;
 const STATIC_ASSET_EXTENSIONS = new Set([
   ".css",
   ".gif",
@@ -219,6 +220,18 @@ async function cmdServe(argv) {
 
   await maybeShowStarCta({ trackerDir });
 
+  // Native desktop apps keep this server alive even when the dashboard window
+  // is closed. Provider hooks are the fast path, but they can be removed by a
+  // tool update or skipped by a provider. Scan every local source once a
+  // minute as a bounded fallback so the queue cannot remain stale indefinitely.
+  // `--no-sync` still skips the blocking startup sync; this periodic pass is
+  // native-shell-only and uses the lightweight local mode (no cloud upload,
+  // Cursor network request, or deep Codex archive scan).
+  const nativeBackgroundSync = startNativeBackgroundSync({
+    onError: (e) =>
+      process.stdout.write(`Background local sync warning: ${e?.message || e}\n`),
+  });
+
   // Anonymous daily heartbeat (see src/lib/telemetry.js for the privacy
   // contract). Fire-and-forget at startup, then re-checked every 6 hours so
   // long-lived embedded-app servers still count on later days; the shared
@@ -240,6 +253,7 @@ async function cmdServe(argv) {
   // 5. Graceful shutdown
   const shutdown = () => {
     process.stdout.write("\nShutting down...\n");
+    nativeBackgroundSync?.stop();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 3000);
   };
@@ -248,6 +262,49 @@ async function cmdServe(argv) {
 
   // Keep process alive
   await new Promise(() => {});
+}
+
+function startNativeBackgroundSync({
+  appShell = process.env.TOKENTRACKER_APP_SHELL,
+  intervalMs = NATIVE_BACKGROUND_SYNC_INTERVAL_MS,
+  runSync,
+  setIntervalFn = setInterval,
+  clearIntervalFn = clearInterval,
+  onError = () => {},
+} = {}) {
+  const normalizedShell = String(appShell || "").trim().toLowerCase();
+  if (normalizedShell !== "macos" && normalizedShell !== "windows") return null;
+
+  const sync = runSync || (async (args) => {
+    const { cmdSync } = require("./sync");
+    await cmdSync(args);
+  });
+  let inFlight = null;
+  const run = () => {
+    if (inFlight) return inFlight;
+    const pending = Promise.resolve()
+      .then(() => sync(["--auto", "--background", "--all-local-sources"]))
+      .catch((error) => {
+        try { onError(error); } catch (_e) {}
+      })
+      .finally(() => {
+        if (inFlight === pending) inFlight = null;
+      });
+    inFlight = pending;
+    return pending;
+  };
+
+  const timer = setIntervalFn(() => {
+    void run();
+  }, intervalMs);
+  timer?.unref?.();
+
+  return {
+    run,
+    stop() {
+      clearIntervalFn(timer);
+    },
+  };
 }
 
 function findPidOnPort(port) {
@@ -457,4 +514,6 @@ module.exports = {
   isRunningUnderWsl,
   resolveDefaultPort,
   shouldServeSpaFallback,
+  startNativeBackgroundSync,
+  NATIVE_BACKGROUND_SYNC_INTERVAL_MS,
 };

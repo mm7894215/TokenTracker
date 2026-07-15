@@ -28,6 +28,7 @@ import {
 import { shouldShowInstallCard } from "../lib/install-status";
 import { getMockNow, isMockEnabled } from "../lib/mock-data";
 import { publishUsageLimitsPreloadState } from "../lib/dashboard-preload.js";
+import { startLocalUsageAutoRefresh } from "../lib/local-usage-auto-refresh";
 import { buildFleetData, buildTopModels, resolveDisplayTokens } from "../lib/model-breakdown";
 import { safeWriteClipboard } from "../lib/safe-browser";
 import { isScreenshotModeEnabled } from "../lib/screenshot-mode";
@@ -922,6 +923,20 @@ export function DashboardPage({
     return () => {
       active = false;
     };
+  }, [isLocalMode, mockEnabled, refreshUsageStats]);
+
+  // Provider hooks update the queue quickly, while the native server also
+  // performs a once-per-minute all-source fallback scan. Re-read the local
+  // aggregates while this dashboard remains visible so those queue updates
+  // appear without requiring a click or a page reload.
+  useEffect(() => {
+    if (!isLocalMode || mockEnabled) return undefined;
+    const autoRefresh = startLocalUsageAutoRefresh({
+      refresh: refreshUsageStats,
+      onError: (error) =>
+        console.warn("[DashboardPage] Automatic usage refresh failed:", error),
+    });
+    return () => autoRefresh.stop();
   }, [isLocalMode, mockEnabled, refreshUsageStats]);
 
   const handleUsageRefresh = useCallback(async () => {
