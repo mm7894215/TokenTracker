@@ -5,7 +5,20 @@ const fs = require("node:fs/promises");
 const fssync = require("node:fs");
 const { test } = require("node:test");
 
-const cp = require("node:child_process");
+// This suite only uses child_process to run `sqlite3 <db> <sql>` writes when
+// building fixtures. Route those through in-process node:sqlite instead of
+// spawning the CLI per statement — the spawns dominated the suite's wall time.
+// Call sites stay `cp.execFileSync("sqlite3", [dbPath, sql])`; nothing else uses cp.
+const { runSql: runSqliteWrite } = require("./helpers/sqlite-write");
+const cp = {
+  execFileSync(bin, args) {
+    if (bin === "sqlite3") {
+      runSqliteWrite(args[0], args[1]);
+      return "";
+    }
+    throw new Error(`unexpected cp.execFileSync("${bin}") in rollout-parser test`);
+  },
+};
 const {
   parseRolloutIncremental,
   parseClaudeIncremental,
@@ -1666,6 +1679,93 @@ test("parseRolloutIncremental latches off after the replay burst, keeping fast l
     const queued = await readJsonLines(queuePath);
     const total = queued.reduce((n, q) => n + q.total_tokens, 0);
     assert.equal(total, r0.total_tokens + l0.total_tokens + l1.total_tokens);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseRolloutIncremental counts fast live turns appended after the first sync of a forked rollout", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  try {
+    const rolloutPath = path.join(tmp, "rollout-2026-06-09T20-46-23-fork.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const u = (i, o) => ({ input_tokens: i, cached_input_tokens: 0, output_tokens: o, reasoning_output_tokens: 0, total_tokens: i + o });
+    const add = (a, b) => ({
+      input_tokens: a.input_tokens + b.input_tokens,
+      cached_input_tokens: 0,
+      output_tokens: a.output_tokens + b.output_tokens,
+      reasoning_output_tokens: 0,
+      total_tokens: a.total_tokens + b.total_tokens,
+    });
+    const r0 = u(100, 10);
+    const r1 = u(200, 20);
+    const t1 = add(r0, r1);
+
+    // First sync: replay burst only.
+    const firstLines = [
+      buildSessionMetaLine({ model: "gpt-5.5", cwd: tmp, forkedFromId: "019e095c-c041-7b40-b7cb-43ddb153086c" }),
+      buildTurnContextLine({ model: "gpt-5.5", cwd: tmp, currentDate: "2026-06-09" }),
+      buildTokenCountLine({ ts: "2026-06-09T20:46:23.100Z", last: r0, total: r0 }),
+      buildTokenCountLine({ ts: "2026-06-09T20:46:23.101Z", last: r1, total: t1 }),
+    ];
+    await fs.writeFile(rolloutPath, firstLines.join("\n") + "\n", "utf8");
+    const first = await parseRolloutIncremental({ rolloutFiles: [rolloutPath], cursors, queuePath });
+    assert.equal(first.eventsAggregated, 1); // first-of-run counted, burst tail skipped
+
+    // Second sync resumes mid-file: two genuine live turns only 200ms apart.
+    // The burst detector must be inert on a resumed scan — these are live.
+    const l0 = u(5, 5);
+    const l1 = u(6, 6);
+    const t2 = add(t1, l0);
+    const t3 = add(t2, l1);
+    const appended = [
+      buildTokenCountLine({ ts: "2026-06-09T20:47:10.000Z", last: l0, total: t2 }),
+      buildTokenCountLine({ ts: "2026-06-09T20:47:10.200Z", last: l1, total: t3 }),
+    ];
+    await fs.appendFile(rolloutPath, appended.join("\n") + "\n", "utf8");
+    const second = await parseRolloutIncremental({ rolloutFiles: [rolloutPath], cursors, queuePath });
+    assert.equal(second.eventsAggregated, 2, "both fast live turns must be counted on resume");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseRolloutIncremental fails open when a forked rollout's timestamps step backwards", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  try {
+    const rolloutPath = path.join(tmp, "rollout-2026-06-09T20-46-23-fork.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const u = (i, o) => ({ input_tokens: i, cached_input_tokens: 0, output_tokens: o, reasoning_output_tokens: 0, total_tokens: i + o });
+    const add = (a, b) => ({
+      input_tokens: a.input_tokens + b.input_tokens,
+      cached_input_tokens: 0,
+      output_tokens: a.output_tokens + b.output_tokens,
+      reasoning_output_tokens: 0,
+      total_tokens: a.total_tokens + b.total_tokens,
+    });
+    const r0 = u(100, 10);
+    const l0 = u(5, 5); // clock stepped BACKWARDS before this row (NTP correction)
+    const l1 = u(6, 6); // 100ms after l0 — dense, but the latch must already be off
+    const t1 = add(r0, l0);
+    const t2 = add(t1, l1);
+
+    const lines = [
+      buildSessionMetaLine({ model: "gpt-5.5", cwd: tmp, forkedFromId: "019e095c-c041-7b40-b7cb-43ddb153086c" }),
+      buildTurnContextLine({ model: "gpt-5.5", cwd: tmp, currentDate: "2026-06-09" }),
+      buildTokenCountLine({ ts: "2026-06-09T20:46:23.100Z", last: r0, total: r0 }),
+      buildTokenCountLine({ ts: "2026-06-09T20:46:22.900Z", last: l0, total: t1 }),
+      buildTokenCountLine({ ts: "2026-06-09T20:46:23.000Z", last: l1, total: t2 }),
+    ];
+    await fs.writeFile(rolloutPath, lines.join("\n") + "\n", "utf8");
+
+    const res = await parseRolloutIncremental({ rolloutFiles: [rolloutPath], cursors, queuePath });
+    // A backwards step is outside what the burst heuristic was measured
+    // against: the prefix ends permanently and every row is counted.
+    assert.equal(res.eventsAggregated, 3);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

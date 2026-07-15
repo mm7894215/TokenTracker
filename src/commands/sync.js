@@ -3542,8 +3542,20 @@ async function repairCodexForkReplayInflation({
   // codex file. A forked rollout that was deleted before this repair runs is
   // unreproducible anyway — the #187 reproducibility guard would defer forever
   // — so gating on what is on disk loses nothing. Files forked AFTER the parser
-  // fix shipped never accrue phantom, so marking done here is final.
-  if (!(await hasForkedCodexRollout(rolloutFiles))) {
+  // fix shipped never accrue phantom, so marking done here is final — but ONLY
+  // when every candidate head was actually inspected: an unreadable candidate
+  // could be the one forked rollout, so an indeterminate scan defers with the
+  // retryable {skipped:true} sentinel instead of finalizing.
+  const forkScan = await scanForForkedCodexRollout(rolloutFiles);
+  if (!forkScan.forked) {
+    if (forkScan.indeterminate) {
+      migrations[CODEX_FORK_REPLAY_REPAIR_KEY] = {
+        skipped: true,
+        reason: "fork_scan_indeterminate",
+        at: new Date().toISOString(),
+      };
+      return false;
+    }
     migrations[CODEX_FORK_REPLAY_REPAIR_KEY] = new Date().toISOString();
     return false;
   }
@@ -3560,14 +3572,18 @@ async function repairCodexForkReplayInflation({
   });
 }
 
-// True when any codex rollout's head contains the fork marker. The child
-// session_meta (with forked_from_id) is the FIRST line of a forked rollout —
-// observed at byte offset ≤169 across every local sample — so a bounded head
-// read is sufficient. 64KB leaves ample margin for long base_instructions
-// preceding it; a substring false positive (the marker quoted in unrelated
-// head content) only costs one redundant guarded rebuild, never data.
-async function hasForkedCodexRollout(rolloutFiles) {
+// Scans codex rollout heads for the fork marker. The child session_meta (with
+// forked_from_id) is the FIRST line of a forked rollout — observed at byte
+// offset ≤169 across every local sample — so a bounded head read is
+// sufficient. 64KB leaves ample margin for long base_instructions preceding
+// it; a substring false positive (the marker quoted in unrelated head content)
+// only costs one redundant guarded rebuild, never data. Tri-state result:
+// {forked:true} on a hit, {forked:false, indeterminate:false} only when every
+// candidate was inspected, {forked:false, indeterminate:true} when any head
+// read failed — the caller must not finalize "no forks" off a failed read.
+async function scanForForkedCodexRollout(rolloutFiles) {
   const HEAD_BYTES = 65536;
+  let indeterminate = false;
   for (const entry of Array.isArray(rolloutFiles) ? rolloutFiles : []) {
     const fp = typeof entry === "string" ? entry : entry?.path;
     const src = typeof entry === "string" ? "codex" : String(entry?.source || "codex");
@@ -3577,14 +3593,16 @@ async function hasForkedCodexRollout(rolloutFiles) {
       fh = await fs.open(fp, "r");
       const buf = Buffer.alloc(HEAD_BYTES);
       const { bytesRead } = await fh.read(buf, 0, HEAD_BYTES, 0);
-      if (buf.toString("utf8", 0, bytesRead).includes('"forked_from_id"')) return true;
+      if (buf.toString("utf8", 0, bytesRead).includes('"forked_from_id"')) {
+        return { forked: true, indeterminate: false };
+      }
     } catch (_e) {
-      // unreadable file: let the rebuild's own guards decide
+      indeterminate = true;
     } finally {
       if (fh) await fh.close().catch(() => {});
     }
   }
-  return false;
+  return { forked: false, indeterminate };
 }
 
 function isCodexSessionCursorPath(filePath) {

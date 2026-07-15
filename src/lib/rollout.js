@@ -1514,7 +1514,12 @@ async function parseRolloutFile({
   let currentCwd = null;
   let currentDate = null;
   let isForkedRollout = false;
-  let replayPrefixActive = true;
+  // The replay prefix only ever exists at the head of a freshly-forked file. A
+  // resumed scan (startOffset > 0) can never see it — and never re-reads the
+  // session_meta line, so isForkedRollout stays false there anyway — but gate
+  // on the offset explicitly so correctness does not hinge on that distant
+  // invariant.
+  let replayPrefixActive = startOffset === 0;
   let prevForkedTokenMs = null;
   const rolloutDate = rolloutDateFromPath(filePath);
   let currentProjectRef = projectRef || null;
@@ -1611,9 +1616,16 @@ async function parseRolloutFile({
     // keeping the cumulative-delta baseline correct for the live turns we keep.
     // Scoped to forked codex rollouts. (issue #169 follow-up.)
     let forkedReplaySkip = false;
-    if (isForkedRollout && source === DEFAULT_SOURCE) {
+    if (isForkedRollout && source === DEFAULT_SOURCE && replayPrefixActive) {
       const tokenMs = Date.parse(tokenTimestamp);
-      if (Number.isFinite(tokenMs)) {
+      // Fail open on anything the burst heuristic was not measured against:
+      // an unparseable timestamp or a backwards clock step permanently ends
+      // the prefix, so no later row can be skipped off a stale baseline.
+      // Replay flushes are monotonic in every sampled rollout (2,116 gaps,
+      // min 0ms), so this never fires on genuine replays.
+      if (!Number.isFinite(tokenMs) || (prevForkedTokenMs !== null && tokenMs < prevForkedTokenMs)) {
+        replayPrefixActive = false;
+      } else {
         if (prevForkedTokenMs !== null && tokenMs - prevForkedTokenMs >= CODEX_FORK_REPLAY_GAP_MS) {
           replayPrefixActive = false;
         }

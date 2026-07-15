@@ -1083,6 +1083,49 @@ describe("repairCodexForkReplayInflation (#169 follow-up) — fork replay histor
     }
   });
 
+  it("defers with a retryable sentinel when a candidate head cannot be read (pre-gate indeterminate)", async () => {
+    const home = await makeTempHome();
+    try {
+      // A directory posing as a rollout file: fh.read() fails with EISDIR, so
+      // the head scan cannot rule out a fork — the gate must NOT finalize.
+      const unreadable = path.join(
+        home, ".codex", "sessions", "2025", "12", "17",
+        "rollout-2025-12-17T00-00-00-cccccccc-dddd-eeee-ffff-000000000000.jsonl",
+      );
+      await fs.mkdir(unreadable, { recursive: true });
+      const queuePath = path.join(home, "queue.jsonl");
+      const queueStatePath = path.join(home, "queue.state.json");
+      await fs.writeFile(queuePath, "", "utf8");
+      await fs.writeFile(queueStatePath, JSON.stringify({ offset: 12 }), "utf8");
+      const cursors = { hourly: { buckets: {}, groupQueued: {} }, files: {}, codexHashes: [], migrations: {} };
+
+      const ran = await repairCodexForkReplayInflation({
+        cursors,
+        queuePath,
+        queueStatePath,
+        rolloutFiles: [{ path: unreadable, source: "codex" }],
+      });
+      assert.equal(ran, false);
+      assert.equal(cursors.migrations[CODEX_FORK_REPLAY_REPAIR_KEY].skipped, true);
+      assert.equal(cursors.migrations[CODEX_FORK_REPLAY_REPAIR_KEY].reason, "fork_scan_indeterminate");
+      assert.equal(JSON.parse(await fs.readFile(queueStatePath, "utf8")).offset, 12);
+
+      // Once the readable truth is available, the retryable sentinel lets the
+      // gate finalize (here: only a non-forked file remains).
+      const codexFile = await writeCodexFile(home);
+      const ranAgain = await repairCodexForkReplayInflation({
+        cursors,
+        queuePath,
+        queueStatePath,
+        rolloutFiles: [{ path: codexFile, source: "codex" }],
+      });
+      assert.equal(ranAgain, false);
+      assert.equal(typeof cursors.migrations[CODEX_FORK_REPLAY_REPAIR_KEY], "string");
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
   it("defers via the reproducibility guard when a previously-counted session is gone", async () => {
     const home = await makeTempHome();
     try {
