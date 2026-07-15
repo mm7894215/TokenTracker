@@ -4,7 +4,7 @@ const fs = require("node:fs/promises");
 
 const { readJson } = require("./fs");
 const { readCodexNotify, readEveryCodeNotify } = require("./codex-config");
-const { isClaudeHookConfigured, buildClaudeHookCommand } = require("./claude-config");
+const { areClaudeUsageHooksConfigured, buildClaudeHookCommand } = require("./claude-config");
 const {
   resolveGeminiConfigDir,
   resolveGeminiSettingsPath,
@@ -81,7 +81,7 @@ async function collectTrackerDiagnostics({
     ? everyCodeNotifyRaw.map((v) => redactValue(v, home))
     : null;
   const claudeHookCommand = buildClaudeHookCommand(path.join(binDir, "notify.cjs"));
-  const claudeHookConfigured = await isClaudeHookConfigured({
+  const claudeHookConfigured = await areClaudeUsageHooksConfigured({
     settingsPath: claudeConfigPath,
     hookCommand: claudeHookCommand,
   });

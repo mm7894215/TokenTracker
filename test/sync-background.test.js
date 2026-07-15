@@ -47,6 +47,32 @@ async function writeArchivedCodexRollout(codexHome, date, uuid, totalTokens) {
   return filePath;
 }
 
+async function writeClaudeSession(home, date, sessionId, totalTokens) {
+  const dir = path.join(home, ".claude", "projects", "sample");
+  await fs.mkdir(dir, { recursive: true });
+  const filePath = path.join(dir, `${sessionId}.jsonl`);
+  await fs.writeFile(
+    filePath,
+    JSON.stringify({
+      type: "assistant",
+      timestamp: `${date}T00:00:00.000Z`,
+      requestId: `request-${sessionId}`,
+      message: {
+        id: `message-${sessionId}`,
+        model: "claude-sonnet-4-5",
+        usage: {
+          input_tokens: totalTokens,
+          output_tokens: 0,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+        },
+      },
+    }) + "\n",
+    "utf8",
+  );
+  return filePath;
+}
+
 async function withTempSyncEnv(fn) {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-background-"));
   const saved = {
@@ -180,6 +206,22 @@ test("background auto sync avoids broad provider traversal", async () => {
     assert.equal(broadReads, 0);
     const queue = await readQueue(home);
     assert.match(queue, /"total_tokens":22/);
+  });
+});
+
+test("all-local background sync includes Claude while preserving lightweight behavior", async () => {
+  await withTempSyncEnv(async (home) => {
+    await writeClaudeSession(home, "2026-06-30", "session-all-local", 53);
+
+    await cmdSync(["--auto", "--background", "--all-local-sources"]);
+
+    const queue = await readQueue(home);
+    assert.match(queue, /"source":"claude"/);
+    assert.match(queue, /"total_tokens":53/);
+    await assert.rejects(
+      fs.stat(path.join(home, ".tokentracker", "tracker", "queue.state.json")),
+      { code: "ENOENT" },
+    );
   });
 });
 

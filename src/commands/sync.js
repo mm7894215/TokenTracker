@@ -330,11 +330,18 @@ async function cmdSync(argv) {
 
     const autoSourceScope = resolveAutoSourceScope(opts);
     const isBackgroundLightweightSync = opts.auto && opts.background && !opts.drain;
+    const isBackgroundAllLocalSync = isBackgroundLightweightSync && opts.allLocalSources;
     const isFullSourceScan = !autoSourceScope && !isBackgroundLightweightSync;
     const sourceAllowed = (...sources) => {
       if (isBackgroundLightweightSync) {
         if (autoSourceScope) {
-          return BACKGROUND_AUTO_SYNC_SOURCES.has(autoSourceScope) && sources.includes(autoSourceScope);
+          return (
+            (isBackgroundAllLocalSync || BACKGROUND_AUTO_SYNC_SOURCES.has(autoSourceScope)) &&
+            sources.includes(autoSourceScope)
+          );
+        }
+        if (isBackgroundAllLocalSync) {
+          return sources.some((source) => AUTO_SYNC_SOURCES.has(source));
         }
         return sources.some((source) => BACKGROUND_AUTO_SYNC_SOURCES.has(source));
       }
@@ -1998,6 +2005,7 @@ function parseArgs(argv) {
     source: null,
     drain: false,
     background: false,
+    allLocalSources: false,
     repairGrok: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -2013,6 +2021,7 @@ function parseArgs(argv) {
     else if (a.startsWith("--source=")) out.source = normalizeSyncSource(a.slice("--source=".length));
     else if (a === "--drain") out.drain = true;
     else if (a === "--background" || a === "--lightweight") out.background = true;
+    else if (a === "--all-local-sources") out.allLocalSources = true;
     else if (a === "--repair-grok") out.repairGrok = true;
     else throw new Error(`Unknown option: ${a}`);
   }

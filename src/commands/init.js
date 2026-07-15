@@ -21,9 +21,11 @@ const {
 } = require("../lib/codex-config");
 const {
   upsertClaudeHook,
+  upsertClaudeUsageHooks,
   buildClaudeHookCommand,
   buildHookCommand,
   isClaudeHookConfigured,
+  areClaudeUsageHooksConfigured,
 } = require("../lib/claude-config");
 const {
   resolveGeminiConfigDir,
@@ -418,6 +420,78 @@ async function repairCodexNotifyIntegration({ home = os.homedir(), trackerDir, b
   return { ...result, skippedReason: null, notifyPath };
 }
 
+async function repairRuntimeIntegrations({
+  home = os.homedir(),
+  trackerDir,
+  binDir,
+  safeMode = true,
+} = {}) {
+  const paths = trackerDir && binDir ? { trackerDir, binDir } : await resolveTrackerPaths({ home });
+  const resolvedTrackerDir = trackerDir || paths.trackerDir;
+  const resolvedBinDir = binDir || paths.binDir;
+  const notifyPath = await writeNotifyHandler({
+    trackerDir: resolvedTrackerDir,
+    binDir: resolvedBinDir,
+  });
+  const context = buildIntegrationTargets({
+    home,
+    trackerDir: resolvedTrackerDir,
+    notifyPath,
+  });
+  const integrations = {};
+  const warnings = [];
+
+  const attempt = async (key, work) => {
+    try {
+      integrations[key] = await work();
+    } catch (error) {
+      integrations[key] = { changed: false, skippedReason: "repair-failed" };
+      warnings.push({ integration: key, error: error?.message || String(error) });
+    }
+  };
+
+  await attempt("codex", () => repairCodexNotifyIntegration({
+    home,
+    trackerDir: resolvedTrackerDir,
+    binDir: resolvedBinDir,
+    safeMode,
+  }));
+
+  const hookRepairs = [
+    ["claude", context.claudeDir, () => upsertClaudeUsageHooks({
+      settingsPath: context.claudeSettingsPath,
+      hookCommand: context.claudeHookCommand,
+    })],
+    ["gemini", context.geminiConfigDir, () => upsertGeminiHook({
+      settingsPath: context.geminiSettingsPath,
+      hookCommand: context.geminiHookCommand,
+    })],
+    ["codebuddy", context.codebuddyDir, () => upsertClaudeHook({
+      settingsPath: context.codebuddySettingsPath,
+      hookCommand: context.codebuddyHookCommand,
+    })],
+    ["workbuddy", context.workbuddyDir, () => upsertClaudeHook({
+      settingsPath: context.workbuddySettingsPath,
+      hookCommand: context.workbuddyHookCommand,
+    })],
+  ];
+  for (const [key, configDir, repair] of hookRepairs) {
+    if (await isDir(configDir)) await attempt(key, repair);
+    else integrations[key] = { changed: false, skippedReason: "config-missing" };
+  }
+
+  if (await isDir(context.opencodeConfigDir)) {
+    await attempt("opencode", () => upsertOpencodePlugin({
+      configDir: context.opencodeConfigDir,
+      notifyPath,
+    }));
+  } else {
+    integrations.opencode = { changed: false, skippedReason: "config-missing" };
+  }
+
+  return { notifyPath, integrations, warnings };
+}
+
 function buildIntegrationTargets({ home, trackerDir, notifyPath }) {
   const codexHome = process.env.CODEX_HOME || path.join(home, ".codex");
   const codexConfigPath = path.join(codexHome, "config.toml");
@@ -495,7 +569,7 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
 
   const claudeDirExists = await isDir(context.claudeDir);
   if (claudeDirExists) {
-    await upsertClaudeHook({
+    await upsertClaudeUsageHooks({
       settingsPath: context.claudeSettingsPath,
       hookCommand: context.claudeHookCommand,
     });
@@ -787,7 +861,7 @@ async function previewIntegrations({ context }) {
 
   const claudeDirExists = await isDir(context.claudeDir);
   if (claudeDirExists) {
-    const configured = await isClaudeHookConfigured({
+    const configured = await areClaudeUsageHooksConfigured({
       settingsPath: context.claudeSettingsPath,
       hookCommand: context.claudeHookCommand,
     });
@@ -1071,7 +1145,6 @@ const codexOriginalPath = ${JSON.stringify(originalPath)};
 const codeOriginalPath = ${JSON.stringify(path.join(trackerDir, "code_notify_original.json"))};
 const trackerBinPath = ${JSON.stringify(trackerBinPath)};
   const depsMarkerPath = path.join(trackerDir, 'app', 'bin', 'tracker.js');
-  const configPath = path.join(trackerDir, 'config.json');
 const fallbackPkg = ${JSON.stringify(fallbackPkg)};
 const selfPath = path.resolve(__filename);
 const home = os.homedir();
@@ -1109,18 +1182,10 @@ if (debugEnabled) {
 // Throttle spawn: at most once per 20 seconds.
 try {
     const throttlePath = path.join(trackerDir, 'sync.throttle');
-    let deviceToken = process.env.TOKENTRACKER_DEVICE_TOKEN || null;
-    if (!deviceToken) {
-      try {
-        const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-        if (cfg && typeof cfg.deviceToken === 'string') deviceToken = cfg.deviceToken;
-      } catch (_) {}
-    }
-    const canSync = Boolean(deviceToken && deviceToken.length > 0);
     const now = Date.now();
     let last = 0;
     try { last = Number(fs.readFileSync(throttlePath, 'utf8')) || 0; } catch (_) {}
-    if (canSync && now - last > 20_000) {
+    if (now - last > 20_000) {
     try { fs.writeFileSync(throttlePath, String(now), 'utf8'); } catch (_) {}
     const hasLocalRuntime = fs.existsSync(trackerBinPath);
     const hasLocalDeps = fs.existsSync(depsMarkerPath);
@@ -1241,6 +1306,7 @@ module.exports = {
   buildNotifyHandler,
   installLocalTrackerApp,
   repairCodexNotifyIntegration,
+  repairRuntimeIntegrations,
 };
 
 async function probeFile(p) {

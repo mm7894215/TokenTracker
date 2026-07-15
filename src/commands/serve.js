@@ -71,11 +71,13 @@ async function cmdServe(argv) {
   }
 
   try {
-    const { installLocalTrackerApp, repairCodexNotifyIntegration } = require("./init");
+    const { installLocalTrackerApp, repairRuntimeIntegrations } = require("./init");
     await installLocalTrackerApp({ appDir: path.join(trackerDir, "app") });
-    const repairResult = await repairCodexNotifyIntegration({ trackerDir, binDir, safeMode: true });
-    if (repairResult?.skippedReason && repairResult.skippedReason !== "config-missing") {
-      process.stdout.write(`Codex notify repair skipped: ${repairResult.skippedReason}\n`);
+    const repairResult = await repairRuntimeIntegrations({ trackerDir, binDir, safeMode: true });
+    for (const warning of repairResult?.warnings || []) {
+      process.stdout.write(
+        `Runtime integration repair warning (${warning.integration}): ${warning.error}\n`,
+      );
     }
   } catch (e) {
     process.stdout.write(`Runtime refresh warning: ${e?.message || e}\n`);

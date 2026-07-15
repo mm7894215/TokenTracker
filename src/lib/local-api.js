@@ -685,6 +685,7 @@ function runSyncCommand(extraEnv = {}, opts = {}) {
     const args = [TRACKER_BIN, "sync"];
     if (opts.auto === true) args.push("--auto");
     if (opts.background === true) args.push("--background");
+    if (opts.allLocalSources === true) args.push("--all-local-sources");
     if (opts.drain === true) args.push("--drain");
     const child = spawn(process.execPath, args, {
       env: { ...process.env, ...extraEnv },
@@ -1693,6 +1694,7 @@ function createLocalApiHandler({ queuePath }) {
         const auto = body.auto === true && !drain;
         const background =
           auto && (body.background === true || body.lightweight === true);
+        const allLocalSources = background && body.allLocalSources === true;
         if (typeof body.deviceToken === "string" && body.deviceToken.trim()) {
           extraEnv.TOKENTRACKER_DEVICE_TOKEN = body.deviceToken.trim();
         }
@@ -1724,7 +1726,12 @@ function createLocalApiHandler({ queuePath }) {
             extraEnv.TOKENTRACKER_DEVICE_TOKEN = issuedToken;
           }
         }
-        const result = await runSyncCommand(extraEnv, { drain, auto, background });
+        const result = await runSyncCommand(extraEnv, {
+          drain,
+          auto,
+          background,
+          allLocalSources,
+        });
         try {
           const { resetUsageLimitsCache } = require("./usage-limits");
           resetUsageLimitsCache();

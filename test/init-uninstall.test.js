@@ -8,6 +8,7 @@ const {
   cmdInit,
   buildNotifyHandler,
   repairCodexNotifyIntegration,
+  repairRuntimeIntegrations,
 } = require("../src/commands/init");
 const { cmdUninstall } = require("../src/commands/uninstall");
 const { withHome } = require("./helpers/with-home");
@@ -64,6 +65,43 @@ async function runGeneratedNotifyHandler({ trackerDir, notify, args = ["--source
     child.stdin?.end();
   });
 }
+
+test("notify handler runs local source sync without a cloud device token", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-notify-local-sync-"));
+  try {
+    const trackerDir = path.join(tmp, "tracker");
+    const trackerBinPath = path.join(trackerDir, "app", "bin", "tracker.js");
+    const markerPath = path.join(tmp, "sync-args.json");
+    const notifyPath = path.join(tmp, "notify.cjs");
+    await fs.mkdir(path.dirname(trackerBinPath), { recursive: true });
+    await fs.writeFile(
+      trackerBinPath,
+      `require("node:fs").writeFileSync(${JSON.stringify(markerPath)}, JSON.stringify(process.argv.slice(2)));\n`,
+      "utf8",
+    );
+    await fs.writeFile(
+      notifyPath,
+      buildNotifyHandler({ trackerDir, packageName: "tokentracker-cli" }),
+      "utf8",
+    );
+
+    const env = { ...process.env };
+    delete env.TOKENTRACKER_DEVICE_TOKEN;
+    await new Promise((resolve, reject) => {
+      require("node:child_process").execFile(
+        process.execPath,
+        [notifyPath, "--source=codex", "turn-ended"],
+        { env },
+        (err) => (err ? reject(err) : resolve()),
+      );
+    });
+
+    const marker = await waitForFile(markerPath, { timeoutMs: 5000 });
+    assert.deepEqual(JSON.parse(marker), ["sync", "--auto", "--from-notify", "--source", "codex"]);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
 
 test("notify handler chains executable original notify commands and skips stale explicit paths", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-notify-chain-"));
@@ -287,6 +325,90 @@ test("serve-time Codex notify repair installs TokenTracker and preserves Sky ori
   } finally {
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("serve-time runtime repair restores hooks for installed local providers", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-runtime-repair-"));
+  const savedEnv = {
+    CODEX_HOME: process.env.CODEX_HOME,
+    GEMINI_HOME: process.env.GEMINI_HOME,
+    OPENCODE_CONFIG_DIR: process.env.OPENCODE_CONFIG_DIR,
+    CODEBUDDY_HOME: process.env.CODEBUDDY_HOME,
+    WORKBUDDY_HOME: process.env.WORKBUDDY_HOME,
+  };
+  try {
+    process.env.CODEX_HOME = path.join(tmp, ".codex");
+    process.env.GEMINI_HOME = path.join(tmp, ".gemini");
+    process.env.OPENCODE_CONFIG_DIR = path.join(tmp, ".config", "opencode");
+    process.env.CODEBUDDY_HOME = path.join(tmp, ".codebuddy");
+    process.env.WORKBUDDY_HOME = path.join(tmp, ".workbuddy");
+    const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+    const binDir = path.join(tmp, ".tokentracker", "bin");
+    await Promise.all([
+      fs.mkdir(path.join(tmp, ".claude"), { recursive: true }),
+      fs.mkdir(process.env.GEMINI_HOME, { recursive: true }),
+      fs.mkdir(process.env.OPENCODE_CONFIG_DIR, { recursive: true }),
+      fs.mkdir(process.env.CODEBUDDY_HOME, { recursive: true }),
+      fs.mkdir(process.env.WORKBUDDY_HOME, { recursive: true }),
+    ]);
+    await fs.writeFile(
+      path.join(tmp, ".claude", "settings.json"),
+      JSON.stringify({ permissions: { allow: ["Read"] } }),
+      "utf8",
+    );
+
+    const result = await repairRuntimeIntegrations({ home: tmp, trackerDir, binDir });
+
+    assert.deepEqual(result.warnings, []);
+    assert.equal(result.integrations.claude.changed, true);
+    assert.equal(result.integrations.gemini.changed, true);
+    assert.equal(result.integrations.opencode.changed, true);
+    assert.equal(result.integrations.codebuddy.changed, true);
+    assert.equal(result.integrations.workbuddy.changed, true);
+    const notifyPath = path.join(binDir, "notify.cjs");
+    await fs.stat(notifyPath);
+
+    const claudeSettings = JSON.parse(
+      await fs.readFile(path.join(tmp, ".claude", "settings.json"), "utf8"),
+    );
+    assert.deepEqual(claudeSettings.permissions, { allow: ["Read"] });
+    assert.equal(
+      flattenHookEntries(claudeSettings.hooks.SessionEnd).some(
+        (hook) => hook.command === buildClaudeHookCommand(notifyPath),
+      ),
+      true,
+    );
+    assert.equal(
+      flattenHookEntries(claudeSettings.hooks.Stop).some(
+        (hook) => hook.command === buildClaudeHookCommand(notifyPath),
+      ),
+      true,
+    );
+
+    const geminiSettings = JSON.parse(
+      await fs.readFile(path.join(process.env.GEMINI_HOME, "settings.json"), "utf8"),
+    );
+    assert.equal(geminiSettings.tools.enableHooks, true);
+    assert.equal(
+      flattenHookEntries(geminiSettings.hooks.SessionEnd).some(
+        (hook) => hook.command === buildGeminiHookCommand(notifyPath),
+      ),
+      true,
+    );
+    assert.equal(
+      await fs.readFile(
+        path.join(process.env.OPENCODE_CONFIG_DIR, "plugin", DEFAULT_PLUGIN_NAME),
+        "utf8",
+      ),
+      buildOpencodePlugin({ notifyPath }),
+    );
+  } finally {
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     await fs.rm(tmp, { recursive: true, force: true });
   }
 });
@@ -1219,6 +1341,10 @@ test("init then uninstall manages Claude hooks without removing existing hooks",
       .map((h) => h?.command);
     assert.ok(allCommands.includes(existingCommand), "expected existing Claude hook to remain");
     assert.ok(allCommands.includes(hookCommand), "expected tracker Claude hook to be added");
+    const stopCommands = (installed?.hooks?.Stop || [])
+      .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : [entry]))
+      .map((h) => h?.command);
+    assert.ok(stopCommands.includes(hookCommand), "expected tracker Claude Stop hook to be added");
 
     await cmdUninstall([]);
 
@@ -1235,6 +1361,13 @@ test("init then uninstall manages Claude hooks without removing existing hooks",
     assert.ok(
       !restoredCommands.includes(hookCommand),
       "expected tracker Claude hook to be removed",
+    );
+    const restoredStopCommands = (restored?.hooks?.Stop || [])
+      .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : [entry]))
+      .map((h) => h?.command);
+    assert.ok(
+      !restoredStopCommands.includes(hookCommand),
+      "expected tracker Claude Stop hook to be removed",
     );
   } finally {
     process.stdout.write = prevWrite;

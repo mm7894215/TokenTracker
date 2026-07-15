@@ -485,11 +485,28 @@ export async function getUserStatus(_opts: AnyRecord = {}) {
   return fetchLocalJson(PATHS.userStatus);
 }
 
-export async function triggerLocalSync({ signal }: AnyRecord = {}) {
+export async function triggerLocalSync({
+  signal,
+  auto = false,
+  background = false,
+  allLocalSources = false,
+  drain = false,
+}: AnyRecord = {}) {
   const authHeaders = await getLocalApiAuthHeaders();
+  const body: AnyRecord = {};
+  if (drain) {
+    body.drain = true;
+  } else if (auto) {
+    body.auto = true;
+    if (background) {
+      body.background = true;
+      if (allLocalSources) body.allLocalSources = true;
+    }
+  }
   const response = await fetch(`/functions/${PATHS.localSync}`, {
     method: "POST",
-    headers: { Accept: "application/json", ...authHeaders },
+    headers: { Accept: "application/json", "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify(body),
     cache: "no-store",
     signal,
   });

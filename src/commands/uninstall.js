@@ -3,7 +3,12 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 
 const { restoreCodexNotify, restoreEveryCodeNotify } = require("../lib/codex-config");
-const { removeClaudeHook, buildClaudeHookCommand, buildHookCommand } = require("../lib/claude-config");
+const {
+  removeClaudeHook,
+  removeClaudeUsageHooks,
+  buildClaudeHookCommand,
+  buildHookCommand,
+} = require("../lib/claude-config");
 const {
   resolveGeminiConfigDir,
   resolveGeminiSettingsPath,
@@ -64,7 +69,10 @@ async function cmdUninstall(argv) {
       })
     : { restored: false, skippedReason: "config-missing" };
   const claudeRemove = claudeConfigExists
-    ? await removeClaudeHook({ settingsPath: claudeSettingsPath, hookCommand: claudeHookCommand })
+    ? await removeClaudeUsageHooks({
+        settingsPath: claudeSettingsPath,
+        hookCommand: claudeHookCommand,
+      })
     : { removed: false, skippedReason: "config-missing" };
   const codebuddyRemove = codebuddyConfigExists
     ? await removeClaudeHook({

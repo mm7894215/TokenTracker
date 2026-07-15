@@ -8,6 +8,7 @@ const { readJson } = require("../lib/fs");
 const { readCodexNotify, readEveryCodeNotify } = require("../lib/codex-config");
 const {
   isClaudeHookConfigured,
+  areClaudeUsageHooksConfigured,
   buildClaudeHookCommand,
   buildHookCommand,
 } = require("../lib/claude-config");
@@ -155,7 +156,7 @@ async function cmdStatus(argv = []) {
   const everyCodeNotify = await readEveryCodeNotify(codeConfigPath);
   const everyCodeConfigured =
     Array.isArray(everyCodeNotify) && everyCodeNotify.length > 0;
-  const claudeHookConfigured = await isClaudeHookConfigured({
+  const claudeHookConfigured = await areClaudeUsageHooksConfigured({
     settingsPath: claudeSettingsPath,
     hookCommand: claudeHookCommand,
   });
