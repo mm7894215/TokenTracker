@@ -2,6 +2,7 @@ import { getInsforgeAnonKey, getInsforgeRemoteUrl } from "./insforge-config";
 import {
   clearCloudDeviceSession,
   emitCloudUsageSynced,
+  getCloudUsageReady,
   getLastCloudSyncTs,
   getStoredDeviceSession,
   setLastCloudSyncTs,
@@ -214,9 +215,12 @@ async function syncCloudUsageWithRecovery(
  */
 export async function runCloudUsageSyncIfDue(getAccessToken: () => Promise<string | null>): Promise<void> {
   const last = getLastCloudSyncTs();
-  if (Date.now() - last < MIN_SYNC_INTERVAL_MS) return;
+  const cloudUsageReady = getCloudUsageReady();
+  if (cloudUsageReady && Date.now() - last < MIN_SYNC_INTERVAL_MS) return;
 
-  const accessToken = await syncCloudUsageWithRecovery(getAccessToken);
+  const accessToken = await syncCloudUsageWithRecovery(getAccessToken, {
+    drain: !cloudUsageReady,
+  });
   if (!accessToken) return;
   setLastCloudSyncTs(Date.now());
   await triggerLeaderboardRefresh(accessToken, "cloud-sync-auto");

@@ -1910,6 +1910,10 @@ async function cmdSync(argv, context = {}) {
         if (!opts.auto) {
           process.stderr.write(`Upload error: ${e?.message || e}\n`);
         }
+        // `sync --drain` is the readiness boundary for first-time cloud view:
+        // callers must not treat a swallowed upload failure as a completed
+        // historical backfill and switch away from the intact local data.
+        if (opts.drain) throw e;
       }
     }
 

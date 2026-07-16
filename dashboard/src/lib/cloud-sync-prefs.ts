@@ -1,6 +1,7 @@
 const KEY_ENABLED = "tokentracker_cloud_sync_enabled";
 const KEY_DEVICE = "tokentracker_cloud_device_session_v1";
 const KEY_LAST_SYNC = "tokentracker_cloud_last_sync_ts";
+const KEY_USAGE_READY = "tokentracker_cloud_usage_ready_v1";
 export const CLOUD_USAGE_SYNCED_EVENT = "tt.cloudUsageSynced";
 let memoryDeviceSession: CloudDeviceSession | null = null;
 
@@ -48,6 +49,7 @@ export function setCloudSyncEnabled(enabled: boolean): void {
   } catch {
     /* ignore */
   }
+  if (!enabled) setCloudUsageReady(false);
   // Mirror the toggle to the local CLI server (best-effort, localhost only) so
   // the auth-unaware native popover can gate its cross-device "account view" on
   // the same preference. The dashboard remains the source of truth; this is a
@@ -116,11 +118,29 @@ export function clearCloudDeviceSession(): void {
 
 export function emitCloudUsageSynced(): void {
   try {
+    setCloudUsageReady(true);
     if (typeof window !== "undefined") {
       window.dispatchEvent(new Event(CLOUD_USAGE_SYNCED_EVENT));
     }
   } catch {
     /* best-effort invalidation for the active dashboard */
+  }
+}
+
+export function getCloudUsageReady(): boolean {
+  try {
+    return localStorage.getItem(KEY_USAGE_READY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function setCloudUsageReady(ready: boolean): void {
+  try {
+    if (ready) localStorage.setItem(KEY_USAGE_READY, "1");
+    else localStorage.removeItem(KEY_USAGE_READY);
+  } catch {
+    /* ignore */
   }
 }
 

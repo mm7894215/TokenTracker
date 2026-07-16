@@ -3,6 +3,7 @@ import { useInsforgeAuth } from "./InsforgeAuthContext.jsx";
 import {
   CLOUD_USAGE_SYNCED_EVENT,
   getCloudSyncEnabled,
+  getCloudUsageReady,
   isLocalDashboardHost,
   syncCloudSyncPrefToLocalServer,
 } from "../lib/cloud-sync-prefs";
@@ -40,7 +41,9 @@ export function AccountViewProvider({ children }) {
 
   const [localHost, setLocalHost] = useState(() => isLocalDashboardHost());
   const [cloudSyncOn, setCloudSyncOn] = useState(() => getCloudSyncEnabled());
+  const [cloudUsageReady, setCloudUsageReady] = useState(() => getCloudUsageReady());
   const [revision, setRevision] = useState(0);
+  const cloudUsageReadyRef = React.useRef(cloudUsageReady);
 
   useEffect(() => {
     setLocalHost(isLocalDashboardHost());
@@ -56,7 +59,10 @@ export function AccountViewProvider({ children }) {
       // accountView-flip effect below — bumping in both places caused every
       // toggle to advance revision by 2 and trigger duplicate refetches.
       const next = getCloudSyncEnabled();
+      const nextReady = getCloudUsageReady();
       setCloudSyncOn((prev) => (prev === next ? prev : next));
+      cloudUsageReadyRef.current = nextReady;
+      setCloudUsageReady((prev) => (prev === nextReady ? prev : nextReady));
     };
     window.addEventListener(CLOUD_SYNC_CHANGE_EVENT, refresh);
     window.addEventListener("storage", refresh);
@@ -68,7 +74,14 @@ export function AccountViewProvider({ children }) {
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
-    const invalidateAccountUsage = () => setRevision((n) => n + 1);
+    const invalidateAccountUsage = () => {
+      if (cloudUsageReadyRef.current) {
+        setRevision((n) => n + 1);
+        return;
+      }
+      cloudUsageReadyRef.current = true;
+      setCloudUsageReady(true);
+    };
     window.addEventListener(CLOUD_USAGE_SYNCED_EVENT, invalidateAccountUsage);
     return () => window.removeEventListener(CLOUD_USAGE_SYNCED_EVENT, invalidateAccountUsage);
   }, []);
@@ -79,8 +92,8 @@ export function AccountViewProvider({ children }) {
   const accountView = useMemo(() => {
     if (!authEnabled || !signedIn) return false;
     if (!localHost) return true;
-    return cloudSyncOn;
-  }, [authEnabled, signedIn, localHost, cloudSyncOn]);
+    return cloudSyncOn && cloudUsageReady;
+  }, [authEnabled, signedIn, localHost, cloudSyncOn, cloudUsageReady]);
 
   // Single source of truth for revision bumps: fire when the *resolved*
   // accountView flips. Covers signIn/signOut, host change, and the
@@ -101,7 +114,7 @@ export function AccountViewProvider({ children }) {
   // instead of committing the soon-to-be-discarded local fetch. We only gate
   // when cloud is the *likely* resolved scope; a local-only user (no cloud
   // sync, signed out) must still get instant local data.
-  const expectCloud = authEnabled && (!localHost || cloudSyncOn);
+  const expectCloud = authEnabled && (!localHost || (cloudSyncOn && cloudUsageReady));
   const resolving = authLoading && expectCloud;
 
   const value = useMemo(

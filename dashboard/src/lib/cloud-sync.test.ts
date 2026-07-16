@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { clearCloudDeviceSession } from "./cloud-sync-prefs";
+import {
+  clearCloudDeviceSession,
+  getCloudUsageReady,
+  setCloudUsageReady,
+} from "./cloud-sync-prefs";
 import { runCloudUsageSyncIfDue, runCloudUsageSyncNow } from "./cloud-sync";
 
 vi.mock("./insforge-config", () => ({
@@ -90,7 +94,7 @@ describe("cloud usage sync", () => {
     window.removeEventListener("tt.cloudUsageSynced", onSynced);
   });
 
-  it("does not send drain for scheduled sync", async () => {
+  it("drains the full queue before the first scheduled cloud view becomes ready", async () => {
     const fetchMock = installFetchMock();
     const onSynced = vi.fn();
     window.addEventListener("tt.cloudUsageSynced", onSynced);
@@ -99,9 +103,23 @@ describe("cloud usage sync", () => {
 
     expect(getLocalSyncBody(fetchMock)).toEqual({
       deviceToken: "device-token",
+      drain: true,
       insforgeBaseUrl: "https://cloud.example",
     });
     expect(onSynced).toHaveBeenCalledTimes(1);
+    expect(getCloudUsageReady()).toBe(true);
     window.removeEventListener("tt.cloudUsageSynced", onSynced);
+  });
+
+  it("keeps scheduled sync lightweight after cloud usage is ready", async () => {
+    setCloudUsageReady(true);
+    const fetchMock = installFetchMock();
+
+    await runCloudUsageSyncIfDue(async () => "access-token");
+
+    expect(getLocalSyncBody(fetchMock)).toEqual({
+      deviceToken: "device-token",
+      insforgeBaseUrl: "https://cloud.example",
+    });
   });
 });
