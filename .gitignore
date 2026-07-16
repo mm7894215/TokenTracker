@@ -81,9 +81,11 @@ Thumbs.db
 .parcel-cache
 .turbo
 
-# Private launch playbook — never push to remote
+# Private launch playbook & growth-strategy docs — never push to remote
 docs/launch/PLAYBOOK.md
 docs/launch/submit-awesome-pr.sh
+docs/launch/2026-07-15-1k-launch-kit.md
+docs/plans/2026-07-15-github-stars-growth-design.md
 
 # Scratch / reference clones (not part of the project)
 scratch/
@@ -91,8 +93,30 @@ scratch/
 # Local InsForge MCP config (contains full-access API_KEY — never commit)
 dashboard/.mcp.json
 
-# Security ops scripts & audit reports (contain vuln details / lockdown SQL — never commit to public repo)
-scripts/ops/
+# Security ops scripts & audit reports: ignored by default (vuln details / lockdown SQL —
+# never commit to public repo). Only the whitelisted public schema/RPC/validator files
+# below are tracked; add a `!scripts/ops/<file>` line before tracking anything new.
+scripts/ops/*
+!scripts/ops/account-usage-grouped-rpc.sql
+!scripts/ops/billable-total-tokens-migration.sql
+!scripts/ops/leaderboard-refresh-lock.sql
+!scripts/ops/leaderboard-rollup-daily.sql
+!scripts/ops/leaderboard-snapshot-retention.sql
+!scripts/ops/leaderboard-usage-grouped-rpc.sql
+!scripts/ops/pr-retro.cjs
+!scripts/ops/pricing-sync-health.sql
+!scripts/ops/tokentracker-device-machine-cluster.sql
+!scripts/ops/tokentracker-hourly-device-dedup.sql
+!scripts/ops/tokentracker-hourly-mirror-row-dedup.sql
+!scripts/ops/tokentracker-profile-likes-schema.sql
+!scripts/ops/tokentracker-restore-20260617.sql
+!scripts/ops/ui-hardcode-baseline.json
+!scripts/ops/usage-daily-rollup-backfill.sql
+!scripts/ops/usage-daily-rollup-rollback.sql
+!scripts/ops/usage-daily-rollup.sql
+!scripts/ops/user-badges.sql
+!scripts/ops/validate-ui-hardcode-lib.cjs
+!scripts/ops/validate-ui-hardcode.cjs
 
 # Local working notes (todo / lessons — not part of the repo)
 tasks/
