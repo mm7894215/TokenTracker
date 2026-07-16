@@ -652,6 +652,7 @@ async function parseCodexRolloutFile(filePath, {
 
   function attributeTurn(delta) {
     if (!delta || delta.total_tokens <= 0) {
+      for (const p of pendingExecEnds) absorbExecEnd(p);
       pendingCalls = [];
       pendingSkills = [];
       pendingExecEnds = [];

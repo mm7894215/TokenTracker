@@ -254,6 +254,8 @@ async function computeCodexContextBreakdown({
       : null;
     let parsed = parsedCacheKey ? PARSED_GROUP_CACHE.get(parsedCacheKey) : null;
     if (parsed) {
+      // Cacheable groups are partitioned by rollout UUID, so their token event
+      // keys cannot overlap and cache hits need not backfill seenTokenEvents.
       diagnostics.parse_cache_hits += 1;
       PARSED_GROUP_CACHE.delete(parsedCacheKey);
       PARSED_GROUP_CACHE.set(parsedCacheKey, parsed);

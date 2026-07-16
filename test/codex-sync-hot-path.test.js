@@ -79,6 +79,39 @@ test("idle Codex parsing does not materialize a production-scale hash Set or arr
   }
 });
 
+test("Codex sync skips candidate reductions when diagnostics are disabled", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "tt-codex-sync-no-diagnostics-"));
+  try {
+    const rolloutFiles = new Proxy([], {
+      get(target, property, receiver) {
+        if (property === "reduce") {
+          throw new Error("diagnostics-disabled paths must not read Array#reduce");
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const cursors = { version: 1, files: {}, codexHashes: [] };
+
+    const filtered = await filterColdCodexRolloutFiles({
+      rolloutFiles,
+      cursors,
+      auditDue: true,
+    });
+    assert.strictEqual(filtered.rolloutFiles, rolloutFiles);
+
+    const parsed = await parseRolloutIncremental({
+      rolloutFiles,
+      cursors,
+      queuePath: path.join(root, "queue.jsonl"),
+      source: "codex",
+    });
+    assert.equal(parsed.filesProcessed, 0);
+    assert.equal(parsed.eventsAggregated, 0);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("cold filtering distinguishes discovered rollouts, cursor keys, parse candidates, and skipped files", async () => {
   const oldPath = path.join(
     "/tmp", "sessions", "2029", "01", "01",

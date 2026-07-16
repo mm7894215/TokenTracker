@@ -191,12 +191,6 @@ async function parseRolloutIncremental({
   const touchedBuckets = new Set();
   const defaultSource = normalizeSourceInput(source) || DEFAULT_SOURCE;
   const syncDiagnostics = diagnostics && typeof diagnostics === "object" ? diagnostics : null;
-  const codexParseCandidates = (Array.isArray(rolloutFiles) ? rolloutFiles : []).reduce((count, entry) => {
-    const entrySource = typeof entry === "string"
-      ? defaultSource
-      : normalizeSourceInput(entry?.source) || defaultSource;
-    return count + (entrySource === DEFAULT_SOURCE ? 1 : 0);
-  }, 0);
 
   if (!cursors.files || typeof cursors.files !== "object") {
     cursors.files = {};
@@ -215,6 +209,12 @@ async function parseRolloutIncremental({
   let historicalCodexEvents = null;
   let cursorSessionPaths = null;
   if (syncDiagnostics) {
+    const codexParseCandidates = (Array.isArray(rolloutFiles) ? rolloutFiles : []).reduce((count, entry) => {
+      const entrySource = typeof entry === "string"
+        ? defaultSource
+        : normalizeSourceInput(entry?.source) || defaultSource;
+      return count + (entrySource === DEFAULT_SOURCE ? 1 : 0);
+    }, 0);
     const discoveredRollouts = Number(syncDiagnostics.discovered_rollouts);
     const cursorKeys = Number(syncDiagnostics.cursor_keys);
     const coldSkipped = Number(syncDiagnostics.cold_skipped);
@@ -500,11 +500,11 @@ async function filterColdCodexRolloutFiles({
   const isCodexEntry = (entry) => (
     typeof entry === "string" || (normalizeSourceInput(entry?.source) || DEFAULT_SOURCE) === DEFAULT_SOURCE
   );
-  const discoveredRollouts = files.reduce(
-    (count, entry) => count + (isCodexEntry(entry) ? 1 : 0),
-    0,
-  );
   if (syncDiagnostics) {
+    const discoveredRollouts = files.reduce(
+      (count, entry) => count + (isCodexEntry(entry) ? 1 : 0),
+      0,
+    );
     syncDiagnostics.discovered_rollouts = discoveredRollouts;
     syncDiagnostics.cursor_keys = Object.keys(cursors?.files || {}).length;
     syncDiagnostics.cold_skipped = 0;

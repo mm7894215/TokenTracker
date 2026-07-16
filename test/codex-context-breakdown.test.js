@@ -182,6 +182,70 @@ test("computeCodexContextBreakdown returns non-overlapping totals plus exec dril
   }
 });
 
+test("computeCodexContextBreakdown preserves exec stats on a zero-token turn", async () => {
+  const dir = await makeTmpDir("tt-codex-breakdown-zero-token-exec");
+  try {
+    const day = "2026-05-08";
+    const usage = {
+      input_tokens: 10,
+      cached_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      output_tokens: 5,
+      reasoning_output_tokens: 0,
+      total_tokens: 15,
+    };
+    await writeRollout(dir, day, "rollout-zero-token-exec.jsonl", [
+      {
+        timestamp: "2026-05-08T10:00:00.000Z",
+        type: "session_meta",
+        payload: { id: "s-zero-token-exec", cwd: "/tmp/project", model_provider: "openai" },
+      },
+      {
+        timestamp: "2026-05-08T10:00:01.000Z",
+        type: "event_msg",
+        payload: { type: "token_count", info: { total_token_usage: usage } },
+      },
+      {
+        timestamp: "2026-05-08T10:00:02.000Z",
+        type: "response_item",
+        payload: { type: "function_call", name: "exec_command", arguments: "{\"cmd\":\"npm test\"}" },
+      },
+      {
+        timestamp: "2026-05-08T10:00:03.000Z",
+        type: "event_msg",
+        payload: {
+          type: "exec_command_end",
+          command: ["bash", "-lc", "npm test"],
+          status: "completed",
+          exit_code: 0,
+          duration: { secs: 1, nanos: 0 },
+          aggregated_output: "pass\n",
+        },
+      },
+      {
+        timestamp: "2026-05-08T10:00:04.000Z",
+        type: "event_msg",
+        payload: { type: "token_count", info: { total_token_usage: usage } },
+      },
+    ]);
+
+    const result = await computeCodexContextBreakdown({
+      from: day,
+      to: day,
+      codexDir: dir,
+      top: 20,
+    });
+
+    const command = result.exec_command_breakdown.by_command.find((row) => row.name === "npm test");
+    assert.ok(command, "zero-token turns must retain completed exec metadata");
+    assert.equal(command.calls, 1);
+    assert.equal(command.totals.total_tokens, 0);
+    assert.equal(result.totals.total_tokens, 15, "the zero-token turn must not change session totals");
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("computeCodexContextBreakdown supports nested payload.msg token_count events", async () => {
   const dir = await makeTmpDir("tt-codex-breakdown-msg-token-count");
   try {
