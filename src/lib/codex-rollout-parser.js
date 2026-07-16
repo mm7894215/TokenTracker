@@ -19,6 +19,11 @@ const {
   buildExecStatsEntry,
 } = require("./categorizer-utils");
 
+const DISCOVERY_FULL_AUDIT_INTERVAL_MS = 60 * 1000;
+const MAX_DISCOVERY_INVENTORIES = 32;
+const DISCOVERY_INVENTORIES = new Map();
+const ZONED_DAY_FORMATTERS = new Map();
+
 // ---------------------------------------------------------------------------
 // Timezone helpers
 // ---------------------------------------------------------------------------
@@ -52,13 +57,18 @@ function getZonedParts(date, timeZoneContext = {}) {
 
   if (timeZone && typeof Intl !== "undefined" && Intl.DateTimeFormat) {
     try {
-      return new Intl.DateTimeFormat("en-CA", {
-        timeZone,
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hourCycle: "h23",
-      }).formatToParts(dt);
+      let formatter = ZONED_DAY_FORMATTERS.get(timeZone);
+      if (!formatter) {
+        formatter = new Intl.DateTimeFormat("en-CA", {
+          timeZone,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hourCycle: "h23",
+        });
+        ZONED_DAY_FORMATTERS.set(timeZone, formatter);
+      }
+      return formatter.formatToParts(dt);
     } catch {
       // Fall through to offset handling.
     }
@@ -98,8 +108,9 @@ function isTimestampInRequestedDayRange(timestamp, { from, to, timeZoneContext }
 // File discovery
 // ---------------------------------------------------------------------------
 
-function safeJsonParse(str) {
+function safeJsonParse(str, diagnostics = null) {
   try {
+    if (diagnostics) diagnostics.json_parse_calls += 1;
     return JSON.parse(str);
   } catch {
     return null;
@@ -131,6 +142,210 @@ function listJsonlFiles(rootDir) {
 
   out.sort((a, b) => a.localeCompare(b));
   return out;
+}
+
+function rolloutPathDay(filePath) {
+  const normalized = String(filePath || "").replaceAll("\\", "/");
+  const fileMatch = path.basename(normalized).match(/(?:^|rollout-)(\d{4})-(\d{2})-(\d{2})/);
+  if (fileMatch) return `${fileMatch[1]}-${fileMatch[2]}-${fileMatch[3]}`;
+  const directoryMatch = normalized.match(/.*\/(\d{4})\/(\d{2})\/(\d{2})(?:\/|$)/);
+  return directoryMatch
+    ? `${directoryMatch[1]}-${directoryMatch[2]}-${directoryMatch[3]}`
+    : null;
+}
+
+function nextDayKey(dayKey) {
+  if (!dayKey) return null;
+  const date = new Date(`${dayKey}T00:00:00.000Z`);
+  if (!Number.isFinite(date.getTime())) return null;
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+function metadataRangeBounds(from, to, timeZoneContext) {
+  const offsetMinutes = timeZoneContext?.offsetMinutes;
+  if (Number.isFinite(offsetMinutes)) {
+    const dstGuardMs = 2 * 60 * 60 * 1000;
+    const fromUtc = from ? Date.parse(`${from}T00:00:00.000Z`) : null;
+    const afterTo = to ? nextDayKey(to) : null;
+    const toUtcExclusive = afterTo ? Date.parse(`${afterTo}T00:00:00.000Z`) : null;
+    return {
+      fromMs: Number.isFinite(fromUtc)
+        ? fromUtc + offsetMinutes * 60_000 - dstGuardMs
+        : null,
+      toMs: Number.isFinite(toUtcExclusive)
+        ? toUtcExclusive + offsetMinutes * 60_000 + dstGuardMs
+        : null,
+    };
+  }
+  const { fromIso, toIso } = dayKeyToIsoBounds(from, to);
+  return {
+    fromMs: fromIso ? Date.parse(fromIso) : null,
+    toMs: toIso ? Date.parse(toIso) : null,
+  };
+}
+
+function isConservativeRangeCandidate(filePath, stat, {
+  from = null,
+  to = null,
+  timeZoneContext = null,
+  metadataBounds = null,
+} = {}) {
+  if (!from && !to) return true;
+  // With no lower bound, a later-path rewrite can still contain an event at or
+  // before `to`. There is no metadata-only exclusion that can prove otherwise.
+  if (!from) return true;
+  const pathDay = rolloutPathDay(filePath);
+  if (!pathDay) return true;
+
+  const pathOverlaps = (!from || pathDay >= from) && (!to || pathDay <= to);
+  if (pathOverlaps) return true;
+
+  // Old sessions can be appended or rewritten. A post-range mtime or ctime is
+  // therefore a reason to parse, never a reason to exclude. ctime also catches
+  // cold-process inode replacement/truncation when a writer preserves mtime.
+  // Future-dated decoys are kept conservatively; correctness wins over an open.
+  const bounds = metadataBounds || metadataRangeBounds(from, to, timeZoneContext);
+  const fromMs = bounds.fromMs;
+  const toMs = bounds.toMs;
+  const mtimeMs = Number(stat?.mtimeMs);
+  const ctimeMs = Number(stat?.ctimeMs);
+  const changedAfterStart = (value) => (
+    Number.isFinite(value) && (!Number.isFinite(fromMs) || value >= fromMs)
+  );
+  const changedInsideRange = (value) => (
+    changedAfterStart(value) && (!Number.isFinite(toMs) || value <= toMs)
+  );
+  if (pathDay < from) {
+    return changedAfterStart(mtimeMs) || changedAfterStart(ctimeMs);
+  }
+
+  // A path one day ahead can still overlap the requested browser day because
+  // rollout folders follow the writer's local date. Its current mtime may be
+  // later if the same session kept growing, so metadata alone cannot exclude it.
+  if (to && pathDay === nextDayKey(to)) return true;
+
+  // A host-local path day can be later than the requested browser day when
+  // their timezones differ. Keep it only when filesystem metadata maps back
+  // into the requested day range; do not pull every genuinely future session
+  // into a historical query.
+  return changedInsideRange(mtimeMs) || changedInsideRange(ctimeMs);
+}
+
+function isRolloutPathInRequestedRange(filePath, { from = null, to = null } = {}) {
+  const pathDay = rolloutPathDay(filePath);
+  if (!pathDay) return true;
+  if (from && pathDay < from) return false;
+  if (to && pathDay > to) return false;
+  return true;
+}
+
+function discoveryInventoryKey(roots) {
+  return roots.map((root) => path.resolve(root)).sort().join("\0");
+}
+
+function getDiscoveryInventory(roots, nowMs) {
+  const key = discoveryInventoryKey(roots);
+  let inventory = DISCOVERY_INVENTORIES.get(key);
+  if (!inventory) {
+    inventory = { files: new Map(), lastFullAuditAtMs: 0, lastUsedAtMs: nowMs };
+    DISCOVERY_INVENTORIES.set(key, inventory);
+  }
+  inventory.lastUsedAtMs = nowMs;
+  while (DISCOVERY_INVENTORIES.size > MAX_DISCOVERY_INVENTORIES) {
+    let oldestKey = null;
+    let oldestAt = Infinity;
+    for (const [candidateKey, candidate] of DISCOVERY_INVENTORIES) {
+      if (candidateKey === key) continue;
+      if (candidate.lastUsedAtMs < oldestAt) {
+        oldestAt = candidate.lastUsedAtMs;
+        oldestKey = candidateKey;
+      }
+    }
+    if (!oldestKey) break;
+    DISCOVERY_INVENTORIES.delete(oldestKey);
+  }
+  return inventory;
+}
+
+function discoverCodexSessionFiles(rootDirs, options = {}) {
+  const diagnostics = options.diagnostics || null;
+  const roots = Array.isArray(rootDirs) ? rootDirs : [rootDirs];
+  const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
+  const inventory = getDiscoveryInventory(roots.filter(Boolean), nowMs);
+  const candidateOptions = {
+    ...options,
+    metadataBounds: metadataRangeBounds(options.from, options.to, options.timeZoneContext),
+  };
+  const bounded = Boolean(options.from || options.to);
+  const auditAgeMs = nowMs - Number(inventory.lastFullAuditAtMs || 0);
+  const fullMetadataAudit = Boolean(
+    options.exhaustive ||
+    !bounded ||
+    !Number.isFinite(auditAgeMs) ||
+    auditAgeMs < 0 ||
+    auditAgeMs >= DISCOVERY_FULL_AUDIT_INTERVAL_MS
+  );
+  if (diagnostics) diagnostics.full_metadata_audit = fullMetadataAudit;
+  const entries = [];
+  const visited = new Set();
+  const stack = roots.filter(Boolean);
+
+  while (stack.length > 0) {
+    const dir = stack.pop();
+    let children;
+    try {
+      children = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const child of children) {
+      const filePath = path.join(dir, child.name);
+      if (child.isDirectory()) {
+        stack.push(filePath);
+        continue;
+      }
+      if (!child.isFile() || !child.name.endsWith(".jsonl") || visited.has(filePath)) continue;
+      visited.add(filePath);
+      if (diagnostics) diagnostics.discovered_files += 1;
+      const cached = inventory.files.get(filePath) || null;
+      const cachedCandidate = cached
+        ? isConservativeRangeCandidate(filePath, cached, candidateOptions)
+        : false;
+      const shouldStat = Boolean(
+        fullMetadataAudit ||
+        !cached ||
+        cachedCandidate ||
+        isRolloutPathInRequestedRange(filePath, options)
+      );
+      let stat = cached;
+      if (shouldStat) {
+        try {
+          if (diagnostics) diagnostics.stat_calls += 1;
+          stat = fs.statSync(filePath);
+          inventory.files.set(filePath, stat);
+        } catch {
+          inventory.files.delete(filePath);
+          continue;
+        }
+      } else if (diagnostics) {
+        diagnostics.metadata_cache_hits += 1;
+      }
+      const candidate = Boolean(
+        options.exhaustive ||
+        isConservativeRangeCandidate(filePath, stat, candidateOptions),
+      );
+      entries.push({ filePath, stat, candidate });
+      if (candidate && diagnostics) diagnostics.candidate_files += 1;
+    }
+  }
+
+  for (const filePath of inventory.files.keys()) {
+    if (!visited.has(filePath)) inventory.files.delete(filePath);
+  }
+  if (fullMetadataAudit) inventory.lastFullAuditAtMs = nowMs;
+
+  return entries.sort((a, b) => a.filePath.localeCompare(b.filePath));
 }
 
 async function listCodexSessionFiles(baseDir) {
@@ -172,9 +387,9 @@ function normalizeToolName(payload) {
   return name || "unknown";
 }
 
-function extractSkillNameFromFunctionCall(payload) {
+function extractSkillNameFromFunctionCall(payload, diagnostics = null) {
   if (!payload || payload.name !== "exec_command") return null;
-  const args = safeJsonParse(payload.arguments || "{}") || {};
+  const args = safeJsonParse(payload.arguments || "{}", diagnostics) || {};
   const cmd = String(args.cmd || "");
   const match = cmd.match(/(?:^|\/)skills\/(?:\.system\/)?([^/\s]+)\/SKILL\.md\b/);
   return match ? match[1] : null;
@@ -334,9 +549,15 @@ function finalizeExecRows(map) {
 // Main parser
 // ---------------------------------------------------------------------------
 
-async function parseCodexRolloutFile(filePath, { fromIso, toIso, from = null, to = null, timeZoneContext = null } = {}) {
-  const stream = fs.createReadStream(filePath, { encoding: "utf8" });
-  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+async function parseCodexRolloutFile(filePath, {
+  from = null,
+  to = null,
+  timeZoneContext = null,
+  diagnostics = null,
+  seenTokenEvents = null,
+} = {}) {
+  const filePaths = (Array.isArray(filePath) ? filePath : [filePath]).filter(Boolean);
+  const primaryFilePath = filePaths[0] || String(filePath || "");
 
   let sessionId = null;
   let cwd = null;
@@ -430,7 +651,13 @@ async function parseCodexRolloutFile(filePath, { fromIso, toIso, from = null, to
   }
 
   function attributeTurn(delta) {
-    if (!delta || delta.total_tokens <= 0) return;
+    if (!delta || delta.total_tokens <= 0) {
+      for (const p of pendingExecEnds) absorbExecEnd(p);
+      pendingCalls = [];
+      pendingSkills = [];
+      pendingExecEnds = [];
+      return;
+    }
     turnCount += 1;
 
     const toolNames = pendingCalls
@@ -517,19 +744,10 @@ async function parseCodexRolloutFile(filePath, { fromIso, toIso, from = null, to
     pendingExecEnds = [];
   }
 
-  for await (const line of rl) {
-    if (!line) continue;
-    let obj;
-    try {
-      obj = JSON.parse(line);
-    } catch {
-      continue;
-    }
+  for await (const obj of iterateCodexObjects(filePaths, diagnostics)) {
     const ts = typeof obj?.timestamp === "string" ? obj.timestamp : null;
     if (!ts) continue;
-    if (fromIso && ts < fromIso) continue;
-    if (toIso && ts > toIso) continue;
-    if (!isTimestampInRequestedDayRange(ts, { from, to, timeZoneContext })) continue;
+    const inRequestedRange = isTimestampInRequestedDayRange(ts, { from, to, timeZoneContext });
 
     if (obj.type === "session_meta") {
       const p = obj.payload || {};
@@ -548,7 +766,7 @@ async function parseCodexRolloutFile(filePath, { fromIso, toIso, from = null, to
 
     if (obj.type === "response_item" && obj.payload?.type === "function_call") {
       pendingCalls.push(obj.payload);
-      const skill = extractSkillNameFromFunctionCall(obj.payload);
+      const skill = extractSkillNameFromFunctionCall(obj.payload, diagnostics);
       if (skill) pendingSkills.push(skill);
       continue;
     }
@@ -565,21 +783,31 @@ async function parseCodexRolloutFile(filePath, { fromIso, toIso, from = null, to
       const totalUsage = info?.total_token_usage;
       const delta = pickDelta(lastUsage, totalUsage, prevTotals);
       if (totalUsage && typeof totalUsage === "object") prevTotals = totalUsage;
-      if (delta) attributeTurn(delta);
+      if (inRequestedRange) {
+        const eventSessionId = sessionId || rolloutSessionIdFromPath(primaryFilePath) || primaryFilePath;
+        const eventKey = `${eventSessionId}:${ts}:${JSON.stringify({ lastUsage, totalUsage })}`;
+        if (seenTokenEvents && seenTokenEvents.has(eventKey)) {
+          attributeTurn(null);
+        } else {
+          if (seenTokenEvents && delta?.total_tokens > 0) seenTokenEvents.add(eventKey);
+          attributeTurn(delta);
+        }
+      } else {
+        pendingCalls = [];
+        pendingSkills = [];
+        pendingExecEnds = [];
+      }
       continue;
     }
   }
 
-  rl.close();
-  stream.close?.();
-
   return {
-    sessionId,
+    sessionId: sessionId || rolloutSessionIdFromPath(primaryFilePath) || primaryFilePath,
     cwd,
     model: model || provider,
     provider,
     version: cliVersion,
-    filePath,
+    filePath: primaryFilePath,
     turnCount,
     totals,
     toolBreakdown: {
@@ -599,6 +827,71 @@ async function parseCodexRolloutFile(filePath, { fromIso, toIso, from = null, to
   };
 }
 
+async function* readCodexObjects(filePath, diagnostics, fileIndex) {
+  if (diagnostics) diagnostics.opened_files += 1;
+  const stream = fs.createReadStream(filePath, { encoding: "utf8" });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  let lineIndex = 0;
+  try {
+    for await (const line of rl) {
+      if (!line) continue;
+      let obj;
+      try {
+        if (diagnostics) diagnostics.json_parse_calls += 1;
+        obj = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      yield { obj, fileIndex, lineIndex };
+      lineIndex += 1;
+    }
+  } finally {
+    rl.close();
+    stream.close?.();
+    if (diagnostics) diagnostics.parsed_files += 1;
+  }
+}
+
+async function* iterateCodexObjects(filePaths, diagnostics) {
+  if (filePaths.length <= 1) {
+    for await (const record of readCodexObjects(filePaths[0], diagnostics, 0)) {
+      yield record.obj;
+    }
+    return;
+  }
+
+  // A live rollout can overlap its archived copy or be split into prefix/suffix
+  // fragments. Merge only duplicate-session groups, order by event time, and
+  // suppress byte-semantically identical records from different files so the
+  // cumulative baseline is established exactly once.
+  const records = [];
+  for (let fileIndex = 0; fileIndex < filePaths.length; fileIndex += 1) {
+    for await (const record of readCodexObjects(filePaths[fileIndex], diagnostics, fileIndex)) {
+      records.push(record);
+    }
+  }
+  records.sort((a, b) => {
+    const aTimestamp = typeof a.obj?.timestamp === "string" ? a.obj.timestamp : "";
+    const bTimestamp = typeof b.obj?.timestamp === "string" ? b.obj.timestamp : "";
+    return aTimestamp.localeCompare(bTimestamp) || a.fileIndex - b.fileIndex || a.lineIndex - b.lineIndex;
+  });
+  const firstFileByRecord = new Map();
+  for (const record of records) {
+    const semanticKey = JSON.stringify(record.obj);
+    const firstFile = firstFileByRecord.get(semanticKey);
+    if (firstFile !== undefined && firstFile !== record.fileIndex) continue;
+    if (firstFile === undefined) firstFileByRecord.set(semanticKey, record.fileIndex);
+    yield record.obj;
+  }
+}
+
+function rolloutSessionIdFromPath(filePath) {
+  const match = path.basename(String(filePath || "")).match(
+    /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i,
+  );
+  return match ? match[1] : null;
+}
+
 module.exports = {
   parseCodexRolloutFile,
   extractTokenCount,
@@ -610,12 +903,16 @@ module.exports = {
   totalsReset,
   listJsonlFiles,
   listCodexSessionFiles,
+  discoverCodexSessionFiles,
+  rolloutPathDay,
+  isConservativeRangeCandidate,
   safeJsonParse,
   dayKeyToIsoBounds,
   formatPartsDayKey,
   getZonedParts,
   timestampDayKey,
   isTimestampInRequestedDayRange,
+  rolloutSessionIdFromPath,
   finalizeToolRows,
   finalizeSkillRows,
   finalizeExecRows,

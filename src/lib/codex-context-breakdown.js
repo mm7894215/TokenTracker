@@ -10,7 +10,7 @@
 
 "use strict";
 
-const fs = require("node:fs");
+const crypto = require("node:crypto");
 const os = require("node:os");
 const path = require("node:path");
 
@@ -25,8 +25,8 @@ const {
 
 const {
   parseCodexRolloutFile,
-  listCodexSessionFiles,
-  dayKeyToIsoBounds,
+  discoverCodexSessionFiles,
+  rolloutSessionIdFromPath,
   finalizeToolRows,
   finalizeSkillRows,
   finalizeExecRows,
@@ -120,23 +120,53 @@ function buildDateRange({ period, date }) {
 // ---------------------------------------------------------------------------
 
 const CACHE = new Map();
+const PARSED_GROUP_CACHE = new Map();
 const CACHE_TTL_MS = 60_000;
-const CACHE_SCHEMA_VERSION = "codex-context-v2";
-
-function maxMtimeMs(files) {
-  let max = 0;
-  for (const filePath of files) {
-    try {
-      const st = fs.statSync(filePath);
-      if (st.mtimeMs > max) max = st.mtimeMs;
-    } catch {}
-  }
-  return max;
-}
+const CACHE_SCHEMA_VERSION = "codex-context-v4";
+const MAX_PARSED_GROUP_CACHE_ENTRIES = 4096;
 
 function cacheTimeZoneKey(timeZoneContext) {
   if (!timeZoneContext) return "";
   return `${timeZoneContext.timeZone || ""}|${Number.isFinite(timeZoneContext.offsetMinutes) ? timeZoneContext.offsetMinutes : ""}`;
+}
+
+function statIdentity(filePath, stat) {
+  return JSON.stringify([filePath, stat.size, stat.mtimeMs, stat.ctimeMs, stat.ino]);
+}
+
+function inventorySignature(entries) {
+  const hash = crypto.createHash("sha256");
+  for (const { filePath, stat, candidate } of entries) {
+    hash.update(statIdentity(filePath, stat));
+    hash.update(candidate ? "1" : "0");
+    hash.update("\0");
+  }
+  return hash.digest("hex");
+}
+
+function parsedGroupCacheKey(entries, { from, to, timeZoneContext }) {
+  const hash = crypto.createHash("sha256");
+  hash.update(CACHE_SCHEMA_VERSION);
+  hash.update(from || "");
+  hash.update("\0");
+  hash.update(to || "");
+  hash.update("\0");
+  hash.update(cacheTimeZoneKey(timeZoneContext));
+  for (const { filePath, stat } of entries) {
+    hash.update(statIdentity(filePath, stat));
+    hash.update("\0");
+  }
+  return hash.digest("hex");
+}
+
+function rememberParsedGroup(key, value) {
+  PARSED_GROUP_CACHE.delete(key);
+  PARSED_GROUP_CACHE.set(key, value);
+  while (PARSED_GROUP_CACHE.size > MAX_PARSED_GROUP_CACHE_ENTRIES) {
+    const oldest = PARSED_GROUP_CACHE.keys().next().value;
+    if (!oldest) break;
+    PARSED_GROUP_CACHE.delete(oldest);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -151,6 +181,9 @@ async function computeCodexContextBreakdown({
   codexDir = null,
   top = 20,
   timeZoneContext = null,
+  exhaustive = false,
+  nowMs = Date.now(),
+  includeDiagnostics = false,
 } = {}) {
   let fromKey = from;
   let toKey = to;
@@ -160,10 +193,33 @@ async function computeCodexContextBreakdown({
     toKey = range?.to || null;
   }
 
-  const { fromIso, toIso } = dayKeyToIsoBounds(fromKey, toKey);
-  const baseDir = codexDir || path.join(os.homedir(), ".codex", "sessions");
-
-  const files = await listCodexSessionFiles(baseDir);
+  const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+  const roots = codexDir
+    ? [codexDir]
+    : [path.join(codexHome, "sessions"), path.join(codexHome, "archived_sessions")];
+  const baseDir = roots.join(path.delimiter);
+  const diagnostics = {
+    cache_hit: false,
+    full_metadata_audit: false,
+    discovered_files: 0,
+    candidate_files: 0,
+    stat_calls: 0,
+    metadata_cache_hits: 0,
+    opened_files: 0,
+    parsed_files: 0,
+    parse_cache_hits: 0,
+    json_parse_calls: 0,
+  };
+  const discovered = discoverCodexSessionFiles(roots, {
+    from: fromKey,
+    to: toKey,
+    timeZoneContext,
+    exhaustive,
+    nowMs,
+    diagnostics,
+  });
+  const candidates = discovered.filter((entry) => entry.candidate);
+  const fileSignature = inventorySignature(discovered);
   const cacheKey = [
     CACHE_SCHEMA_VERSION,
     baseDir,
@@ -171,24 +227,48 @@ async function computeCodexContextBreakdown({
     toKey || "",
     cacheTimeZoneKey(timeZoneContext),
     Number.isFinite(top) ? top : 20,
-    files.length,
-    maxMtimeMs(files),
+    exhaustive ? "exhaustive" : "bounded",
+    fileSignature,
   ].join("|");
   const cached = CACHE.get(cacheKey);
   if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
-    return cached.value;
+    diagnostics.cache_hit = true;
+    return includeDiagnostics ? { ...cached.value, diagnostics } : cached.value;
   }
 
   const sessions = [];
+  const seenTokenEvents = new Set();
 
-  for (const filePath of files) {
-    const parsed = await parseCodexRolloutFile(filePath, {
-      fromIso,
-      toIso,
-      from: fromKey,
-      to: toKey,
-      timeZoneContext,
-    });
+  const candidateGroups = new Map();
+  for (const entry of candidates) {
+    const sessionKey = rolloutSessionIdFromPath(entry.filePath) || entry.filePath;
+    if (!candidateGroups.has(sessionKey)) candidateGroups.set(sessionKey, []);
+    candidateGroups.get(sessionKey).push(entry);
+  }
+
+  for (const entries of candidateGroups.values()) {
+    const filePaths = entries.map((entry) => entry.filePath);
+    const cacheable = Boolean(rolloutSessionIdFromPath(filePaths[0]));
+    const parsedCacheKey = cacheable
+      ? parsedGroupCacheKey(entries, { from: fromKey, to: toKey, timeZoneContext })
+      : null;
+    let parsed = parsedCacheKey ? PARSED_GROUP_CACHE.get(parsedCacheKey) : null;
+    if (parsed) {
+      // Cacheable groups are partitioned by rollout UUID, so their token event
+      // keys cannot overlap and cache hits need not backfill seenTokenEvents.
+      diagnostics.parse_cache_hits += 1;
+      PARSED_GROUP_CACHE.delete(parsedCacheKey);
+      PARSED_GROUP_CACHE.set(parsedCacheKey, parsed);
+    } else {
+      parsed = await parseCodexRolloutFile(filePaths.length === 1 ? filePaths[0] : filePaths, {
+        from: fromKey,
+        to: toKey,
+        timeZoneContext,
+        diagnostics,
+        seenTokenEvents,
+      });
+      if (parsedCacheKey) rememberParsedGroup(parsedCacheKey, parsed);
+    }
     if (!parsed || !parsed.totals || !parsed.totals.total_tokens) continue;
     sessions.push(parsed);
   }
@@ -261,26 +341,25 @@ async function computeCodexContextBreakdown({
     }))
     .sort((a, b) => (b.totals?.total_tokens || 0) - (a.totals?.total_tokens || 0));
 
-  const nonTextToolTotal = toolRows.reduce((sum, row) => {
-    if ((row.raw_name || row.name) === "text_response") return sum;
-    return sum + Number(row.totals?.total_tokens || 0);
-  }, 0);
-  const displayedMessageTotal = Math.max(
-    0,
-    Number(grand.total_tokens || 0) - Number(grand.reasoning_output_tokens || 0) - nonTextToolTotal,
-  );
   const textResponse = toolRows.find((row) => (row.raw_name || row.name) === "text_response");
   const textResponseTotals = textResponse?.totals || emptyTotals();
   const textResponseHistoryWeight = Math.max(
     0,
     Number(textResponseTotals.cached_input_tokens || 0) + Number(textResponseTotals.cache_creation_input_tokens || 0),
   );
+  const textResponseInputWeight = Math.max(0, Number(textResponseTotals.input_tokens || 0));
+  const textResponseOutputWeight = Math.max(
+    0,
+    Number(textResponseTotals.output_tokens || 0) - Number(textResponseTotals.reasoning_output_tokens || 0),
+  );
+  const displayedMessageTotal =
+    textResponseInputWeight + textResponseHistoryWeight + textResponseOutputWeight;
   const messageAlloc = allocateByLargestRemainder(
     displayedMessageTotal,
     {
-      user_input: Math.max(0, Number(textResponseTotals.input_tokens || 0)),
+      user_input: textResponseInputWeight,
       conversation_history: textResponseHistoryWeight,
-      assistant_response: Math.max(0, Number(textResponseTotals.output_tokens || 0)),
+      assistant_response: textResponseOutputWeight,
     },
     ["user_input", "conversation_history", "assistant_response"],
   );
@@ -350,7 +429,7 @@ async function computeCodexContextBreakdown({
     scope: "supported",
     breakdown_status: "ok",
     totals: grand,
-    session_count: sessions.length,
+    session_count: new Set(sessions.map((session) => session.sessionId || session.filePath)).size,
     message_count: sessions.reduce((a, s) => a + (s.turnCount || 0), 0),
     message_breakdown: {
       categories: messageBreakdown,
@@ -387,12 +466,13 @@ async function computeCodexContextBreakdown({
     },
   };
 
-  CACHE.set(cacheKey, { at: Date.now(), value: result });
+  const cacheValue = { ...result };
+  CACHE.set(cacheKey, { at: Date.now(), value: cacheValue });
   while (CACHE.size > 32) {
     const oldest = [...CACHE.entries()].sort((a, b) => a[1].at - b[1].at)[0];
     if (oldest) CACHE.delete(oldest[0]);
   }
-  return result;
+  return includeDiagnostics ? { ...result, diagnostics } : result;
 }
 
 module.exports = {

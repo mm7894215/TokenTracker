@@ -62,7 +62,7 @@ test("computeCodexContextBreakdown returns non-overlapping totals plus exec dril
               cache_creation_input_tokens: 50,
               output_tokens: 200,
               reasoning_output_tokens: 30,
-              total_tokens: 650,
+              total_tokens: 550,
             },
           },
         },
@@ -84,7 +84,7 @@ test("computeCodexContextBreakdown returns non-overlapping totals plus exec dril
               cache_creation_input_tokens: 60,
               output_tokens: 280,
               reasoning_output_tokens: 50,
-              total_tokens: 890,
+              total_tokens: 760,
             },
           },
         },
@@ -101,7 +101,7 @@ test("computeCodexContextBreakdown returns non-overlapping totals plus exec dril
               cache_creation_input_tokens: 70,
               output_tokens: 320,
               reasoning_output_tokens: 60,
-              total_tokens: 1040,
+              total_tokens: 890,
             },
           },
         },
@@ -168,15 +168,79 @@ test("computeCodexContextBreakdown returns non-overlapping totals plus exec dril
     assert.ok(toolTotal <= result.totals.total_tokens, "tool attribution should not exceed session total");
 
     const messageRows = result.message_breakdown.categories;
-    const nonTextToolTotal = result.tool_calls_breakdown.categories.reduce((sum, row) => {
-      if (row.name === "Text Response") return sum;
-      return sum + Number(row.totals.total_tokens || 0);
-    }, 0);
+    const textResponse = result.tool_calls_breakdown.categories.find((row) => row.name === "Text Response");
     const messageTotal = messageRows.reduce((sum, row) => sum + Number(row.totals.total_tokens || 0), 0);
-    assert.equal(messageTotal, result.totals.total_tokens - result.totals.reasoning_output_tokens - nonTextToolTotal);
+    assert.equal(
+      messageTotal,
+      Number(textResponse.totals.total_tokens || 0) - Number(textResponse.totals.reasoning_output_tokens || 0),
+    );
     assert.ok(messageRows.find((row) => row.key === "user_input").totals.total_tokens > 0);
     assert.ok(messageRows.find((row) => row.key === "conversation_history").totals.total_tokens > 0);
     assert.ok(messageRows.find((row) => row.key === "assistant_response").totals.total_tokens > 0);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("computeCodexContextBreakdown preserves exec stats on a zero-token turn", async () => {
+  const dir = await makeTmpDir("tt-codex-breakdown-zero-token-exec");
+  try {
+    const day = "2026-05-08";
+    const usage = {
+      input_tokens: 10,
+      cached_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      output_tokens: 5,
+      reasoning_output_tokens: 0,
+      total_tokens: 15,
+    };
+    await writeRollout(dir, day, "rollout-zero-token-exec.jsonl", [
+      {
+        timestamp: "2026-05-08T10:00:00.000Z",
+        type: "session_meta",
+        payload: { id: "s-zero-token-exec", cwd: "/tmp/project", model_provider: "openai" },
+      },
+      {
+        timestamp: "2026-05-08T10:00:01.000Z",
+        type: "event_msg",
+        payload: { type: "token_count", info: { total_token_usage: usage } },
+      },
+      {
+        timestamp: "2026-05-08T10:00:02.000Z",
+        type: "response_item",
+        payload: { type: "function_call", name: "exec_command", arguments: "{\"cmd\":\"npm test\"}" },
+      },
+      {
+        timestamp: "2026-05-08T10:00:03.000Z",
+        type: "event_msg",
+        payload: {
+          type: "exec_command_end",
+          command: ["bash", "-lc", "npm test"],
+          status: "completed",
+          exit_code: 0,
+          duration: { secs: 1, nanos: 0 },
+          aggregated_output: "pass\n",
+        },
+      },
+      {
+        timestamp: "2026-05-08T10:00:04.000Z",
+        type: "event_msg",
+        payload: { type: "token_count", info: { total_token_usage: usage } },
+      },
+    ]);
+
+    const result = await computeCodexContextBreakdown({
+      from: day,
+      to: day,
+      codexDir: dir,
+      top: 20,
+    });
+
+    const command = result.exec_command_breakdown.by_command.find((row) => row.name === "npm test");
+    assert.ok(command, "zero-token turns must retain completed exec metadata");
+    assert.equal(command.calls, 1);
+    assert.equal(command.totals.total_tokens, 0);
+    assert.equal(result.totals.total_tokens, 15, "the zero-token turn must not change session totals");
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
@@ -210,7 +274,7 @@ test("computeCodexContextBreakdown supports nested payload.msg token_count event
                 cache_creation_input_tokens: 0,
                 output_tokens: 25,
                 reasoning_output_tokens: 5,
-                total_tokens: 90,
+                total_tokens: 75,
               },
             },
           },
@@ -256,6 +320,11 @@ test("computeCodexContextBreakdown filters by requested local day", async () => 
         },
       },
       {
+        timestamp: "2026-05-08T15:45:00.000Z",
+        type: "response_item",
+        payload: { type: "function_call", name: "take_snapshot", call_id: "call-before-range", arguments: "{}" },
+      },
+      {
         timestamp: "2026-05-08T16:30:00.000Z",
         type: "event_msg",
         payload: {
@@ -281,10 +350,18 @@ test("computeCodexContextBreakdown filters by requested local day", async () => 
       timeZoneContext: { timeZone: "Asia/Shanghai", offsetMinutes: -480 },
     });
 
-    assert.equal(result.totals.input_tokens, 160);
-    assert.equal(result.totals.cached_input_tokens, 40);
-    assert.equal(result.totals.output_tokens, 30);
-    assert.equal(result.totals.total_tokens, 230);
+    assert.equal(result.totals.input_tokens, 80);
+    assert.equal(result.totals.cached_input_tokens, 20);
+    assert.equal(result.totals.cache_creation_input_tokens, 0);
+    assert.equal(result.totals.output_tokens, 20);
+    assert.equal(result.totals.reasoning_output_tokens, 0);
+    assert.equal(result.totals.total_tokens, 120);
+    assert.equal(result.session_count, 1);
+    assert.equal(result.message_count, 1);
+    const browser = result.tool_calls_breakdown.categories.find((row) => row.name === "Browser");
+    assert.ok(browser, "the pending pre-range tool must be attributed to the first in-range delta");
+    assert.equal(browser.calls, 1);
+    assert.equal(browser.totals.total_tokens, 120);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
@@ -329,7 +406,7 @@ test("computeCodexContextBreakdown sanitizes command grouping without arguments"
               cache_creation_input_tokens: 0,
               output_tokens: 20,
               reasoning_output_tokens: 0,
-              total_tokens: 80,
+              total_tokens: 70,
             },
           },
         },
@@ -390,7 +467,7 @@ test("computeCodexContextBreakdown keeps MCP server context in displayed tool na
               cache_creation_input_tokens: 10,
               output_tokens: 80,
               reasoning_output_tokens: 0,
-              total_tokens: 230,
+              total_tokens: 210,
             },
           },
         },
@@ -448,7 +525,7 @@ test("computeCodexContextBreakdown infers skills from SKILL.md exec reads", asyn
               cache_creation_input_tokens: 10,
               output_tokens: 80,
               reasoning_output_tokens: 0,
-              total_tokens: 230,
+              total_tokens: 210,
             },
           },
         },
