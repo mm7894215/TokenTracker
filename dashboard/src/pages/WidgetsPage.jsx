@@ -310,26 +310,35 @@ function fillTwoSlots(ids, availableItems) {
  * Dark pill on a neutral wallpaper-style backdrop. When `showStats` is off,
  * only the icon is shown (matches the native fallback behavior).
  */
-function MenuBarPreview({ slotConfigs, showStats }) {
+function MenuBarPreview({ slotConfigs, showStats, iconPreference }) {
   return (
     <div className="flex justify-center rounded-xl bg-gradient-to-b from-oai-gray-100 to-oai-gray-200 px-6 py-8 dark:from-oai-gray-950/80 dark:to-oai-gray-900/80">
       <div
         className="inline-flex items-stretch rounded-md shadow-[0_1px_3px_rgba(0,0,0,0.18)] ring-1 ring-black/10 dark:ring-white/10 px-3"
         style={{ background: "linear-gradient(180deg, #2c2c2e 0%, #1c1c1e 100%)" }}
+        data-testid="menu-bar-preview"
       >
         {/* Icon column: asymmetric padding (more left, less right) brings the
-            character close to the first metric since there's no separator
-            between them. Character is sized to read like a real macOS
-            menu-bar glyph rather than a hero illustration. */}
-        <div className="flex items-center pl-2 pr-1 py-2.5">
-          <img
-            src="/clawd/mini/idle-tight.svg"
-            alt=""
-            aria-hidden="true"
-            className="block shrink-0"
-            style={{ height: 22, width: "auto" }}
-            draggable="false"
-          />
+            icon close to the first metric since there's no separator between them. */}
+        <div className="flex items-center pl-2 pr-1 py-2.5" data-icon={iconPreference}>
+          {iconPreference === "openai" ? (
+            <img
+              src="/brand-logos/openai.svg"
+              alt=""
+              aria-hidden="true"
+              className="block h-5 w-5 shrink-0 brightness-0 invert"
+              draggable="false"
+            />
+          ) : (
+            <img
+              src="/clawd/mini/idle-tight.svg"
+              alt=""
+              aria-hidden="true"
+              className="block shrink-0"
+              style={{ height: 22, width: "auto" }}
+              draggable="false"
+            />
+          )}
         </div>
         {showStats
           ? slotConfigs.map(({ slot, item }, idx) => (
@@ -392,6 +401,32 @@ function MenuBarToggleRow({ label, hint, checked, disabled, onChange }) {
   );
 }
 
+function MenuBarIconSelect({ value, disabled, onChange }) {
+  const label = copy("settings.menubar.icon");
+  return (
+    <div className="flex items-center justify-between gap-4 py-3">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-oai-black dark:text-white">{label}</p>
+        <p className="mt-0.5 text-xs text-oai-gray-500 dark:text-oai-gray-400">
+          {copy("settings.menubar.iconHint")}
+        </p>
+      </div>
+      <Select
+        value={value}
+        disabled={disabled}
+        ariaLabel={label}
+        onValueChange={onChange}
+        options={[
+          { value: "claude", label: copy("settings.menubar.iconClaude") },
+          { value: "openai", label: copy("settings.menubar.iconOpenAI") },
+        ]}
+        matchTriggerWidth
+        className="w-40 shrink-0 px-3 py-2 text-sm font-medium sm:w-44"
+      />
+    </div>
+  );
+}
+
 function MenuBarDisplayCard() {
   const { available, settings, setSetting } = useNativeSettings();
 
@@ -413,6 +448,7 @@ function MenuBarDisplayCard() {
   );
   const slotIds = useMemo(() => fillTwoSlots(selectedIds, availableItems), [availableItems, selectedIds]);
   const showStats = settings?.showStats !== false;
+  const menuBarIcon = settings?.menuBarIcon === "openai" ? "openai" : "claude";
 
   const saveSelection = (ids) => {
     setSetting("menuBarItems", normalizeMenuBarItems(ids, availableItems, maxItems));
@@ -442,7 +478,11 @@ function MenuBarDisplayCard() {
 
   return (
     <article className="rounded-xl border border-oai-gray-200 bg-white p-5 transition-colors duration-200 dark:border-oai-gray-800 dark:bg-oai-gray-900 sm:p-6">
-      <MenuBarPreview slotConfigs={slotConfigs} showStats={showStats} />
+      <MenuBarPreview
+        slotConfigs={slotConfigs}
+        showStats={showStats}
+        iconPreference={menuBarIcon}
+      />
 
       <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
         {slotConfigs.map(({ slot, currentValue, options }) => (
@@ -478,6 +518,11 @@ function MenuBarDisplayCard() {
           checked={confettiOnReset}
           disabled={!available}
           onChange={() => setSetting("confettiOnReset", !confettiOnReset)}
+        />
+        <MenuBarIconSelect
+          value={menuBarIcon}
+          disabled={!available}
+          onChange={(value) => setSetting("menuBarIcon", value)}
         />
       </div>
     </article>

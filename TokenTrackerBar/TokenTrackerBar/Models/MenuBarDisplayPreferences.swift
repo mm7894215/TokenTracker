@@ -296,3 +296,27 @@ enum MenuBarDisplayPreferences {
         return Array(normalized.prefix(maxVisibleItems))
     }
 }
+
+enum MenuBarIconPreference: String, CaseIterable {
+    case claude
+    case openAI = "openai"
+
+    static let key = "MenuBarIconPreference"
+
+    /// Keeps the icon choice independent from the displayed metrics while
+    /// preserving the existing Claude icon as the default.
+    static func read(from defaults: UserDefaults = .standard) -> MenuBarIconPreference {
+        if let rawValue = defaults.string(forKey: key),
+           let preference = MenuBarIconPreference(rawValue: rawValue) {
+            return preference
+        }
+        return .claude
+    }
+
+    static func write(
+        _ preference: MenuBarIconPreference,
+        to defaults: UserDefaults = .standard
+    ) {
+        defaults.set(preference.rawValue, forKey: key)
+    }
+}

@@ -41,8 +41,10 @@ final class StatusBarController: NSObject {
 
     private let menuBarHeight: CGFloat = 22
     private let menuBarIconSize = NSSize(width: 22, height: 22)
+    private let openAIMenuBarIconSize = NSSize(width: 18, height: 18)
     private let emptyAttributedTitle = NSAttributedString(string: "")
     private var isUpdatingDisplay = false
+    private var appliedMenuBarIconPreference: MenuBarIconPreference?
 
     private static let showStatsKey = "MenuBarShowStats"
     private var showStats: Bool {
@@ -206,6 +208,7 @@ final class StatusBarController: NSObject {
         defer { isUpdatingDisplay = false }
         guard let button = statusItem.button else { return }
         let displayItems = buildMenuBarDisplayValues()
+        updateMenuBarIconOverride()
 
         // Freeze statusItem.length while the popover is shown: stats publishers and
         // animator frames both call this method, and a flicker in length drags the
@@ -235,6 +238,33 @@ final class StatusBarController: NSObject {
             }
             animator?.applyCurrentState()
         }
+    }
+
+    /// Applies the manually selected icon through the animator so blink and
+    /// sync frames cannot replace the OpenAI override.
+    private func updateMenuBarIconOverride() {
+        let preference = MenuBarIconPreference.read()
+        guard preference != appliedMenuBarIconPreference else { return }
+        appliedMenuBarIconPreference = preference
+
+        guard preference == .openAI,
+              let sourceImage = NSImage(named: "OpenAILogo") else {
+            animator?.setOverrideImage(nil)
+            return
+        }
+
+        let iconRect = NSRect(
+            x: (menuBarIconSize.width - openAIMenuBarIconSize.width) / 2,
+            y: (menuBarIconSize.height - openAIMenuBarIconSize.height) / 2,
+            width: openAIMenuBarIconSize.width,
+            height: openAIMenuBarIconSize.height
+        )
+        let icon = NSImage(size: menuBarIconSize, flipped: false) { _ in
+            sourceImage.draw(in: iconRect)
+            return true
+        }
+        icon.isTemplate = true
+        animator?.setOverrideImage(icon)
     }
 
     private func buildMenuBarDisplayValues() -> [MenuBarDisplayValue] {

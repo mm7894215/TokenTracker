@@ -498,6 +498,10 @@ settings.menubar.showStats,ui,SettingsPage,SettingsPage,mb_show_stats,"Show stat
 settings.menubar.showStatsHint,ui,SettingsPage,SettingsPage,mb_show_stats_hint,"Display today's token count and cost beside the menu bar icon.",,active
 settings.menubar.animatedIcon,ui,SettingsPage,SettingsPage,mb_anim,"Animated icon",,active
 settings.menubar.animatedIconHint,ui,SettingsPage,SettingsPage,mb_anim_hint,"Blink the Clawd character and play the syncing animation in the menu bar.",,active
+settings.menubar.icon,ui,WidgetsPage,MenuBarDisplayCard,mb_icon,"Menu bar icon",,active
+settings.menubar.iconHint,ui,WidgetsPage,MenuBarDisplayCard,mb_icon_hint,"Choose the Claude or OpenAI icon independently of the displayed metrics.",,active
+settings.menubar.iconClaude,ui,WidgetsPage,MenuBarDisplayCard,mb_icon_claude,"Claude",,active
+settings.menubar.iconOpenAI,ui,WidgetsPage,MenuBarDisplayCard,mb_icon_openai,"OpenAI",,active
 settings.menubar.confettiOnReset,ui,SettingsPage,SettingsPage,mb_confetti,"Confetti on limits reset",,active
 settings.menubar.confettiOnResetHint,ui,SettingsPage,SettingsPage,mb_confetti_hint,"Set off a fireworks celebration when a usage limit resets after you were near it.",,active
 settings.menubar.launchAtLogin,ui,SettingsPage,SettingsPage,mb_login,"Launch at login",,active

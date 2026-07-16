@@ -23,6 +23,7 @@ final class MenuBarAnimator {
     private var frameIndex = 0
     private(set) var currentState: State = .idle
     private var renderedImage: NSImage
+    private var overrideImage: NSImage?
 
     /// UserDefaults key for animation toggle
     private static let enabledKey = "MenuBarAnimationEnabled"
@@ -78,10 +79,22 @@ final class MenuBarAnimator {
         applyCurrentState()
     }
 
+    /// Replaces the animated Clawd frames with a provider icon. Passing nil
+    /// restores the user's existing animation preference and current state.
+    func setOverrideImage(_ image: NSImage?) {
+        overrideImage = image
+        applyCurrentState()
+    }
+
     func applyCurrentState() {
         frameIndex = 0
         stopAnimation()
         cancelBlink()
+
+        if let overrideImage {
+            setButtonImage(overrideImage)
+            return
+        }
 
         guard isEnabled else {
             setButtonImage(fallbackIcon)
@@ -140,6 +153,7 @@ final class MenuBarAnimator {
     }
 
     private func playBlink() {
+        guard overrideImage == nil else { return }
         guard currentState == .idle, !reduceMotion, isEnabled else {
             if currentState == .idle { scheduleNextBlink() }
             return
@@ -248,9 +262,10 @@ final class MenuBarAnimator {
     // MARK: - Helpers
 
     private func setButtonImage(_ image: NSImage) {
-        renderedImage = image
-        button?.image = image
-        onImageUpdated?(image)
+        let displayedImage = overrideImage ?? image
+        renderedImage = displayedImage
+        button?.image = displayedImage
+        onImageUpdated?(displayedImage)
     }
 
     private var reduceMotion: Bool {

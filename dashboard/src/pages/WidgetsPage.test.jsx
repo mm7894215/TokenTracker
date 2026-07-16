@@ -99,6 +99,7 @@ describe("WidgetsPage menu bar configurator", () => {
     setCopyLocale(ZH_CN_LOCALE);
     const bridge = installNativeBridge({
       showStats: true,
+      menuBarIcon: "openai",
       menuBarItems: ["codexCredits", "codexSpark7d"],
       menuBarMaxItems: 2,
       menuBarAvailableItems: [
@@ -128,8 +129,56 @@ describe("WidgetsPage menu bar configurator", () => {
 
     const primary = await screen.findByRole("combobox", { name: copy("menubar.slot.primary") });
     const secondary = screen.getByRole("combobox", { name: copy("menubar.slot.secondary") });
+    const preview = screen.getByTestId("menu-bar-preview");
 
     expect(primary).toHaveTextContent(copy("menubar.metric.codex_credits"));
     expect(secondary).toHaveTextContent(copy("menubar.metric.codex_spark_7d"));
+    expect(preview.querySelector('[data-icon="openai"]')).toBeInTheDocument();
+    expect(preview.querySelector('img[src="/brand-logos/openai.svg"]')).toBeInTheDocument();
+  });
+
+  it("selects the OpenAI icon independently of the displayed metrics", async () => {
+    const user = userEvent.setup();
+    const bridge = installNativeBridge({
+      showStats: true,
+      menuBarIcon: "claude",
+      menuBarItems: ["todayTokens", "todayCost"],
+      menuBarMaxItems: 2,
+      menuBarAvailableItems: [
+        { id: "todayTokens", label: "Today Tokens", shortLabel: "Tokens", category: "tokens" },
+        { id: "todayCost", label: "Today Cost", shortLabel: "Cost", category: "cost" },
+      ],
+    });
+
+    render(<WidgetsPage />);
+    act(() => bridge.pushSettings());
+
+    const iconLabel = copy("settings.menubar.icon");
+    const iconSelect = await screen.findByRole("combobox", { name: iconLabel });
+    const preview = screen.getByTestId("menu-bar-preview");
+    expect(preview.querySelector('img[src="/clawd/mini/idle-tight.svg"]')).toBeInTheDocument();
+
+    await act(async () => {
+      await user.click(iconSelect);
+    });
+    const listbox = await screen.findByRole("listbox", { name: iconLabel });
+    const openAIOption = within(listbox).getByRole("option", {
+      name: copy("settings.menubar.iconOpenAI"),
+    });
+    await act(async () => {
+      await user.pointer([
+        { keys: "[TouchA>]", target: openAIOption },
+        { keys: "[/TouchA]", target: openAIOption },
+      ]);
+    });
+
+    await waitFor(() => {
+      expect(bridge.messages).toContainEqual({
+        type: "setSetting",
+        key: "menuBarIcon",
+        value: "openai",
+      });
+    });
+    expect(preview.querySelector('img[src="/brand-logos/openai.svg"]')).toBeInTheDocument();
   });
 });

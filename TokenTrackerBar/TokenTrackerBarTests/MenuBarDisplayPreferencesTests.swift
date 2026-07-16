@@ -91,6 +91,32 @@ final class MenuBarDisplayPreferencesTests: XCTestCase {
         }
     }
 
+    func testIconPreferenceDefaultsToClaudeIndependentlyOfMetrics() throws {
+        let (defaults, suiteName) = try makeIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set([
+            MenuBarDisplayMetric.codex7d.rawValue,
+            MenuBarDisplayMetric.todayTokens.rawValue,
+        ], forKey: MenuBarDisplayPreferences.key)
+
+        XCTAssertEqual(MenuBarIconPreference.read(from: defaults), .claude)
+    }
+
+    func testIconPreferenceCanBeSelectedIndependentlyOfMetrics() throws {
+        let (defaults, suiteName) = try makeIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set([
+            MenuBarDisplayMetric.todayTokens.rawValue,
+            MenuBarDisplayMetric.todayCost.rawValue,
+        ], forKey: MenuBarDisplayPreferences.key)
+
+        MenuBarIconPreference.write(.openAI, to: defaults)
+        XCTAssertEqual(MenuBarIconPreference.read(from: defaults), .openAI)
+
+        MenuBarIconPreference.write(.claude, to: defaults)
+        XCTAssertEqual(MenuBarIconPreference.read(from: defaults), .claude)
+    }
+
     private func decodeResponse(overrides: [String: Any] = [:]) throws -> UsageLimitsResponse {
         var payload: [String: Any] = [
             "fetched_at": "2026-07-01T00:00:00Z",
@@ -106,5 +132,12 @@ final class MenuBarDisplayPreferencesTests: XCTestCase {
         }
         let data = try JSONSerialization.data(withJSONObject: payload)
         return try JSONDecoder().decode(UsageLimitsResponse.self, from: data)
+    }
+
+    private func makeIsolatedDefaults() throws -> (UserDefaults, String) {
+        let suiteName = "MenuBarDisplayPreferencesTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        return (defaults, suiteName)
     }
 }
