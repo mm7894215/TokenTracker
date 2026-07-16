@@ -1,16 +1,23 @@
 import AppKit
 
-/// Clawd-style pixel art character for the menu bar icon.
-/// Uses exact coordinates from clawd-static-base.svg (15×16 grid),
-/// scaled at 1.2pt per SVG unit to fill 18×18pt canvas.
+/// Animated menu bar icon with four styles (`MenuBarIconStyle`):
+/// - `clawd`  — pixel-art Clawd drawn procedurally from clawd-static-base.svg
+///              coordinates (idle blink / syncing bounce / disconnected "?")
+/// - `cat`    — RunCat-style running cat (5 Apache-2.0 frames from
+///              Kyome22/menubar_runcat, see THIRD_PARTY_NOTICES.md); state is
+///              expressed through running speed, sleeping curls up
+/// - `pet`    — silhouette of the desktop pet selected on the Pet page,
+///              frames built by `MenuBarPetFrameProvider`
+/// - `static` — the original lightning-bolt icon, no animation
 ///
-/// Body parts drawn as filled rects, eyes cut out as transparent holes
-/// so the menu bar background peeks through (works for template images).
+/// Runner styles sprint for `MenuBarRunnerPace.sprintWindow` after
+/// `noteActivity()` (queue.jsonl appends — i.e. the AI just burned tokens).
 @MainActor
 final class MenuBarAnimator {
 
     enum State: Equatable {
         case idle
+        case sleeping
         case syncing
         case disconnected
     }
@@ -20,12 +27,14 @@ final class MenuBarAnimator {
     private weak var button: NSStatusBarButton?
     private var animationTimer: Timer?
     private var blinkTimer: Timer?
+    private var sprintTimer: Timer?
     private var frameIndex = 0
+    private var loopFrames: [NSImage] = []
     private(set) var currentState: State = .idle
     private var renderedImage: NSImage
 
-    /// UserDefaults key for animation toggle
-    private static let enabledKey = "MenuBarAnimationEnabled"
+    private let petFrameProvider = MenuBarPetFrameProvider()
+    private var sprintUntil: Date = .distantPast
 
     /// Static fallback icon (original lightning bolt)
     private let fallbackIcon: NSImage
@@ -39,6 +48,7 @@ final class MenuBarAnimator {
     private let offsetX: CGFloat = -0.1
     private let offsetY: CGFloat = 4.07
     private let canvasSize = NSSize(width: 22, height: 22)
+    private let catCanvasSize = NSSize(width: 28, height: 18)
 
     // Pre-rendered frames
     /// The current icon image (for external use, e.g. stats rendering)
@@ -49,15 +59,20 @@ final class MenuBarAnimator {
     private lazy var blinkFrame = buildFrame(eyesClosed: true, yShift: 0)
     private lazy var syncFrames = buildSyncFrames()
     private lazy var disconnectedFrame = buildDisconnectedFrame()
+    private lazy var catFrames = buildCatFrames()
+    private lazy var catSleepFrames = buildCatSleepFrames()
+    private lazy var catDisconnectedFrame = buildCatDisconnectedFrame()
 
-    /// Whether pixel animation is enabled (persisted in UserDefaults)
-    var isEnabled: Bool {
-        get { UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool ?? true }
+    /// Persisted icon style (UserDefaults, with legacy toggle migration).
+    var iconStyle: MenuBarIconStyle {
+        get { MenuBarIconStyle.current() }
         set {
-            UserDefaults.standard.set(newValue, forKey: Self.enabledKey)
+            MenuBarIconStyle.setCurrent(newValue)
             applyCurrentState()
         }
     }
+
+    var isSprinting: Bool { Date() < sprintUntil }
 
     // MARK: - Init
 
@@ -78,35 +93,134 @@ final class MenuBarAnimator {
         applyCurrentState()
     }
 
+    /// The queue file just grew — the AI is actively burning tokens right now.
+    /// Runner styles speed up for a sprint window; each new append extends it.
+    func noteActivity() {
+        let wasSprinting = isSprinting
+        sprintUntil = Date().addingTimeInterval(MenuBarRunnerPace.sprintWindow)
+        sprintTimer?.invalidate()
+        sprintTimer = Timer.scheduledTimer(
+            withTimeInterval: MenuBarRunnerPace.sprintWindow + 0.1,
+            repeats: false
+        ) { [weak self] _ in
+            Task { @MainActor in self?.applyCurrentState() }
+        }
+        if !wasSprinting { applyCurrentState() }
+    }
+
     func applyCurrentState() {
         frameIndex = 0
         stopAnimation()
         cancelBlink()
 
-        guard isEnabled else {
+        switch iconStyle {
+        case .static:
             setButtonImage(fallbackIcon)
-            return
+        case .clawd:
+            applyClawd()
+        case .cat:
+            applyCat()
+        case .pet:
+            applyPet()
         }
+    }
 
+    // MARK: - Clawd (procedural pixel character)
+
+    private func applyClawd() {
         if reduceMotion {
             setButtonImage(idleFrame)
             return
         }
 
         switch currentState {
-        case .idle:
+        case .idle, .sleeping:
+            // Clawd has no sleeping pose; idle blink covers both.
             setButtonImage(idleFrame)
             scheduleNextBlink()
         case .syncing:
-            startAnimation(interval: 0.15)
+            startAnimation(frames: syncFrames, interval: 0.15)
         case .disconnected:
             setButtonImage(disconnectedFrame)
         }
     }
 
+    // MARK: - Cat (RunCat-style runner)
+
+    private func applyCat() {
+        guard !catFrames.isEmpty else {
+            applyClawd()
+            return
+        }
+
+        switch currentState {
+        case .disconnected:
+            setButtonImage(catDisconnectedFrame)
+        case .sleeping where !isSprinting:
+            if reduceMotion || catSleepFrames.count < 2 {
+                setButtonImage(catSleepFrames.first ?? catFrames[0])
+            } else {
+                startAnimation(frames: catSleepFrames, interval: catInterval)
+            }
+        default:
+            if reduceMotion {
+                setButtonImage(catFrames[0])
+            } else {
+                startAnimation(frames: catFrames, interval: catInterval)
+            }
+        }
+    }
+
+    private var catInterval: TimeInterval {
+        MenuBarRunnerPace.frameInterval(style: .cat, motion: runnerMotion)
+    }
+
+    // MARK: - Pet (desktop pet silhouette)
+
+    private func applyPet() {
+        guard let frames = petFrameProvider.frames(for: PetCharacterStore.shared.character) else {
+            // Clawd is selected (no atlas) or the atlas failed to load.
+            applyClawd()
+            return
+        }
+
+        if reduceMotion {
+            setButtonImage(frames.idle[0])
+            return
+        }
+
+        switch currentState {
+        case .disconnected:
+            setButtonImage(frames.disconnected)
+        case .sleeping where !isSprinting:
+            startAnimation(frames: frames.sleeping, interval: petInterval)
+        case .syncing:
+            startAnimation(frames: frames.active, interval: petInterval)
+        case .idle, .sleeping:
+            startAnimation(
+                frames: isSprinting ? frames.active : frames.idle,
+                interval: petInterval
+            )
+        }
+    }
+
+    private var petInterval: TimeInterval {
+        MenuBarRunnerPace.frameInterval(style: .pet, motion: runnerMotion)
+    }
+
+    private var runnerMotion: MenuBarRunnerMotion {
+        if isSprinting { return .sprinting }
+        switch currentState {
+        case .sleeping: return .sleeping
+        case .syncing: return .syncing
+        case .idle, .disconnected: return .idle
+        }
+    }
+
     // MARK: - Animation Loop
 
-    private func startAnimation(interval: TimeInterval) {
+    private func startAnimation(frames: [NSImage], interval: TimeInterval) {
+        loopFrames = frames
         tick()
         animationTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
@@ -116,11 +230,12 @@ final class MenuBarAnimator {
     private func stopAnimation() {
         animationTimer?.invalidate()
         animationTimer = nil
+        loopFrames = []
     }
 
     private func tick() {
-        guard currentState == .syncing, !syncFrames.isEmpty else { return }
-        setButtonImage(syncFrames[frameIndex % syncFrames.count])
+        guard !loopFrames.isEmpty else { return }
+        setButtonImage(loopFrames[frameIndex % loopFrames.count])
         frameIndex += 1
     }
 
@@ -140,13 +255,12 @@ final class MenuBarAnimator {
     }
 
     private func playBlink() {
-        guard currentState == .idle, !reduceMotion, isEnabled else {
-            if currentState == .idle { scheduleNextBlink() }
-            return
-        }
+        guard currentState == .idle || currentState == .sleeping,
+              !reduceMotion, iconStyle == .clawd else { return }
         setButtonImage(blinkFrame)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-            guard let self, self.currentState == .idle else { return }
+            guard let self, self.currentState == .idle || self.currentState == .sleeping,
+                  self.iconStyle == .clawd else { return }
             self.setButtonImage(self.idleFrame)
             self.scheduleNextBlink()
         }
@@ -168,11 +282,114 @@ final class MenuBarAnimator {
         ]
     }
 
+    // MARK: - Cat Frames
+
+    private func buildCatFrames() -> [NSImage] {
+        (0..<5).compactMap { n in
+            guard let named = NSImage(named: "RunnerCat\(n)"),
+                  let image = named.copy() as? NSImage else { return nil }
+            image.size = catCanvasSize
+            image.isTemplate = true
+            return image
+        }
+    }
+
+    /// Curled-up sleeping cat, drawn procedurally (the RunCat set only ships
+    /// running poses). Two frames make a slow breathing loop; the second one
+    /// carries a tiny "z".
+    private func buildCatSleepFrames() -> [NSImage] {
+        [buildCatSleepFrame(exhale: false), buildCatSleepFrame(exhale: true)]
+    }
+
+    private func buildCatSleepFrame(exhale: Bool) -> NSImage {
+        let img = NSImage(size: catCanvasSize, flipped: true) { [self] _ in
+            NSColor.black.setFill()
+
+            // Body: a curled bun, slightly flatter on the exhale frame.
+            let squash: CGFloat = exhale ? 1 : 0
+            let body = NSBezierPath(
+                ovalIn: NSRect(x: 6, y: 6 + squash, width: 17, height: 11 - squash)
+            )
+            body.fill()
+
+            // Head resting on the right side of the bun.
+            let head = NSBezierPath(
+                ovalIn: NSRect(x: 16.5, y: 4.5 + squash, width: 8.5, height: 8)
+            )
+            head.fill()
+
+            // Ears: two small triangles.
+            let earA = NSBezierPath()
+            earA.move(to: NSPoint(x: 18, y: 6 + squash))
+            earA.line(to: NSPoint(x: 19.2, y: 2.6 + squash))
+            earA.line(to: NSPoint(x: 21, y: 5.4 + squash))
+            earA.close()
+            earA.fill()
+            let earB = NSBezierPath()
+            earB.move(to: NSPoint(x: 21.6, y: 5.2 + squash))
+            earB.line(to: NSPoint(x: 23.4, y: 2.8 + squash))
+            earB.line(to: NSPoint(x: 24.6, y: 6 + squash))
+            earB.close()
+            earB.fill()
+
+            // Tail wrapped around the front of the bun.
+            let tail = NSBezierPath()
+            tail.move(to: NSPoint(x: 7, y: 15.4))
+            tail.curve(
+                to: NSPoint(x: 3.4, y: 9.6),
+                controlPoint1: NSPoint(x: 3.6, y: 15.6),
+                controlPoint2: NSPoint(x: 2.6, y: 12.4)
+            )
+            tail.lineWidth = 2.2
+            tail.lineCapStyle = .round
+            NSColor.black.setStroke()
+            tail.stroke()
+
+            // Tiny "z" while exhaling.
+            if exhale {
+                let font = NSFont.systemFont(ofSize: 5, weight: .bold)
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: font,
+                    .foregroundColor: NSColor.black.withAlphaComponent(0.8),
+                ]
+                NSAttributedString(string: "z", attributes: attrs)
+                    .draw(at: NSPoint(x: catCanvasSize.width - 5, y: 0))
+            }
+
+            return true
+        }
+        img.isTemplate = true
+        return img
+    }
+
+    /// Dimmed cat with a "?" — mirrors Clawd's disconnected treatment.
+    private func buildCatDisconnectedFrame() -> NSImage {
+        let img = NSImage(size: catCanvasSize, flipped: false) { [weak self] rect in
+            guard let self, let base = self.catFrames.first else { return false }
+            base.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 0.5)
+
+            let font = NSFont.systemFont(ofSize: 7, weight: .bold)
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: NSColor.black.withAlphaComponent(0.7),
+            ]
+            let str = NSAttributedString(string: "?", attributes: attrs)
+            let strSize = str.size()
+            str.draw(at: NSPoint(
+                x: (rect.width - strSize.width) / 2,
+                y: rect.height - strSize.height
+            ))
+            return true
+        }
+        img.isTemplate = true
+        return img
+    }
+
     // MARK: - Disconnected Frame (dimmed character with ?)
 
     private func buildDisconnectedFrame() -> NSImage {
         let img = NSImage(size: canvasSize, flipped: true) { [self] _ in
-            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+            guard NSGraphicsContext.current?.cgContext != nil else { return false }
 
             NSColor.black.withAlphaComponent(0.5).setFill()
 

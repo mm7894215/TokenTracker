@@ -3,6 +3,7 @@ import { FileArchive, Link2, Loader2, MonitorUp, Trash2, Upload, Zap } from "luc
 import { ToggleSwitch, SegmentedControl } from "../components/settings/Controls.jsx";
 import { usePetSettings } from "../hooks/use-pet-settings.js";
 import { usePetCatalog } from "../hooks/use-pet-catalog.js";
+import { useNativeSettings } from "../hooks/use-native-settings.js";
 import { importPetPackage, installPetFromUrl, removePet } from "../lib/pets-api.js";
 import { copy } from "../lib/copy";
 import { cn } from "../lib/cn";
@@ -191,6 +192,8 @@ export function PetPage() {
   // choice must stick, so the first click stops the rotation for this visit.
   const [autoRotate, setAutoRotate] = useState(true);
   const selectedCharacter = settings.character || "clawd";
+  const nativeSettings = useNativeSettings();
+  const menuBarPetActive = nativeSettings.settings?.menuBarIconStyle === "pet";
   const selectedPet = pets.find((pet) => pet.id === selectedCharacter) || pets[0];
   // A long codex-pets.net download deserves live feedback, and failures must not
   // read like successes — success confirms via toast, errors stay inline by the form.
@@ -289,6 +292,23 @@ export function PetPage() {
                       />
                     ))}
                   </div>
+                  {nativeSettings.available ? (
+                    <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-oai-gray-200/70 bg-oai-gray-50/60 px-3 py-2.5 dark:border-oai-gray-800 dark:bg-oai-gray-900/40">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold">{copy("pet.menubar.title")}</p>
+                        <p className="mt-0.5 text-[11px] leading-relaxed text-oai-gray-500 dark:text-oai-gray-400">
+                          {copy("pet.menubar.hint")}
+                        </p>
+                      </div>
+                      <ToggleSwitch
+                        checked={menuBarPetActive}
+                        onChange={() =>
+                          nativeSettings.setSetting("menuBarIconStyle", menuBarPetActive ? "clawd" : "pet")
+                        }
+                        ariaLabel={copy("pet.menubar.title")}
+                      />
+                    </div>
+                  ) : null}
                 </section>
 
                 {catalogAvailable ? (

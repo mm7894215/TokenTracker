@@ -32,6 +32,7 @@ final class StatusBarController: NSObject {
     private let launchAtLoginManager: LaunchAtLoginManager
     private let desktopPetController: DesktopPetWindowController
     private var animator: MenuBarAnimator?
+    private let queueActivityMonitor = QueueActivityMonitor()
     private let confettiController = ScreenConfettiOverlayController()
     private var cancellables = Set<AnyCancellable>()
     /// While the status-item menu is open, refreshes the “Check for Updates” row when download/check status changes.
@@ -152,37 +153,59 @@ final class StatusBarController: NSObject {
             guard let self, self.showStats, !self.buildMenuBarDisplayValues().isEmpty else { return }
             self.updateStatsDisplay()
         }
+
+        // Real-time activity: queue.jsonl appends make the runner icon sprint.
+        queueActivityMonitor.onActivity = { [weak self] in
+            self?.animator?.noteActivity()
+        }
+        queueActivityMonitor.start()
+
         updateStatsDisplay()
+    }
+
+    /// Single derivation of the animator state from the view model.
+    /// Priority: syncing > disconnected > sleeping (no tokens today) > idle.
+    private func refreshAnimatorState() {
+        let state: MenuBarAnimator.State
+        if viewModel.isSyncing {
+            state = .syncing
+        } else if !viewModel.serverOnline {
+            state = .disconnected
+        } else if viewModel.todayTokens == 0 {
+            state = .sleeping
+        } else {
+            state = .idle
+        }
+        animator?.setState(state)
     }
 
     private func observeSyncState() {
         viewModel.$isSyncing
             .receive(on: RunLoop.main)
-            .sink { [weak self] syncing in
-                guard let self else { return }
-                if syncing {
-                    self.animator?.setState(.syncing)
-                } else if !self.viewModel.serverOnline {
-                    self.animator?.setState(.disconnected)
-                } else {
-                    self.animator?.setState(.idle)
-                }
-            }
+            .sink { [weak self] _ in self?.refreshAnimatorState() }
             .store(in: &cancellables)
 
         // Observe server online status for disconnected icon
         viewModel.$serverOnline
             .receive(on: RunLoop.main)
-            .sink { [weak self] online in
-                guard let self, !self.viewModel.isSyncing else { return }
-                self.animator?.setState(online ? .idle : .disconnected)
+            .sink { [weak self] _ in self?.refreshAnimatorState() }
+            .store(in: &cancellables)
+
+        // Update stats text when today data changes (also drives the
+        // sleeping/idle split for the runner icons)
+        viewModel.$todaySummary
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.refreshAnimatorState()
+                self?.updateStatsDisplay()
             }
             .store(in: &cancellables)
 
-        // Update stats text when today data changes
-        viewModel.$todaySummary
+        // Re-render pet frames when the selected character changes
+        PetCharacterStore.shared.$character
+            .dropFirst()
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.updateStatsDisplay() }
+            .sink { [weak self] _ in self?.animator?.applyCurrentState() }
             .store(in: &cancellables)
 
         viewModel.$rollingSummary
@@ -461,7 +484,13 @@ final class StatusBarController: NSObject {
         let labelOriginY = textOriginY
         let valueOriginY = labelOriginY + labelHeight + lineGap
 
-        let iconWidth = menuBarIconSize.width
+        // Respect the icon's own aspect ratio: Clawd frames are 22×22 but the
+        // runner cat is 28×18 — squeezing it into the square slot distorts it.
+        let iconSize: NSSize = {
+            guard let icon, icon.size.width > 0, icon.size.height > 0 else { return menuBarIconSize }
+            return icon.size
+        }()
+        let iconWidth = iconSize.width
         let textOriginX = iconWidth + iconTrailingPadding
         let columnsWidth = columns.enumerated().reduce(CGFloat(0)) { total, pair in
             let separatorWidth: CGFloat = pair.offset == 0 ? 0 : (sepGap + 1 + sepGap)
@@ -474,7 +503,12 @@ final class StatusBarController: NSObject {
             guard let self else { return false }
 
             if let icon {
-                let iconRect = NSRect(origin: .zero, size: self.menuBarIconSize)
+                let iconRect = NSRect(
+                    origin: NSPoint(x: 0, y: floor((self.menuBarHeight - iconSize.height) / 2)),
+                    size: iconSize
+                )
+                // Pixel-art frames (cat / pet silhouettes) must not be smoothed.
+                NSGraphicsContext.current?.imageInterpolation = .none
                 // Template icons are black alpha — tint to labelColor for compositing
                 if icon.isTemplate {
                     icon.draw(in: iconRect, from: .zero, operation: .sourceOver, fraction: 1)
@@ -483,6 +517,7 @@ final class StatusBarController: NSObject {
                 } else {
                     icon.draw(in: iconRect, from: .zero, operation: .sourceOver, fraction: 1)
                 }
+                NSGraphicsContext.current?.imageInterpolation = .default
             }
 
             var cursorX = textOriginX
@@ -686,17 +721,67 @@ final class StatusBarController: NSObject {
 
         menu.addItem(.separator())
 
-        // Show Stats in Menu Bar (toggle)
+        // Menu Bar Display (stats toggle + quick slot pickers, mirrors the
+        // Widgets page so users don't have to open the dashboard to switch)
+        let displayItem = NSMenuItem(title: Strings.menuMenuBarDisplay, action: nil, keyEquivalent: "")
+        let displayMenu = NSMenu()
+
         let statsItem = NSMenuItem(title: Strings.menuShowStats, action: #selector(toggleStats), keyEquivalent: "")
         statsItem.target = self
         statsItem.state = showStats ? .on : .off
-        menu.addItem(statsItem)
+        displayMenu.addItem(statsItem)
 
-        // Animated Icon (toggle)
-        let animItem = NSMenuItem(title: Strings.menuAnimatedIcon, action: #selector(toggleAnimation), keyEquivalent: "")
-        animItem.target = self
-        animItem.state = (animator?.isEnabled ?? true) ? .on : .off
-        menu.addItem(animItem)
+        if showStats {
+            displayMenu.addItem(.separator())
+            let selectedIDs = MenuBarDisplayPreferences.read()
+            let payload = MenuBarDisplayPreferences.availableItemsPayload(
+                for: viewModel.usageLimits,
+                keepingSelected: selectedIDs,
+                hiddenProviders: LimitsSettingsStore.shared.hiddenProviders
+            )
+            for slot in 0..<MenuBarDisplayPreferences.maxVisibleItems {
+                let currentID = slot < selectedIDs.count ? selectedIDs[slot] : nil
+                let currentLabel = payload.first { $0["id"] == currentID }?["label"] ?? ""
+                let slotTitle = slot == 0 ? Strings.menuPrimarySlot : Strings.menuSecondarySlot
+                let slotItem = NSMenuItem(
+                    title: currentLabel.isEmpty ? slotTitle : "\(slotTitle): \(currentLabel)",
+                    action: nil,
+                    keyEquivalent: ""
+                )
+                let slotMenu = NSMenu()
+                for entry in payload {
+                    guard let id = entry["id"], let label = entry["label"] else { continue }
+                    let metricItem = NSMenuItem(
+                        title: label,
+                        action: #selector(selectMenuBarSlotMetric(_:)),
+                        keyEquivalent: ""
+                    )
+                    metricItem.target = self
+                    metricItem.representedObject = ["slot": slot, "id": id] as [String: Any]
+                    metricItem.state = id == currentID ? .on : .off
+                    slotMenu.addItem(metricItem)
+                }
+                slotItem.submenu = slotMenu
+                displayMenu.addItem(slotItem)
+            }
+        }
+
+        displayItem.submenu = displayMenu
+        menu.addItem(displayItem)
+
+        // Menu Bar Icon (style submenu: Clawd / Cat / My Pet / Static)
+        let iconItem = NSMenuItem(title: Strings.menuMenuBarIcon, action: nil, keyEquivalent: "")
+        let iconMenu = NSMenu()
+        let currentStyle = animator?.iconStyle ?? .clawd
+        for style in MenuBarIconStyle.allCases {
+            let item = NSMenuItem(title: iconStyleLabel(style), action: #selector(selectIconStyle(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = style.rawValue
+            item.state = style == currentStyle ? .on : .off
+            iconMenu.addItem(item)
+        }
+        iconItem.submenu = iconMenu
+        menu.addItem(iconItem)
 
         // Confetti on Reset (toggle)
         let confettiItem = NSMenuItem(title: Strings.confettiOnResetLabel, action: #selector(toggleConfetti), keyEquivalent: "")
@@ -770,8 +855,37 @@ final class StatusBarController: NSObject {
         showStats.toggle()
     }
 
-    @objc private func toggleAnimation() {
-        animator?.isEnabled.toggle()
+    @objc private func selectMenuBarSlotMetric(_ sender: NSMenuItem) {
+        guard let info = sender.representedObject as? [String: Any],
+              let slot = info["slot"] as? Int,
+              let id = info["id"] as? String else { return }
+        var ids = MenuBarDisplayPreferences.read()
+        guard ids.indices.contains(slot) else { return }
+        let other = slot == 0 ? 1 : 0
+        if ids.indices.contains(other), ids[other] == id {
+            // Keep both slots distinct by swapping instead of rejecting.
+            ids[other] = ids[slot]
+        }
+        ids[slot] = id
+        MenuBarDisplayPreferences.write(ids)
+        NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
+        NativeBridge.shared.pushSettings()
+    }
+
+    private func iconStyleLabel(_ style: MenuBarIconStyle) -> String {
+        switch style {
+        case .clawd: return Strings.petCharacterClawd
+        case .cat: return Strings.iconStyleCat
+        case .pet: return Strings.iconStyleMyPet
+        case .static: return Strings.iconStyleStatic
+        }
+    }
+
+    @objc private func selectIconStyle(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let style = MenuBarIconStyle(rawValue: raw) else { return }
+        animator?.iconStyle = style
+        NativeBridge.shared.pushSettings()
     }
 
     @objc private func toggleConfetti() {

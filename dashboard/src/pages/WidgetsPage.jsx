@@ -392,6 +392,27 @@ function MenuBarToggleRow({ label, hint, checked, disabled, onChange }) {
   );
 }
 
+function MenuBarSelectRow({ label, hint, value, options, disabled, onChange }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-3">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-oai-black dark:text-white">{label}</p>
+        {hint ? (
+          <p className="mt-0.5 text-xs text-oai-gray-500 dark:text-oai-gray-400">{hint}</p>
+        ) : null}
+      </div>
+      <Select
+        value={value}
+        disabled={disabled}
+        ariaLabel={label}
+        onValueChange={onChange}
+        options={options}
+        className="shrink-0 px-3 py-2 text-sm font-medium"
+      />
+    </div>
+  );
+}
+
 function MenuBarDisplayCard() {
   const { available, settings, setSetting } = useNativeSettings();
 
@@ -437,7 +458,10 @@ function MenuBarDisplayCard() {
     return { slot, currentValue, options, item };
   });
 
-  const animatedIcon = settings?.animatedIcon !== false;
+  const iconStyles = ["clawd", "cat", "pet", "static"];
+  const iconStyle = iconStyles.includes(settings?.menuBarIconStyle)
+    ? settings.menuBarIconStyle
+    : "clawd";
   const confettiOnReset = settings?.confettiOnReset !== false;
 
   return (
@@ -465,12 +489,18 @@ function MenuBarDisplayCard() {
           disabled={!available}
           onChange={() => setSetting("showStats", !showStats)}
         />
-        <MenuBarToggleRow
-          label={copy("settings.menubar.animatedIcon")}
-          hint={copy("settings.menubar.animatedIconHint")}
-          checked={animatedIcon}
+        <MenuBarSelectRow
+          label={copy("settings.menubar.iconStyle")}
+          hint={copy("settings.menubar.iconStyleHint")}
+          value={iconStyle}
           disabled={!available}
-          onChange={() => setSetting("animatedIcon", !animatedIcon)}
+          options={[
+            { value: "clawd", label: copy("settings.menubar.iconStyle.clawd") },
+            { value: "cat", label: copy("settings.menubar.iconStyle.cat") },
+            { value: "pet", label: copy("settings.menubar.iconStyle.pet") },
+            { value: "static", label: copy("settings.menubar.iconStyle.static") },
+          ]}
+          onChange={(next) => setSetting("menuBarIconStyle", next)}
         />
         <MenuBarToggleRow
           label={copy("settings.menubar.confettiOnReset")}

@@ -117,6 +117,7 @@ targets:
       - path: TokenTrackerBarTests
       - path: TokenTrackerBar/Models/LimitsSettingsStore.swift
       - path: TokenTrackerBar/Models/MenuBarDisplayPreferences.swift
+      - path: TokenTrackerBar/Models/MenuBarIconStyle.swift
       - path: TokenTrackerBar/Models/UsageLimits.swift
       - path: TokenTrackerBar/Models/LimitPace.swift
       - path: TokenTrackerBar/Models/WeeklyLimitResetDetector.swift

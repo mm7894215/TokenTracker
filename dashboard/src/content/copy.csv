@@ -189,7 +189,7 @@ dashboard.projects.detail.source_conv,ui,DataDetails,ProjectDetailModal,source_c
 dashboard.widgets.title,dashboard,DashboardPage,WidgetOnboardingCard,title,"Desktop Widgets",,active
 dashboard.widgets.hint,dashboard,DashboardPage,WidgetOnboardingCard,hint,"Right-click your desktop → Edit Widgets → search ""TokenTracker""",,active
 dashboard.widgets.dismiss_aria,dashboard,DashboardPage,WidgetOnboardingCard,dismiss_aria,"Dismiss widget intro",,active
-widgets.page.title,dashboard,WidgetsPage,WidgetsPage,title,"Widgets",,active
+widgets.page.title,dashboard,WidgetsPage,WidgetsPage,title,"Menu Bar & Widgets",,active
 widgets.cta.open_gallery,dashboard,WidgetsPage,WidgetsPage,cta_open_gallery,"Open Widget Gallery",,active
 widgets.cta.download,dashboard,WidgetsPage,WidgetsPage,cta_download,"Download Mac App",,active
 widgets.cta.macos_only,dashboard,WidgetsPage,WidgetsPage,cta_macos_only,"macOS only",,active
@@ -367,7 +367,7 @@ dashboard.screenshot.twitter_text,dashboard,DashboardPage,ScreenshotShare,share_
 
 nav.usage,shared,*,Sidebar,nav_usage,"Tokens",,active
 nav.limits,shared,*,Sidebar,nav_limits,"Limits",,active
-nav.widgets,shared,*,Sidebar,nav_widgets,"macOS Widgets",,active
+nav.widgets,shared,*,Sidebar,nav_widgets,"Menu Bar & Widgets",,active
 nav.leaderboard,shared,*,Sidebar,nav_leaderboard,"Leaderboard",,active
 nav.collapse,shared,*,Sidebar,nav_collapse,"Collapse sidebar",,active
 nav.expand,shared,*,Sidebar,nav_expand,"Expand sidebar",,active
@@ -496,10 +496,19 @@ settings.account.signedOutHint,ui,SettingsPage,SettingsPage,signed_out_hint,"Sig
 settings.section.menubar,ui,SettingsPage,SettingsPage,sec_menubar,"Menu Bar App",,active
 settings.menubar.showStats,ui,SettingsPage,SettingsPage,mb_show_stats,"Show stats in menu bar",,active
 settings.menubar.showStatsHint,ui,SettingsPage,SettingsPage,mb_show_stats_hint,"Display today's token count and cost beside the menu bar icon.",,active
-settings.menubar.animatedIcon,ui,SettingsPage,SettingsPage,mb_anim,"Animated icon",,active
-settings.menubar.animatedIconHint,ui,SettingsPage,SettingsPage,mb_anim_hint,"Blink the Clawd character and play the syncing animation in the menu bar.",,active
+pet.menubar.title,ui,PetPage,PetPage,pet_menubar_title,"Run in the menu bar",,active
+pet.menubar.hint,ui,PetPage,PetPage,pet_menubar_hint,"Your pet replaces the menu bar icon and sprints while your AI tools burn tokens.",,active
+settings.menubar.iconStyle,ui,WidgetsPage,MenuBarDisplayCard,mb_icon_style,"Menu bar icon",,active
+settings.menubar.iconStyleHint,ui,WidgetsPage,MenuBarDisplayCard,mb_icon_style_hint,"Choose who lives in the menu bar. The cat and your pet run faster while your AI tools are burning tokens.",,active
+settings.menubar.iconStyle.clawd,ui,WidgetsPage,MenuBarDisplayCard,mb_icon_style_clawd,"Clawd",,active
+settings.menubar.iconStyle.cat,ui,WidgetsPage,MenuBarDisplayCard,mb_icon_style_cat,"Cat",,active
+settings.menubar.iconStyle.pet,ui,WidgetsPage,MenuBarDisplayCard,mb_icon_style_pet,"My pet",,active
+settings.menubar.iconStyle.static,ui,WidgetsPage,MenuBarDisplayCard,mb_icon_style_static,"Static",,active
 settings.menubar.confettiOnReset,ui,SettingsPage,SettingsPage,mb_confetti,"Confetti on limits reset",,active
 settings.menubar.confettiOnResetHint,ui,SettingsPage,SettingsPage,mb_confetti_hint,"Set off a fireworks celebration when a usage limit resets after you were near it.",,active
+settings.menubar.appearance,ui,SettingsPage,MenuBarSection,mb_appearance,"Menu bar display & icon",,active
+settings.menubar.appearanceHint,ui,SettingsPage,MenuBarSection,mb_appearance_hint,"Stats, metric slots, and the animated icon live on the Menu Bar & Widgets page.",,active
+settings.menubar.appearanceLink,ui,SettingsPage,MenuBarSection,mb_appearance_link,"Open",,active
 settings.menubar.launchAtLogin,ui,SettingsPage,SettingsPage,mb_login,"Launch at login",,active
 settings.menubar.launchAtLoginHint,ui,SettingsPage,SettingsPage,mb_login_hint,"Start TokenTrackerBar automatically when you sign in to macOS.",,active
 settings.menubar.syncNow,ui,SettingsPage,SettingsPage,mb_sync_now,"Sync now",,active

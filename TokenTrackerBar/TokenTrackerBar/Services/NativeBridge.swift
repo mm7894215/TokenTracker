@@ -163,7 +163,10 @@ final class NativeBridge {
                 hiddenProviders: hiddenProviders
             ),
             "menuBarMaxItems": MenuBarDisplayPreferences.maxVisibleItems,
-            "animatedIcon": UserDefaults.standard.object(forKey: "MenuBarAnimationEnabled") as? Bool ?? true,
+            "menuBarIconStyle": MenuBarIconStyle.current().rawValue,
+            // Legacy field kept so an older bundled dashboard still renders a
+            // sensible toggle state.
+            "animatedIcon": MenuBarIconStyle.current() != .static,
             "confettiOnReset": WeeklyLimitResetDetector.confettiEnabled(),
             "launchAtLogin": launchAtLoginValue,
             "launchAtLoginSupported": launchAtLoginSupported,
@@ -214,9 +217,16 @@ final class NativeBridge {
                 MenuBarDisplayPreferences.write(raw.compactMap { $0 as? String })
                 NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
             }
+        case "menuBarIconStyle":
+            if let raw = value as? String, let style = MenuBarIconStyle(rawValue: raw) {
+                MenuBarIconStyle.setCurrent(style)
+                NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
+            }
         case "animatedIcon":
+            // Legacy toggle from older dashboards: true restores the default
+            // character, false maps to the static icon.
             if let bool = value as? Bool {
-                UserDefaults.standard.set(bool, forKey: "MenuBarAnimationEnabled")
+                MenuBarIconStyle.setCurrent(bool ? .clawd : .static)
                 NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
             }
         case "confettiOnReset":

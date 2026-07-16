@@ -192,7 +192,13 @@ enum Strings {
     static var menuLaunchAtLogin: String { t("Launch at Login", "登录时启动", "登入時啟動", "ログイン時に起動", "로그인 시 실행") }
     static var menuStarOnGitHub: String { t("★ Star on GitHub", "★ 在 GitHub 上标星", "★ 在 GitHub 上標星", "★ GitHub でスターを付ける", "★ GitHub에서 스타하기") }
     static var menuShowStats: String { t("Show Stats in Menu Bar", "在菜单栏显示统计", "在選單欄顯示統計", "メニューバーに統計を表示", "메뉴 막대에 통계 표시") }
-    static var menuAnimatedIcon: String { t("Animated Icon", "动态图标", "動態圖示", "アニメーションアイコン", "애니메이션 아이콘") }
+    static var menuMenuBarDisplay: String { t("Menu Bar Display", "菜单栏显示", "選單欄顯示", "メニューバー表示", "메뉴 막대 표시") }
+    static var menuPrimarySlot: String { t("Primary", "主指标", "主指標", "プライマリ", "기본") }
+    static var menuSecondarySlot: String { t("Secondary", "副指标", "副指標", "セカンダリ", "보조") }
+    static var menuMenuBarIcon: String { t("Menu Bar Icon", "菜单栏图标", "選單欄圖示", "メニューバーアイコン", "메뉴 막대 아이콘") }
+    static var iconStyleCat: String { t("Cat", "小猫", "小貓", "ネコ", "고양이") }
+    static var iconStyleMyPet: String { t("My Pet", "我的宠物", "我的寵物", "マイペット", "내 펫") }
+    static var iconStyleStatic: String { t("Static", "静态", "靜態", "静的", "정적") }
     static var menuDesktopPet: String { t("Desktop Pet", "桌面宠物", "桌面寵物", "デスクトップペット", "데스크톱 펫") }
     static var menuHidePet: String { t("Hide Pet", "隐藏桌宠", "隱藏桌寵", "ペットを隠す", "펫 숨기기") }
     static var menuPetSize: String { t("Pet Size", "桌宠大小", "桌寵大小", "ペットのサイズ", "펫 크기") }
