@@ -151,6 +151,15 @@ enum MenuBarDisplayMetric: String, CaseIterable {
     }
 }
 
+struct MenuBarSummarySelection: OptionSet, Equatable {
+    let rawValue: Int
+
+    static let today = MenuBarSummarySelection(rawValue: 1 << 0)
+    static let rolling = MenuBarSummarySelection(rawValue: 1 << 1)
+    static let total = MenuBarSummarySelection(rawValue: 1 << 2)
+    static let all: MenuBarSummarySelection = [.today, .rolling, .total]
+}
+
 private extension UsageLimitsResponse {
     /// Whether a provider is currently usable (configured with no error).
     /// Optional providers (kimi, copilot) treated as unavailable when nil.
@@ -272,6 +281,34 @@ enum MenuBarDisplayPreferences {
 
     static func write(_ ids: [String], to defaults: UserDefaults = .standard) {
         defaults.set(normalize(ids), forKey: key)
+    }
+
+    /// Queue writes only affect token and cost summaries. Limit-only menu bar
+    /// configurations need no local usage request when the queue changes.
+    static func summarySelection(for ids: [String]) -> MenuBarSummarySelection {
+        ids.reduce(into: MenuBarSummarySelection()) { selection, id in
+            guard let metric = MenuBarDisplayMetric(rawValue: id) else { return }
+            switch metric {
+            case .todayTokens, .todayCost:
+                selection.insert(.today)
+            case .last7dTokens:
+                selection.insert(.rolling)
+            case .totalTokens, .totalCost:
+                selection.insert(.total)
+            case .claude5h, .claude7d,
+                 .codex5h, .codex7d, .codexCredits, .codexSpark5h, .codexSpark7d,
+                 .cursorPlan, .cursorAuto, .cursorAPI,
+                 .geminiPro, .geminiFlash, .geminiLite,
+                 .kimiWeekly, .kimi5h, .kimiTotal,
+                 .kiroMonth, .kiroBonus,
+                 .grokMonth, .grokOndemand,
+                 .copilotPremium, .copilotChat,
+                 .antigravityClaudeWeekly, .antigravityClaude5h,
+                 .antigravityGeminiWeekly, .antigravityGemini5h,
+                 .zcodeGlm52, .zcodeGlm5Turbo:
+                break
+            }
+        }
     }
 
     static func normalize(_ ids: [String]) -> [String] {

@@ -87,6 +87,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notificationCenter.addObserver(
             self,
             selector: #selector(scheduleWakeCatchUp(_:)),
+            name: NSWorkspace.screensDidWakeNotification,
+            object: nil
+        )
+        notificationCenter.addObserver(
+            self,
+            selector: #selector(scheduleWakeCatchUp(_:)),
             name: NSWorkspace.sessionDidBecomeActiveNotification,
             object: nil
         )

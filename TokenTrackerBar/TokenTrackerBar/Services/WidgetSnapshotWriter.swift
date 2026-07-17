@@ -33,6 +33,24 @@ enum WidgetSnapshotWriter {
         let usageLimits: UsageLimitsResponse?
     }
 
+    /// Preserve the pre-existing five-minute widget freshness contract only
+    /// for users who actually placed a TokenTracker widget. Everyone else can
+    /// stay on the lightweight hidden refresh path.
+    static func hasConfiguredWidgets() async -> Bool {
+        await withCheckedContinuation { continuation in
+            WidgetCenter.shared.getCurrentConfigurations { result in
+                switch result {
+                case .success(let configurations):
+                    continuation.resume(returning: !configurations.isEmpty)
+                case .failure:
+                    // Fail toward freshness: a transient WidgetKit query error
+                    // must not leave an existing widget stale indefinitely.
+                    continuation.resume(returning: true)
+                }
+            }
+        }
+    }
+
     static func update(from vm: DashboardViewModel) async {
         // STEP 1 — synchronously freeze every VM field we will need. After
         // this point we never touch `vm` again. This is the fix for the

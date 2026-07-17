@@ -1,4 +1,5 @@
 const fs = require("node:fs/promises");
+const crypto = require("node:crypto");
 const path = require("node:path");
 
 async function ensureDir(p) {
@@ -49,26 +50,88 @@ async function chmod600IfPossible(filePath) {
 
 const LOCK_STALE_MS = 5 * 60 * 1000; // 5 minutes
 
-async function openLock(lockPath, { quietIfLocked }) {
+function parseLockOwner(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    const pid = Number(parsed?.pid);
+    const token = typeof parsed?.token === "string" ? parsed.token : null;
+    if (!Number.isSafeInteger(pid) || pid <= 0 || !token) return null;
+    return { pid, token };
+  } catch (_e) {
+    return null;
+  }
+}
+
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    if (e?.code === "ESRCH") return false;
+    // EPERM means the process exists but belongs to another user. Unknown
+    // errors are treated conservatively so a live lock is never reclaimed.
+    return true;
+  }
+}
+
+async function existingLockCanBeReclaimed(lockPath) {
+  try {
+    const [stat, raw] = await Promise.all([
+      fs.stat(lockPath),
+      fs.readFile(lockPath, "utf8").catch(() => ""),
+    ]);
+    const owner = parseLockOwner(raw);
+    if (owner) return !isProcessAlive(owner.pid);
+    return Date.now() - stat.mtimeMs > LOCK_STALE_MS;
+  } catch (e) {
+    // The lock disappeared between open and inspection, so retry acquisition.
+    if (e?.code === "ENOENT") return true;
+    return false;
+  }
+}
+
+async function releaseOwnedLock(lockPath, handle, token) {
+  await handle.close().catch(() => {});
+  try {
+    const owner = parseLockOwner(await fs.readFile(lockPath, "utf8"));
+    if (owner?.token === token) {
+      await fs.unlink(lockPath).catch(() => {});
+    }
+  } catch (_e) {}
+}
+
+async function openLock(lockPath, { quietIfLocked } = {}) {
   try {
     const handle = await fs.open(lockPath, "wx");
+    const token = crypto.randomUUID();
+    try {
+      await handle.writeFile(
+        JSON.stringify({ pid: process.pid, token, createdAt: new Date().toISOString() }) + "\n",
+        "utf8",
+      );
+    } catch (e) {
+      await handle.close().catch(() => {});
+      await fs.unlink(lockPath).catch(() => {});
+      throw e;
+    }
     return {
       async release() {
-        await handle.close().catch(() => {});
-        await fs.unlink(lockPath).catch(() => {});
+        await releaseOwnedLock(lockPath, handle, token);
       },
     };
   } catch (e) {
     if (e && e.code === "EEXIST") {
-      // Check if lock is stale
-      try {
-        const stat = await fs.stat(lockPath);
-        if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
-          await fs.unlink(lockPath).catch(() => {});
-          return openLock(lockPath, { quietIfLocked });
+      if (await existingLockCanBeReclaimed(lockPath)) {
+        try {
+          await fs.unlink(lockPath);
+        } catch (unlinkError) {
+          if (unlinkError?.code !== "ENOENT") {
+            if (!quietIfLocked) {
+              process.stdout.write("Another sync is already running.\n");
+            }
+            return null;
+          }
         }
-      } catch (_statErr) {
-        // Lock file disappeared between checks, retry
         return openLock(lockPath, { quietIfLocked });
       }
       if (!quietIfLocked) {

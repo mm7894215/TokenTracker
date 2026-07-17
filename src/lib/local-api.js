@@ -35,6 +35,7 @@ const {
   getModelPricing,
   computeRowCost,
   ensurePricingLoaded,
+  getPricingRevision,
 } = require("./pricing");
 
 const {
@@ -66,6 +67,33 @@ const CLAUDE_MEM_OBSERVER_PROJECT_KEY = deriveProjectKeyFromRef(
   CLAUDE_MEM_OBSERVER_PROJECT_REF,
 );
 const PROJECT_USAGE_MAX_ENTRIES = 10;
+const MAX_TIME_ZONE_CACHE_ENTRIES = 16;
+
+// The native dashboard fans one refresh out across several local endpoints.
+// Keep one immutable, deduped view of the current queue so those endpoints do
+// not all read and JSON.parse the same append-only file. A file identity +
+// nanosecond timestamp signature invalidates the cache immediately on append,
+// in-place rewrite, or atomic replacement.
+let queueDataCache = null;
+const dailyAggregationCache = new WeakMap();
+const zonedPartsFormatters = new Map();
+
+function boundedCacheSet(cache, key, value, maxEntries) {
+  if (cache.has(key)) cache.delete(key);
+  cache.set(key, value);
+  while (cache.size > maxEntries) {
+    cache.delete(cache.keys().next().value);
+  }
+}
+
+function queueFileSignature(queuePath) {
+  const stat = fs.statSync(queuePath, { bigint: true });
+  return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+}
+
+function timeZoneContextKey({ timeZone, offsetMinutes } = {}) {
+  return `${timeZone || ""}|${Number.isFinite(offsetMinutes) ? offsetMinutes : ""}|p${getPricingRevision()}`;
+}
 
 // Shared by project-usage-summary and project-usage-detail: reads the
 // deduped project bucket log, drops the claude-mem pseudo project, and
@@ -160,6 +188,21 @@ function normalizeQueueRow(row) {
 }
 
 function readQueueData(queuePath) {
+  let signature;
+  try {
+    signature = queueFileSignature(queuePath);
+  } catch (e) {
+    if (queueDataCache?.queuePath === queuePath) queueDataCache = null;
+    if (e?.code !== "ENOENT") {
+      console.error("[LocalAPI] readQueueData: failed to stat queue:", e?.message || e);
+    }
+    return [];
+  }
+
+  if (queueDataCache?.queuePath === queuePath && queueDataCache.signature === signature) {
+    return queueDataCache.rows;
+  }
+
   let raw;
   try {
     raw = fs.readFileSync(queuePath, "utf8");
@@ -196,7 +239,9 @@ function readQueueData(queuePath) {
     const key = `${row.source || ""}|${row.model || ""}|${row.hour_start || ""}`;
     seen.set(key, normalizeQueueRow(row));
   }
-  return Array.from(seen.values());
+  const rows = Array.from(seen.values());
+  queueDataCache = { queuePath, signature, rows };
+  return rows;
 }
 
 function rowDayKey(row, timeZoneContext) {
@@ -214,8 +259,19 @@ function rowDayKey(row, timeZoneContext) {
 }
 
 function aggregateByDay(rows, timeZoneContext = null) {
+  const normalizedRows = Array.isArray(rows) ? rows : [];
+  const cacheKey = timeZoneContextKey(timeZoneContext || {});
+  let cachedByTimeZone = dailyAggregationCache.get(normalizedRows);
+  if (cachedByTimeZone?.has(cacheKey)) {
+    const cached = cachedByTimeZone.get(cacheKey);
+    // Touch the entry so the small per-queue map behaves as an LRU.
+    cachedByTimeZone.delete(cacheKey);
+    cachedByTimeZone.set(cacheKey, cached);
+    return cached;
+  }
+
   const byDay = new Map();
-  for (const row of rows) {
+  for (const row of normalizedRows) {
     if (!row.hour_start) continue;
     const day = rowDayKey(row, timeZoneContext);
     if (!day) continue;
@@ -250,7 +306,13 @@ function aggregateByDay(rows, timeZoneContext = null) {
     const model = row.model || "unknown";
     a.models[model] = (a.models[model] || 0) + (row.total_tokens || 0);
   }
-  return Array.from(byDay.values()).sort((a, b) => a.day.localeCompare(b.day));
+  const daily = Array.from(byDay.values()).sort((a, b) => a.day.localeCompare(b.day));
+  if (!cachedByTimeZone) {
+    cachedByTimeZone = new Map();
+    dailyAggregationCache.set(normalizedRows, cachedByTimeZone);
+  }
+  boundedCacheSet(cachedByTimeZone, cacheKey, daily, MAX_TIME_ZONE_CACHE_ENTRIES);
+  return daily;
 }
 
 function buildCodexCategoryFallbackFromQueue(queueRows, { from, to, timeZoneContext }) {
@@ -477,17 +539,34 @@ function getZonedParts(date, { timeZone, offsetMinutes } = {}) {
 
   if (timeZone && typeof Intl !== "undefined" && Intl.DateTimeFormat) {
     try {
-      const formatter = new Intl.DateTimeFormat("en-CA", {
-        timeZone,
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hourCycle: "h23",
-      });
-      const parts = formatter.formatToParts(dt);
+      let formatter;
+      if (zonedPartsFormatters.has(timeZone)) {
+        formatter = zonedPartsFormatters.get(timeZone);
+      } else {
+        try {
+          formatter = new Intl.DateTimeFormat("en-CA", {
+            timeZone,
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hourCycle: "h23",
+          });
+        } catch {
+          // Cache invalid zone ids too; otherwise a bad local query would
+          // throw once per queue row before falling back to its fixed offset.
+          formatter = null;
+        }
+        boundedCacheSet(
+          zonedPartsFormatters,
+          timeZone,
+          formatter,
+          MAX_TIME_ZONE_CACHE_ENTRIES,
+        );
+      }
+      const parts = formatter?.formatToParts(dt) || [];
       const values = parts.reduce((acc, part) => {
         if (part.type && part.value) acc[part.type] = part.value;
         return acc;
@@ -685,6 +764,7 @@ function runSyncCommand(extraEnv = {}, opts = {}) {
     const args = [TRACKER_BIN, "sync"];
     if (opts.auto === true) args.push("--auto");
     if (opts.background === true) args.push("--background");
+    if (opts.publishAccount === true) args.push("--publish-account");
     if (opts.allLocalSources === true) args.push("--all-local-sources");
     if (opts.drain === true) args.push("--drain");
     const child = spawn(process.execPath, args, {
@@ -1696,6 +1776,11 @@ function createLocalApiHandler({ queuePath }) {
         const auto = body.auto === true && !drain;
         const background =
           auto && (body.background === true || body.lightweight === true);
+        // The local server is the trust boundary for cloud-sync preferences.
+        // A persisted device token must not let a native background request
+        // upload after the user has explicitly disabled cloud sync.
+        const publishAccount =
+          background && body.publishAccount === true && getCloudSyncPref();
         const allLocalSources = background && body.allLocalSources === true;
         if (typeof body.deviceToken === "string" && body.deviceToken.trim()) {
           extraEnv.TOKENTRACKER_DEVICE_TOKEN = body.deviceToken.trim();
@@ -1710,7 +1795,10 @@ function createLocalApiHandler({ queuePath }) {
           extraEnv.TOKENTRACKER_INSFORGE_BASE_URL = allowedBaseUrl;
           localSyncBaseUrl = allowedBaseUrl;
         }
-        if (!background && !extraEnv.TOKENTRACKER_DEVICE_TOKEN && getCloudSyncPref() && getRefreshTokenForCloud()) {
+        if ((!background || publishAccount) &&
+            !extraEnv.TOKENTRACKER_DEVICE_TOKEN &&
+            getCloudSyncPref() &&
+            getRefreshTokenForCloud()) {
           let issuedToken = null;
           try {
             issuedToken = await issueDeviceTokenForLocalSync(qp, { baseUrl: localSyncBaseUrl });
@@ -1732,6 +1820,7 @@ function createLocalApiHandler({ queuePath }) {
           drain,
           auto,
           background,
+          publishAccount,
           allLocalSources,
         });
         try {
@@ -1778,7 +1867,8 @@ function createLocalApiHandler({ queuePath }) {
       const to = url.searchParams.get("to") || "";
       const timeZoneContext = getTimeZoneContext(url);
       const { rows, scope, excludedSources } = scopedQueueRows(qp, url);
-      const daily = aggregateByDay(rows, timeZoneContext).filter((d) => d.day >= from && d.day <= to);
+      const allDaily = aggregateByDay(rows, timeZoneContext);
+      const daily = allDaily.filter((d) => d.day >= from && d.day <= to);
       const totals = daily.reduce(
         (acc, r) => {
           acc.total_tokens += r.total_tokens;
@@ -1798,7 +1888,6 @@ function createLocalApiHandler({ queuePath }) {
 
       const todayParts = getZonedParts(new Date(), timeZoneContext);
       const todayStr = formatPartsDayKey(todayParts) || new Date().toISOString().slice(0, 10);
-      const allDaily = aggregateByDay(rows, timeZoneContext);
 
       const shiftDay = (dayStr, delta) => {
         const d = new Date(`${dayStr}T00:00:00Z`);

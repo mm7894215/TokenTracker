@@ -37,6 +37,7 @@ const seedRaw = loadSeedSync();
 const state = {
   loaded: false,
   loadingPromise: null,
+  revision: 0,
   litellmRawMap: seedRaw, // raw per-token; field shape from LiteLLM JSON
   litellmPerMillionMap: buildLitellmPerMillionMap(seedRaw), // USD/MTok
   source: Object.keys(seedRaw).length ? "seed-snapshot:sync" : null,
@@ -61,6 +62,7 @@ async function ensurePricingLoaded(opts = {}) {
       state.litellmPerMillionMap = buildLitellmPerMillionMap(state.litellmRawMap);
       state.source = source;
       state.loaded = true;
+      state.revision += 1;
       state.negativeCache.clear();
       return state;
     } finally {
@@ -79,7 +81,12 @@ function resetPricingForTests() {
   state.litellmRawMap = seedRaw;
   state.litellmPerMillionMap = buildLitellmPerMillionMap(seedRaw);
   state.source = Object.keys(seedRaw).length ? "seed-snapshot:sync" : null;
+  state.revision += 1;
   state.negativeCache.clear();
+}
+
+function getPricingRevision() {
+  return state.revision;
 }
 
 function getModelPricing(model, opts = {}) {
@@ -133,6 +140,7 @@ const MODEL_PRICING = curatedOverrides.exact;
 
 module.exports = {
   ensurePricingLoaded,
+  getPricingRevision,
   getModelPricing,
   computeRowCost,
   resetPricingForTests,

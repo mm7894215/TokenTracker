@@ -149,7 +149,17 @@ test("menu-bar popover is anchored to an app-owned positioning window", () => {
   );
   assert.match(
     viewModel,
-    /private\s+func\s+runQueuedReloadIfNeeded\(\)\s+async[\s\S]*shouldReloadAfterCurrentLoad\s*=\s*false[\s\S]*await\s+loadAll\(\)/,
+    /private\s+func\s+finishDataLoad\(\)\s+async[\s\S]*shouldReloadAfterCurrentLoad\s*=\s*false[\s\S]*await\s+loadAll\(\)/,
     "A queued reload should run after the current load finishes so sync-now can refresh stale data.",
+  );
+  assert.match(
+    viewModel,
+    /needsFullRefreshOnPopoverOpen\s*=\s*true[\s\S]*guard\s+!summaries\.isEmpty/,
+    "Hidden publication refreshes must mark charts and detail data dirty even when no token summary is selected.",
+  );
+  assert.match(
+    viewModel,
+    /else if needsFullRefreshOnPopoverOpen \|\| BackgroundRefreshPolicy\.shouldRunPopoverOpenLoad/,
+    "Opening the popover must reload dirty full-dashboard data even inside the normal 30-second debounce.",
   );
 });

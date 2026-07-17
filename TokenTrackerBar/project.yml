@@ -122,7 +122,9 @@ targets:
       - path: TokenTrackerBar/Models/LimitPace.swift
       - path: TokenTrackerBar/Models/WeeklyLimitResetDetector.swift
       - path: TokenTrackerBar/Models/BackgroundRefreshPolicy.swift
+      - path: TokenTrackerBar/Models/UsagePublicationPolicy.swift
       - path: TokenTrackerBar/Services/ResumableDownloader.swift
+      - path: TokenTrackerBar/Services/QueueActivityMonitor.swift
       - path: TokenTrackerBar/Models/CompanionAnimationPolicy.swift
       # WeeklyLimitResetDetector's window labels come from Strings, which
       # resolves the locale via Shared/NativeLocalization (Shared is

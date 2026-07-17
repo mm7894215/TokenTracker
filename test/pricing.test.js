@@ -760,6 +760,7 @@ test("index: getModelPricing returns ZERO for empty/null model", () => {
 
 test("index: ensurePricingLoaded is idempotent (concurrent callers share one fetch)", async () => {
   pricing.resetPricingForTests();
+  const revisionBeforeLoad = pricing.getPricingRevision();
   const cachePath = tmpCachePath();
   let fetchCalls = 0;
   const fetchImpl = async () => {
@@ -775,6 +776,9 @@ test("index: ensurePricingLoaded is idempotent (concurrent callers share one fet
   assert.equal(a.loaded, true);
   assert.equal(b.loaded, true);
   assert.equal(c.loaded, true);
+  assert.equal(pricing.getPricingRevision(), revisionBeforeLoad + 1);
+  await pricing.ensurePricingLoaded({ cachePath, fetchImpl });
+  assert.equal(pricing.getPricingRevision(), revisionBeforeLoad + 1);
 });
 
 test("WorkBuddy: hy3-preview-agent has real Hunyuan token pricing (not $0)", () => {
