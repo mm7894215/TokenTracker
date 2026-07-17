@@ -725,26 +725,23 @@ test("v2 source-scoped sync commits a same-inode append without loading historic
     const baselineTimestamp = "2030-06-02T00:30:00.000Z";
     const appendedTimestamp = "2030-06-02T00:35:00.000Z";
     const baselineLine = `${JSON.stringify(codexTokenEvent(baselineTimestamp, 10))}\n`;
-    await fs.writeFile(rolloutPath, baselineLine, "utf8");
-    const baselineStat = await fs.stat(rolloutPath);
+    const appendedLine = `${JSON.stringify(codexTokenEvent(appendedTimestamp, 25))}\n`;
+    const baselineBytes = Buffer.byteLength(baselineLine);
+    await fs.writeFile(rolloutPath, `${baselineLine}${appendedLine}`, "utf8");
+    const rolloutStat = await fs.stat(rolloutPath);
     await fs.writeFile(cursorsPath, `${JSON.stringify({
       version: 1,
       files: {
         [rolloutPath]: {
-          inode: baselineStat.ino,
-          offset: baselineStat.size,
-          projectOffset: baselineStat.size,
+          inode: rolloutStat.ino,
+          offset: baselineBytes,
+          projectOffset: baselineBytes,
           projectFileContext: { absent: true, checkedAtMs: Date.now() },
           lastTotal: codexUsage(10),
         },
       },
       codexHashes: [`${sessionId}:${baselineTimestamp}`],
     })}\n`, "utf8");
-    await fs.appendFile(
-      rolloutPath,
-      `${JSON.stringify(codexTokenEvent(appendedTimestamp, 25))}\n`,
-      "utf8",
-    );
 
     const diagnostics = {};
     await cmdSync(
