@@ -21,7 +21,7 @@
     "access": "public"
   },
   "scripts": {
-    "ci:local": "npm test && npm run validate:copy && npm run validate:ui-hardcode && npm run validate:guardrails && node --test test/architecture-guardrails.test.js && npm --prefix dashboard run build",
+    "ci:local": "npm test && npm run validate:copy && npm run validate:ui-hardcode && npm run validate:guardrails && npm run validate:versions && node --test test/architecture-guardrails.test.js && npm --prefix dashboard run build",
     "copy:pull": "node scripts/copy-sync.cjs pull",
     "copy:push": "node scripts/copy-sync.cjs push",
     "dashboard:build": "npm --prefix dashboard run build",
@@ -43,7 +43,8 @@
     "validate:retros": "node scripts/validate-retros.cjs",
     "validate:ui-hardcode": "node scripts/ops/validate-ui-hardcode.cjs",
     "sync-versions": "node scripts/sync-versions.cjs",
-    "version": "node scripts/sync-versions.cjs && git add TokenTrackerBar/project.yml TokenTrackerWin/TokenTrackerWin.csproj"
+    "validate:versions": "node scripts/validate-versions.cjs",
+    "version": "node scripts/sync-versions.cjs && git add TokenTrackerBar/project.yml TokenTrackerWin/TokenTrackerWin.csproj TokenTrackerLinux/package.json TokenTrackerLinux/package-lock.json TokenTrackerLinux/src-tauri/Cargo.toml TokenTrackerLinux/src-tauri/Cargo.lock TokenTrackerLinux/src-tauri/tauri.conf.json TokenTrackerLinux/packaging/arch/tokentracker-linux/PKGBUILD"
   },
   "dependencies": {
     "@mongodb-js/zstd": "^2.0.1",
@@ -52,7 +53,8 @@
   },
   "devDependencies": {
     "@sourcegraph/scip-typescript": "^0.4.0",
-    "esbuild": "0.28.1"
+    "esbuild": "0.28.1",
+    "pngjs": "^7.0.0"
   },
   "repository": {
     "type": "git",

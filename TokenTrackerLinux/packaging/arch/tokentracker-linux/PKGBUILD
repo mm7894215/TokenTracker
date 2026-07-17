@@ -1,6 +1,6 @@
 # Maintainer: local
 pkgname=tokentracker-linux
-pkgver=0.68.1
+pkgver=0.81.1
 pkgrel=1
 pkgdesc='Local TokenTracker Linux desktop client for Arch KDE'
 arch=('x86_64')
@@ -33,7 +33,7 @@ build() {
   npm ci
   npm --prefix dashboard ci
   npm run dashboard:build
-  npm --prefix TokenTrackerLinux install
+  npm --prefix TokenTrackerLinux ci
   npm --prefix TokenTrackerLinux run bundle:node
   npm --prefix TokenTrackerLinux run build
 }

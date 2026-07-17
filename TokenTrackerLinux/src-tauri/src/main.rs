@@ -79,7 +79,13 @@ fn start_health_monitor() {
                 total_restarts,
                 server::MAX_RESTARTS
             );
-            match server.restart() {
+            let port = server.port();
+            let restart_result = server.restart_process();
+            drop(guard);
+
+            match restart_result.and_then(|()| {
+                server::wait_for_server_ready(port, std::time::Duration::from_secs(20))
+            }) {
                 Ok(()) => {
                     eprintln!("[TokenTracker] server restarted successfully");
                     consecutive_failures = 0;

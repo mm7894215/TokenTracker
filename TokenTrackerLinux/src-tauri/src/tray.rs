@@ -5,13 +5,24 @@ use tauri::{App, AppHandle, Manager};
 
 const OPEN_ID: &str = "open-dashboard";
 const QUIT_ID: &str = "quit";
+const FALLBACK_TRAY_ICON: &[u8] = include_bytes!("../icons/icon.png");
+
+fn fallback_tray_icon() -> tauri::Result<Image<'static>> {
+    Image::from_bytes(FALLBACK_TRAY_ICON)
+}
 
 pub fn install(app: &App) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, OPEN_ID, "Open Dashboard", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &quit])?;
 
-    let mut builder = TrayIconBuilder::with_id("main-tray")
+    let icon = app
+        .default_window_icon()
+        .cloned()
+        .unwrap_or(fallback_tray_icon()?);
+
+    TrayIconBuilder::with_id("main-tray")
+        .icon(icon)
         .tooltip("TokenTracker")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -28,13 +39,8 @@ pub fn install(app: &App) -> tauri::Result<()> {
             {
                 show_main_window(tray.app_handle());
             }
-        });
-
-    if let Some(icon) = app.default_window_icon() {
-        builder = builder.icon(Image::from(icon.clone()));
-    }
-
-    builder.build(app)?;
+        })
+        .build(app)?;
 
     Ok(())
 }
@@ -44,5 +50,18 @@ pub fn show_main_window(app: &AppHandle) {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fallback_tray_icon;
+
+    #[test]
+    fn embedded_fallback_icon_has_non_zero_dimensions() {
+        let icon = fallback_tray_icon().expect("embedded fallback icon must decode");
+
+        assert!(icon.width() > 0);
+        assert!(icon.height() > 0);
     }
 }

@@ -45,7 +45,7 @@ impl TokenTrackerServer {
             .spawn()
             .map_err(|error| format!("failed to start TokenTracker server: {error}"))?;
 
-        wait_for_server(port, Duration::from_secs(20)).map_err(|error| {
+        wait_for_server_ready(port, Duration::from_secs(20)).map_err(|error| {
             let _ = child.kill();
             let _ = child.wait();
             error
@@ -87,10 +87,10 @@ impl TokenTrackerServer {
 
     /// Kill the current server process and start a new one on the same port.
     ///
-    /// The dashboard's JavaScript is already loaded and targeting this port, so
-    /// restarting on the same port lets existing in-flight requests resume
-    /// without a page reload.
-    pub fn restart(&mut self) -> Result<(), String> {
+    /// Returns after spawning the replacement process. Readiness polling is
+    /// handled by the health monitor after it releases the global server mutex,
+    /// so app shutdown never waits for the full readiness timeout.
+    pub fn restart_process(&mut self) -> Result<(), String> {
         let _ = self.child.kill();
         let _ = self.child.wait();
 
@@ -108,7 +108,7 @@ impl TokenTrackerServer {
             .spawn()
             .map_err(|error| format!("failed to restart server: {error}"))?;
 
-        wait_for_server(self.port, Duration::from_secs(20))
+        Ok(())
     }
 
     pub fn stop(&mut self) {
@@ -201,7 +201,7 @@ pub fn serve_args(tracker: &Path, port: u16) -> Vec<OsString> {
     ]
 }
 
-fn wait_for_server(port: u16, timeout: Duration) -> Result<(), String> {
+pub fn wait_for_server_ready(port: u16, timeout: Duration) -> Result<(), String> {
     let start = Instant::now();
     while start.elapsed() < timeout {
         if probe_server_http(port).is_ok() {

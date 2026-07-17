@@ -11,7 +11,12 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LINUX_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$LINUX_DIR/.." && pwd)"
-EMBED_DIR="$LINUX_DIR/EmbeddedServer"
+# Overrides keep bundle tests isolated; production builds retain these default paths.
+EMBED_DIR="${TOKENTRACKER_LINUX_EMBED_DIR:-$LINUX_DIR/EmbeddedServer}"
+DASHBOARD_DIST="${TOKENTRACKER_DASHBOARD_DIST:-$REPO_ROOT/dashboard/dist}"
+TAURI_ICON="${TOKENTRACKER_TAURI_ICON:-$LINUX_DIR/src-tauri/icons/icon.png}"
+
+node "$LINUX_DIR/scripts/sync-tauri-icon.mjs" "$REPO_ROOT/dashboard/public/icon-512.png" "$TAURI_ICON"
 TARGET_ARCH="${TARGET_ARCH:-x64}"
 NODE_PLATFORM="linux-${TARGET_ARCH}"
 NODE_TAR="node-v${NODE_VERSION}-${NODE_PLATFORM}.tar.gz"
@@ -57,12 +62,12 @@ cp -R "$REPO_ROOT/src" "$TT_DIR/src"
 cp "$REPO_ROOT/package.json" "$TT_DIR/"
 cp "$REPO_ROOT/package-lock.json" "$TT_DIR/"
 
-if [[ ! -d "$REPO_ROOT/dashboard/dist" ]]; then
+if [[ ! -d "$DASHBOARD_DIST" ]]; then
   echo "dashboard/dist not found. Run npm run dashboard:build first." >&2
   exit 1
 fi
 mkdir -p "$TT_DIR/dashboard"
-cp -R "$REPO_ROOT/dashboard/dist" "$TT_DIR/dashboard/dist"
+cp -R "$DASHBOARD_DIST" "$TT_DIR/dashboard/dist"
 
 (
   cd "$TT_DIR"

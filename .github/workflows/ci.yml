@@ -59,6 +59,7 @@ jobs:
           npm run validate:copy
           npm run validate:ui-hardcode
           npm run validate:guardrails
+          npm run validate:versions
           node --test test/architecture-guardrails.test.js
 
   macos-tests:

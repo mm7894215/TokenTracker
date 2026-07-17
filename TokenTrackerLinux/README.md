@@ -2,6 +2,8 @@
 
 This is a local Arch Linux + KDE Plasma desktop client for TokenTracker. It is intended for personal local use from this repository, not public release distribution.
 
+> **Packaging scope:** This PKGBUILD builds from a local repository checkout. It is not ready for AUR publication or clean-chroot builds, and the build does not promise byte-identical artifacts.
+
 ## Build and install
 
 ```bash
