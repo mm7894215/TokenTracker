@@ -485,7 +485,7 @@ class V2CursorStore {
         counts: { nonCodexFiles: 0, codexFiles: 0, totalFiles: 0, codexEvents: 0 },
       };
 
-      await linkGenerationFiles({
+      await cloneGenerationFiles({
         fromDirectory: this.generationDir,
         toDirectory: generationDir,
         metadata: nextMetadata,
@@ -575,12 +575,11 @@ class V2CursorStore {
 
       await maybeInjectFailure(this.failureInjector, "beforeManifestSwap");
 
-      const legacyFingerprint = await fingerprintFile(this.cursorsPath);
       const nextManifest = {
         version: STORE_VERSION,
         current: generationId,
         previous: this.generation?.id || null,
-        legacyFingerprint: legacyFingerprint || this.manifest?.legacyFingerprint || null,
+        legacyFingerprint: this.manifest?.legacyFingerprint || null,
         updatedAt: new Date().toISOString(),
       };
       await writeJson(path.join(this.storeRoot, MANIFEST_FILENAME), nextManifest);
@@ -915,24 +914,20 @@ function sameGenerationCounts(left, right) {
     .every((key) => Number(left?.[key]) === Number(right?.[key]));
 }
 
-async function linkGenerationFiles({ fromDirectory, toDirectory, metadata }) {
+async function cloneGenerationFiles({ fromDirectory, toDirectory, metadata }) {
   for (const entry of Object.values(metadata.codexFiles || {})) {
-    if (entry?.file) await linkOrCopy(fromDirectory, toDirectory, entry.file);
+    if (entry?.file) await cloneOrCopy(fromDirectory, toDirectory, entry.file);
   }
   for (const entry of Object.values(metadata.codexEvents || {})) {
-    if (entry?.file) await linkOrCopy(fromDirectory, toDirectory, entry.file);
+    if (entry?.file) await cloneOrCopy(fromDirectory, toDirectory, entry.file);
   }
 }
 
-async function linkOrCopy(fromDirectory, toDirectory, relativeFile) {
+async function cloneOrCopy(fromDirectory, toDirectory, relativeFile) {
   const source = path.join(fromDirectory, relativeFile);
   const target = path.join(toDirectory, relativeFile);
   await ensureDir(path.dirname(target));
-  try {
-    await fs.link(source, target);
-  } catch (_e) {
-    await fs.copyFile(source, target);
-  }
+  await fs.copyFile(source, target, fssync.constants.COPYFILE_FICLONE);
 }
 
 async function rebuildEventShards({ generationDir, metadata, hashes }) {

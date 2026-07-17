@@ -113,11 +113,19 @@ async function readCurrentGeneration(trackerDir) {
   const manifest = JSON.parse(
     await fs.readFile(path.join(storeRoot, "manifest.json"), "utf8"),
   );
-  const directory = path.join(storeRoot, "generations", manifest.current);
+  return {
+    manifest,
+    ...(await readGenerationFixture(trackerDir, manifest.current)),
+  };
+}
+
+async function readGenerationFixture(trackerDir, generationId) {
+  const storeRoot = path.join(trackerDir, STORE_DIRNAME);
+  const directory = path.join(storeRoot, "generations", generationId);
   const metadata = JSON.parse(
     await fs.readFile(path.join(directory, "generation.json"), "utf8"),
   );
-  return { manifest, directory, metadata };
+  return { directory, metadata };
 }
 
 function corruptShardWithoutChangingLength(raw) {
@@ -304,6 +312,36 @@ test("a failed generation commit leaves the previous manifest authoritative", as
   });
 });
 
+test("ordinary commits keep unchanged fallback shards physically independent", async () => {
+  await withCursorFixture(async ({ trackerDir, cursorsPath, day17File, day16File }) => {
+    const migrated = await openCursorStore({ trackerDir, cursorsPath, forceV2: true });
+    await migrated.loadCodexFilesForPaths([day17File]);
+    migrated.cursors.files[day17File].offset = 44;
+    await migrated.commit();
+
+    const current = await readCurrentGeneration(trackerDir);
+    const previous = await readGenerationFixture(trackerDir, current.manifest.previous);
+    const shard = current.metadata.codexFiles["2026-07-16"];
+    const shardPath = path.join(current.directory, shard.file);
+    const raw = await fs.readFile(shardPath, "utf8");
+    await fs.writeFile(shardPath, corruptShardWithoutChangingLength(raw), "utf8");
+
+    for (const [shards, shardKey] of [
+      ["codexFiles", "2026-07-16"],
+      ["codexEvents", "2026-07-16"],
+    ]) {
+      const currentPath = path.join(current.directory, current.metadata[shards][shardKey].file);
+      const previousPath = path.join(previous.directory, previous.metadata[shards][shardKey].file);
+      assert.notEqual((await fs.stat(currentPath)).ino, (await fs.stat(previousPath)).ino);
+    }
+
+    const recovered = await openCursorStore({ trackerDir, cursorsPath });
+    const result = await recovered.loadCodexFilesForPaths([day16File]);
+    assert.equal(result.restarted, true);
+    assert.equal(recovered.cursors.files[day16File].offset, 20);
+  });
+});
+
 test("a downgraded legacy writer is detected and remigrated on upgrade", async () => {
   await withCursorFixture(async ({ trackerDir, cursorsPath, day17File, legacy }) => {
     const migrated = await openCursorStore({ trackerDir, cursorsPath, forceV2: true });
@@ -327,6 +365,24 @@ test("a downgraded legacy writer is detected and remigrated on upgrade", async (
       ),
       true,
     );
+  });
+});
+
+test("commit does not acknowledge a concurrent legacy write it did not migrate", async () => {
+  await withCursorFixture(async ({ trackerDir, cursorsPath, day17File, legacy }) => {
+    const store = await openCursorStore({ trackerDir, cursorsPath, forceV2: true });
+    const downgraded = structuredClone(legacy);
+    downgraded.files[day17File].offset = 77;
+    downgraded.updatedAt = "2026-07-19T00:00:00.000Z";
+    await fs.writeFile(cursorsPath, `${JSON.stringify(downgraded, null, 2)}\n`, "utf8");
+
+    store.cursors.updatedAt = "2026-07-18T00:00:00.000Z";
+    await store.commit();
+
+    const reopened = await openCursorStore({ trackerDir, cursorsPath });
+    await reopened.loadCodexFilesForPaths([day17File]);
+    assert.equal(reopened.cursors.updatedAt, "2026-07-19T00:00:00.000Z");
+    assert.equal(reopened.cursors.files[day17File].offset, 77);
   });
 });
 
