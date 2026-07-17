@@ -190,6 +190,7 @@ class V2CursorStore {
     storeRoot,
     manifest,
     generation,
+    fallbackGenerationId,
     codexRoots,
     failureInjector,
   }) {
@@ -199,6 +200,7 @@ class V2CursorStore {
     this.manifest = manifest;
     this.generation = generation.metadata;
     this.generationDir = generation.directory;
+    this.fallbackGenerationId = fallbackGenerationId;
     this.codexRoots = codexRoots;
     this.cursors = generation.core;
     this.failureInjector = failureInjector;
@@ -250,6 +252,20 @@ class V2CursorStore {
   }
 
   async loadFileShard(shardKey, cursors = this.cursors) {
+    try {
+      return await this.loadFileShardUnchecked(shardKey, cursors);
+    } catch (error) {
+      if (
+        error?.code !== "TOKENTRACKER_CURSOR_STORE_CORRUPT" ||
+        !this.activateFallbackGeneration(cursors)
+      ) {
+        throw error;
+      }
+      return this.loadFileShardUnchecked(shardKey, cursors);
+    }
+  }
+
+  async loadFileShardUnchecked(shardKey, cursors = this.cursors) {
     if (this.loadedFileShards.has(shardKey)) {
       mergeFileShardIntoCursors(this.loadedFileShards.get(shardKey).data, cursors);
       return this.loadedFileShards.get(shardKey).data;
@@ -260,19 +276,32 @@ class V2CursorStore {
       : null;
     let data = {};
     if (filePath) {
-      const result = await readJsonStrict(filePath);
-      if (result.status !== "ok") {
+      let raw;
+      try {
+        raw = await fs.readFile(filePath, "utf8");
+      } catch (error) {
         throw cursorStoreCorruption(
           `Unable to read Codex cursor shard ${metadata.file}`,
-          result.error,
+          error,
         );
       }
-      data = result.value;
+      assertShardIntegrity(raw, metadata, `Codex cursor shard ${metadata.file}`);
+      try {
+        data = JSON.parse(raw);
+      } catch (error) {
+        throw cursorStoreCorruption(
+          `Invalid Codex cursor shard ${metadata.file}`,
+          error,
+        );
+      }
     }
     const normalized = data && typeof data === "object" && !Array.isArray(data)
       ? data
       : {};
-    if (filePath && normalized !== data) {
+    if (
+      filePath &&
+      (normalized !== data || Object.keys(normalized).length !== metadata.count)
+    ) {
       throw cursorStoreCorruption(`Invalid Codex cursor shard ${metadata.file}`);
     }
     this.loadedFileShards.set(shardKey, {
@@ -350,6 +379,20 @@ class V2CursorStore {
   }
 
   loadEventSet(shardKey) {
+    try {
+      return this.loadEventSetUnchecked(shardKey);
+    } catch (error) {
+      if (
+        error?.code !== "TOKENTRACKER_CURSOR_STORE_CORRUPT" ||
+        !this.activateFallbackGeneration()
+      ) {
+        throw error;
+      }
+      return this.loadEventSetUnchecked(shardKey);
+    }
+  }
+
+  loadEventSetUnchecked(shardKey) {
     if (this.loadedEventSets.has(shardKey)) {
       return this.loadedEventSets.get(shardKey);
     }
@@ -367,10 +410,44 @@ class V2CursorStore {
           e,
         );
       }
+      assertShardIntegrity(raw, metadata, `Codex event shard ${metadata.file}`);
     }
-    const values = new Set(raw.split("\n").filter(Boolean));
+    const rows = raw.split("\n").filter(Boolean);
+    const values = new Set(rows);
+    if (
+      filePath &&
+      (rows.length !== metadata.count || values.size !== metadata.count)
+    ) {
+      throw cursorStoreCorruption(`Invalid Codex event shard ${metadata.file}`);
+    }
     this.loadedEventSets.set(shardKey, values);
     return values;
+  }
+
+  activateFallbackGeneration(cursors = this.cursors) {
+    const generationId = this.fallbackGenerationId;
+    this.fallbackGenerationId = null;
+    if (!generationId) return false;
+
+    const fallback = readGenerationSync({
+      storeRoot: this.storeRoot,
+      generationId,
+    });
+    if (!fallback) return false;
+
+    const fallbackCore = cloneJson(fallback.core);
+    replaceObjectContents(this.cursors, fallbackCore);
+    if (cursors !== this.cursors) {
+      replaceObjectContents(cursors, cloneJson(fallback.core));
+    }
+    this.generation = fallback.metadata;
+    this.generationDir = fallback.directory;
+    this.loadedFileShards.clear();
+    this.loadedEventSets.clear();
+    this.pendingEventKeys.clear();
+    this.skipValidationCache.clear();
+    this.materializedCodexHashes = false;
+    return true;
   }
 
   async commit(cursors = this.cursors) {
@@ -424,11 +501,13 @@ class V2CursorStore {
         delete nextMetadata.codexFiles[shardKey];
         continue;
       }
-      await fs.writeFile(targetPath, `${JSON.stringify(data)}\n`, "utf8");
+      const serialized = `${JSON.stringify(data)}\n`;
+      await fs.writeFile(targetPath, serialized, "utf8");
       nextMetadata.codexFiles[shardKey] = buildCodexFileShardMetadata({
         shardKey,
         data,
         relativeFile,
+        serialized,
         dayInventoryCache: cursors.codexDayInventoryCache,
       });
     }
@@ -447,11 +526,13 @@ class V2CursorStore {
         const relativeFile = path.join("codex-events", `${safeShardFilename(shardKey)}.txt`);
         const targetPath = path.join(generationDir, relativeFile);
         await fs.unlink(targetPath).catch(() => {});
-        await fs.writeFile(targetPath, serializeEventSet(existing), "utf8");
-        nextMetadata.codexEvents[shardKey] = {
-          file: relativeFile,
-          count: existing.size,
-        };
+        const serialized = serializeEventSet(existing);
+        await fs.writeFile(targetPath, serialized, "utf8");
+        nextMetadata.codexEvents[shardKey] = buildEventShardMetadata({
+          relativeFile,
+          values: existing,
+          serialized,
+        });
       }
     }
 
@@ -509,7 +590,7 @@ async function migrateLegacyCursorState({
   codexRoots,
   failureInjector,
 }) {
-  const cursors = (await readJson(cursorsPath)) || defaultCursorState();
+  const cursors = await readLegacyCursorStateForMigration(cursorsPath);
   const generationId = newGenerationId();
   const generationDir = generationDirectory(storeRoot, generationId);
   await ensureDir(path.join(generationDir, "codex-files"));
@@ -535,30 +616,34 @@ async function migrateLegacyCursorState({
 
   for (const [shardKey, data] of codexFilesByShard.entries()) {
     const relativeFile = path.join("codex-files", `${safeShardFilename(shardKey)}.json`);
+    const serialized = `${JSON.stringify(data)}\n`;
     await fs.writeFile(
       path.join(generationDir, relativeFile),
-      `${JSON.stringify(data)}\n`,
+      serialized,
       "utf8",
     );
     metadata.codexFiles[shardKey] = buildCodexFileShardMetadata({
       shardKey,
       data,
       relativeFile,
+      serialized,
       dayInventoryCache: cursors.codexDayInventoryCache,
     });
   }
 
   for (const [shardKey, values] of eventShards.entries()) {
     const relativeFile = path.join("codex-events", `${safeShardFilename(shardKey)}.txt`);
+    const serialized = serializeEventSet(values);
     await fs.writeFile(
       path.join(generationDir, relativeFile),
-      serializeEventSet(values),
+      serialized,
       "utf8",
     );
-    metadata.codexEvents[shardKey] = {
-      file: relativeFile,
-      count: values.size,
-    };
+    metadata.codexEvents[shardKey] = buildEventShardMetadata({
+      relativeFile,
+      values,
+      serialized,
+    });
   }
 
   await fs.writeFile(
@@ -589,6 +674,27 @@ async function migrateLegacyCursorState({
   return manifest;
 }
 
+async function readLegacyCursorStateForMigration(cursorsPath) {
+  const result = await readJsonStrict(cursorsPath);
+  if (result.status === "missing") return defaultCursorState();
+  if (result.status !== "ok") {
+    throw cursorStoreCorruption(
+      `Unable to read legacy cursor state ${cursorsPath}`,
+      result.error,
+    );
+  }
+  if (!isCursorStateRoot(result.value)) {
+    throw cursorStoreCorruption(`Invalid legacy cursor state ${cursorsPath}`);
+  }
+  if (
+    result.value.codexHashes !== undefined &&
+    !Array.isArray(result.value.codexHashes)
+  ) {
+    throw cursorStoreCorruption(`Invalid legacy Codex event state ${cursorsPath}`);
+  }
+  return result.value;
+}
+
 async function openManifestGeneration({
   cursorsPath,
   storeRoot,
@@ -596,7 +702,11 @@ async function openManifestGeneration({
   codexRoots,
   failureInjector,
 }) {
-  for (const generationId of [manifest.current, manifest.previous]) {
+  const generationIds = Array.from(new Set([
+    manifest.current,
+    manifest.previous,
+  ].filter(Boolean)));
+  for (const generationId of generationIds) {
     const generation = await readGeneration({ storeRoot, generationId });
     if (!generation) continue;
     return new V2CursorStore({
@@ -604,6 +714,10 @@ async function openManifestGeneration({
       storeRoot,
       manifest,
       generation,
+      fallbackGenerationId:
+        generationId === manifest.current && manifest.previous !== generationId
+          ? manifest.previous
+          : null,
       codexRoots,
       failureInjector,
     });
@@ -619,20 +733,43 @@ async function readGeneration({ storeRoot, generationId }) {
     return null;
   }
   const core = await readJson(path.join(directory, metadata.coreFile));
-  if (
-    !core ||
-    typeof core !== "object" ||
-    Array.isArray(core) ||
-    !core.files ||
-    typeof core.files !== "object" ||
-    Array.isArray(core.files)
-  ) {
-    return null;
-  }
+  if (!isCursorStateRoot(core)) return null;
   if (!(await generationReferencesExist(directory, metadata))) return null;
   const counts = calculateGenerationCounts(metadata, core.files);
   if (!sameGenerationCounts(counts, metadata.counts)) return null;
   return { directory, metadata, core };
+}
+
+function readGenerationSync({ storeRoot, generationId }) {
+  if (typeof generationId !== "string" || generationId.length === 0) return null;
+  const directory = generationDirectory(storeRoot, generationId);
+  try {
+    const metadata = JSON.parse(
+      fssync.readFileSync(path.join(directory, "generation.json"), "utf8"),
+    );
+    if (!isGenerationMetadata(metadata, generationId)) return null;
+    const core = JSON.parse(
+      fssync.readFileSync(path.join(directory, metadata.coreFile), "utf8"),
+    );
+    if (!isCursorStateRoot(core)) return null;
+    if (!generationReferencesExistSync(directory, metadata)) return null;
+    const counts = calculateGenerationCounts(metadata, core.files);
+    if (!sameGenerationCounts(counts, metadata.counts)) return null;
+    return { directory, metadata, core };
+  } catch (_error) {
+    return null;
+  }
+}
+
+function isCursorStateRoot(value) {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    value.files &&
+    typeof value.files === "object" &&
+    !Array.isArray(value.files)
+  );
 }
 
 function isGenerationMetadata(metadata, generationId) {
@@ -667,11 +804,16 @@ function validShardMetadataMap(shards, expectedDirectory) {
   for (const entry of Object.values(shards)) {
     const reference = normalizeShardReference(entry?.file, expectedDirectory);
     const count = Number(entry?.count);
+    const bytes = Number(entry?.bytes);
     if (
       !reference ||
       files.has(reference.name) ||
       !Number.isSafeInteger(count) ||
-      count < 0
+      count < 0 ||
+      !Number.isSafeInteger(bytes) ||
+      bytes < 0 ||
+      typeof entry?.sha256 !== "string" ||
+      !/^[a-f0-9]{64}$/.test(entry.sha256)
     ) {
       return false;
     }
@@ -695,6 +837,29 @@ async function generationReferencesExist(directory, metadata) {
         withFileTypes: true,
       });
     } catch (_e) {
+      return false;
+    }
+    const files = new Map(entries.map((entry) => [entry.name, entry]));
+    if (expectedNames.some((name) => !files.get(name)?.isFile())) return false;
+  }
+  return true;
+}
+
+function generationReferencesExistSync(directory, metadata) {
+  for (const [expectedDirectory, shards] of [
+    ["codex-files", metadata.codexFiles],
+    ["codex-events", metadata.codexEvents],
+  ]) {
+    const expectedNames = Object.values(shards)
+      .map((entry) => normalizeShardReference(entry.file, expectedDirectory).name);
+    if (expectedNames.length === 0) continue;
+
+    let entries;
+    try {
+      entries = fssync.readdirSync(path.join(directory, expectedDirectory), {
+        withFileTypes: true,
+      });
+    } catch (_error) {
       return false;
     }
     const files = new Map(entries.map((entry) => [entry.name, entry]));
@@ -751,12 +916,17 @@ async function rebuildEventShards({ generationDir, metadata, hashes }) {
   metadata.codexEvents = {};
   for (const [shardKey, values] of partitionEventHashes(hashes).entries()) {
     const relativeFile = path.join("codex-events", `${safeShardFilename(shardKey)}.txt`);
+    const serialized = serializeEventSet(values);
     await fs.writeFile(
       path.join(generationDir, relativeFile),
-      serializeEventSet(values),
+      serialized,
       "utf8",
     );
-    metadata.codexEvents[shardKey] = { file: relativeFile, count: values.size };
+    metadata.codexEvents[shardKey] = buildEventShardMetadata({
+      relativeFile,
+      values,
+      serialized,
+    });
   }
 }
 
@@ -764,6 +934,7 @@ function buildCodexFileShardMetadata({
   shardKey,
   data,
   relativeFile,
+  serialized,
   dayInventoryCache,
 }) {
   const directories = {};
@@ -823,12 +994,38 @@ function buildCodexFileShardMetadata({
     file: relativeFile,
     shardKey,
     count: Object.keys(data || {}).length,
+    ...buildShardIntegrity(serialized),
     directories,
     projectSummary: {
       configs: Array.from(configs.values()),
       absentFreshUntil,
     },
   };
+}
+
+function buildEventShardMetadata({ relativeFile, values, serialized }) {
+  return {
+    file: relativeFile,
+    count: values.size,
+    ...buildShardIntegrity(serialized),
+  };
+}
+
+function buildShardIntegrity(serialized) {
+  return {
+    bytes: Buffer.byteLength(serialized),
+    sha256: crypto.createHash("sha256").update(serialized).digest("hex"),
+  };
+}
+
+function assertShardIntegrity(raw, metadata, label) {
+  const integrity = buildShardIntegrity(raw);
+  if (
+    integrity.bytes !== metadata?.bytes ||
+    integrity.sha256 !== metadata?.sha256
+  ) {
+    throw cursorStoreCorruption(`Integrity check failed for ${label}`);
+  }
 }
 
 async function validateProjectSummary(summary, nowMs) {
@@ -1028,6 +1225,11 @@ async function cleanupGenerations(storeRoot, keep) {
 
 function cloneJson(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function replaceObjectContents(target, source) {
+  for (const key of Object.keys(target)) delete target[key];
+  Object.assign(target, source);
 }
 
 function cursorStoreCorruption(message, cause = null) {

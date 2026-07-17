@@ -120,6 +120,14 @@ async function readCurrentGeneration(trackerDir) {
   return { manifest, directory, metadata };
 }
 
+function corruptShardWithoutChangingLength(raw) {
+  assert.ok(raw.length > 0);
+  const first = raw[0] === "x" ? "y" : "x";
+  const corrupted = `${first}${raw.slice(1)}`;
+  assert.equal(Buffer.byteLength(corrupted), Buffer.byteLength(raw));
+  return corrupted;
+}
+
 test("small cursor states keep the legacy single-file path", async () => {
   await withCursorFixture(async ({ trackerDir, cursorsPath }) => {
     const store = await openCursorStore({
@@ -134,6 +142,23 @@ test("small cursor states keep the legacy single-file path", async () => {
     const persisted = JSON.parse(await fs.readFile(cursorsPath, "utf8"));
     assert.equal(persisted.updatedAt, "2026-07-18T00:00:00.000Z");
     assert.ok(Array.isArray(persisted.codexHashes));
+  });
+});
+
+test("v2 migration rejects malformed legacy cursor state", async () => {
+  await withCursorFixture(async ({ trackerDir, cursorsPath }) => {
+    const malformed = '{"version":1,"files":';
+    await fs.writeFile(cursorsPath, malformed, "utf8");
+
+    await assert.rejects(
+      openCursorStore({ trackerDir, cursorsPath, forceV2: true }),
+      (error) => error?.code === "TOKENTRACKER_CURSOR_STORE_CORRUPT",
+    );
+    assert.equal(await fs.readFile(cursorsPath, "utf8"), malformed);
+    await assert.rejects(
+      fs.access(path.join(trackerDir, STORE_DIRNAME, "manifest.json")),
+      (error) => error?.code === "ENOENT",
+    );
   });
 });
 
@@ -362,6 +387,50 @@ test("a current generation with a missing event shard falls back to the previous
     await recovered.loadCodexFilesForPaths([day17File]);
     assert.equal(recovered.cursors.files[day17File].offset, 10);
     assert.equal(recovered.codexEventStore.has(eventKey), true);
+  });
+});
+
+test("a malformed current file shard lazily falls back to the previous generation", async () => {
+  await withCursorFixture(async ({ trackerDir, cursorsPath, day17File }) => {
+    const migrated = await openCursorStore({ trackerDir, cursorsPath, forceV2: true });
+    await migrated.loadCodexFilesForPaths([day17File]);
+    migrated.cursors.files[day17File].offset = 44;
+    await migrated.commit();
+
+    const current = await readCurrentGeneration(trackerDir);
+    const shard = current.metadata.codexFiles["2026-07-17"];
+    const shardPath = path.join(current.directory, shard.file);
+    const raw = await fs.readFile(shardPath, "utf8");
+    await fs.writeFile(shardPath, corruptShardWithoutChangingLength(raw), "utf8");
+
+    const recovered = await openCursorStore({ trackerDir, cursorsPath });
+    await recovered.loadCodexFilesForPaths([day17File]);
+    assert.equal(recovered.cursors.files[day17File].offset, 10);
+  });
+});
+
+test("a malformed current event shard lazily falls back to the previous generation", async () => {
+  await withCursorFixture(async ({ trackerDir, cursorsPath, day17File }) => {
+    const baseEvent = "11111111-1111-4111-8111-111111111111:2026-07-17T00:00:01.000Z";
+    const addedEvent = "11111111-1111-4111-8111-111111111111:2026-07-17T00:00:02.000Z";
+    const migrated = await openCursorStore({ trackerDir, cursorsPath, forceV2: true });
+    await migrated.loadCodexFilesForPaths([day17File]);
+    assert.equal(migrated.codexEventStore.has(baseEvent), true);
+    migrated.codexEventStore.add(addedEvent);
+    migrated.cursors.files[day17File].offset = 44;
+    await migrated.commit();
+
+    const current = await readCurrentGeneration(trackerDir);
+    const shard = current.metadata.codexEvents["2026-07-17"];
+    const shardPath = path.join(current.directory, shard.file);
+    const raw = await fs.readFile(shardPath, "utf8");
+    await fs.writeFile(shardPath, corruptShardWithoutChangingLength(raw), "utf8");
+
+    const recovered = await openCursorStore({ trackerDir, cursorsPath });
+    assert.equal(recovered.codexEventStore.has(addedEvent), false);
+    assert.equal(recovered.codexEventStore.has(baseEvent), true);
+    await recovered.loadCodexFilesForPaths([day17File]);
+    assert.equal(recovered.cursors.files[day17File].offset, 10);
   });
 });
 
