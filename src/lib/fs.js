@@ -51,6 +51,8 @@ async function chmod600IfPossible(filePath) {
 const LOCK_STALE_MS = 5 * 60 * 1000; // 5 minutes
 const LOCK_HEARTBEAT_MS = 30 * 1000;
 const MAX_RECLAIM_DEPTH = 4;
+const TRANSITION_GUARD_RETRY_MS = 5;
+const TRANSITION_GUARD_ATTEMPTS = 1000;
 
 function parseLockOwner(raw) {
   try {
@@ -148,17 +150,52 @@ async function releaseOwnedLock(
   heartbeatHandle,
   heartbeatTimer,
   token,
+  {
+    beforeReleaseUnlink = null,
+    reclaimDepth = 0,
+    serializeRelease = true,
+  } = {},
 ) {
-  clearInterval(heartbeatTimer);
-  await handle.close().catch(() => {});
-  await heartbeatHandle?.close().catch(() => {});
+  let transitionGuard = null;
+  if (serializeRelease) {
+    // Reclaimers use the same guard while moving a stale lease aside. Holding
+    // it across token validation and unlink makes that ownership transition
+    // indivisible: an old owner cannot delete a replacement installed by a
+    // concurrent stale-lock reclaimer.
+    for (let attempt = 0; attempt < TRANSITION_GUARD_ATTEMPTS; attempt += 1) {
+      transitionGuard = await openLock(`${lockPath}.reclaim`, {
+        quietIfLocked: true,
+        reclaimDepth: reclaimDepth + 1,
+        // This short-lived internal guard is the serialization primitive; its
+        // own release must not recursively acquire another transition guard.
+        serializeRelease: false,
+      });
+      if (transitionGuard) break;
+      await new Promise((resolve) => setTimeout(resolve, TRANSITION_GUARD_RETRY_MS));
+    }
+    if (!transitionGuard) {
+      throw new Error(`Timed out serializing lock release: ${lockPath}`);
+    }
+  }
+
   try {
+    clearInterval(heartbeatTimer);
+    await handle.close().catch(() => {});
+    await heartbeatHandle?.close().catch(() => {});
     const owner = parseLockOwner(await fs.readFile(lockPath, "utf8"));
     if (owner?.token === token) {
+      if (typeof beforeReleaseUnlink === "function") {
+        await beforeReleaseUnlink({ lockPath });
+      }
       await fs.unlink(lockPath).catch(() => {});
       await fs.unlink(heartbeatPathFor(lockPath, token)).catch(() => {});
     }
-  } catch (_e) {}
+  } catch (_e) {
+    // Missing or replaced owner paths are already released from this token's
+    // perspective. Other failures retain the conservative no-delete outcome.
+  } finally {
+    await transitionGuard?.release();
+  }
 }
 
 async function openLock(
@@ -166,7 +203,9 @@ async function openLock(
   {
     quietIfLocked = false,
     beforeReclaim = null,
+    beforeReleaseUnlink = null,
     reclaimDepth = 0,
+    serializeRelease = true,
   } = {},
 ) {
   try {
@@ -190,6 +229,11 @@ async function openLock(
             heartbeatHandle,
             heartbeatTimer,
             token,
+            {
+              beforeReleaseUnlink,
+              reclaimDepth,
+              serializeRelease,
+            },
           );
         },
       };
@@ -214,6 +258,7 @@ async function openLock(
         const reclaimGuard = await openLock(`${lockPath}.reclaim`, {
           quietIfLocked: true,
           reclaimDepth: reclaimDepth + 1,
+          serializeRelease: false,
         });
         if (!reclaimGuard) return null;
 

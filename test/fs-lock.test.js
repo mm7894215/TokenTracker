@@ -120,6 +120,53 @@ test("an obsolete owner cannot remove a replacement lock", async () => {
   });
 });
 
+test("release and stale reclaim serialize ownership before replacement", async () => {
+  await withLockPath(async (lockPath) => {
+    let releaseValidated;
+    const validationReached = new Promise((resolve) => {
+      releaseValidated = resolve;
+    });
+    let allowRelease;
+    const releaseBarrier = new Promise((resolve) => {
+      allowRelease = resolve;
+    });
+
+    const active = await openLock(lockPath, {
+      quietIfLocked: true,
+      beforeReleaseUnlink: async () => {
+        releaseValidated();
+        await releaseBarrier;
+      },
+    });
+    assert.ok(active);
+
+    const owner = JSON.parse(await fs.readFile(lockPath, "utf8"));
+    await fs.writeFile(
+      lockPath,
+      JSON.stringify({ ...owner, pid: 2_147_483_647 }) + "\n",
+      "utf8",
+    );
+
+    const releasing = active.release();
+    await validationReached;
+
+    // This contender classifies the old lease as stale, but it cannot move or
+    // replace the lease while release holds the shared transition guard.
+    const blockedReclaimer = await openLock(lockPath, { quietIfLocked: true });
+    assert.equal(blockedReclaimer, null);
+
+    allowRelease();
+    await releasing;
+
+    const replacement = await openLock(lockPath, { quietIfLocked: true });
+    assert.ok(replacement);
+    const replacementOwner = await fs.readFile(lockPath, "utf8");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(await fs.readFile(lockPath, "utf8"), replacementOwner);
+    await replacement.release();
+  });
+});
+
 test("two stale reclaimers cannot both acquire the same lock", async () => {
   await withLockPath(async (lockPath) => {
     await fs.writeFile(
