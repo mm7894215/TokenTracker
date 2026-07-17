@@ -556,13 +556,15 @@ async function filterColdCodexRolloutFiles({
   const coldDaySkipDecisions = new Map();
   const out = [];
   let skipped = 0;
+  let cursorStoreRestarted = false;
 
   const loadCodexCursorDirectory = async (filePath) => {
     if (!codexCursorStore) return;
     const directory = path.dirname(filePath);
     if (cursorLoadDirectories.has(directory)) return;
     cursorLoadDirectories.add(directory);
-    await codexCursorStore.loadCodexFilesForPaths([filePath], cursors);
+    const result = await codexCursorStore.loadCodexFilesForPaths([filePath], cursors);
+    if (result?.restarted) cursorStoreRestarted = true;
   };
 
   const canSkipCodexDirectory = async (filePath) => {
@@ -594,12 +596,14 @@ async function filterColdCodexRolloutFiles({
     const rolloutDate = rolloutDateFromPath(filePath);
     if (!rolloutDate || activeDates.has(rolloutDate)) {
       await loadCodexCursorDirectory(filePath);
+      if (cursorStoreRestarted) break;
       out.push(entry);
       continue;
     }
 
     if (auditDue) {
       await loadCodexCursorDirectory(filePath);
+      if (cursorStoreRestarted) break;
       out.push(entry);
       continue;
     }
@@ -610,6 +614,7 @@ async function filterColdCodexRolloutFiles({
     }
 
     await loadCodexCursorDirectory(filePath);
+    if (cursorStoreRestarted) break;
 
     const prev = cursors.files[filePath];
     const cachedSize = Number(prev?.offset);
@@ -638,6 +643,18 @@ async function filterColdCodexRolloutFiles({
     skipped += 1;
   }
 
+  if (cursorStoreRestarted) {
+    await codexCursorStore.loadCodexFilesForPaths(files, cursors);
+    if (syncDiagnostics) {
+      syncDiagnostics.cold_skipped = 0;
+      syncDiagnostics.parse_candidates = files.reduce(
+        (count, entry) => count + (isCodexEntry(entry) ? 1 : 0),
+        0,
+      );
+    }
+    return { rolloutFiles: files, skipped: 0, restarted: true };
+  }
+
   if (syncDiagnostics) {
     syncDiagnostics.cold_skipped = skipped;
     syncDiagnostics.parse_candidates = out.reduce(
@@ -645,7 +662,7 @@ async function filterColdCodexRolloutFiles({
       0,
     );
   }
-  return { rolloutFiles: out, skipped };
+  return { rolloutFiles: out, skipped, restarted: false };
 }
 
 function activeCodexRolloutDates(

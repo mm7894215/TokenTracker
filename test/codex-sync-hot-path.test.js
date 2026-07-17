@@ -238,6 +238,48 @@ test("v2 cold filtering batches shard decisions and loads by day directory", asy
   assert.deepEqual(calls, { skip: 1, load: 1 });
 });
 
+test("v2 cold filtering discards partial skip decisions after generation fallback", async () => {
+  const oldPath = path.join(
+    "/tmp", ".codex", "sessions", "2029", "01", "01", "rollout-old.jsonl",
+  );
+  const activePath = path.join(
+    "/tmp", ".codex", "sessions", "2030", "06", "02", "rollout-active.jsonl",
+  );
+  const rolloutFiles = [
+    { path: oldPath, source: "codex" },
+    { path: activePath, source: "codex" },
+  ];
+  const calls = [];
+  const codexCursorStore = {
+    fileCount: rolloutFiles.length,
+    async canSkipCodexDay() {
+      return true;
+    },
+    async loadCodexFilesForPaths(files) {
+      calls.push(files);
+      return { restarted: calls.length === 1 };
+    },
+  };
+  const diagnostics = {};
+
+  const filtered = await filterColdCodexRolloutFiles({
+    rolloutFiles,
+    cursors: { version: 1, files: {}, codexDayInventoryCache: { version: 1, days: {} } },
+    codexCursorStore,
+    diagnostics,
+    nowMs: Date.UTC(2030, 5, 2, 12, 0, 0),
+    recentDays: 2,
+  });
+
+  assert.strictEqual(filtered.rolloutFiles, rolloutFiles);
+  assert.equal(filtered.skipped, 0);
+  assert.equal(filtered.restarted, true);
+  assert.equal(calls.length, 2);
+  assert.strictEqual(calls[1], rolloutFiles);
+  assert.equal(diagnostics.cold_skipped, 0);
+  assert.equal(diagnostics.parse_candidates, 2);
+});
+
 test("Codex sync diagnostics keep candidate counts source-scoped after mixed-source parsing", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "tt-codex-sync-mixed-diagnostics-"));
   try {
@@ -866,6 +908,109 @@ test("v2 source-scoped sync deduplicates an inode rewrite from its day event sha
     const store = await openCursorStore({ trackerDir, cursorsPath });
     await store.loadCodexFilesForPaths([rolloutPath]);
     assert.equal(store.cursors.files[rolloutPath].inode, replacementStat.ino);
+  });
+});
+
+test("v2 sync restarts the full Codex parse after an event-shard fallback", async () => {
+  await withIsolatedCodexHome("tt-codex-v2-event-fallback-", async ({ codexHome, trackerDir }) => {
+    const appendSessionId = "aaaaaaaa-bbbb-4ccc-8ddd-111111111111";
+    const rewriteSessionId = "eeeeeeee-ffff-4000-8111-222222222222";
+    const appendBaselineTimestamp = "2030-06-02T01:00:00.000Z";
+    const appendTimestamp = "2030-06-02T01:05:00.000Z";
+    const rewriteBaselineTimestamp = "2030-06-02T01:10:00.000Z";
+    const rewriteTimestamp = "2030-06-02T01:15:00.000Z";
+    const dayDir = path.join(codexHome, "sessions", "2030", "06", "02");
+    const appendRolloutPath = path.join(
+      dayDir,
+      `rollout-2030-06-02T01-00-00-${appendSessionId}.jsonl`,
+    );
+    const rewriteRolloutPath = path.join(
+      dayDir,
+      `rollout-2030-06-02T01-10-00-${rewriteSessionId}.jsonl`,
+    );
+    const cursorsPath = path.join(trackerDir, "cursors.json");
+    const queuePath = path.join(trackerDir, "queue.jsonl");
+    const appendBaselineLine = `${JSON.stringify(codexTokenEvent(appendBaselineTimestamp, 5))}\n`;
+    const appendLine = `${JSON.stringify(codexTokenEvent(appendTimestamp, 15))}\n`;
+    const rewriteBaselineLine = `${JSON.stringify(codexTokenEvent(rewriteBaselineTimestamp, 10))}\n`;
+    const rewriteLine = `${JSON.stringify(codexTokenEvent(rewriteTimestamp, 20))}\n`;
+    await fs.mkdir(dayDir, { recursive: true });
+    await fs.mkdir(trackerDir, { recursive: true });
+    await fs.writeFile(appendRolloutPath, appendBaselineLine, "utf8");
+    await fs.writeFile(rewriteRolloutPath, rewriteBaselineLine, "utf8");
+    await fs.writeFile(
+      cursorsPath,
+      `${JSON.stringify({ version: 1, files: {}, codexHashes: [] })}\n`,
+      "utf8",
+    );
+
+    await cmdSync(
+      ["--auto", "--from-retry", "--source=codex"],
+      { cursorStoreOptions: { forceV2: true } },
+    );
+    const baselineRows = await readJsonlRows(queuePath);
+    assert.equal(baselineRows.length, 1);
+    assert.equal(baselineRows[0].total_tokens, 15);
+
+    const stableStore = await openCursorStore({ trackerDir, cursorsPath });
+    await stableStore.materializeAllCodexState();
+    await stableStore.commit();
+
+    const storeRoot = path.join(trackerDir, STORE_DIRNAME);
+    const manifest = JSON.parse(
+      await fs.readFile(path.join(storeRoot, "manifest.json"), "utf8"),
+    );
+    const generationDir = path.join(storeRoot, "generations", manifest.current);
+    const metadata = JSON.parse(
+      await fs.readFile(path.join(generationDir, "generation.json"), "utf8"),
+    );
+    const eventShardPath = path.join(
+      generationDir,
+      metadata.codexEvents["2030-06-02"].file,
+    );
+    await fs.appendFile(eventShardPath, "corrupt", "utf8");
+
+    const appendStat = await fs.stat(appendRolloutPath);
+    await fs.appendFile(appendRolloutPath, appendLine, "utf8");
+    assert.equal((await fs.stat(appendRolloutPath)).ino, appendStat.ino);
+
+    const rewriteStat = await fs.stat(rewriteRolloutPath);
+    const replacement = `${rewriteRolloutPath}.replacement`;
+    await fs.writeFile(replacement, `${rewriteBaselineLine}${rewriteLine}`, "utf8");
+    await fs.rename(replacement, rewriteRolloutPath);
+    assert.notEqual((await fs.stat(rewriteRolloutPath)).ino, rewriteStat.ino);
+
+    await cmdSync(["--auto", "--from-retry", "--source=codex"]);
+
+    const rows = await readJsonlRows(queuePath);
+    assert.equal(rows.length, 2);
+    assert.equal(rows[1].source, "codex");
+    assert.equal(rows[1].total_tokens, 35);
+
+    const reopened = await openCursorStore({ trackerDir, cursorsPath });
+    await reopened.loadCodexFilesForPaths([appendRolloutPath, rewriteRolloutPath]);
+    assert.equal(
+      reopened.cursors.files[appendRolloutPath].offset,
+      (await fs.stat(appendRolloutPath)).size,
+    );
+    assert.equal(
+      reopened.cursors.files[rewriteRolloutPath].offset,
+      (await fs.stat(rewriteRolloutPath)).size,
+    );
+    assert.equal(
+      reopened.codexEventStore.has(`${appendSessionId}:${appendBaselineTimestamp}`),
+      true,
+    );
+    assert.equal(reopened.codexEventStore.has(`${appendSessionId}:${appendTimestamp}`), true);
+    assert.equal(
+      reopened.codexEventStore.has(`${rewriteSessionId}:${rewriteBaselineTimestamp}`),
+      true,
+    );
+    assert.equal(reopened.codexEventStore.has(`${rewriteSessionId}:${rewriteTimestamp}`), true);
+
+    const queueBeforeIdle = await fs.readFile(queuePath, "utf8");
+    await cmdSync(["--auto", "--from-retry", "--source=codex"]);
+    assert.equal(await fs.readFile(queuePath, "utf8"), queueBeforeIdle);
   });
 });
 

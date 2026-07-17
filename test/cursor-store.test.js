@@ -427,10 +427,83 @@ test("a malformed current event shard lazily falls back to the previous generati
     await fs.writeFile(shardPath, corruptShardWithoutChangingLength(raw), "utf8");
 
     const recovered = await openCursorStore({ trackerDir, cursorsPath });
+    assert.throws(
+      () => recovered.codexEventStore.has(addedEvent),
+      (error) => (
+        error?.code === "TOKENTRACKER_CURSOR_STORE_RETRY" &&
+        error?.cause?.code === "TOKENTRACKER_CURSOR_STORE_CORRUPT"
+      ),
+    );
     assert.equal(recovered.codexEventStore.has(addedEvent), false);
     assert.equal(recovered.codexEventStore.has(baseEvent), true);
     await recovered.loadCodexFilesForPaths([day17File]);
     assert.equal(recovered.cursors.files[day17File].offset, 10);
+  });
+});
+
+test("materialization restarts every shard after a lazy generation fallback", async () => {
+  await withCursorFixture(async ({
+    trackerDir,
+    cursorsPath,
+    day17File,
+    day16File,
+  }) => {
+    const migrated = await openCursorStore({ trackerDir, cursorsPath, forceV2: true });
+    await migrated.loadCodexFilesForPaths([day17File, day16File]);
+    migrated.cursors.files[day17File].offset = 44;
+    migrated.cursors.files[day16File].offset = 55;
+    await migrated.commit();
+
+    const current = await readCurrentGeneration(trackerDir);
+    const shard = current.metadata.codexFiles["2026-07-16"];
+    const shardPath = path.join(current.directory, shard.file);
+    const raw = await fs.readFile(shardPath, "utf8");
+    await fs.writeFile(shardPath, corruptShardWithoutChangingLength(raw), "utf8");
+
+    const recovered = await openCursorStore({ trackerDir, cursorsPath });
+    const result = await recovered.materializeAllCodexState();
+    assert.equal(result.restarted, true);
+    assert.equal(recovered.cursors.files[day17File].offset, 10);
+    assert.equal(recovered.cursors.files[day16File].offset, 20);
+  });
+});
+
+test("commit rejects a corrupt required shard without publishing a mixed generation", async () => {
+  await withCursorFixture(async ({ trackerDir, cursorsPath }) => {
+    const currentOnlyEvent = "11111111-1111-4111-8111-111111111111:2026-07-17T00:00:01.500Z";
+    const newEvent = "11111111-1111-4111-8111-111111111111:2026-07-17T00:00:02.000Z";
+    const migrated = await openCursorStore({ trackerDir, cursorsPath, forceV2: true });
+    migrated.codexEventStore.add(currentOnlyEvent);
+    await migrated.commit();
+
+    const current = await readCurrentGeneration(trackerDir);
+    const shard = current.metadata.codexEvents["2026-07-17"];
+    const shardPath = path.join(current.directory, shard.file);
+    const raw = await fs.readFile(shardPath, "utf8");
+    await fs.writeFile(shardPath, corruptShardWithoutChangingLength(raw), "utf8");
+
+    const storeRoot = path.join(trackerDir, STORE_DIRNAME);
+    const manifestPath = path.join(storeRoot, "manifest.json");
+    const generationsPath = path.join(storeRoot, "generations");
+    const manifestBefore = await fs.readFile(manifestPath, "utf8");
+    const generationsBefore = (await fs.readdir(generationsPath)).sort();
+
+    const failing = await openCursorStore({ trackerDir, cursorsPath });
+    failing.codexEventStore.add(newEvent);
+    await assert.rejects(
+      failing.commit(),
+      (error) => error?.code === "TOKENTRACKER_CURSOR_STORE_CORRUPT",
+    );
+
+    assert.equal(await fs.readFile(manifestPath, "utf8"), manifestBefore);
+    assert.deepEqual((await fs.readdir(generationsPath)).sort(), generationsBefore);
+
+    const reopened = await openCursorStore({ trackerDir, cursorsPath });
+    assert.throws(
+      () => reopened.codexEventStore.has(newEvent),
+      (error) => error?.code === "TOKENTRACKER_CURSOR_STORE_RETRY",
+    );
+    assert.equal(reopened.codexEventStore.has(newEvent), false);
   });
 });
 

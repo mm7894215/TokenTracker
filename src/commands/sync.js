@@ -108,6 +108,7 @@ const {
 const { purgeProjectUsage } = require("../lib/project-usage-purge");
 const {
   isCodexSessionCursorPath,
+  isCursorStoreRetry,
   openCursorStore,
 } = require("../lib/cursor-store");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
@@ -467,7 +468,7 @@ async function cmdSync(argv, context = {}) {
     const codexColdAuditDue = codexColdSkipEnabled
       ? isCodexColdScanAuditDue(cursors)
       : false;
-    const codexColdFilter = codexColdSkipEnabled
+    let codexColdFilter = codexColdSkipEnabled
       ? await filterColdCodexRolloutFiles({
           rolloutFiles,
           cursors,
@@ -478,8 +479,13 @@ async function cmdSync(argv, context = {}) {
         })
       : { rolloutFiles, skipped: 0 };
     const rolloutFilesForParse = codexColdFilter.rolloutFiles;
+    let codexCursorLoadRestarted = false;
     if (!codexColdSkipEnabled && sourceAllowed("codex")) {
-      await cursorStore.loadCodexFilesForPaths(rolloutFilesForParse, cursors);
+      const loadResult = await cursorStore.loadCodexFilesForPaths(
+        rolloutFilesForParse,
+        cursors,
+      );
+      codexCursorLoadRestarted = Boolean(loadResult?.restarted);
     }
 
     const openclawFiles = openclawSignal?.sessionFile
@@ -494,33 +500,58 @@ async function cmdSync(argv, context = {}) {
 
     let parseResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     let codexParseSucceeded = false;
+    let codexFallbackRetryRan = Boolean(
+      codexColdFilter.restarted || codexCursorLoadRestarted,
+    );
+    const runCodexParse = (files) => parseRolloutIncremental({
+      rolloutFiles: files,
+      cursors,
+      codexEventStore: Array.isArray(cursors.codexHashes)
+        ? null
+        : cursorStore.codexEventStore,
+      queuePath,
+      projectQueuePath,
+      diagnostics: syncDiagnostics,
+      onProgress: (p) => {
+        if (!progress?.enabled) return;
+        const pct = p.total > 0 ? p.index / p.total : 1;
+        progress.update(
+          `Parsing ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} files | buckets ${formatNumber(
+            p.bucketsQueued,
+          )}`,
+        );
+      },
+    });
     try {
-      parseResult = await parseRolloutIncremental({
-        rolloutFiles: rolloutFilesForParse,
-        cursors,
-        codexEventStore: Array.isArray(cursors.codexHashes)
-          ? null
-          : cursorStore.codexEventStore,
-        queuePath,
-        projectQueuePath,
-        diagnostics: syncDiagnostics,
-        onProgress: (p) => {
-          if (!progress?.enabled) return;
-          const pct = p.total > 0 ? p.index / p.total : 1;
-          progress.update(
-            `Parsing ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} files | buckets ${formatNumber(
-              p.bucketsQueued,
-            )}`,
-          );
-        },
-      });
+      parseResult = await runCodexParse(rolloutFilesForParse);
       codexParseSucceeded = true;
     } catch (err) {
-      warnProviderParseFailure("Codex", err, opts);
+      if (isCursorStoreRetry(err)) {
+        await cursorStore.loadCodexFilesForPaths(rolloutFiles, cursors);
+        codexColdFilter = { rolloutFiles, skipped: 0, restarted: true };
+        codexFallbackRetryRan = true;
+        if (syncDiagnostics) {
+          syncDiagnostics.cold_skipped = 0;
+          syncDiagnostics.parse_candidates = rolloutFiles.reduce(
+            (count, entry) => count + (
+              typeof entry === "string" || !entry?.source || entry.source === "codex"
+                ? 1
+                : 0
+            ),
+            0,
+          );
+        }
+        parseResult = await runCodexParse(rolloutFiles);
+        codexParseSucceeded = true;
+      } else if (err?.code === "TOKENTRACKER_CURSOR_STORE_CORRUPT") {
+        throw err;
+      } else {
+        warnProviderParseFailure("Codex", err, opts);
+      }
     }
     if (codexColdSkipEnabled && codexParseSucceeded) {
       recordCodexColdScanAudit(cursors, {
-        fullAudit: codexColdAuditDue,
+        fullAudit: codexColdAuditDue || codexFallbackRetryRan,
         skipped: codexColdFilter.skipped,
       });
     }

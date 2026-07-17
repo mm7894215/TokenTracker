@@ -16,6 +16,7 @@ const MANIFEST_FILENAME = "manifest.json";
 const GENERATIONS_DIRNAME = "generations";
 const DEFAULT_ACTIVATION_BYTES = 16 * 1024 * 1024;
 const PROJECT_ABSENT_CONTEXT_RESCAN_MS = 24 * 60 * 60 * 1000;
+const CURSOR_STORE_RETRY_CODE = "TOKENTRACKER_CURSOR_STORE_RETRY";
 
 async function openCursorStore({
   trackerDir,
@@ -246,9 +247,17 @@ class V2CursorStore {
       if (!isCodexSessionCursorPathForRoots(filePath, this.codexRoots)) continue;
       shardKeys.add(codexFileShardKey(filePath));
     }
-    for (const shardKey of shardKeys) {
-      await this.loadFileShard(shardKey, cursors);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        for (const shardKey of shardKeys) {
+          await this.loadFileShard(shardKey, cursors);
+        }
+        return { restarted: attempt > 0 };
+      } catch (error) {
+        if (!isCursorStoreRetry(error) || attempt > 0) throw error;
+      }
     }
+    return { restarted: false };
   }
 
   async loadFileShard(shardKey, cursors = this.cursors) {
@@ -261,7 +270,7 @@ class V2CursorStore {
       ) {
         throw error;
       }
-      return this.loadFileShardUnchecked(shardKey, cursors);
+      throw cursorStoreRetry(error);
     }
   }
 
@@ -314,19 +323,27 @@ class V2CursorStore {
   }
 
   async materializeAllCodexState(cursors = this.cursors) {
-    for (const shardKey of Object.keys(this.generation?.codexFiles || {})) {
-      await this.loadFileShard(shardKey, cursors);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        for (const shardKey of Object.keys(this.generation?.codexFiles || {})) {
+          await this.loadFileShard(shardKey, cursors);
+        }
+        const hashes = [];
+        for (const shardKey of Object.keys(this.generation?.codexEvents || {})) {
+          const values = this.loadEventSet(shardKey, cursors);
+          for (const key of values) hashes.push(key);
+        }
+        for (const values of this.pendingEventKeys.values()) {
+          for (const key of values) hashes.push(key);
+        }
+        cursors.codexHashes = hashes;
+        this.materializedCodexHashes = true;
+        return { restarted: attempt > 0 };
+      } catch (error) {
+        if (!isCursorStoreRetry(error) || attempt > 0) throw error;
+      }
     }
-    const hashes = [];
-    for (const shardKey of Object.keys(this.generation?.codexEvents || {})) {
-      const values = this.loadEventSet(shardKey);
-      for (const key of values) hashes.push(key);
-    }
-    for (const values of this.pendingEventKeys.values()) {
-      for (const key of values) hashes.push(key);
-    }
-    cursors.codexHashes = hashes;
-    this.materializedCodexHashes = true;
+    return { restarted: false };
   }
 
   async canSkipCodexDay({
@@ -378,17 +395,17 @@ class V2CursorStore {
     if (loaded) loaded.add(key);
   }
 
-  loadEventSet(shardKey) {
+  loadEventSet(shardKey, cursors = this.cursors) {
     try {
       return this.loadEventSetUnchecked(shardKey);
     } catch (error) {
       if (
         error?.code !== "TOKENTRACKER_CURSOR_STORE_CORRUPT" ||
-        !this.activateFallbackGeneration()
+        !this.activateFallbackGeneration(cursors)
       ) {
         throw error;
       }
-      return this.loadEventSetUnchecked(shardKey);
+      throw cursorStoreRetry(error);
     }
   }
 
@@ -453,132 +470,141 @@ class V2CursorStore {
   async commit(cursors = this.cursors) {
     const generationId = newGenerationId();
     const generationDir = generationDirectory(this.storeRoot, generationId);
-    await ensureDir(path.join(generationDir, "codex-files"));
-    await ensureDir(path.join(generationDir, "codex-events"));
+    let published = false;
+    try {
+      await ensureDir(path.join(generationDir, "codex-files"));
+      await ensureDir(path.join(generationDir, "codex-events"));
 
-    const nextMetadata = {
-      version: STORE_VERSION,
-      id: generationId,
-      createdAt: new Date().toISOString(),
-      coreFile: "core.json",
-      codexFiles: cloneJson(this.generation?.codexFiles || {}),
-      codexEvents: cloneJson(this.generation?.codexEvents || {}),
-      counts: { nonCodexFiles: 0, codexFiles: 0, totalFiles: 0, codexEvents: 0 },
-    };
+      const nextMetadata = {
+        version: STORE_VERSION,
+        id: generationId,
+        createdAt: new Date().toISOString(),
+        coreFile: "core.json",
+        codexFiles: cloneJson(this.generation?.codexFiles || {}),
+        codexEvents: cloneJson(this.generation?.codexEvents || {}),
+        counts: { nonCodexFiles: 0, codexFiles: 0, totalFiles: 0, codexEvents: 0 },
+      };
 
-    await linkGenerationFiles({
-      fromDirectory: this.generationDir,
-      toDirectory: generationDir,
-      metadata: nextMetadata,
-    });
-
-    const codexShardKeysPresent = new Set();
-    for (const filePath of Object.keys(cursors.files || {})) {
-      if (isCodexSessionCursorPathForRoots(filePath, this.codexRoots)) {
-        codexShardKeysPresent.add(codexFileShardKey(filePath));
-      }
-    }
-    for (const shardKey of codexShardKeysPresent) {
-      if (!this.loadedFileShards.has(shardKey) && nextMetadata.codexFiles[shardKey]) {
-        await this.loadFileShard(shardKey, cursors);
-      }
-    }
-
-    const { coreFiles, codexFilesByShard } = partitionCursorFiles(
-      cursors.files,
-      this.codexRoots,
-    );
-    const dirtyFileShards = new Set([
-      ...this.loadedFileShards.keys(),
-      ...codexFilesByShard.keys(),
-    ]);
-    for (const shardKey of dirtyFileShards) {
-      const data = codexFilesByShard.get(shardKey) || {};
-      const relativeFile = path.join("codex-files", `${safeShardFilename(shardKey)}.json`);
-      const targetPath = path.join(generationDir, relativeFile);
-      await fs.unlink(targetPath).catch(() => {});
-      if (Object.keys(data).length === 0) {
-        delete nextMetadata.codexFiles[shardKey];
-        continue;
-      }
-      const serialized = `${JSON.stringify(data)}\n`;
-      await fs.writeFile(targetPath, serialized, "utf8");
-      nextMetadata.codexFiles[shardKey] = buildCodexFileShardMetadata({
-        shardKey,
-        data,
-        relativeFile,
-        serialized,
-        dayInventoryCache: cursors.codexDayInventoryCache,
-      });
-    }
-
-    if (this.materializedCodexHashes || Array.isArray(cursors.codexHashes)) {
-      await rebuildEventShards({
-        generationDir,
+      await linkGenerationFiles({
+        fromDirectory: this.generationDir,
+        toDirectory: generationDir,
         metadata: nextMetadata,
-        hashes: Array.isArray(cursors.codexHashes) ? cursors.codexHashes : [],
       });
-    } else {
-      for (const [shardKey, pending] of this.pendingEventKeys.entries()) {
-        if (pending.size === 0) continue;
-        const existing = this.loadEventSet(shardKey);
-        for (const key of pending) existing.add(key);
-        const relativeFile = path.join("codex-events", `${safeShardFilename(shardKey)}.txt`);
+
+      const codexShardKeysPresent = new Set();
+      for (const filePath of Object.keys(cursors.files || {})) {
+        if (isCodexSessionCursorPathForRoots(filePath, this.codexRoots)) {
+          codexShardKeysPresent.add(codexFileShardKey(filePath));
+        }
+      }
+      for (const shardKey of codexShardKeysPresent) {
+        if (!this.loadedFileShards.has(shardKey) && nextMetadata.codexFiles[shardKey]) {
+          await this.loadFileShardUnchecked(shardKey, cursors);
+        }
+      }
+
+      const { coreFiles, codexFilesByShard } = partitionCursorFiles(
+        cursors.files,
+        this.codexRoots,
+      );
+      const dirtyFileShards = new Set([
+        ...this.loadedFileShards.keys(),
+        ...codexFilesByShard.keys(),
+      ]);
+      for (const shardKey of dirtyFileShards) {
+        const data = codexFilesByShard.get(shardKey) || {};
+        const relativeFile = path.join("codex-files", `${safeShardFilename(shardKey)}.json`);
         const targetPath = path.join(generationDir, relativeFile);
         await fs.unlink(targetPath).catch(() => {});
-        const serialized = serializeEventSet(existing);
+        if (Object.keys(data).length === 0) {
+          delete nextMetadata.codexFiles[shardKey];
+          continue;
+        }
+        const serialized = `${JSON.stringify(data)}\n`;
         await fs.writeFile(targetPath, serialized, "utf8");
-        nextMetadata.codexEvents[shardKey] = buildEventShardMetadata({
+        nextMetadata.codexFiles[shardKey] = buildCodexFileShardMetadata({
+          shardKey,
+          data,
           relativeFile,
-          values: existing,
           serialized,
+          dayInventoryCache: cursors.codexDayInventoryCache,
         });
       }
+
+      if (this.materializedCodexHashes || Array.isArray(cursors.codexHashes)) {
+        await rebuildEventShards({
+          generationDir,
+          metadata: nextMetadata,
+          hashes: Array.isArray(cursors.codexHashes) ? cursors.codexHashes : [],
+        });
+      } else {
+        for (const [shardKey, pending] of this.pendingEventKeys.entries()) {
+          if (pending.size === 0) continue;
+          const existing = this.loadEventSetUnchecked(shardKey);
+          for (const key of pending) existing.add(key);
+          const relativeFile = path.join("codex-events", `${safeShardFilename(shardKey)}.txt`);
+          const targetPath = path.join(generationDir, relativeFile);
+          await fs.unlink(targetPath).catch(() => {});
+          const serialized = serializeEventSet(existing);
+          await fs.writeFile(targetPath, serialized, "utf8");
+          nextMetadata.codexEvents[shardKey] = buildEventShardMetadata({
+            relativeFile,
+            values: existing,
+            serialized,
+          });
+        }
+      }
+
+      const core = {
+        ...cursors,
+        files: coreFiles,
+      };
+      delete core.codexHashes;
+      await fs.writeFile(
+        path.join(generationDir, nextMetadata.coreFile),
+        `${JSON.stringify(core)}\n`,
+        "utf8",
+      );
+
+      nextMetadata.counts = calculateGenerationCounts(nextMetadata, coreFiles);
+      await fs.writeFile(
+        path.join(generationDir, "generation.json"),
+        `${JSON.stringify(nextMetadata, null, 2)}\n`,
+        "utf8",
+      );
+
+      await maybeInjectFailure(this.failureInjector, "beforeManifestSwap");
+
+      const legacyFingerprint = await fingerprintFile(this.cursorsPath);
+      const nextManifest = {
+        version: STORE_VERSION,
+        current: generationId,
+        previous: this.generation?.id || null,
+        legacyFingerprint: legacyFingerprint || this.manifest?.legacyFingerprint || null,
+        updatedAt: new Date().toISOString(),
+      };
+      await writeJson(path.join(this.storeRoot, MANIFEST_FILENAME), nextManifest);
+      published = true;
+
+      this.manifest = nextManifest;
+      this.generation = nextMetadata;
+      this.generationDir = generationDir;
+      this.cursors = core;
+      this.loadedFileShards.clear();
+      this.loadedEventSets.clear();
+      this.pendingEventKeys.clear();
+      this.skipValidationCache.clear();
+      this.materializedCodexHashes = false;
+      await cleanupGenerations(this.storeRoot, new Set([
+        nextManifest.current,
+        nextManifest.previous,
+      ].filter(Boolean)));
+    } catch (error) {
+      if (!published) {
+        await fs.rm(generationDir, { recursive: true, force: true }).catch(() => {});
+      }
+      throw error;
     }
-
-    const core = {
-      ...cursors,
-      files: coreFiles,
-    };
-    delete core.codexHashes;
-    await fs.writeFile(
-      path.join(generationDir, nextMetadata.coreFile),
-      `${JSON.stringify(core)}\n`,
-      "utf8",
-    );
-
-    nextMetadata.counts = calculateGenerationCounts(nextMetadata, coreFiles);
-    await fs.writeFile(
-      path.join(generationDir, "generation.json"),
-      `${JSON.stringify(nextMetadata, null, 2)}\n`,
-      "utf8",
-    );
-
-    await maybeInjectFailure(this.failureInjector, "beforeManifestSwap");
-
-    const legacyFingerprint = await fingerprintFile(this.cursorsPath);
-    const nextManifest = {
-      version: STORE_VERSION,
-      current: generationId,
-      previous: this.generation?.id || null,
-      legacyFingerprint: legacyFingerprint || this.manifest?.legacyFingerprint || null,
-      updatedAt: new Date().toISOString(),
-    };
-    await writeJson(path.join(this.storeRoot, MANIFEST_FILENAME), nextManifest);
-
-    this.manifest = nextManifest;
-    this.generation = nextMetadata;
-    this.generationDir = generationDir;
-    this.cursors = core;
-    this.loadedFileShards.clear();
-    this.loadedEventSets.clear();
-    this.pendingEventKeys.clear();
-    this.skipValidationCache.clear();
-    this.materializedCodexHashes = false;
-    await cleanupGenerations(this.storeRoot, new Set([
-      nextManifest.current,
-      nextManifest.previous,
-    ].filter(Boolean)));
   }
 }
 
@@ -1238,6 +1264,19 @@ function cursorStoreCorruption(message, cause = null) {
   return error;
 }
 
+function cursorStoreRetry(cause) {
+  const error = new Error(
+    "Cursor store generation changed; restart the operation",
+    cause ? { cause } : undefined,
+  );
+  error.code = CURSOR_STORE_RETRY_CODE;
+  return error;
+}
+
+function isCursorStoreRetry(error) {
+  return error?.code === CURSOR_STORE_RETRY_CODE;
+}
+
 async function maybeInjectFailure(injector, stage) {
   if (typeof injector === "function") await injector(stage);
 }
@@ -1249,6 +1288,7 @@ module.exports = {
   codexEventShardKey,
   codexFileShardKey,
   isCodexSessionCursorPath,
+  isCursorStoreRetry,
   openCursorStore,
   readCursorStateSummary,
 };
