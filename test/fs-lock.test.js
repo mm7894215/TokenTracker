@@ -152,11 +152,13 @@ test("release and stale reclaim serialize ownership before replacement", async (
 
     // This contender classifies the old lease as stale, but it cannot move or
     // replace the lease while release holds the shared transition guard.
-    const blockedReclaimer = await openLock(lockPath, { quietIfLocked: true });
-    assert.equal(blockedReclaimer, null);
-
-    allowRelease();
-    await releasing;
+    try {
+      const blockedReclaimer = await openLock(lockPath, { quietIfLocked: true });
+      assert.equal(blockedReclaimer, null);
+    } finally {
+      allowRelease();
+      await releasing;
+    }
 
     const replacement = await openLock(lockPath, { quietIfLocked: true });
     assert.ok(replacement);

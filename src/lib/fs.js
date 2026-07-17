@@ -174,6 +174,10 @@ async function releaseOwnedLock(
       await new Promise((resolve) => setTimeout(resolve, TRANSITION_GUARD_RETRY_MS));
     }
     if (!transitionGuard) {
+      clearInterval(heartbeatTimer);
+      await handle.close().catch(() => {});
+      await heartbeatHandle?.close().catch(() => {});
+      await fs.unlink(heartbeatPathFor(lockPath, token)).catch(() => {});
       throw new Error(`Timed out serializing lock release: ${lockPath}`);
     }
   }
@@ -273,7 +277,12 @@ async function openLock(
             await fs.rename(lockPath, quarantinePath);
           } catch (renameError) {
             if (renameError?.code === "ENOENT") {
-              return openLock(lockPath, { quietIfLocked, reclaimDepth });
+              return openLock(lockPath, {
+                quietIfLocked,
+                beforeReleaseUnlink,
+                reclaimDepth,
+                serializeRelease,
+              });
             }
             if (!quietIfLocked) {
               process.stdout.write("Another sync is already running.\n");
@@ -289,7 +298,12 @@ async function openLock(
             // to a replacement lease created after the atomic rename.
             await fs.unlink(heartbeatPathFor(lockPath, staleOwner.token)).catch(() => {});
           }
-          return await openLock(lockPath, { quietIfLocked, reclaimDepth });
+          return await openLock(lockPath, {
+            quietIfLocked,
+            beforeReleaseUnlink,
+            reclaimDepth,
+            serializeRelease,
+          });
         } finally {
           if (quarantinePath) await fs.unlink(quarantinePath).catch(() => {});
           await reclaimGuard.release();
