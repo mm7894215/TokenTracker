@@ -12,6 +12,10 @@
  * `tokentracker_devices_active_unique` on (user_id, platform, device_name)
  * means renaming to a name already held by another active device on the same
  * platform raises a unique violation → surfaced as 409 (name_taken).
+ *
+ * Renaming also sets name_customized = true, which tells the token-issue /
+ * device-flow-poll keep-fresh writes to stop refreshing device_name from the
+ * client default (those writes used to revert every rename within ~12h).
  */
 import { createClient } from "npm:@insforge/sdk";
 
@@ -100,13 +104,25 @@ export default async function (req: Request): Promise<Response> {
   });
 
   try {
-    const { data, error } = await client.database
+    let { data, error } = await client.database
       .from("tokentracker_devices")
-      .update({ device_name: name })
+      .update({ device_name: name, name_customized: true })
       .eq("id", deviceId)
       .eq("user_id", userId)
       .is("revoked_at", null)
       .select("id, device_name, platform");
+    if (error && /name_customized/i.test(error.message || "")) {
+      // Deploy-order safety net: this function is live but the
+      // name_customized migration has not run yet. Fall back to the legacy
+      // update so rename keeps working (unprotected) instead of 500ing.
+      ({ data, error } = await client.database
+        .from("tokentracker_devices")
+        .update({ device_name: name })
+        .eq("id", deviceId)
+        .eq("user_id", userId)
+        .is("revoked_at", null)
+        .select("id, device_name, platform"));
+    }
     if (error) {
       const msg = error.message || "";
       if (/unique|duplicate|conflict|already exists/i.test(msg))
