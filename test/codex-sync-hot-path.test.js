@@ -954,6 +954,7 @@ test("v2 sync restarts the full Codex parse after an event-shard fallback", asyn
 
     const stableStore = await openCursorStore({ trackerDir, cursorsPath });
     await stableStore.materializeAllCodexState();
+    const appendInode = stableStore.cursors.files[appendRolloutPath].inode;
     await stableStore.commit();
 
     const storeRoot = path.join(trackerDir, STORE_DIRNAME);
@@ -970,9 +971,7 @@ test("v2 sync restarts the full Codex parse after an event-shard fallback", asyn
     );
     await fs.appendFile(eventShardPath, "corrupt", "utf8");
 
-    const appendStat = await fs.stat(appendRolloutPath);
     await fs.appendFile(appendRolloutPath, appendLine, "utf8");
-    assert.equal((await fs.stat(appendRolloutPath)).ino, appendStat.ino);
 
     const rewriteStat = await fs.stat(rewriteRolloutPath);
     const replacement = `${rewriteRolloutPath}.replacement`;
@@ -993,6 +992,7 @@ test("v2 sync restarts the full Codex parse after an event-shard fallback", asyn
       reopened.cursors.files[appendRolloutPath].offset,
       (await fs.stat(appendRolloutPath)).size,
     );
+    assert.equal(reopened.cursors.files[appendRolloutPath].inode, appendInode);
     assert.equal(
       reopened.cursors.files[rewriteRolloutPath].offset,
       (await fs.stat(rewriteRolloutPath)).size,
