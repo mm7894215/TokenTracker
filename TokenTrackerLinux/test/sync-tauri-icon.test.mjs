@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,6 +10,10 @@ import {
   createRgbaPng,
   syncTauriIcon,
 } from '../scripts/sync-tauri-icon.mjs';
+
+function sha256(buffer) {
+  return createHash('sha256').update(buffer).digest('hex');
+}
 
 function pngHeader(buffer) {
   assert.deepEqual(buffer.subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
@@ -33,8 +38,14 @@ test('canonical dashboard icon converts to an 8-bit RGBA PNG', () => {
   });
 
   const decoded = PNG.sync.read(converted);
+  const canonicalPixels = PNG.sync.read(canonical);
   assert.equal(decoded.width, 512);
   assert.equal(decoded.height, 512);
+  assert.equal(
+    sha256(decoded.data),
+    sha256(canonicalPixels.data),
+    'RGBA conversion must preserve the canonical icon pixels',
+  );
 });
 
 test('sync writes a deterministic RGBA Tauri icon', () => {

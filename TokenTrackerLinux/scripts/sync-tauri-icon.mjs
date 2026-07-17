@@ -13,11 +13,12 @@ export const tauriIconPath = path.join(linuxDir, 'src-tauri', 'icons', 'icon.png
 /** Decode the canonical PNG and encode its pixels as an 8-bit RGBA PNG for Tauri. */
 export function createRgbaPng(source) {
   const decoded = PNG.sync.read(source);
-  return PNG.sync.write(new PNG({
+  const output = new PNG({
     width: decoded.width,
     height: decoded.height,
-    data: Buffer.from(decoded.data),
-  }), { colorType: 6, inputHasAlpha: true });
+  });
+  decoded.data.copy(output.data);
+  return PNG.sync.write(output, { colorType: 6, inputHasAlpha: true });
 }
 
 export function syncTauriIcon(sourcePath = canonicalIconPath, destinationPath = tauriIconPath) {
