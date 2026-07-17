@@ -124,13 +124,20 @@ class DashboardViewModel: ObservableObject {
         isLoading = true
         pendingFullRefreshAfterHiddenRefresh = false
         needsFullRefreshOnPopoverOpen = false
-        // A full load starting after a queue event covers every summary that
-        // event requested. Events arriving during this load are queued below.
-        pendingUsagePublications.removeAll()
         error = nil
+
+        // Events already queued are covered by this full load. Remove only
+        // that starting snapshot so events arriving while the health check or
+        // fetches are in flight remain queued for the next pass.
+        let pendingAtLoadStart = pendingUsagePublications
+        pendingUsagePublications.removeAll()
 
         serverOnline = await APIClient.shared.checkServerHealth()
         guard serverOnline else {
+            pendingUsagePublications.enqueue(
+                pendingAtLoadStart.sources,
+                summaries: pendingAtLoadStart.summaries
+            )
             isLoading = false
             await finishDataLoad()
             return
@@ -276,6 +283,16 @@ class DashboardViewModel: ObservableObject {
             }
         }
 
+        // A partial API failure means the starting snapshot was not fully
+        // covered. Restore it alongside any events that arrived during the
+        // load so the next pass can retry without dropping the publication.
+        if errorCount > 0 {
+            pendingUsagePublications.enqueue(
+                pendingAtLoadStart.sources,
+                summaries: pendingAtLoadStart.summaries
+            )
+        }
+
         if errorCount >= totalFetches {
             self.error = firstError
         }
@@ -289,10 +306,14 @@ class DashboardViewModel: ObservableObject {
         // Push the latest data to the widget snapshot file so the desktop
         // widgets pick it up on their next timeline reload.
         await WidgetSnapshotWriter.update(from: self)
-        await finishDataLoad()
+        await finishDataLoad(allowPendingRefresh: errorCount == 0)
     }
 
-    private func finishDataLoad() async {
+    private func finishDataLoad(allowPendingRefresh: Bool = true) async {
+        // Preserve pending publications while the local API is offline, or
+        // when a partial load failed, but do not immediately feed them back
+        // into another retry loop. The next scheduled/manual load retries.
+        guard serverOnline, allowPendingRefresh else { return }
         if shouldReloadAfterCurrentLoad {
             shouldReloadAfterCurrentLoad = false
             await loadAll()
@@ -336,13 +357,14 @@ class DashboardViewModel: ObservableObject {
     private func waitForAccountCacheVisibility(
         for summaries: MenuBarSummarySelection
     ) async {
-        guard !summaries.isEmpty else { return }
         while !Task.isCancelled {
-            let slotDelay = UsagePublicationPolicy.remainingAccountCacheDelay(
-                state: summaryPublicationState,
-                summaries: summaries,
-                now: Date()
-            )
+            let slotDelay: TimeInterval = summaries.isEmpty
+                ? 0
+                : UsagePublicationPolicy.remainingAccountCacheDelay(
+                    state: summaryPublicationState,
+                    summaries: summaries,
+                    now: Date()
+                )
             let latestAccountRead = await APIClient.shared.latestAccountSummaryReadCompletedAt
             let globalDelay = UsagePublicationPolicy.remainingAccountCacheDelay(
                 latestReadCompletedAt: latestAccountRead,
@@ -472,7 +494,7 @@ class DashboardViewModel: ObservableObject {
 
         isMenuBarSummaryLoading = false
         isLoading = false
-        await finishDataLoad()
+        await finishDataLoad(allowPendingRefresh: firstError == nil)
     }
 
     // MARK: - Sync

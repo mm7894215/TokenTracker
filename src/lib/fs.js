@@ -49,6 +49,8 @@ async function chmod600IfPossible(filePath) {
 }
 
 const LOCK_STALE_MS = 5 * 60 * 1000; // 5 minutes
+const LOCK_HEARTBEAT_MS = 30 * 1000;
+const MAX_RECLAIM_DEPTH = 4;
 
 function parseLockOwner(raw) {
   try {
@@ -60,6 +62,11 @@ function parseLockOwner(raw) {
   } catch (_e) {
     return null;
   }
+}
+
+function heartbeatPathFor(lockPath, token) {
+  const tokenDigest = crypto.createHash("sha256").update(token, "utf8").digest("hex");
+  return `${lockPath}.heartbeat.${tokenDigest}`;
 }
 
 function isProcessAlive(pid) {
@@ -75,64 +82,173 @@ function isProcessAlive(pid) {
 }
 
 async function existingLockCanBeReclaimed(lockPath) {
+  let lockHandle = null;
   try {
+    // Inspect one opened inode instead of stat-ing a path and then reading
+    // that path. The latter is a TOCTOU window and is also unsafe if a
+    // concurrent reclaimer replaces the lock between the two operations.
+    lockHandle = await fs.open(lockPath, "r");
     const [stat, raw] = await Promise.all([
-      fs.stat(lockPath),
-      fs.readFile(lockPath, "utf8").catch(() => ""),
+      lockHandle.stat(),
+      lockHandle.readFile({ encoding: "utf8" }),
     ]);
     const owner = parseLockOwner(raw);
-    if (owner) return !isProcessAlive(owner.pid);
+    if (owner) {
+      if (!isProcessAlive(owner.pid)) return true;
+
+      // New leases keep a token-specific heartbeat separate from the owner
+      // file. This lets a PID that has since been reused be recognized as an
+      // abandoned lease without reclaiming a live, long-running sync whose
+      // heartbeat is still fresh. Locks from before heartbeat support retain
+      // the conservative live-PID behavior.
+      let heartbeatHandle = null;
+      try {
+        heartbeatHandle = await fs.open(heartbeatPathFor(lockPath, owner.token), "r");
+        const heartbeat = await heartbeatHandle.stat();
+        return Date.now() - heartbeat.mtimeMs > LOCK_STALE_MS;
+      } catch (_e) {
+        return false;
+      } finally {
+        await heartbeatHandle?.close().catch(() => {});
+      }
+    }
     return Date.now() - stat.mtimeMs > LOCK_STALE_MS;
   } catch (e) {
     // The lock disappeared between open and inspection, so retry acquisition.
     if (e?.code === "ENOENT") return true;
     return false;
+  } finally {
+    await lockHandle?.close().catch(() => {});
   }
 }
 
-async function releaseOwnedLock(lockPath, handle, token) {
+function startLockHeartbeat(handle, heartbeatHandle) {
+  const beat = async () => {
+    try {
+      const now = new Date();
+      await Promise.all([
+        handle.utimes(now, now),
+        heartbeatHandle.utimes(now, now),
+      ]);
+    } catch (_e) {
+      // A failed heartbeat makes the lease eligible for bounded stale
+      // reclamation. The owning sync will still finish or release normally.
+    }
+  };
+  const timer = setInterval(() => {
+    void beat();
+  }, LOCK_HEARTBEAT_MS);
+  timer.unref?.();
+  return timer;
+}
+
+async function releaseOwnedLock(
+  lockPath,
+  handle,
+  heartbeatHandle,
+  heartbeatTimer,
+  token,
+) {
+  clearInterval(heartbeatTimer);
   await handle.close().catch(() => {});
+  await heartbeatHandle?.close().catch(() => {});
   try {
     const owner = parseLockOwner(await fs.readFile(lockPath, "utf8"));
     if (owner?.token === token) {
       await fs.unlink(lockPath).catch(() => {});
+      await fs.unlink(heartbeatPathFor(lockPath, token)).catch(() => {});
     }
   } catch (_e) {}
 }
 
-async function openLock(lockPath, { quietIfLocked } = {}) {
+async function openLock(
+  lockPath,
+  {
+    quietIfLocked = false,
+    beforeReclaim = null,
+    reclaimDepth = 0,
+  } = {},
+) {
   try {
     const handle = await fs.open(lockPath, "wx");
     const token = crypto.randomUUID();
+    const heartbeatPath = heartbeatPathFor(lockPath, token);
+    let heartbeatHandle = null;
     try {
       await handle.writeFile(
         JSON.stringify({ pid: process.pid, token, createdAt: new Date().toISOString() }) + "\n",
         "utf8",
       );
+      heartbeatHandle = await fs.open(heartbeatPath, "wx");
+      await heartbeatHandle.writeFile(`${token}\n`, "utf8");
+      const heartbeatTimer = startLockHeartbeat(handle, heartbeatHandle);
+      return {
+        async release() {
+          await releaseOwnedLock(
+            lockPath,
+            handle,
+            heartbeatHandle,
+            heartbeatTimer,
+            token,
+          );
+        },
+      };
     } catch (e) {
+      await heartbeatHandle?.close().catch(() => {});
+      await fs.unlink(heartbeatPath).catch(() => {});
       await handle.close().catch(() => {});
       await fs.unlink(lockPath).catch(() => {});
       throw e;
     }
-    return {
-      async release() {
-        await releaseOwnedLock(lockPath, handle, token);
-      },
-    };
   } catch (e) {
     if (e && e.code === "EEXIST") {
       if (await existingLockCanBeReclaimed(lockPath)) {
+        if (typeof beforeReclaim === "function") {
+          await beforeReclaim({ lockPath });
+        }
+        if (reclaimDepth >= MAX_RECLAIM_DEPTH) return null;
+
+        // Serialize all reclaimers before re-checking the target. A stale
+        // check can be shared by many contenders; only the holder of this
+        // atomic guard may move the old lease out of the way.
+        const reclaimGuard = await openLock(`${lockPath}.reclaim`, {
+          quietIfLocked: true,
+          reclaimDepth: reclaimDepth + 1,
+        });
+        if (!reclaimGuard) return null;
+
+        let quarantinePath = null;
         try {
-          await fs.unlink(lockPath);
-        } catch (unlinkError) {
-          if (unlinkError?.code !== "ENOENT") {
+          // Re-check while holding the guard. A competing reclaimer may have
+          // already replaced the target since our initial stale inspection.
+          if (!(await existingLockCanBeReclaimed(lockPath))) return null;
+
+          quarantinePath = `${lockPath}.stale.${process.pid}.${crypto.randomUUID()}`;
+          try {
+            await fs.rename(lockPath, quarantinePath);
+          } catch (renameError) {
+            if (renameError?.code === "ENOENT") {
+              return openLock(lockPath, { quietIfLocked, reclaimDepth });
+            }
             if (!quietIfLocked) {
               process.stdout.write("Another sync is already running.\n");
             }
             return null;
           }
+
+          const staleOwner = parseLockOwner(
+            await fs.readFile(quarantinePath, "utf8").catch(() => ""),
+          );
+          if (staleOwner) {
+            // The heartbeat name contains the old token, so it cannot belong
+            // to a replacement lease created after the atomic rename.
+            await fs.unlink(heartbeatPathFor(lockPath, staleOwner.token)).catch(() => {});
+          }
+          return await openLock(lockPath, { quietIfLocked, reclaimDepth });
+        } finally {
+          if (quarantinePath) await fs.unlink(quarantinePath).catch(() => {});
+          await reclaimGuard.release();
         }
-        return openLock(lockPath, { quietIfLocked });
       }
       if (!quietIfLocked) {
         process.stdout.write("Another sync is already running.\n");

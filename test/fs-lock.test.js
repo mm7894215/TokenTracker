@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
@@ -53,6 +54,30 @@ test("sync lock immediately reclaims a fresh lease owned by a dead process", asy
   });
 });
 
+test("sync lock reclaims a reused PID only after its heartbeat expires", async () => {
+  await withLockPath(async (lockPath) => {
+    const token = "reused-pid";
+    const tokenDigest = crypto.createHash("sha256").update(token, "utf8").digest("hex");
+    const heartbeatPath = `${lockPath}.heartbeat.${tokenDigest}`;
+    await fs.writeFile(
+      lockPath,
+      JSON.stringify({
+        pid: process.pid,
+        token,
+        createdAt: new Date().toISOString(),
+      }) + "\n",
+      "utf8",
+    );
+    await fs.writeFile(heartbeatPath, `${token}\n`, "utf8");
+    const old = new Date(Date.now() - 6 * 60 * 1000);
+    await fs.utimes(heartbeatPath, old, old);
+
+    const lock = await openLock(lockPath, { quietIfLocked: true });
+    assert.ok(lock);
+    await lock.release();
+  });
+});
+
 test("sync lock never reclaims an old lease while its owner is still alive", async () => {
   await withLockPath(async (lockPath) => {
     const active = await openLock(lockPath, { quietIfLocked: true });
@@ -92,6 +117,38 @@ test("an obsolete owner cannot remove a replacement lock", async () => {
     await first.release();
     assert.equal(await fs.readFile(lockPath, "utf8"), replacementOwner);
     await replacement.release();
+  });
+});
+
+test("two stale reclaimers cannot both acquire the same lock", async () => {
+  await withLockPath(async (lockPath) => {
+    await fs.writeFile(
+      lockPath,
+      JSON.stringify({
+        pid: 2_147_483_647,
+        token: "abandoned-concurrent",
+        createdAt: new Date().toISOString(),
+      }) + "\n",
+      "utf8",
+    );
+
+    let classified = 0;
+    let releaseBarrier;
+    const bothClassified = new Promise((resolve) => {
+      releaseBarrier = resolve;
+    });
+    const beforeReclaim = async () => {
+      classified += 1;
+      if (classified === 2) releaseBarrier();
+      await bothClassified;
+    };
+
+    const locks = await Promise.all([
+      openLock(lockPath, { quietIfLocked: true, beforeReclaim }),
+      openLock(lockPath, { quietIfLocked: true, beforeReclaim }),
+    ]);
+    assert.equal(locks.filter(Boolean).length, 1);
+    for (const lock of locks) await lock?.release();
   });
 });
 
