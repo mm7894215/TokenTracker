@@ -167,6 +167,7 @@ async function listOpencodeMessageFiles(storageDir) {
 async function parseRolloutIncremental({
   rolloutFiles,
   cursors,
+  codexEventStore,
   queuePath,
   projectQueuePath,
   onProgress,
@@ -200,8 +201,16 @@ async function parseRolloutIncremental({
   // the claudeHashes pattern: it makes an inode-changing re-scan idempotent so an
   // external rewrite of a session file (Codex-Manager's atomic provider-patch on
   // account switch, issue #187) cannot re-count already-counted events.
+  const externalCodexEventStore =
+    codexEventStore &&
+    typeof codexEventStore.has === "function" &&
+    typeof codexEventStore.add === "function"
+      ? codexEventStore
+      : null;
   const prevCodexHashes = Array.isArray(cursors?.codexHashes) ? cursors.codexHashes : [];
-  if (!Array.isArray(cursors.codexHashes)) cursors.codexHashes = prevCodexHashes;
+  if (!externalCodexEventStore && !Array.isArray(cursors.codexHashes)) {
+    cursors.codexHashes = prevCodexHashes;
+  }
   let seenCodexEvents = null;
   let newCodexEventKeys = null;
   let newCodexEventKeySet = null;
@@ -229,7 +238,9 @@ async function parseRolloutIncremental({
       hash_set_constructions: 0,
       hash_array_materializations: 0,
       hash_array_materialized_items: 0,
-      codex_hash_count: prevCodexHashes.length,
+      codex_hash_count: externalCodexEventStore
+        ? Number(externalCodexEventStore.size || 0)
+        : prevCodexHashes.length,
     });
   }
   const ensureNewCodexEventKeys = () => {
@@ -242,6 +253,7 @@ async function parseRolloutIncremental({
     newCodexEventKeySet.add(key);
     newCodexEventKeys.push(key);
     if (seenCodexEvents) seenCodexEvents.add(key);
+    externalCodexEventStore?.add(key);
   };
   const getAppendOnlyCodexEvents = () => {
     if (!appendOnlyCodexEvents) {
@@ -258,6 +270,20 @@ async function parseRolloutIncremental({
     return appendOnlyCodexEvents;
   };
   const getHistoricalCodexEvents = () => {
+    if (externalCodexEventStore) {
+      if (!historicalCodexEvents) {
+        historicalCodexEvents = {
+          has(key) {
+            return Boolean(
+              newCodexEventKeySet?.has(key) ||
+              externalCodexEventStore.has(key)
+            );
+          },
+          add: recordNewCodexEvent,
+        };
+      }
+      return historicalCodexEvents;
+    }
     if (!seenCodexEvents) {
       seenCodexEvents = new Set(prevCodexHashes);
       for (const key of newCodexEventKeys || []) seenCodexEvents.add(key);
@@ -470,11 +496,15 @@ async function parseRolloutIncremental({
   const projectBucketsQueued = projectEnabled
     ? await enqueueTouchedProjectBuckets({ projectQueuePath, projectState, projectTouchedBuckets })
     : 0;
-  for (const key of newCodexEventKeys || []) prevCodexHashes.push(key);
+  if (!externalCodexEventStore) {
+    for (const key of newCodexEventKeys || []) prevCodexHashes.push(key);
+  }
   if (syncDiagnostics) {
-    syncDiagnostics.codex_hash_count = Array.isArray(cursors.codexHashes)
-      ? cursors.codexHashes.length
-      : prevCodexHashes.length;
+    syncDiagnostics.codex_hash_count = externalCodexEventStore
+      ? Number(externalCodexEventStore.size || 0)
+      : Array.isArray(cursors.codexHashes)
+        ? cursors.codexHashes.length
+        : prevCodexHashes.length;
   }
   hourlyState.updatedAt = new Date().toISOString();
   cursors.hourly = hourlyState;
@@ -489,6 +519,7 @@ async function parseRolloutIncremental({
 async function filterColdCodexRolloutFiles({
   rolloutFiles,
   cursors,
+  codexCursorStore = null,
   projectEnabled = false,
   auditDue = false,
   nowMs = Date.now(),
@@ -506,18 +537,48 @@ async function filterColdCodexRolloutFiles({
       0,
     );
     syncDiagnostics.discovered_rollouts = discoveredRollouts;
-    syncDiagnostics.cursor_keys = Object.keys(cursors?.files || {}).length;
+    syncDiagnostics.cursor_keys = Number.isFinite(codexCursorStore?.fileCount)
+      ? codexCursorStore.fileCount
+      : Object.keys(cursors?.files || {}).length;
     syncDiagnostics.cold_skipped = 0;
     syncDiagnostics.parse_candidates = discoveredRollouts;
   }
-  if (auditDue || !cursors?.files || typeof cursors.files !== "object") {
+  if (
+    !codexCursorStore &&
+    (auditDue || !cursors?.files || typeof cursors.files !== "object")
+  ) {
     return { rolloutFiles: files, skipped: 0 };
   }
 
   const activeDates = activeCodexRolloutDates(files, { nowMs, recentDays });
   const freshnessCache = new Map();
+  const cursorLoadDirectories = new Set();
+  const coldDaySkipDecisions = new Map();
   const out = [];
   let skipped = 0;
+
+  const loadCodexCursorDirectory = async (filePath) => {
+    if (!codexCursorStore) return;
+    const directory = path.dirname(filePath);
+    if (cursorLoadDirectories.has(directory)) return;
+    cursorLoadDirectories.add(directory);
+    await codexCursorStore.loadCodexFilesForPaths([filePath], cursors);
+  };
+
+  const canSkipCodexDirectory = async (filePath) => {
+    if (!codexCursorStore) return false;
+    const directory = path.dirname(filePath);
+    if (coldDaySkipDecisions.has(directory)) {
+      return coldDaySkipDecisions.get(directory);
+    }
+    const decision = await codexCursorStore.canSkipCodexDay({
+      filePath,
+      dayInventoryCache: cursors?.codexDayInventoryCache,
+      nowMs,
+    });
+    coldDaySkipDecisions.set(directory, decision);
+    return decision;
+  };
 
   for (const entry of files) {
     const filePath = typeof entry === "string" ? entry : entry?.path;
@@ -532,9 +593,23 @@ async function filterColdCodexRolloutFiles({
 
     const rolloutDate = rolloutDateFromPath(filePath);
     if (!rolloutDate || activeDates.has(rolloutDate)) {
+      await loadCodexCursorDirectory(filePath);
       out.push(entry);
       continue;
     }
+
+    if (auditDue) {
+      await loadCodexCursorDirectory(filePath);
+      out.push(entry);
+      continue;
+    }
+
+    if (await canSkipCodexDirectory(filePath)) {
+      skipped += 1;
+      continue;
+    }
+
+    await loadCodexCursorDirectory(filePath);
 
     const prev = cursors.files[filePath];
     const cachedSize = Number(prev?.offset);

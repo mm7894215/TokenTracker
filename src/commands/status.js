@@ -5,6 +5,7 @@ const fssync = require("node:fs");
 const pkg = require("../../package.json");
 
 const { readJson } = require("../lib/fs");
+const { readCursorStateSummary } = require("../lib/cursor-store");
 const { readCodexNotify, readEveryCodeNotify } = require("../lib/codex-config");
 const {
   isClaudeHookConfigured,
@@ -134,7 +135,7 @@ async function cmdStatus(argv = []) {
   const geminiHookCommand = buildGeminiHookCommand(notifyPath);
 
   const config = await readJson(configPath);
-  const cursors = await readJson(cursorsPath);
+  const { cursors } = await readCursorStateSummary({ trackerDir, cursorsPath });
   const queueState = (await readJson(queueStatePath)) || { offset: 0 };
   const uploadThrottle = normalizeUploadState(
     await readJson(uploadThrottlePath),

@@ -106,6 +106,10 @@ const {
   parseCursorCsv,
 } = require("../lib/cursor-config");
 const { purgeProjectUsage } = require("../lib/project-usage-purge");
+const {
+  isCodexSessionCursorPath,
+  openCursorStore,
+} = require("../lib/cursor-store");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
 const { resolveRuntimeConfig } = require("../lib/runtime-config");
 
@@ -288,6 +292,9 @@ function mergeCopilotAppDbStates(primary = {}, alias = {}) {
 async function cmdSync(argv, context = {}) {
   const opts = parseArgs(argv);
   const diagnostics = context && typeof context === "object" ? context.diagnostics : null;
+  const cursorStoreOptions = context && typeof context === "object"
+    ? context.cursorStoreOptions
+    : null;
   const syncDiagnostics = diagnostics && typeof diagnostics === "object" ? diagnostics : null;
   const home = os.homedir();
   const { trackerDir } = await resolveTrackerPaths({ home });
@@ -315,7 +322,16 @@ async function cmdSync(argv, context = {}) {
     const legacyGrokSignalPath = path.join(trackerDir, "tracker", "grok-last-session.json");
 
     const config = await readJson(configPath);
-    const cursors = (await readJson(cursorsPath)) || { version: 1, files: {}, updatedAt: null };
+    const codexCursorRoots = [process.env.CODEX_HOME || path.join(home, ".codex")];
+    const cursorStore = await openCursorStore({
+      trackerDir,
+      cursorsPath,
+      codexRoots: codexCursorRoots,
+      ...(cursorStoreOptions && typeof cursorStoreOptions === "object"
+        ? cursorStoreOptions
+        : {}),
+    });
+    const cursors = cursorStore.cursors;
     const uploadThrottle = normalizeUploadState(await readJson(uploadThrottlePath));
     let uploadThrottleState = uploadThrottle;
     let grokHookSignal = null;
@@ -418,6 +434,7 @@ async function cmdSync(argv, context = {}) {
     }
 
     if (isFullSourceScan) {
+      await cursorStore.materializeAllCodexState(cursors);
       await migrateRolloutCumulativeDeltaBuckets({ cursors, queuePath, rolloutFiles });
       const codexRescanRepairRan = await repairCodexRescanInflation({
         cursors,
@@ -446,7 +463,7 @@ async function cmdSync(argv, context = {}) {
       });
     }
 
-    const codexColdSkipEnabled = opts.auto && (isFullSourceScan || isBackgroundLightweightSync) && sourceAllowed("codex");
+    const codexColdSkipEnabled = opts.auto && sourceAllowed("codex");
     const codexColdAuditDue = codexColdSkipEnabled
       ? isCodexColdScanAuditDue(cursors)
       : false;
@@ -454,12 +471,16 @@ async function cmdSync(argv, context = {}) {
       ? await filterColdCodexRolloutFiles({
           rolloutFiles,
           cursors,
+          codexCursorStore: cursorStore,
           projectEnabled: true,
           auditDue: codexColdAuditDue,
           diagnostics: syncDiagnostics,
         })
       : { rolloutFiles, skipped: 0 };
     const rolloutFilesForParse = codexColdFilter.rolloutFiles;
+    if (!codexColdSkipEnabled && sourceAllowed("codex")) {
+      await cursorStore.loadCodexFilesForPaths(rolloutFilesForParse, cursors);
+    }
 
     const openclawFiles = openclawSignal?.sessionFile
       ? [{ path: openclawSignal.sessionFile, source: "openclaw" }]
@@ -477,6 +498,9 @@ async function cmdSync(argv, context = {}) {
       parseResult = await parseRolloutIncremental({
         rolloutFiles: rolloutFilesForParse,
         cursors,
+        codexEventStore: Array.isArray(cursors.codexHashes)
+          ? null
+          : cursorStore.codexEventStore,
         queuePath,
         projectQueuePath,
         diagnostics: syncDiagnostics,
@@ -1851,12 +1875,12 @@ async function cmdSync(argv, context = {}) {
     }
 
     cursors.updatedAt = new Date().toISOString();
-    await writeJson(cursorsPath, cursors);
+    await cursorStore.commit(cursors);
     if (syncDiagnostics) {
-      const cursorStat = await fs.stat(cursorsPath);
+      const cursorStat = await fs.stat(cursorStore.currentCorePath);
       syncDiagnostics.cursor_commits = Number(syncDiagnostics.cursor_commits || 0) + 1;
       syncDiagnostics.cursor_bytes = Number(syncDiagnostics.cursor_bytes || 0) + cursorStat.size;
-      syncDiagnostics.cursor_path = cursorsPath;
+      syncDiagnostics.cursor_path = cursorStore.currentCorePath;
     }
     if (grokHookSignalConsumed && grokHookSignalPath) {
       await fs.unlink(grokHookSignalPath).catch(() => {});
@@ -3653,12 +3677,6 @@ async function scanForForkedCodexRollout(rolloutFiles) {
     }
   }
   return { forked: false, indeterminate };
-}
-
-function isCodexSessionCursorPath(filePath) {
-  if (typeof filePath !== "string") return false;
-  const normalized = filePath.replace(/\\/g, "/");
-  return /\/\.codex\/(?:archived_)?sessions\//.test(normalized);
 }
 
 async function projectUsageKeysFromQueuePath(queuePath, source) {

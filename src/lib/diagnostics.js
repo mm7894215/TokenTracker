@@ -3,6 +3,7 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 
 const { readJson } = require("./fs");
+const { readCursorStateSummary } = require("./cursor-store");
 const { readCodexNotify, readEveryCodeNotify } = require("./codex-config");
 const { areClaudeUsageHooksConfigured, buildClaudeHookCommand } = require("./claude-config");
 const {
@@ -59,7 +60,8 @@ async function collectTrackerDiagnostics({
     path.join(home, ".grok");
 
   const config = await readJson(configPath);
-  const cursors = await readJson(cursorsPath);
+  const cursorSummary = await readCursorStateSummary({ trackerDir, cursorsPath });
+  const cursors = cursorSummary.cursors;
   const queueState = (await readJson(queueStatePath)) || { offset: 0 };
   const uploadThrottle = normalizeUploadState(await readJson(uploadThrottlePath));
   const autoRetry = await readJson(autoRetryPath);
@@ -165,10 +167,11 @@ async function collectTrackerDiagnostics({
     },
     parse: {
       updated_at: typeof cursors?.updatedAt === "string" ? cursors.updatedAt : null,
-      file_count:
-        cursors?.files && typeof cursors.files === "object"
-          ? Object.keys(cursors.files).length
-          : null,
+      file_count: cursorSummary.fileCount,
+      cursor_store: cursorSummary.mode,
+      cursor_store_legacy_drift: cursorSummary.legacyDrift === true,
+      codex_file_count: cursorSummary.codexFileCount,
+      codex_event_count: cursorSummary.codexEventCount,
     },
     queue: {
       size_bytes: queueSize,
