@@ -266,35 +266,21 @@ function selectAppendHashPaths(candidateGroups) {
 }
 
 async function digestFilePrefix(
-  filePath,
+  sourceHandle,
   endOffset,
   diagnostics = null,
-  sourceHandle = null,
 ) {
   const end = Math.max(0, Number(endOffset) || 0);
   const hash = crypto.createHash("sha256");
   if (end === 0) return hash.digest("hex");
   let bytesRead = 0;
-  if (sourceHandle && typeof sourceHandle.read === "function") {
-    const buffer = Buffer.allocUnsafe(PREFIX_HASH_READ_BYTES);
-    while (bytesRead < end) {
-      const length = Math.min(buffer.length, end - bytesRead);
-      const result = await sourceHandle.read(buffer, 0, length, bytesRead);
-      if (!result.bytesRead) break;
-      hash.update(buffer.subarray(0, result.bytesRead));
-      bytesRead += result.bytesRead;
-    }
-  } else {
-    const stream = fs.createReadStream(filePath, {
-      start: 0,
-      end: end - 1,
-      highWaterMark: PREFIX_HASH_READ_BYTES,
-    });
-    for await (const value of stream) {
-      const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
-      bytesRead += chunk.length;
-      hash.update(chunk);
-    }
+  const buffer = Buffer.allocUnsafe(PREFIX_HASH_READ_BYTES);
+  while (bytesRead < end) {
+    const length = Math.min(buffer.length, end - bytesRead);
+    const result = await sourceHandle.read(buffer, 0, length, bytesRead);
+    if (!result.bytesRead) break;
+    hash.update(buffer.subarray(0, result.bytesRead));
+    bytesRead += result.bytesRead;
   }
   if (diagnostics) {
     diagnostics.prefix_validation_bytes =
@@ -338,10 +324,9 @@ async function openValidatedResumeFile(cached, entry, diagnostics = null) {
 
     const expected = cached.contentHashState.copy().digest("hex");
     const actual = await digestFilePrefix(
-      entry.filePath,
+      handle,
       cached.endOffset,
       diagnostics,
-      handle,
     );
     if (actual !== expected) return null;
     if (diagnostics) diagnostics.stat_calls += 1;
@@ -377,15 +362,6 @@ function rememberParsedGroup(key, value) {
 }
 
 function splitCapturedParse(parsed) {
-  if (!parsed || typeof parsed !== "object") {
-    return {
-      parsed,
-      resumeState: null,
-      endOffset: 0,
-      appendable: false,
-      contentHashState: null,
-    };
-  }
   const {
     resumeState = null,
     endOffset = 0,
@@ -537,10 +513,9 @@ async function computeCodexContextBreakdown({
             try {
               const expectedSnapshot = resumed.contentHashState.copy().digest("hex");
               const actualSnapshot = await digestFilePrefix(
-                singleEntry.filePath,
+                resumeHandle,
                 singleEntry.stat.size,
                 diagnostics,
-                resumeHandle,
               );
               stableAfterParse = actualSnapshot === expectedSnapshot;
             } catch {

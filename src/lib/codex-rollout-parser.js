@@ -948,12 +948,12 @@ function parseCodexLine(lineBuffer, diagnostics) {
   if (content.length > 0 && content[content.length - 1] === 0x0d) {
     content = content.subarray(0, content.length - 1);
   }
-  if (content.length === 0) return { empty: true, obj: null };
+  if (content.length === 0) return null;
   try {
     if (diagnostics) diagnostics.json_parse_calls += 1;
-    return { empty: false, obj: JSON.parse(content.toString("utf8")) };
+    return JSON.parse(content.toString("utf8"));
   } catch {
-    return { empty: false, obj: null };
+    return null;
   }
 }
 
@@ -1017,7 +1017,9 @@ async function* readCodexObjectsIncremental(filePath, diagnostics, fileIndex, {
         if (newline < 0) {
           const tail = chunk.subarray(cursor);
           if (tail.length > 0) {
-            fragments.push(tail);
+            // Stable-handle reads reuse their buffer, so retained fragments
+            // must own their bytes before the next read overwrites it.
+            fragments.push(Buffer.from(tail));
             fragmentsBytes += tail.length;
           }
           break;
@@ -1033,9 +1035,9 @@ async function* readCodexObjectsIncremental(filePath, diagnostics, fileIndex, {
         const absoluteEnd = chunkStart + newline + 1;
         if (readProgress) readProgress.endOffset = absoluteEnd;
         lineStartOffset = absoluteEnd;
-        const parsed = parseCodexLine(lineBuffer, diagnostics);
-        if (parsed.obj) {
-          yield { obj: parsed.obj, fileIndex, lineIndex };
+        const obj = parseCodexLine(lineBuffer, diagnostics);
+        if (obj) {
+          yield { obj, fileIndex, lineIndex };
           lineIndex += 1;
         }
         cursor = newline + 1;
@@ -1046,10 +1048,10 @@ async function* readCodexObjectsIncremental(filePath, diagnostics, fileIndex, {
       const lineBuffer = fragments.length === 1
         ? fragments[0]
         : Buffer.concat(fragments, fragmentsBytes);
-      const parsed = parseCodexLine(lineBuffer, diagnostics);
-      if (parsed.obj) {
+      const obj = parseCodexLine(lineBuffer, diagnostics);
+      if (obj) {
         if (readProgress) readProgress.endOffset = lineStartOffset + fragmentsBytes;
-        yield { obj: parsed.obj, fileIndex, lineIndex };
+        yield { obj, fileIndex, lineIndex };
       }
     }
   } finally {

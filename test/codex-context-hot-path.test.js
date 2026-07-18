@@ -902,6 +902,113 @@ test("Context incrementally parses append-only sessions with pending tools and d
   }
 });
 
+test("Context preserves appended JSONL records larger than the stable read buffer", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "tt-codex-context-large-record-"));
+  const freshRoot = await fs.mkdtemp(
+    path.join(os.tmpdir(), "tt-codex-context-large-record-fresh-"),
+  );
+  try {
+    const fileName =
+      "rollout-2030-06-01T23-40-00-88888888-8888-4888-8888-888888888888.jsonl";
+    const initialEvents = [
+      {
+        timestamp: "2030-06-01T23:40:00.000Z",
+        type: "session_meta",
+        payload: {
+          id: "88888888-8888-4888-8888-888888888888",
+          cwd: "/tmp/project",
+          model_provider: "openai",
+        },
+      },
+      tokenCount("2030-06-01T23:50:00.000Z", BASELINE_USAGE),
+    ];
+    const filePath = await writeRollout(
+      root,
+      "2030-06-01",
+      fileName,
+      initialEvents,
+      "2030-06-02T00:00:00.000Z",
+    );
+    const args = {
+      from: "2030-06-02",
+      to: "2030-06-02",
+      codexDir: root,
+      timeZoneContext: { timeZone: "UTC", offsetMinutes: 0 },
+    };
+    const primed = await computeCodexContextBreakdown(args);
+    assert.equal(primed.totals.total_tokens, 0);
+
+    const skillCommand =
+      `sed -n '1,120p' /tmp/.codex/skills/large-fixture/SKILL.md ${"x".repeat(90 * 1024)}`;
+    const appendedEvents = [
+      {
+        timestamp: "2030-06-02T00:01:00.000Z",
+        type: "response_item",
+        payload: {
+          type: "function_call",
+          name: "exec_command",
+          call_id: "large-exec",
+          arguments: JSON.stringify({ cmd: skillCommand }),
+        },
+      },
+      {
+        timestamp: "2030-06-02T00:02:00.000Z",
+        type: "event_msg",
+        payload: {
+          type: "exec_command_end",
+          command: [
+            "bash",
+            "-lc",
+            "sed -n '1,120p' /tmp/.codex/skills/large-fixture/SKILL.md",
+          ],
+          status: "completed",
+          exit_code: 0,
+          duration: { secs: 0, nanos: 10_000_000 },
+          aggregated_output: "skill body\n",
+        },
+      },
+      tokenCount("2030-06-02T00:05:00.000Z", TARGET_USAGE),
+    ];
+    const appendedContents = rolloutContents(appendedEvents);
+    assert.ok(Buffer.byteLength(JSON.stringify(appendedEvents[0])) > 64 * 1024);
+    await fs.appendFile(filePath, appendedContents, "utf8");
+    const active = new Date("2030-06-02T00:06:00.000Z");
+    await fs.utimes(filePath, active, active);
+
+    const incremental = await computeCodexContextBreakdown(args);
+    const freshPath = await writeRollout(freshRoot, "2030-06-01", fileName, []);
+    await fs.copyFile(filePath, freshPath);
+    await fs.utimes(freshPath, active, active);
+    const fresh = await computeCodexContextBreakdown({ ...args, codexDir: freshRoot });
+
+    const { diagnostics: incrementalDiagnostics, ...incrementalOutput } = incremental;
+    const { diagnostics: _freshDiagnostics, ...freshOutput } = fresh;
+    assert.deepEqual(incrementalOutput, freshOutput);
+    assertExactTargetDelta(incremental);
+    assert.equal(
+      fresh.tool_calls_breakdown.categories.find((row) => row.name === "Execution")
+        ?.totals.total_tokens,
+      76,
+    );
+    assert.equal(fresh.skills_breakdown.skills[0]?.name, "large-fixture");
+    assert.ok(
+      fresh.exec_command_breakdown.by_command.some(
+        (row) => row.totals.total_tokens === 76,
+      ),
+    );
+    assert.equal(incrementalDiagnostics.incremental_parse_hits, 1);
+    assert.equal(incrementalDiagnostics.incremental_parse_fallbacks, 0);
+    assert.equal(incrementalDiagnostics.json_parse_calls, appendedEvents.length + 1);
+    assert.equal(
+      incrementalDiagnostics.bytes_read,
+      Buffer.byteLength(appendedContents),
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(freshRoot, { recursive: true, force: true });
+  }
+});
+
 test("Context keeps one file handle across prefix validation and suffix parsing", {
   skip: process.platform === "win32",
 }, async () => {
