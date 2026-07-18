@@ -5,6 +5,7 @@
 
 "use strict";
 
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const readline = require("node:readline");
@@ -560,11 +561,33 @@ async function parseCodexRolloutFile(filePath, {
   endOffset = null,
   resumeState = null,
   captureResumeState = false,
+  captureContentHash = false,
+  contentHashState = null,
 } = {}) {
   const filePaths = (Array.isArray(filePath) ? filePath : [filePath]).filter(Boolean);
   const primaryFilePath = filePaths[0] || String(filePath || "");
   const isResuming = Boolean(resumeState && filePaths.length === 1);
-  const readProgress = { endOffset: Math.max(0, Number(startOffset) || 0) };
+  const initialOffset = Math.max(0, Number(startOffset) || 0);
+  const readProgress = {
+    endOffset: initialOffset,
+    lastByte: initialOffset > 0 ? 0x0a : null,
+  };
+  let contentHasher = null;
+  if (captureResumeState && captureContentHash && filePaths.length === 1) {
+    if (contentHashState && typeof contentHashState.copy === "function") {
+      try {
+        contentHasher = contentHashState.copy();
+      } catch {
+        contentHasher = null;
+      }
+    }
+    if (initialOffset > 0 && !contentHasher) {
+      const error = new Error("Codex rollout append is missing its prefix hash state");
+      error.code = CODEX_RESUME_INVALIDATED;
+      throw error;
+    }
+    if (!contentHasher) contentHasher = crypto.createHash("sha256");
+  }
 
   let sessionId = isResuming ? resumeState.sessionId || null : null;
   let cwd = isResuming ? resumeState.cwd || null : null;
@@ -811,6 +834,7 @@ async function parseCodexRolloutFile(filePath, {
     startOffset,
     endOffset,
     readProgress,
+    contentHasher,
   })) {
     const ts = typeof obj?.timestamp === "string" ? obj.timestamp : null;
     if (!ts) continue;
@@ -909,6 +933,10 @@ async function parseCodexRolloutFile(filePath, {
       lastTimestampEventSignatures: Array.from(materializeLastTimestampSignatures()),
     };
     result.endOffset = readProgress.endOffset;
+    result.appendable = Boolean(contentHasher) && (
+      readProgress.endOffset === 0 || readProgress.lastByte === 0x0a
+    );
+    result.contentHashState = contentHasher;
   }
   return result;
 }
@@ -931,6 +959,7 @@ async function* readCodexObjectsIncremental(filePath, diagnostics, fileIndex, {
   startOffset = 0,
   endOffset = null,
   readProgress = null,
+  contentHasher = null,
 } = {}) {
   const start = Math.max(0, Number(startOffset) || 0);
   const requestedEnd = Number(endOffset);
@@ -957,6 +986,10 @@ async function* readCodexObjectsIncremental(filePath, diagnostics, fileIndex, {
       const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
       const chunkStart = nextChunkOffset;
       nextChunkOffset += chunk.length;
+      if (contentHasher) contentHasher.update(chunk);
+      if (readProgress && chunk.length > 0) {
+        readProgress.lastByte = chunk[chunk.length - 1];
+      }
       if (diagnostics) {
         diagnostics.bytes_read = Number(diagnostics.bytes_read || 0) + chunk.length;
       }
@@ -1003,6 +1036,7 @@ async function* readCodexObjectsIncremental(filePath, diagnostics, fileIndex, {
       }
     }
   } finally {
+    if (readProgress) readProgress.endOffset = nextChunkOffset;
     stream.destroy();
     if (diagnostics) diagnostics.parsed_files += 1;
   }
@@ -1012,6 +1046,7 @@ async function* readCodexObjectsFull(filePath, diagnostics, fileIndex, {
   startOffset = 0,
   endOffset = null,
   readProgress = null,
+  contentHasher = null,
 } = {}) {
   const start = Math.max(0, Number(startOffset) || 0);
   const requestedEnd = Number(endOffset);
@@ -1024,10 +1059,20 @@ async function* readCodexObjectsFull(filePath, diagnostics, fileIndex, {
 
   if (diagnostics) diagnostics.opened_files += 1;
   const stream = fs.createReadStream(filePath, {
-    encoding: "utf8",
+    ...(contentHasher ? {} : { encoding: "utf8" }),
     start,
     ...(hasBoundedEnd ? { end: requestedEnd - 1 } : {}),
   });
+  const trackChunk = contentHasher
+    ? (value) => {
+        const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+        contentHasher.update(chunk);
+        if (readProgress && chunk.length > 0) {
+          readProgress.lastByte = chunk[chunk.length - 1];
+        }
+      }
+    : null;
+  if (trackChunk) stream.on("data", trackChunk);
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
   let lineIndex = 0;
   try {
@@ -1050,6 +1095,7 @@ async function* readCodexObjectsFull(filePath, diagnostics, fileIndex, {
       diagnostics.bytes_read = Number(diagnostics.bytes_read || 0) + bytesRead;
       diagnostics.parsed_files += 1;
     }
+    if (trackChunk) stream.off("data", trackChunk);
     rl.close();
     stream.close?.();
   }

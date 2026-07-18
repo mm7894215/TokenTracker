@@ -11,7 +11,7 @@
 "use strict";
 
 const crypto = require("node:crypto");
-const fs = require("node:fs/promises");
+const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
@@ -168,9 +168,9 @@ function buildDateRange({ period, date }) {
 const CACHE = new Map();
 const PARSED_GROUP_CACHE = new Map();
 const CACHE_TTL_MS = 60_000;
-const CACHE_SCHEMA_VERSION = "codex-context-v5";
+const CACHE_SCHEMA_VERSION = "codex-context-v6";
 const MAX_PARSED_GROUP_CACHE_ENTRIES = 4096;
-const APPEND_PREFIX_TAIL_BYTES = 4096;
+const PREFIX_HASH_READ_BYTES = 1024 * 1024;
 
 function cacheTimeZoneKey(timeZoneContext) {
   if (!timeZoneContext) return "";
@@ -215,35 +215,70 @@ function parsedGroupSignature(entries) {
   return hash.digest("hex");
 }
 
-async function inspectParsedPrefix(filePath, endOffset) {
-  const end = Math.max(0, Number(endOffset) || 0);
-  if (end === 0) return { prefixTail: "", appendable: true };
-  const start = Math.max(0, end - APPEND_PREFIX_TAIL_BYTES);
-  const length = end - start;
-  const handle = await fs.open(filePath, "r");
-  try {
-    const buffer = Buffer.allocUnsafe(length);
-    const { bytesRead } = await handle.read(buffer, 0, length, start);
-    if (bytesRead !== length) return null;
-    return {
-      prefixTail: crypto.createHash("sha256").update(buffer).digest("hex"),
-      appendable: buffer[length - 1] === 0x0a,
-    };
-  } finally {
-    await handle.close();
+function selectAppendHashPaths(candidateGroups) {
+  // Only the newest single-file group pays the cold hash cost. Any file that
+  // later grows becomes newest, takes one conservative full parse, and keeps
+  // its hash state for subsequent append-only refreshes.
+  let newest = null;
+  for (const entries of candidateGroups.values()) {
+    if (
+      entries.length !== 1 ||
+      !rolloutSessionIdFromPath(entries[0].filePath)
+    ) continue;
+    const entry = entries[0];
+    if (!newest) {
+      newest = entry;
+      continue;
+    }
+    const mtimeDelta = Number(entry.stat?.mtimeMs || 0) -
+      Number(newest.stat?.mtimeMs || 0);
+    const ctimeDelta = Number(entry.stat?.ctimeMs || 0) -
+      Number(newest.stat?.ctimeMs || 0);
+    if (
+      mtimeDelta > 0 ||
+      (mtimeDelta === 0 && ctimeDelta > 0) ||
+      (mtimeDelta === 0 && ctimeDelta === 0 &&
+        entry.filePath.localeCompare(newest.filePath) < 0)
+    ) {
+      newest = entry;
+    }
   }
+  return newest ? new Set([newest.filePath]) : new Set();
 }
 
-async function prefixTailFingerprint(filePath, endOffset) {
-  return (await inspectParsedPrefix(filePath, endOffset))?.prefixTail ?? null;
+async function digestFilePrefix(filePath, endOffset, diagnostics = null) {
+  const end = Math.max(0, Number(endOffset) || 0);
+  const hash = crypto.createHash("sha256");
+  if (end === 0) return hash.digest("hex");
+  const stream = fs.createReadStream(filePath, {
+    start: 0,
+    end: end - 1,
+    highWaterMark: PREFIX_HASH_READ_BYTES,
+  });
+  let bytesRead = 0;
+  try {
+    for await (const value of stream) {
+      const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+      bytesRead += chunk.length;
+      hash.update(chunk);
+    }
+  } finally {
+    stream.destroy();
+  }
+  if (diagnostics) {
+    diagnostics.prefix_validation_bytes =
+      Number(diagnostics.prefix_validation_bytes || 0) + bytesRead;
+  }
+  return bytesRead === end ? hash.digest("hex") : null;
 }
 
-async function canResumeParsedGroup(cached, entry) {
+async function canResumeParsedGroup(cached, entry, diagnostics = null) {
   if (
     !cached?.resumeState ||
     !cached?.stat ||
+    !cached?.contentHashState ||
+    typeof cached.contentHashState.copy !== "function" ||
     cached.appendable !== true ||
-    typeof cached.prefixTail !== "string" ||
     cached.filePath !== entry.filePath
   ) return false;
   const previous = cached.stat;
@@ -258,7 +293,13 @@ async function canResumeParsedGroup(cached, entry) {
     return false;
   }
   try {
-    return await prefixTailFingerprint(entry.filePath, cached.endOffset) === cached.prefixTail;
+    const expected = cached.contentHashState.copy().digest("hex");
+    const actual = await digestFilePrefix(entry.filePath, cached.endOffset, diagnostics);
+    if (actual !== expected) return false;
+    if (diagnostics) diagnostics.stat_calls += 1;
+    const afterValidation = fs.statSync(entry.filePath);
+    return statIdentity(entry.filePath, afterValidation) ===
+      statIdentity(entry.filePath, current);
   } catch {
     return false;
   }
@@ -276,10 +317,22 @@ function rememberParsedGroup(key, value) {
 
 function splitCapturedParse(parsed) {
   if (!parsed || typeof parsed !== "object") {
-    return { parsed, resumeState: null, endOffset: 0 };
+    return {
+      parsed,
+      resumeState: null,
+      endOffset: 0,
+      appendable: false,
+      contentHashState: null,
+    };
   }
-  const { resumeState = null, endOffset = 0, ...result } = parsed;
-  return { parsed: result, resumeState, endOffset };
+  const {
+    resumeState = null,
+    endOffset = 0,
+    appendable = false,
+    contentHashState = null,
+    ...result
+  } = parsed;
+  return { parsed: result, resumeState, endOffset, appendable, contentHashState };
 }
 
 // ---------------------------------------------------------------------------
@@ -324,6 +377,7 @@ async function computeCodexContextBreakdown({
     incremental_parse_hits: 0,
     incremental_parse_fallbacks: 0,
     bytes_read: 0,
+    prefix_validation_bytes: 0,
     json_parse_calls: 0,
   };
   const discovered = discoverCodexSessionFiles(roots, {
@@ -361,6 +415,7 @@ async function computeCodexContextBreakdown({
     if (!candidateGroups.has(sessionKey)) candidateGroups.set(sessionKey, []);
     candidateGroups.get(sessionKey).push(entry);
   }
+  const appendHashPaths = selectAppendHashPaths(candidateGroups);
 
   for (const entries of candidateGroups.values()) {
     const filePaths = entries.map((entry) => entry.filePath);
@@ -381,7 +436,13 @@ async function computeCodexContextBreakdown({
     } else {
       let captured = null;
       const singleEntry = entries.length === 1 ? entries[0] : null;
-      if (singleEntry && await canResumeParsedGroup(cachedGroup, singleEntry)) {
+      const appendHashEligible = Boolean(
+        singleEntry && appendHashPaths.has(singleEntry.filePath),
+      );
+      if (
+        appendHashEligible &&
+        await canResumeParsedGroup(cachedGroup, singleEntry, diagnostics)
+      ) {
         try {
           const resumed = await parseCodexRolloutFile(singleEntry.filePath, {
             from: fromKey,
@@ -393,12 +454,16 @@ async function computeCodexContextBreakdown({
             endOffset: singleEntry.stat.size,
             resumeState: cachedGroup.resumeState,
             captureResumeState: true,
+            captureContentHash: true,
+            contentHashState: cachedGroup.contentHashState,
           });
           const delta = splitCapturedParse(resumed);
           captured = {
             parsed: mergeParsedSessionResults(cachedGroup.parsed, delta.parsed),
             resumeState: delta.resumeState,
             endOffset: delta.endOffset,
+            appendable: delta.appendable,
+            contentHashState: delta.contentHashState,
           };
           diagnostics.incremental_parse_hits += 1;
         } catch (error) {
@@ -418,6 +483,7 @@ async function computeCodexContextBreakdown({
             seenTokenEvents: filePaths.length === 1 ? new Set() : seenTokenEvents,
             endOffset: singleEntry?.stat?.size ?? null,
             captureResumeState: Boolean(singleEntry),
+            captureContentHash: appendHashEligible,
           },
         );
         captured = splitCapturedParse(fresh);
@@ -425,16 +491,13 @@ async function computeCodexContextBreakdown({
 
       parsed = captured.parsed;
       if (parsedCacheKey) {
-        const parsedPrefix = singleEntry
-          ? await inspectParsedPrefix(singleEntry.filePath, captured.endOffset).catch(() => null)
-          : null;
         rememberParsedGroup(parsedCacheKey, {
           signature,
           parsed,
           resumeState: captured.resumeState,
           endOffset: captured.endOffset,
-          prefixTail: parsedPrefix?.prefixTail ?? null,
-          appendable: parsedPrefix?.appendable === true,
+          appendable: captured.appendable === true,
+          contentHashState: captured.contentHashState,
           filePath: singleEntry?.filePath || null,
           stat: singleEntry?.stat || null,
         });

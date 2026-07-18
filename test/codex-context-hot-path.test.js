@@ -220,6 +220,7 @@ test("bounded Context prunes an unrelated historical rollout and reports per-cal
       parse_cache_hits: 0,
       incremental_parse_hits: 0,
       incremental_parse_fallbacks: 0,
+      prefix_validation_bytes: 0,
       json_parse_calls: 2,
     });
     const exhaustive = await computeCodexContextBreakdown({ ...args, exhaustive: true });
@@ -729,7 +730,9 @@ test("Context reuses frozen parsed sessions when one active session changes", as
         total_tokens: 35,
       }),
       ],
+      "2030-06-02T13:00:00.000Z",
     );
+    const activePrefixSize = (await fs.stat(activePath)).size;
     const args = {
       from: "2030-06-02",
       to: "2030-06-02",
@@ -758,6 +761,8 @@ test("Context reuses frozen parsed sessions when one active session changes", as
         total_tokens: 54,
       }),
     ].map((event) => JSON.stringify(event)).join("\n") + "\n", "utf8");
+    const activeMtime = new Date("2030-06-02T14:00:00.000Z");
+    await fs.utimes(activePath, activeMtime, activeMtime);
 
     const second = await computeCodexContextBreakdown(args);
     assert.equal(second.diagnostics.opened_files, 1);
@@ -765,6 +770,7 @@ test("Context reuses frozen parsed sessions when one active session changes", as
     assert.equal(second.diagnostics.parse_cache_hits, 1);
     assert.equal(second.diagnostics.incremental_parse_hits, 1);
     assert.equal(second.diagnostics.incremental_parse_fallbacks, 0);
+    assert.equal(second.diagnostics.prefix_validation_bytes, activePrefixSize);
     assert.equal(second.diagnostics.json_parse_calls, 1);
     assert.ok(second.diagnostics.bytes_read < first.diagnostics.bytes_read);
     assert.ok(stablePath);
@@ -832,6 +838,7 @@ test("Context incrementally parses append-only sessions with pending tools and d
       ],
       "2030-06-02T00:00:00.000Z",
     );
+    const prefixSize = (await fs.stat(filePath)).size;
     const args = {
       from: "2030-06-02",
       to: "2030-06-02",
@@ -864,9 +871,11 @@ test("Context incrementally parses append-only sessions with pending tools and d
     assert.ok(appended.exec_command_breakdown.by_command.length > 0);
     assert.equal(appended.diagnostics.incremental_parse_hits, 1);
     assert.equal(appended.diagnostics.incremental_parse_fallbacks, 0);
+    assert.equal(appended.diagnostics.prefix_validation_bytes, prefixSize);
     assert.equal(appended.diagnostics.json_parse_calls, 1);
     assert.equal(appended.diagnostics.bytes_read, Buffer.byteLength(appendedLine));
 
+    const firstAppendSize = (await fs.stat(filePath)).size;
     await fs.appendFile(filePath, appendedLine, "utf8");
     await fs.utimes(
       filePath,
@@ -878,6 +887,7 @@ test("Context incrementally parses append-only sessions with pending tools and d
     assert.equal(duplicate.message_count, appended.message_count);
     assert.equal(duplicate.diagnostics.incremental_parse_hits, 1);
     assert.equal(duplicate.diagnostics.incremental_parse_fallbacks, 0);
+    assert.equal(duplicate.diagnostics.prefix_validation_bytes, firstAppendSize);
     assert.equal(duplicate.diagnostics.json_parse_calls, 1);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
@@ -894,9 +904,27 @@ test("Context requires an unchanged newline-terminated prefix before resuming", 
       try {
         const fileName =
           "rollout-2030-06-01T23-50-00-55555555-5555-4555-8555-555555555555.jsonl";
-        const filePath = await writeRollout(root, "2030-06-01", fileName, [
-          tokenCount("2030-06-01T23:50:00.000Z", BASELINE_USAGE),
-        ], "2030-06-02T00:00:00.000Z");
+        const events = scenario === "prefix rewrite"
+          ? [
+              {
+                timestamp: "2030-06-01T23:40:00.000Z",
+                type: "session_meta",
+                payload: {
+                  id: "55555555-5555-4555-8555-555555555555",
+                  cwd: `/tmp/${"a".repeat(5000)}`,
+                  model_provider: "openai",
+                },
+              },
+              tokenCount("2030-06-01T23:50:00.000Z", BASELINE_USAGE),
+            ]
+          : [tokenCount("2030-06-01T23:50:00.000Z", BASELINE_USAGE)];
+        const filePath = await writeRollout(
+          root,
+          "2030-06-01",
+          fileName,
+          events,
+          "2030-06-02T00:00:00.000Z",
+        );
         if (scenario === "incomplete record") {
           const stat = await fs.stat(filePath);
           await fs.truncate(filePath, stat.size - 1);
@@ -912,16 +940,19 @@ test("Context requires an unchanged newline-terminated prefix before resuming", 
         };
         const primed = await computeCodexContextBreakdown(args);
         assert.equal(primed.totals.total_tokens, 0);
+        const primedSize = (await fs.stat(filePath)).size;
+        if (scenario === "prefix rewrite") assert.ok(primedSize > 4096);
 
         const targetLine = `${JSON.stringify(
           tokenCount("2030-06-02T00:05:00.000Z", TARGET_USAGE),
         )}\n`;
         if (scenario === "prefix rewrite") {
           const content = await fs.readFile(filePath, "utf8");
-          assert.match(content, /"input_tokens":100/);
+          const mutationOffset = content.indexOf("/tmp/aaaaaaaa");
+          assert.ok(mutationOffset >= 0 && mutationOffset < 4096);
           await fs.writeFile(
             filePath,
-            `${content.replace('"input_tokens":100', '"input_tokens":101')}${targetLine}`,
+            `${content.replace("/tmp/aaaaaaaa", "/tmp/baaaaaaa")}${targetLine}`,
             "utf8",
           );
         } else {
@@ -941,6 +972,10 @@ test("Context requires an unchanged newline-terminated prefix before resuming", 
         assert.equal(guarded.message_count, fresh.message_count);
         assert.equal(guarded.diagnostics.incremental_parse_hits, 0);
         assert.equal(guarded.diagnostics.incremental_parse_fallbacks, 0);
+        assert.equal(
+          guarded.diagnostics.prefix_validation_bytes,
+          scenario === "prefix rewrite" ? primedSize : 0,
+        );
         assert.equal(guarded.diagnostics.opened_files, 1);
         assert.equal(guarded.diagnostics.bytes_read, (await fs.stat(filePath)).size);
       } finally {
