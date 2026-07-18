@@ -125,6 +125,24 @@ describe("LeaderboardPage window-session cache reuse", () => {
     });
   });
 
+  it("keeps normal token-cell hover backgrounds opaque in dark mode", () => {
+    const contextKey = getLeaderboardPreloadContextKey({
+      accessMode: "cloud",
+      baseUrl: "https://edge.example",
+      mockEnabled: false,
+      userId: "user-1",
+    });
+    publishLeaderboardPreloadState(preloadedData, { contextKey });
+    getLeaderboard.mockReturnValue(new Promise(() => {}));
+
+    const { container } = renderLeaderboard();
+    const tokenCell = container.querySelector('td[data-column-key="gpt_tokens"]');
+
+    expect(tokenCell).not.toBeNull();
+    expect(tokenCell.className).toContain("dark:group-hover:bg-oai-gray-900");
+    expect(tokenCell.className).not.toContain("dark:group-hover:bg-oai-gray-900/60");
+  });
+
   it("keeps the pinned me-row rank cell sticky (twMerge must not drop it, issue 265)", () => {
     const contextKey = getLeaderboardPreloadContextKey({
       accessMode: "cloud",

@@ -154,7 +154,7 @@ function LeaderboardTokenCells({ entry, isMe, orderedColumns }) {
     : "text-oai-gray-500 dark:text-oai-gray-400";
   const cellBg = isMe
     ? "bg-oai-brand-50 dark:bg-oai-brand-900/10"
-    : "bg-white dark:bg-oai-gray-950 group-hover:bg-oai-gray-50 dark:group-hover:bg-oai-gray-900/60";
+    : "bg-white dark:bg-oai-gray-950 group-hover:bg-oai-gray-50 dark:group-hover:bg-oai-gray-900";
   return orderedColumns.map((col) => (
     <td
       key={col.key}

@@ -78,6 +78,33 @@ function renderProjects(props = {}) {
   return result;
 }
 
+it("removes the daily table gap while preserving project spacing", () => {
+  const result = render(
+    <DataDetails
+      projectEntries={[baseEntry]}
+      projectLimit={3}
+      copy={copy}
+      dailyBreakdownRows={[{ day: "2026-04-20", total_tokens: 1000 }]}
+      dailyBreakdownColumns={[{ key: "day", label: "Day" }]}
+      toggleSort={() => {}}
+      renderDetailDate={() => "2026-04-20"}
+      renderDetailCell={() => "1K"}
+      DETAILS_PAGED_PERIODS={new Set()}
+      period="month"
+      detailsPageCount={0}
+      detailsPage={0}
+      setDetailsPage={() => {}}
+    />,
+  );
+  const controls = screen.getByRole("tablist").parentElement;
+
+  expect(controls.className).toContain("mb-0");
+  fireEvent.click(screen.getByRole("tab", { name: copy("dashboard.projects.title") }));
+  expect(controls.className).toContain("mb-4");
+
+  result.unmount();
+});
+
 it("renders project rows without external links", () => {
   renderProjects();
   expect(screen.getByText("alpha")).toBeInTheDocument();

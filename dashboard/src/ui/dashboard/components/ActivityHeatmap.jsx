@@ -502,7 +502,7 @@ export function ActivityHeatmap({
       {view === "2d" && (
       <div
         ref={scrollRef}
-        className="overflow-x-auto overflow-y-hidden heatmap-scroll-thin"
+        className={`overflow-x-auto overflow-y-hidden heatmap-scroll-thin${embedded ? "" : " pb-1"}`}
       >
         <div style={{ minWidth: gridCols }}>
           {/* Month labels */}

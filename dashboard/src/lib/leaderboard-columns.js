@@ -42,7 +42,7 @@ export function lbStickyTdRank(isMe) {
     "sticky left-0 z-30 w-14 min-w-14 max-w-14 sm:w-[72px] sm:min-w-[72px] sm:max-w-[72px] px-2.5 sm:px-4 py-4 whitespace-nowrap",
     isMe
       ? "bg-oai-brand-50 dark:bg-emerald-950"
-      : "bg-white dark:bg-oai-gray-950 group-hover:bg-oai-gray-50 dark:group-hover:bg-oai-gray-900/60",
+      : "bg-white dark:bg-oai-gray-950 group-hover:bg-oai-gray-50 dark:group-hover:bg-oai-gray-900",
   );
 }
 
@@ -54,7 +54,7 @@ export function lbStickyTdUser(isMe) {
     "sticky left-[55px] sm:left-[71px] z-30 hover:z-50 min-w-[96px] sm:min-w-[200px] max-w-[170px] sm:max-w-[min(260px,45vw)] border-l border-r border-oai-gray-200 dark:border-oai-gray-800 px-3 sm:px-4 py-4 min-w-0",
     isMe
       ? "bg-oai-brand-50 dark:bg-emerald-950"
-      : "bg-white dark:bg-oai-gray-950 group-hover:bg-oai-gray-50 dark:group-hover:bg-oai-gray-900/60",
+      : "bg-white dark:bg-oai-gray-950 group-hover:bg-oai-gray-50 dark:group-hover:bg-oai-gray-900",
   );
 }
 

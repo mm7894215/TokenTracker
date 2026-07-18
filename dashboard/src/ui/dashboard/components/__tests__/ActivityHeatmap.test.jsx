@@ -53,6 +53,15 @@ describe("ActivityHeatmap", () => {
     expect(tooltip.className).not.toContain("pointer-events-auto");
   });
 
+  it("reserves scrollbar clearance only for the standalone 2D view", () => {
+    const standalone = renderHeatmap();
+    expect(standalone.container.querySelector(".heatmap-scroll-thin").className).toContain("pb-1");
+    standalone.unmount();
+
+    const embedded = renderHeatmap({ embedded: true });
+    expect(embedded.container.querySelector(".heatmap-scroll-thin").className).not.toContain("pb-1");
+  });
+
   it("forces 2D when embedded, ignoring the persisted 3D dashboard preference", () => {
     // Reproduces the leaderboard-modal regression: picking 3D on the standalone
     // dashboard persists "3d" to localStorage, which the embedded modal instance

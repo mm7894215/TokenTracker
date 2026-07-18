@@ -124,7 +124,7 @@ export function DataDetails({
   return (
     <Card>
       {/* Tab Switcher + Controls */}
-      <div className="flex items-center justify-between gap-3 mb-4">
+      <div className={`flex items-center justify-between gap-3 ${activeTab === "projects" ? "mb-4" : "mb-0"}`}>
         <div role="tablist" aria-label="Data view" className="flex gap-1">
           <button
             role="tab"
