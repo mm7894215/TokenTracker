@@ -163,6 +163,7 @@ export function DashboardView(props) {
     allowBreakdownToggle,
     refreshAll,
     usageLoadingState,
+    announceUsageLoading,
     initialDashboardLoading,
     fleetData,
     hasDetailsActual,
@@ -351,6 +352,7 @@ export function DashboardView(props) {
               fleetData={fleetData}
               onRefresh={screenshotMode ? null : refreshAll}
               loading={usageLoadingState}
+              announceLoading={announceUsageLoading}
               onOpenShare={screenshotMode ? null : onOpenShare}
               customFrom={customFrom}
               customTo={customTo}

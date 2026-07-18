@@ -148,6 +148,7 @@ export function DashboardPage({
   const [installCopied, setInstallCopied] = useState(false);
   const [sessionExpiredCopied, setSessionExpiredCopied] = useState(false);
   const [manualSyncLoading, setManualSyncLoading] = useState(false);
+  const [dashboardContentShown, setDashboardContentShown] = useState(false);
   const mainContentVisibleNotifiedRef = useRef(false);
   const mockEnabled = isMockEnabled();
   const authTokenAllowed = signedIn && !sessionSoftExpired;
@@ -954,8 +955,9 @@ export function DashboardPage({
   // in flight and no detail rows exist yet. A later refresh keeps the rendered
   // data (no skeleton, no flash); local mode loads fast and is left untouched.
   const initialDashboardLoading =
-    accountViewResolving ||
-    (accountView && usageLoadingState && !hasDetailsActual);
+    !dashboardContentShown &&
+    (accountViewResolving ||
+      (accountView && usageLoadingState && !hasDetailsActual));
   const usageSourceLabel = useMemo(
     () =>
       copy("shared.data_source", {
@@ -1274,6 +1276,11 @@ export function DashboardPage({
   const requireAuthGate = !signedIn && !mockEnabled && !sessionSoftExpired && !isLocalMode;
   const showAuthGate = requireAuthGate && !publicMode;
 
+  useEffect(() => {
+    if (showExpiredGate || showAuthGate || initialDashboardLoading) return;
+    setDashboardContentShown(true);
+  }, [initialDashboardLoading, showAuthGate, showExpiredGate]);
+
   const dashboardCardOrder = useDashboardCardOrder(
     LEFT_CARD_ORDER_DEFAULTS,
     RIGHT_CARD_ORDER_DEFAULTS,
@@ -1356,6 +1363,7 @@ export function DashboardPage({
       coreIndexExpandAria={coreIndexExpandAria}
       refreshAll={handleUsageRefresh}
       usageLoadingState={usageLoadingState}
+      announceUsageLoading={manualSyncLoading}
       initialDashboardLoading={initialDashboardLoading}
       usageError={usageError}
       rangeLabel={rangeLabel}
