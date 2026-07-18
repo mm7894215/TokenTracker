@@ -246,24 +246,36 @@ function selectAppendHashPaths(candidateGroups) {
   return newest ? new Set([newest.filePath]) : new Set();
 }
 
-async function digestFilePrefix(filePath, endOffset, diagnostics = null) {
+async function digestFilePrefix(
+  filePath,
+  endOffset,
+  diagnostics = null,
+  sourceHandle = null,
+) {
   const end = Math.max(0, Number(endOffset) || 0);
   const hash = crypto.createHash("sha256");
   if (end === 0) return hash.digest("hex");
-  const stream = fs.createReadStream(filePath, {
-    start: 0,
-    end: end - 1,
-    highWaterMark: PREFIX_HASH_READ_BYTES,
-  });
   let bytesRead = 0;
-  try {
+  if (sourceHandle && typeof sourceHandle.read === "function") {
+    const buffer = Buffer.allocUnsafe(PREFIX_HASH_READ_BYTES);
+    while (bytesRead < end) {
+      const length = Math.min(buffer.length, end - bytesRead);
+      const result = await sourceHandle.read(buffer, 0, length, bytesRead);
+      if (!result.bytesRead) break;
+      hash.update(buffer.subarray(0, result.bytesRead));
+      bytesRead += result.bytesRead;
+    }
+  } else {
+    const stream = fs.createReadStream(filePath, {
+      start: 0,
+      end: end - 1,
+      highWaterMark: PREFIX_HASH_READ_BYTES,
+    });
     for await (const value of stream) {
       const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
       bytesRead += chunk.length;
       hash.update(chunk);
     }
-  } finally {
-    stream.destroy();
   }
   if (diagnostics) {
     diagnostics.prefix_validation_bytes =
@@ -272,7 +284,7 @@ async function digestFilePrefix(filePath, endOffset, diagnostics = null) {
   return bytesRead === end ? hash.digest("hex") : null;
 }
 
-async function canResumeParsedGroup(cached, entry, diagnostics = null) {
+async function openValidatedResumeFile(cached, entry, diagnostics = null) {
   if (
     !cached?.resumeState ||
     !cached?.stat ||
@@ -280,7 +292,7 @@ async function canResumeParsedGroup(cached, entry, diagnostics = null) {
     typeof cached.contentHashState.copy !== "function" ||
     cached.appendable !== true ||
     cached.filePath !== entry.filePath
-  ) return false;
+  ) return null;
   const previous = cached.stat;
   const current = entry.stat;
   if (
@@ -290,18 +302,47 @@ async function canResumeParsedGroup(cached, entry, diagnostics = null) {
     Number(cached.endOffset) < 0 ||
     Number(cached.endOffset) > Number(previous.size)
   ) {
-    return false;
+    return null;
   }
+  let handle = null;
+  let keepOpen = false;
   try {
-    const expected = cached.contentHashState.copy().digest("hex");
-    const actual = await digestFilePrefix(entry.filePath, cached.endOffset, diagnostics);
-    if (actual !== expected) return false;
+    // Validation and suffix parsing share this handle so a path replacement
+    // cannot splice cached aggregates onto bytes from a different file.
+    handle = await fs.promises.open(entry.filePath, "r");
     if (diagnostics) diagnostics.stat_calls += 1;
-    const afterValidation = fs.statSync(entry.filePath);
-    return statIdentity(entry.filePath, afterValidation) ===
-      statIdentity(entry.filePath, current);
+    const opened = await handle.stat();
+    if (
+      statIdentity(entry.filePath, opened) !==
+      statIdentity(entry.filePath, current)
+    ) return null;
+
+    const expected = cached.contentHashState.copy().digest("hex");
+    const actual = await digestFilePrefix(
+      entry.filePath,
+      cached.endOffset,
+      diagnostics,
+      handle,
+    );
+    if (actual !== expected) return null;
+    if (diagnostics) diagnostics.stat_calls += 1;
+    const afterValidation = await handle.stat();
+    if (
+      statIdentity(entry.filePath, afterValidation) !==
+      statIdentity(entry.filePath, current)
+    ) return null;
+    keepOpen = true;
+    return handle;
   } catch {
-    return false;
+    return null;
+  } finally {
+    if (handle && !keepOpen) {
+      try {
+        await handle.close();
+      } catch {
+        // A failed validation already forces the conservative full parse.
+      }
+    }
   }
 }
 
@@ -439,10 +480,10 @@ async function computeCodexContextBreakdown({
       const appendHashEligible = Boolean(
         singleEntry && appendHashPaths.has(singleEntry.filePath),
       );
-      if (
-        appendHashEligible &&
-        await canResumeParsedGroup(cachedGroup, singleEntry, diagnostics)
-      ) {
+      const resumeHandle = appendHashEligible
+        ? await openValidatedResumeFile(cachedGroup, singleEntry, diagnostics)
+        : null;
+      if (resumeHandle) {
         try {
           const resumed = await parseCodexRolloutFile(singleEntry.filePath, {
             from: fromKey,
@@ -456,37 +497,62 @@ async function computeCodexContextBreakdown({
             captureResumeState: true,
             captureContentHash: true,
             contentHashState: cachedGroup.contentHashState,
+            sourceHandle: resumeHandle,
           });
-          const delta = splitCapturedParse(resumed);
-          captured = {
-            parsed: mergeParsedSessionResults(cachedGroup.parsed, delta.parsed),
-            resumeState: delta.resumeState,
-            endOffset: delta.endOffset,
-            appendable: delta.appendable,
-            contentHashState: delta.contentHashState,
-          };
-          diagnostics.incremental_parse_hits += 1;
+          if (diagnostics) diagnostics.stat_calls += 1;
+          const afterParse = await resumeHandle.stat().catch(() => null);
+          if (
+            afterParse &&
+            statIdentity(singleEntry.filePath, afterParse) ===
+              statIdentity(singleEntry.filePath, singleEntry.stat)
+          ) {
+            const delta = splitCapturedParse(resumed);
+            captured = {
+              parsed: mergeParsedSessionResults(cachedGroup.parsed, delta.parsed),
+              resumeState: delta.resumeState,
+              endOffset: delta.endOffset,
+              appendable: delta.appendable,
+              contentHashState: delta.contentHashState,
+            };
+            diagnostics.incremental_parse_hits += 1;
+          } else {
+            diagnostics.incremental_parse_fallbacks += 1;
+          }
         } catch (error) {
           if (!isCodexResumeInvalidated(error)) throw error;
           diagnostics.incremental_parse_fallbacks += 1;
+        } finally {
+          await resumeHandle.close();
         }
       }
 
       if (!captured) {
-        const fresh = await parseCodexRolloutFile(
-          filePaths.length === 1 ? filePaths[0] : filePaths,
-          {
-            from: fromKey,
-            to: toKey,
-            timeZoneContext,
-            diagnostics,
-            seenTokenEvents: filePaths.length === 1 ? new Set() : seenTokenEvents,
-            endOffset: singleEntry?.stat?.size ?? null,
-            captureResumeState: Boolean(singleEntry),
-            captureContentHash: appendHashEligible,
-          },
-        );
-        captured = splitCapturedParse(fresh);
+        let freshHandle = null;
+        let freshEndOffset = singleEntry?.stat?.size ?? null;
+        try {
+          if (resumeHandle && singleEntry) {
+            freshHandle = await fs.promises.open(singleEntry.filePath, "r");
+            if (diagnostics) diagnostics.stat_calls += 1;
+            freshEndOffset = (await freshHandle.stat()).size;
+          }
+          const fresh = await parseCodexRolloutFile(
+            filePaths.length === 1 ? filePaths[0] : filePaths,
+            {
+              from: fromKey,
+              to: toKey,
+              timeZoneContext,
+              diagnostics,
+              seenTokenEvents: filePaths.length === 1 ? new Set() : seenTokenEvents,
+              endOffset: freshEndOffset,
+              captureResumeState: Boolean(singleEntry),
+              captureContentHash: appendHashEligible,
+              sourceHandle: freshHandle,
+            },
+          );
+          captured = splitCapturedParse(fresh);
+        } finally {
+          await freshHandle?.close();
+        }
       }
 
       parsed = captured.parsed;

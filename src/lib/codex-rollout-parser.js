@@ -563,6 +563,7 @@ async function parseCodexRolloutFile(filePath, {
   captureResumeState = false,
   captureContentHash = false,
   contentHashState = null,
+  sourceHandle = null,
 } = {}) {
   const filePaths = (Array.isArray(filePath) ? filePath : [filePath]).filter(Boolean);
   const primaryFilePath = filePaths[0] || String(filePath || "");
@@ -835,6 +836,7 @@ async function parseCodexRolloutFile(filePath, {
     endOffset,
     readProgress,
     contentHasher,
+    sourceHandle,
   })) {
     const ts = typeof obj?.timestamp === "string" ? obj.timestamp : null;
     if (!ts) continue;
@@ -960,6 +962,7 @@ async function* readCodexObjectsIncremental(filePath, diagnostics, fileIndex, {
   endOffset = null,
   readProgress = null,
   contentHasher = null,
+  sourceHandle = null,
 } = {}) {
   const start = Math.max(0, Number(startOffset) || 0);
   const requestedEnd = Number(endOffset);
@@ -971,10 +974,24 @@ async function* readCodexObjectsIncremental(filePath, diagnostics, fileIndex, {
   }
 
   if (diagnostics) diagnostics.opened_files += 1;
-  const stream = fs.createReadStream(filePath, {
-    start,
-    ...(hasBoundedEnd ? { end: requestedEnd - 1 } : {}),
-  });
+  const stream = sourceHandle && typeof sourceHandle.read === "function"
+    ? null
+    : fs.createReadStream(filePath, {
+        start,
+        ...(hasBoundedEnd ? { end: requestedEnd - 1 } : {}),
+      });
+  const chunks = stream || (async function* readStableHandleChunks() {
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    const limit = hasBoundedEnd ? requestedEnd : Number.MAX_SAFE_INTEGER;
+    let offset = start;
+    while (offset < limit) {
+      const length = Math.min(buffer.length, limit - offset);
+      const result = await sourceHandle.read(buffer, 0, length, offset);
+      if (!result.bytesRead) break;
+      offset += result.bytesRead;
+      yield buffer.subarray(0, result.bytesRead);
+    }
+  })();
   const fragments = [];
   let fragmentsBytes = 0;
   let nextChunkOffset = start;
@@ -982,7 +999,7 @@ async function* readCodexObjectsIncremental(filePath, diagnostics, fileIndex, {
   let lineIndex = 0;
 
   try {
-    for await (const value of stream) {
+    for await (const value of chunks) {
       const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
       const chunkStart = nextChunkOffset;
       nextChunkOffset += chunk.length;
@@ -1037,7 +1054,7 @@ async function* readCodexObjectsIncremental(filePath, diagnostics, fileIndex, {
     }
   } finally {
     if (readProgress) readProgress.endOffset = nextChunkOffset;
-    stream.destroy();
+    stream?.destroy();
     if (diagnostics) diagnostics.parsed_files += 1;
   }
 }
@@ -1103,7 +1120,9 @@ async function* readCodexObjectsFull(filePath, diagnostics, fileIndex, {
 
 async function* readCodexObjects(filePath, diagnostics, fileIndex, options = {}) {
   const start = Math.max(0, Number(options.startOffset) || 0);
-  const reader = start > 0 ? readCodexObjectsIncremental : readCodexObjectsFull;
+  const reader = start > 0 || options.sourceHandle
+    ? readCodexObjectsIncremental
+    : readCodexObjectsFull;
   yield* reader(filePath, diagnostics, fileIndex, options);
 }
 

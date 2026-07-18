@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const fsSync = require("node:fs");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
@@ -12,11 +13,15 @@ function computeCodexContextBreakdown(options = {}) {
   return computeRawCodexContextBreakdown({ ...options, includeDiagnostics: true });
 }
 
+function rolloutContents(events) {
+  return `${events.map((event) => JSON.stringify(event)).join("\n")}\n`;
+}
+
 async function writeRollout(rootDir, day, name, events, mtime = `${day}T12:00:00.000Z`) {
   const dir = path.join(rootDir, day.slice(0, 4), day.slice(5, 7), day.slice(8, 10));
   await fs.mkdir(dir, { recursive: true });
   const filePath = path.join(dir, name);
-  await fs.writeFile(filePath, `${events.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
+  await fs.writeFile(filePath, rolloutContents(events), "utf8");
   const stamp = new Date(mtime);
   await fs.utimes(filePath, stamp, stamp);
   return filePath;
@@ -716,11 +721,7 @@ test("Context reuses frozen parsed sessions when one active session changes", as
       }),
       ],
     );
-    const activePath = await writeRollout(
-      root,
-      "2030-06-02",
-      "rollout-2030-06-02T02-00-00-22222222-2222-4222-8222-222222222222.jsonl",
-      [
+    const activeEvents = [
       tokenCount("2030-06-02T02:00:00.000Z", {
         input_tokens: 30,
         cached_input_tokens: 5,
@@ -729,10 +730,15 @@ test("Context reuses frozen parsed sessions when one active session changes", as
         reasoning_output_tokens: 1,
         total_tokens: 35,
       }),
-      ],
+    ];
+    const activePath = await writeRollout(
+      root,
+      "2030-06-02",
+      "rollout-2030-06-02T02-00-00-22222222-2222-4222-8222-222222222222.jsonl",
+      activeEvents,
       "2030-06-02T13:00:00.000Z",
     );
-    const activePrefixSize = (await fs.stat(activePath)).size;
+    const activePrefixSize = Buffer.byteLength(rolloutContents(activeEvents));
     const args = {
       from: "2030-06-02",
       to: "2030-06-02",
@@ -786,59 +792,60 @@ test("Context incrementally parses append-only sessions with pending tools and d
   try {
     const fileName =
       "rollout-2030-06-01T23-40-00-33333333-3333-4333-8333-333333333333.jsonl";
+    const initialEvents = [
+      {
+        timestamp: "2030-06-01T23:40:00.000Z",
+        type: "session_meta",
+        payload: {
+          id: "33333333-3333-4333-8333-333333333333",
+          cwd: "/tmp/project",
+          model_provider: "openai",
+        },
+      },
+      tokenCount("2030-06-01T23:50:00.000Z", BASELINE_USAGE),
+      {
+        timestamp: "2030-06-01T23:59:00.000Z",
+        type: "response_item",
+        payload: {
+          type: "function_call",
+          name: "take_snapshot",
+          call_id: "pending",
+          arguments: "{}",
+        },
+      },
+      {
+        timestamp: "2030-06-01T23:59:10.000Z",
+        type: "response_item",
+        payload: {
+          type: "function_call",
+          name: "exec_command",
+          call_id: "pending-exec",
+          arguments: JSON.stringify({
+            cmd: "sed -n '1,120p' /tmp/.codex/skills/frontend-design/SKILL.md",
+          }),
+        },
+      },
+      {
+        timestamp: "2030-06-01T23:59:20.000Z",
+        type: "event_msg",
+        payload: {
+          type: "exec_command_end",
+          command: ["bash", "-lc", "sed -n '1,120p' /tmp/.codex/skills/frontend-design/SKILL.md"],
+          status: "completed",
+          exit_code: 0,
+          duration: { secs: 0, nanos: 10_000_000 },
+          aggregated_output: "skill body\n",
+        },
+      },
+    ];
     const filePath = await writeRollout(
       root,
       "2030-06-01",
       fileName,
-      [
-        {
-          timestamp: "2030-06-01T23:40:00.000Z",
-          type: "session_meta",
-          payload: {
-            id: "33333333-3333-4333-8333-333333333333",
-            cwd: "/tmp/project",
-            model_provider: "openai",
-          },
-        },
-        tokenCount("2030-06-01T23:50:00.000Z", BASELINE_USAGE),
-        {
-          timestamp: "2030-06-01T23:59:00.000Z",
-          type: "response_item",
-          payload: {
-            type: "function_call",
-            name: "take_snapshot",
-            call_id: "pending",
-            arguments: "{}",
-          },
-        },
-        {
-          timestamp: "2030-06-01T23:59:10.000Z",
-          type: "response_item",
-          payload: {
-            type: "function_call",
-            name: "exec_command",
-            call_id: "pending-exec",
-            arguments: JSON.stringify({
-              cmd: "sed -n '1,120p' /tmp/.codex/skills/frontend-design/SKILL.md",
-            }),
-          },
-        },
-        {
-          timestamp: "2030-06-01T23:59:20.000Z",
-          type: "event_msg",
-          payload: {
-            type: "exec_command_end",
-            command: ["bash", "-lc", "sed -n '1,120p' /tmp/.codex/skills/frontend-design/SKILL.md"],
-            status: "completed",
-            exit_code: 0,
-            duration: { secs: 0, nanos: 10_000_000 },
-            aggregated_output: "skill body\n",
-          },
-        },
-      ],
+      initialEvents,
       "2030-06-02T00:00:00.000Z",
     );
-    const prefixSize = (await fs.stat(filePath)).size;
+    const prefixSize = Buffer.byteLength(rolloutContents(initialEvents));
     const args = {
       from: "2030-06-02",
       to: "2030-06-02",
@@ -875,7 +882,7 @@ test("Context incrementally parses append-only sessions with pending tools and d
     assert.equal(appended.diagnostics.json_parse_calls, 1);
     assert.equal(appended.diagnostics.bytes_read, Buffer.byteLength(appendedLine));
 
-    const firstAppendSize = (await fs.stat(filePath)).size;
+    const firstAppendSize = prefixSize + Buffer.byteLength(appendedLine);
     await fs.appendFile(filePath, appendedLine, "utf8");
     await fs.utimes(
       filePath,
@@ -890,6 +897,125 @@ test("Context incrementally parses append-only sessions with pending tools and d
     assert.equal(duplicate.diagnostics.prefix_validation_bytes, firstAppendSize);
     assert.equal(duplicate.diagnostics.json_parse_calls, 1);
   } finally {
+    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(freshRoot, { recursive: true, force: true });
+  }
+});
+
+test("Context keeps one file handle across prefix validation and suffix parsing", {
+  skip: process.platform === "win32",
+}, async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "tt-codex-context-stable-handle-"));
+  const freshRoot = await fs.mkdtemp(path.join(os.tmpdir(), "tt-codex-context-stable-handle-fresh-"));
+  const originalOpen = fsSync.promises.open;
+  try {
+    const fileName =
+      "rollout-2030-06-02T00-00-00-77777777-7777-4777-8777-777777777777.jsonl";
+    const initialEvents = [
+      tokenCount("2030-06-02T00:01:00.000Z", BASELINE_USAGE),
+    ];
+    const filePath = await writeRollout(
+      root,
+      "2030-06-02",
+      fileName,
+      initialEvents,
+      "2030-06-02T00:02:00.000Z",
+    );
+    const args = {
+      from: "2030-06-02",
+      to: "2030-06-02",
+      codexDir: root,
+      timeZoneContext: { timeZone: "UTC", offsetMinutes: 0 },
+    };
+    await computeCodexContextBreakdown(args);
+
+    const appendedLine = `${JSON.stringify(
+      tokenCount("2030-06-02T00:05:00.000Z", TARGET_USAGE),
+    )}\n`;
+    await fs.appendFile(filePath, appendedLine, "utf8");
+    const active = new Date("2030-06-02T00:06:00.000Z");
+    await fs.utimes(filePath, active, active);
+
+    const replacementEvents = [
+      {
+        timestamp: "2030-06-02T00:00:00.000Z",
+        type: "session_meta",
+        payload: {
+          id: "77777777-7777-4777-8777-777777777777",
+          cwd: `/tmp/${"replacement".repeat(300)}`,
+          model_provider: "openai",
+        },
+      },
+      tokenCount("2030-06-02T00:01:00.000Z", BASELINE_USAGE),
+      tokenCount("2030-06-02T00:10:00.000Z", {
+        input_tokens: 260,
+        cached_input_tokens: 60,
+        cache_creation_input_tokens: 12,
+        output_tokens: 45,
+        reasoning_output_tokens: 9,
+        total_tokens: 317,
+      }),
+    ];
+    assert.ok(
+      Buffer.byteLength(rolloutContents(replacementEvents)) >
+        Buffer.byteLength(rolloutContents(initialEvents)) +
+          Buffer.byteLength(appendedLine),
+    );
+    const replacementPath = path.join(root, "replacement.tmp");
+    await fs.writeFile(replacementPath, rolloutContents(replacementEvents), "utf8");
+    await fs.utimes(replacementPath, active, active);
+    await writeRollout(
+      freshRoot,
+      "2030-06-02",
+      fileName,
+      replacementEvents,
+      active.toISOString(),
+    );
+
+    let replaced = false;
+    fsSync.promises.open = async function openWithReplacement(...openArgs) {
+      const handle = await originalOpen.apply(this, openArgs);
+      if (openArgs[0] !== filePath) return handle;
+      const originalRead = handle.read.bind(handle);
+      handle.read = async function readWithReplacement(
+        buffer,
+        offset,
+        length,
+        position,
+      ) {
+        // The prefix fits in the position-0 read; replace the path exactly
+        // when the same handle advances to the appended suffix.
+        if (!replaced && Number(position) > 0) {
+          fsSync.renameSync(replacementPath, filePath);
+          replaced = true;
+        }
+        return originalRead(buffer, offset, length, position);
+      };
+      return handle;
+    };
+
+    const stableSnapshot = await computeCodexContextBreakdown(args);
+    const freshSnapshot = await computeCodexContextBreakdown({
+      ...args,
+      codexDir: freshRoot,
+    });
+    assert.equal(replaced, true);
+    assert.deepEqual(stableSnapshot.totals, freshSnapshot.totals);
+    assert.deepEqual(
+      stableSnapshot.tool_calls_breakdown,
+      freshSnapshot.tool_calls_breakdown,
+    );
+    assert.equal(stableSnapshot.diagnostics.incremental_parse_hits, 0);
+    assert.equal(stableSnapshot.diagnostics.incremental_parse_fallbacks, 1);
+    assert.equal(stableSnapshot.diagnostics.opened_files, 2);
+
+    fsSync.promises.open = originalOpen;
+    const replacementSnapshot = await computeCodexContextBreakdown(args);
+    assert.equal(replacementSnapshot.diagnostics.incremental_parse_hits, 0);
+    assert.equal(replacementSnapshot.diagnostics.opened_files, 1);
+    assert.deepEqual(replacementSnapshot.totals, freshSnapshot.totals);
+  } finally {
+    fsSync.promises.open = originalOpen;
     await fs.rm(root, { recursive: true, force: true });
     await fs.rm(freshRoot, { recursive: true, force: true });
   }
@@ -918,6 +1044,7 @@ test("Context requires an unchanged newline-terminated prefix before resuming", 
               tokenCount("2030-06-01T23:50:00.000Z", BASELINE_USAGE),
             ]
           : [tokenCount("2030-06-01T23:50:00.000Z", BASELINE_USAGE)];
+        const primedContent = rolloutContents(events);
         const filePath = await writeRollout(
           root,
           "2030-06-01",
@@ -926,8 +1053,7 @@ test("Context requires an unchanged newline-terminated prefix before resuming", 
           "2030-06-02T00:00:00.000Z",
         );
         if (scenario === "incomplete record") {
-          const stat = await fs.stat(filePath);
-          await fs.truncate(filePath, stat.size - 1);
+          await fs.writeFile(filePath, primedContent.slice(0, -1), "utf8");
           const primedAt = new Date("2030-06-02T00:00:00.000Z");
           await fs.utimes(filePath, primedAt, primedAt);
         }
@@ -940,23 +1066,28 @@ test("Context requires an unchanged newline-terminated prefix before resuming", 
         };
         const primed = await computeCodexContextBreakdown(args);
         assert.equal(primed.totals.total_tokens, 0);
-        const primedSize = (await fs.stat(filePath)).size;
+        const primedSize = Buffer.byteLength(primedContent) -
+          (scenario === "incomplete record" ? 1 : 0);
         if (scenario === "prefix rewrite") assert.ok(primedSize > 4096);
 
         const targetLine = `${JSON.stringify(
           tokenCount("2030-06-02T00:05:00.000Z", TARGET_USAGE),
         )}\n`;
+        let finalContentSize;
         if (scenario === "prefix rewrite") {
-          const content = await fs.readFile(filePath, "utf8");
-          const mutationOffset = content.indexOf("/tmp/aaaaaaaa");
+          const mutationOffset = primedContent.indexOf("/tmp/aaaaaaaa");
           assert.ok(mutationOffset >= 0 && mutationOffset < 4096);
+          const rewritten = primedContent.replace("/tmp/aaaaaaaa", "/tmp/baaaaaaa") +
+            targetLine;
           await fs.writeFile(
             filePath,
-            `${content.replace("/tmp/aaaaaaaa", "/tmp/baaaaaaa")}${targetLine}`,
+            rewritten,
             "utf8",
           );
+          finalContentSize = Buffer.byteLength(rewritten);
         } else {
           await fs.appendFile(filePath, `\n${targetLine}`, "utf8");
+          finalContentSize = primedSize + 1 + Buffer.byteLength(targetLine);
         }
         const active = new Date("2030-06-02T00:06:00.000Z");
         await fs.utimes(filePath, active, active);
@@ -977,7 +1108,7 @@ test("Context requires an unchanged newline-terminated prefix before resuming", 
           scenario === "prefix rewrite" ? primedSize : 0,
         );
         assert.equal(guarded.diagnostics.opened_files, 1);
-        assert.equal(guarded.diagnostics.bytes_read, (await fs.stat(filePath)).size);
+        assert.equal(guarded.diagnostics.bytes_read, finalContentSize);
       } finally {
         await fs.rm(root, { recursive: true, force: true });
         await fs.rm(freshRoot, { recursive: true, force: true });
