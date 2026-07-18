@@ -6,7 +6,7 @@ import { StatsPanel } from "../StatsPanel.jsx";
 function renderPanel(props = {}) {
   return render(
     <StatsPanel
-      rankLabel="2026-03-01"
+      startDate="2026-03-01"
       streakDays={12}
       rolling={{
         last_7d: { totals: { billable_total_tokens: 12345 } },
@@ -48,7 +48,7 @@ it("keeps rolling card values compact when the global token format is full", () 
       }}
     >
       <StatsPanel
-        rankLabel="2026-03-01"
+        startDate="2026-03-01"
         streakDays={12}
         periodConversations={30_500}
         rolling={{

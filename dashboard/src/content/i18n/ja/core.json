@@ -57,7 +57,7 @@
   "error.boundary.hint": "コンソールを開いてから、ページを再読み込みしてください",
   "error.boundary.no_details": "エラーの詳細はありません",
   "error.boundary.action.reload": "再読み込み",
-  "identity_card.rank_label": "ランク",
+  "identity_card.rank_label": "開始日",
   "identity_card.streak_label": "アクティブ日数",
   "identity_card.rank_placeholder": "—",
   "identity_card.streak_value": "{{days}} 日",

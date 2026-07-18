@@ -57,7 +57,7 @@
   "error.boundary.hint": "打开控制台，然后重新加载页面",
   "error.boundary.no_details": "没有错误详细信息",
   "error.boundary.action.reload": "重新加载",
-  "identity_card.rank_label": "排名",
+  "identity_card.rank_label": "开始使用",
   "identity_card.streak_label": "活跃天数",
   "identity_card.rank_placeholder": "—",
   "identity_card.streak_value": "{{days}} 天",

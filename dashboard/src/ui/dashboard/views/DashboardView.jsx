@@ -257,7 +257,7 @@ export function DashboardView(props) {
               title={copy("dashboard.identity.title")}
               subtitle={copy("dashboard.identity.subtitle")}
               period={period}
-              rankLabel={identityStartDate ?? copy("identity_card.rank_placeholder")}
+              startDate={identityStartDate ?? copy("identity_card.rank_placeholder")}
               streakDays={activeDays}
               subscriptions={identitySubscriptions}
               periodConversations={summaryConversationsValue}

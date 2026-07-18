@@ -35,7 +35,7 @@ function buildSubscriptionItems(subscriptions) {
 }
 
 export function StatsPanel({
-  rankLabel,
+  startDate,
   streakDays,
   subscriptions = [],
   periodConversations,
@@ -47,7 +47,7 @@ export function StatsPanel({
   const placeholder = copy("shared.placeholder.short");
   const percentSymbol = copy("shared.unit.percent");
 
-  const rankValue = rankLabel ?? copy("identity_card.rank_placeholder");
+  const startDateValue = startDate ?? copy("identity_card.rank_placeholder");
   const streakDaysNum = Number.isFinite(Number(streakDays)) ? Number(streakDays) : 0;
   const streakValue = streakDaysNum
     ? copy("identity_card.streak_value", { days: streakDaysNum })
@@ -160,7 +160,7 @@ export function StatsPanel({
         <div className="mt-4 pt-3 border-t border-oai-gray-100 dark:border-oai-gray-800 flex items-center justify-between text-xs text-oai-gray-400 dark:text-oai-gray-400">
           <div className="flex items-center gap-1.5">
             <span>{copy("identity_card.rank_label")}</span>
-            <span className="text-oai-gray-500 dark:text-oai-gray-300 tabular-nums">{rankValue}</span>
+            <span className="text-oai-gray-500 dark:text-oai-gray-300 tabular-nums">{startDateValue}</span>
           </div>
           <div className="flex items-center gap-1">
             <span>{copy("identity_card.streak_label")}</span>

@@ -40,7 +40,7 @@
   "error.boundary.hint": "Öffne die Konsole und lade die Seite neu",
   "error.boundary.no_details": "Keine Fehlerdetails verfügbar",
   "error.boundary.action.reload": "Neu laden",
-  "identity_card.rank_label": "Rang",
+  "identity_card.rank_label": "Beginn",
   "identity_card.streak_label": "Aktive Tage",
   "identity_card.rank_placeholder": "—",
   "identity_card.streak_value": "{{days}} Tage",
