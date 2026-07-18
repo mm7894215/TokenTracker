@@ -109,6 +109,7 @@ describe("normalizeGrokBillingResponse", () => {
 
     assert.equal(result.period_type, "weekly");
     assert.equal(result.primary_window.used_percent, 42);
+    assert.equal(result.credit_usage_percent, 42);
   });
 
   it("infers weekly from period length when type is omitted", () => {

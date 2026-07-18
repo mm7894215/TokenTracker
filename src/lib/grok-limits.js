@@ -181,7 +181,9 @@ function normalizeGrokBillingResponse(body) {
     period_type: periodType,
     monthly_credits_limit: monthlyLimit,
     monthly_credits_used: used,
-    credit_usage_percent: clampPercent(config.creditUsagePercent),
+    // Effective percent used for the primary bar (API creditUsagePercent, or
+    // productUsage / legacy monthly counters when the raw field is absent).
+    credit_usage_percent: usedPercent == null ? null : clampPercent(usedPercent),
     on_demand_cap: onDemandCap,
     on_demand_used: onDemandUsed,
     billing_period_start: periodStart,
