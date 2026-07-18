@@ -1,13 +1,13 @@
 {
-  "generatedAt": "2026-07-17T11:08:03.160Z",
+  "generatedAt": "2026-07-18T14:32:38.830Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
     "rawText": "JSX text nodes containing letters or digits"
   },
   "totals": {
-    "colors": 385,
-    "rawText": 186
+    "colors": 371,
+    "rawText": 192
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -36,11 +36,14 @@
       "rawTextTokens": []
     },
     "dashboard/src/components/leaderboard/CommunityStatsModal.jsx": {
-      "colors": 14,
-      "rawText": 2,
+      "colors": 0,
+      "rawText": 8,
       "rawTextTokens": [
-        "0 && (",
-        "Math.max(max, Number(m.share) || 0), 0) || 1; return ("
+        "(max.value",
+        "; if (normalized === \"win32\") return",
+        "; return",
+        "; return (",
+        "Math.max(max, Number(band.developer_share) || 0), 0) || 1; return ("
       ]
     },
     "dashboard/src/components/leaderboard/LeaderboardProfileModal.jsx": {

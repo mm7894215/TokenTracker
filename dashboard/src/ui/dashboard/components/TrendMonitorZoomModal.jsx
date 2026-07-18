@@ -7,7 +7,7 @@ import { DateRangePopover } from "./DateRangePopover.jsx";
 import { useCurrency } from "../../../hooks/useCurrency.js";
 import { useTokenFormat } from "../../../hooks/useTokenFormat.js";
 import { formatUsdCurrency } from "../../../lib/format";
-import { useTrendData } from "../../../hooks/use-trend-data.js";
+import { useTrendData } from "../../../hooks/use-trend-data";
 import { getLocalDayKey } from "../../../lib/timezone";
 import { computeZoomStats, getTrendInsightKey } from "../../../lib/trend-stats";
 

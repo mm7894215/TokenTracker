@@ -325,10 +325,9 @@ export async function getLeaderboard({
 }
 
 /**
- * Public, unauthenticated endpoint that returns per-model token aggregates
- * across the entire community for the current week. Used by the Community
- * Stats modal to show real model names (e.g. "claude-sonnet-4-6") instead
- * of provider-level buckets.
+ * Public, unauthenticated snapshot of privacy-safe community aggregates.
+ * Includes models, providers, 30-day growth, token mix, usage bands, and
+ * anonymous platform adoption without exposing user-level rows.
  */
 export async function getCommunityModels() {
   if (isMockEnabled()) return { top_models: [] };
