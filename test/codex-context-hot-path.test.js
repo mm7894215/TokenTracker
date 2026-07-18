@@ -912,7 +912,7 @@ test("Context keeps one file handle across prefix validation and suffix parsing"
     const fileName =
       "rollout-2030-06-02T00-00-00-77777777-7777-4777-8777-777777777777.jsonl";
     const initialEvents = [
-      tokenCount("2030-06-02T00:01:00.000Z", BASELINE_USAGE),
+      tokenCount("2030-06-01T23:59:00.000Z", BASELINE_USAGE),
     ];
     const filePath = await writeRollout(
       root,
@@ -932,6 +932,8 @@ test("Context keeps one file handle across prefix validation and suffix parsing"
     const appendedLine = `${JSON.stringify(
       tokenCount("2030-06-02T00:05:00.000Z", TARGET_USAGE),
     )}\n`;
+    const prefixSize = Buffer.byteLength(rolloutContents(initialEvents));
+    const fullSnapshotSize = prefixSize + Buffer.byteLength(appendedLine);
     await fs.appendFile(filePath, appendedLine, "utf8");
     const active = new Date("2030-06-02T00:06:00.000Z");
     await fs.utimes(filePath, active, active);
@@ -946,7 +948,7 @@ test("Context keeps one file handle across prefix validation and suffix parsing"
           model_provider: "openai",
         },
       },
-      tokenCount("2030-06-02T00:01:00.000Z", BASELINE_USAGE),
+      tokenCount("2030-06-01T23:59:00.000Z", BASELINE_USAGE),
       tokenCount("2030-06-02T00:10:00.000Z", {
         input_tokens: 260,
         cached_input_tokens: 60,
@@ -973,9 +975,18 @@ test("Context keeps one file handle across prefix validation and suffix parsing"
     );
 
     let replaced = false;
+    let matchingOpens = 0;
+    let firstHandleReadSuffix = false;
     fsSync.promises.open = async function openWithReplacement(...openArgs) {
+      const isTarget = openArgs[0] === filePath;
+      if (isTarget && matchingOpens > 0 && !replaced) {
+        fsSync.renameSync(replacementPath, filePath);
+        replaced = true;
+      }
       const handle = await originalOpen.apply(this, openArgs);
-      if (openArgs[0] !== filePath) return handle;
+      if (!isTarget) return handle;
+      matchingOpens += 1;
+      const handleIndex = matchingOpens;
       const originalRead = handle.read.bind(handle);
       handle.read = async function readWithReplacement(
         buffer,
@@ -989,6 +1000,9 @@ test("Context keeps one file handle across prefix validation and suffix parsing"
           fsSync.renameSync(replacementPath, filePath);
           replaced = true;
         }
+        if (handleIndex === 1 && Number(position) > 0) {
+          firstHandleReadSuffix = true;
+        }
         return originalRead(buffer, offset, length, position);
       };
       return handle;
@@ -1000,14 +1014,16 @@ test("Context keeps one file handle across prefix validation and suffix parsing"
       codexDir: freshRoot,
     });
     assert.equal(replaced, true);
-    assert.deepEqual(stableSnapshot.totals, freshSnapshot.totals);
-    assert.deepEqual(
-      stableSnapshot.tool_calls_breakdown,
-      freshSnapshot.tool_calls_breakdown,
+    assert.equal(matchingOpens, 1);
+    assert.equal(firstHandleReadSuffix, true);
+    assertExactTargetDelta(stableSnapshot);
+    assert.equal(stableSnapshot.diagnostics.incremental_parse_hits, 1);
+    assert.equal(stableSnapshot.diagnostics.incremental_parse_fallbacks, 0);
+    assert.equal(stableSnapshot.diagnostics.opened_files, 1);
+    assert.equal(
+      stableSnapshot.diagnostics.prefix_validation_bytes,
+      prefixSize + fullSnapshotSize,
     );
-    assert.equal(stableSnapshot.diagnostics.incremental_parse_hits, 0);
-    assert.equal(stableSnapshot.diagnostics.incremental_parse_fallbacks, 1);
-    assert.equal(stableSnapshot.diagnostics.opened_files, 2);
 
     fsSync.promises.open = originalOpen;
     const replacementSnapshot = await computeCodexContextBreakdown(args);

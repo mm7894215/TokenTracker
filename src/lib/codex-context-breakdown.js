@@ -181,6 +181,25 @@ function statIdentity(filePath, stat) {
   return JSON.stringify([filePath, stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs]);
 }
 
+function contentStatIdentity(filePath, stat) {
+  return JSON.stringify([
+    filePath,
+    stat.dev,
+    stat.ino,
+    stat.size,
+    stat.mtimeMs,
+  ]);
+}
+
+function isUnlinkedResumeSnapshot(filePath, before, after) {
+  return Boolean(
+    before &&
+    after &&
+    Number(after.nlink) === 0 &&
+    contentStatIdentity(filePath, before) === contentStatIdentity(filePath, after),
+  );
+}
+
 function inventorySignature(entries) {
   const hash = crypto.createHash("sha256");
   for (const { filePath, stat, candidate } of entries) {
@@ -328,8 +347,9 @@ async function openValidatedResumeFile(cached, entry, diagnostics = null) {
     if (diagnostics) diagnostics.stat_calls += 1;
     const afterValidation = await handle.stat();
     if (
-      statIdentity(entry.filePath, afterValidation) !==
-      statIdentity(entry.filePath, current)
+      statIdentity(entry.filePath, current) !==
+        statIdentity(entry.filePath, afterValidation) &&
+      !isUnlinkedResumeSnapshot(entry.filePath, current, afterValidation)
     ) return null;
     keepOpen = true;
     return handle;
@@ -501,11 +521,33 @@ async function computeCodexContextBreakdown({
           });
           if (diagnostics) diagnostics.stat_calls += 1;
           const afterParse = await resumeHandle.stat().catch(() => null);
-          if (
+          let stableAfterParse = Boolean(
             afterParse &&
             statIdentity(singleEntry.filePath, afterParse) ===
-              statIdentity(singleEntry.filePath, singleEntry.stat)
+              statIdentity(singleEntry.filePath, singleEntry.stat),
+          );
+          if (
+            !stableAfterParse &&
+            isUnlinkedResumeSnapshot(
+              singleEntry.filePath,
+              singleEntry.stat,
+              afterParse,
+            )
           ) {
+            try {
+              const expectedSnapshot = resumed.contentHashState.copy().digest("hex");
+              const actualSnapshot = await digestFilePrefix(
+                singleEntry.filePath,
+                singleEntry.stat.size,
+                diagnostics,
+                resumeHandle,
+              );
+              stableAfterParse = actualSnapshot === expectedSnapshot;
+            } catch {
+              stableAfterParse = false;
+            }
+          }
+          if (stableAfterParse) {
             const delta = splitCapturedParse(resumed);
             captured = {
               parsed: mergeParsedSessionResults(cachedGroup.parsed, delta.parsed),
