@@ -11,6 +11,7 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 
@@ -31,6 +32,7 @@ const {
   finalizeSkillRows,
   finalizeExecRows,
   buildSkillStatsEntry,
+  isCodexResumeInvalidated,
 } = require("./codex-rollout-parser");
 
 // ---------------------------------------------------------------------------
@@ -85,6 +87,50 @@ function mergeExecRows(map, rows) {
   }
 }
 
+function mergeParsedSessionResults(previous, delta) {
+  if (!previous) return delta;
+  if (!delta) return previous;
+
+  const totals = emptyTotals();
+  mergeRollupTotals(totals, previous.totals || {});
+  mergeRollupTotals(totals, delta.totals || {});
+
+  const tools = new Map();
+  mergeRows(tools, previous.toolBreakdown?.tool_rows);
+  mergeRows(tools, delta.toolBreakdown?.tool_rows);
+  const skills = new Map();
+  mergeSkillRows(skills, previous.skillsBreakdown?.skill_rows);
+  mergeSkillRows(skills, delta.skillsBreakdown?.skill_rows);
+
+  const mergeExecGroup = (key) => {
+    const rows = new Map();
+    mergeExecRows(rows, previous.execCommandBreakdown?.[key]);
+    mergeExecRows(rows, delta.execCommandBreakdown?.[key]);
+    return finalizeExecRows(rows);
+  };
+
+  return {
+    sessionId: delta.sessionId || previous.sessionId,
+    cwd: delta.cwd || previous.cwd,
+    model: delta.model || previous.model,
+    provider: delta.provider || previous.provider,
+    version: delta.version || previous.version,
+    filePath: previous.filePath || delta.filePath,
+    turnCount: Number(previous.turnCount || 0) + Number(delta.turnCount || 0),
+    totals,
+    toolBreakdown: { tool_rows: finalizeToolRows(tools) },
+    skillsBreakdown: { skill_rows: finalizeSkillRows(skills) },
+    execCommandBreakdown: {
+      byType: mergeExecGroup("byType"),
+      byExit: mergeExecGroup("byExit"),
+      byExecutable: mergeExecGroup("byExecutable"),
+      byCommand: mergeExecGroup("byCommand"),
+      byDuration: mergeExecGroup("byDuration"),
+      byOutput: mergeExecGroup("byOutput"),
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Period helpers
 // ---------------------------------------------------------------------------
@@ -122,8 +168,9 @@ function buildDateRange({ period, date }) {
 const CACHE = new Map();
 const PARSED_GROUP_CACHE = new Map();
 const CACHE_TTL_MS = 60_000;
-const CACHE_SCHEMA_VERSION = "codex-context-v4";
+const CACHE_SCHEMA_VERSION = "codex-context-v5";
 const MAX_PARSED_GROUP_CACHE_ENTRIES = 4096;
+const APPEND_PREFIX_TAIL_BYTES = 4096;
 
 function cacheTimeZoneKey(timeZoneContext) {
   if (!timeZoneContext) return "";
@@ -131,7 +178,7 @@ function cacheTimeZoneKey(timeZoneContext) {
 }
 
 function statIdentity(filePath, stat) {
-  return JSON.stringify([filePath, stat.size, stat.mtimeMs, stat.ctimeMs, stat.ino]);
+  return JSON.stringify([filePath, stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs]);
 }
 
 function inventorySignature(entries) {
@@ -152,11 +199,69 @@ function parsedGroupCacheKey(entries, { from, to, timeZoneContext }) {
   hash.update(to || "");
   hash.update("\0");
   hash.update(cacheTimeZoneKey(timeZoneContext));
+  for (const { filePath } of entries) {
+    hash.update(filePath);
+    hash.update("\0");
+  }
+  return hash.digest("hex");
+}
+
+function parsedGroupSignature(entries) {
+  const hash = crypto.createHash("sha256");
   for (const { filePath, stat } of entries) {
     hash.update(statIdentity(filePath, stat));
     hash.update("\0");
   }
   return hash.digest("hex");
+}
+
+async function inspectParsedPrefix(filePath, endOffset) {
+  const end = Math.max(0, Number(endOffset) || 0);
+  if (end === 0) return { prefixTail: "", appendable: true };
+  const start = Math.max(0, end - APPEND_PREFIX_TAIL_BYTES);
+  const length = end - start;
+  const handle = await fs.open(filePath, "r");
+  try {
+    const buffer = Buffer.allocUnsafe(length);
+    const { bytesRead } = await handle.read(buffer, 0, length, start);
+    if (bytesRead !== length) return null;
+    return {
+      prefixTail: crypto.createHash("sha256").update(buffer).digest("hex"),
+      appendable: buffer[length - 1] === 0x0a,
+    };
+  } finally {
+    await handle.close();
+  }
+}
+
+async function prefixTailFingerprint(filePath, endOffset) {
+  return (await inspectParsedPrefix(filePath, endOffset))?.prefixTail ?? null;
+}
+
+async function canResumeParsedGroup(cached, entry) {
+  if (
+    !cached?.resumeState ||
+    !cached?.stat ||
+    cached.appendable !== true ||
+    typeof cached.prefixTail !== "string" ||
+    cached.filePath !== entry.filePath
+  ) return false;
+  const previous = cached.stat;
+  const current = entry.stat;
+  if (
+    Number(previous.dev) !== Number(current.dev) ||
+    Number(previous.ino) !== Number(current.ino) ||
+    Number(current.size) <= Number(previous.size) ||
+    Number(cached.endOffset) < 0 ||
+    Number(cached.endOffset) > Number(previous.size)
+  ) {
+    return false;
+  }
+  try {
+    return await prefixTailFingerprint(entry.filePath, cached.endOffset) === cached.prefixTail;
+  } catch {
+    return false;
+  }
 }
 
 function rememberParsedGroup(key, value) {
@@ -167,6 +272,14 @@ function rememberParsedGroup(key, value) {
     if (!oldest) break;
     PARSED_GROUP_CACHE.delete(oldest);
   }
+}
+
+function splitCapturedParse(parsed) {
+  if (!parsed || typeof parsed !== "object") {
+    return { parsed, resumeState: null, endOffset: 0 };
+  }
+  const { resumeState = null, endOffset = 0, ...result } = parsed;
+  return { parsed: result, resumeState, endOffset };
 }
 
 // ---------------------------------------------------------------------------
@@ -208,6 +321,9 @@ async function computeCodexContextBreakdown({
     opened_files: 0,
     parsed_files: 0,
     parse_cache_hits: 0,
+    incremental_parse_hits: 0,
+    incremental_parse_fallbacks: 0,
+    bytes_read: 0,
     json_parse_calls: 0,
   };
   const discovered = discoverCodexSessionFiles(roots, {
@@ -252,22 +368,77 @@ async function computeCodexContextBreakdown({
     const parsedCacheKey = cacheable
       ? parsedGroupCacheKey(entries, { from: fromKey, to: toKey, timeZoneContext })
       : null;
-    let parsed = parsedCacheKey ? PARSED_GROUP_CACHE.get(parsedCacheKey) : null;
-    if (parsed) {
+    const signature = parsedGroupSignature(entries);
+    const cachedGroup = parsedCacheKey ? PARSED_GROUP_CACHE.get(parsedCacheKey) : null;
+    let parsed = null;
+    if (cachedGroup?.signature === signature) {
       // Cacheable groups are partitioned by rollout UUID, so their token event
       // keys cannot overlap and cache hits need not backfill seenTokenEvents.
       diagnostics.parse_cache_hits += 1;
+      parsed = cachedGroup.parsed;
       PARSED_GROUP_CACHE.delete(parsedCacheKey);
-      PARSED_GROUP_CACHE.set(parsedCacheKey, parsed);
+      PARSED_GROUP_CACHE.set(parsedCacheKey, cachedGroup);
     } else {
-      parsed = await parseCodexRolloutFile(filePaths.length === 1 ? filePaths[0] : filePaths, {
-        from: fromKey,
-        to: toKey,
-        timeZoneContext,
-        diagnostics,
-        seenTokenEvents,
-      });
-      if (parsedCacheKey) rememberParsedGroup(parsedCacheKey, parsed);
+      let captured = null;
+      const singleEntry = entries.length === 1 ? entries[0] : null;
+      if (singleEntry && await canResumeParsedGroup(cachedGroup, singleEntry)) {
+        try {
+          const resumed = await parseCodexRolloutFile(singleEntry.filePath, {
+            from: fromKey,
+            to: toKey,
+            timeZoneContext,
+            diagnostics,
+            seenTokenEvents: new Set(),
+            startOffset: cachedGroup.endOffset,
+            endOffset: singleEntry.stat.size,
+            resumeState: cachedGroup.resumeState,
+            captureResumeState: true,
+          });
+          const delta = splitCapturedParse(resumed);
+          captured = {
+            parsed: mergeParsedSessionResults(cachedGroup.parsed, delta.parsed),
+            resumeState: delta.resumeState,
+            endOffset: delta.endOffset,
+          };
+          diagnostics.incremental_parse_hits += 1;
+        } catch (error) {
+          if (!isCodexResumeInvalidated(error)) throw error;
+          diagnostics.incremental_parse_fallbacks += 1;
+        }
+      }
+
+      if (!captured) {
+        const fresh = await parseCodexRolloutFile(
+          filePaths.length === 1 ? filePaths[0] : filePaths,
+          {
+            from: fromKey,
+            to: toKey,
+            timeZoneContext,
+            diagnostics,
+            seenTokenEvents: filePaths.length === 1 ? new Set() : seenTokenEvents,
+            endOffset: singleEntry?.stat?.size ?? null,
+            captureResumeState: Boolean(singleEntry),
+          },
+        );
+        captured = splitCapturedParse(fresh);
+      }
+
+      parsed = captured.parsed;
+      if (parsedCacheKey) {
+        const parsedPrefix = singleEntry
+          ? await inspectParsedPrefix(singleEntry.filePath, captured.endOffset).catch(() => null)
+          : null;
+        rememberParsedGroup(parsedCacheKey, {
+          signature,
+          parsed,
+          resumeState: captured.resumeState,
+          endOffset: captured.endOffset,
+          prefixTail: parsedPrefix?.prefixTail ?? null,
+          appendable: parsedPrefix?.appendable === true,
+          filePath: singleEntry?.filePath || null,
+          stat: singleEntry?.stat || null,
+        });
+      }
     }
     if (!parsed || !parsed.totals || !parsed.totals.total_tokens) continue;
     sessions.push(parsed);
