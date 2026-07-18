@@ -5,6 +5,7 @@
 
 "use strict";
 
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const readline = require("node:readline");
@@ -23,6 +24,7 @@ const DISCOVERY_FULL_AUDIT_INTERVAL_MS = 60 * 1000;
 const MAX_DISCOVERY_INVENTORIES = 32;
 const DISCOVERY_INVENTORIES = new Map();
 const ZONED_DAY_FORMATTERS = new Map();
+const CODEX_RESUME_INVALIDATED = "TOKENTRACKER_CODEX_RESUME_INVALIDATED";
 
 // ---------------------------------------------------------------------------
 // Timezone helpers
@@ -555,20 +557,62 @@ async function parseCodexRolloutFile(filePath, {
   timeZoneContext = null,
   diagnostics = null,
   seenTokenEvents = null,
+  startOffset = 0,
+  endOffset = null,
+  resumeState = null,
+  captureResumeState = false,
+  captureContentHash = false,
+  contentHashState = null,
+  sourceHandle = null,
 } = {}) {
   const filePaths = (Array.isArray(filePath) ? filePath : [filePath]).filter(Boolean);
   const primaryFilePath = filePaths[0] || String(filePath || "");
+  const isResuming = Boolean(resumeState && filePaths.length === 1);
+  const initialOffset = Math.max(0, Number(startOffset) || 0);
+  const readProgress = {
+    endOffset: initialOffset,
+    lastByte: initialOffset > 0 ? 0x0a : null,
+  };
+  let contentHasher = null;
+  if (captureResumeState && captureContentHash && filePaths.length === 1) {
+    if (contentHashState && typeof contentHashState.copy === "function") {
+      try {
+        contentHasher = contentHashState.copy();
+      } catch {
+        contentHasher = null;
+      }
+    }
+    if (initialOffset > 0 && !contentHasher) {
+      const error = new Error("Codex rollout append is missing its prefix hash state");
+      error.code = CODEX_RESUME_INVALIDATED;
+      throw error;
+    }
+    if (!contentHasher) contentHasher = crypto.createHash("sha256");
+  }
 
-  let sessionId = null;
-  let cwd = null;
-  let model = null;
-  let provider = null;
-  let cliVersion = null;
+  let sessionId = isResuming ? resumeState.sessionId || null : null;
+  let cwd = isResuming ? resumeState.cwd || null : null;
+  let model = isResuming ? resumeState.model || null : null;
+  let provider = isResuming ? resumeState.provider || null : null;
+  let cliVersion = isResuming ? resumeState.cliVersion || null : null;
 
-  let prevTotals = null;
-  let pendingCalls = []; // response_item function_call payloads since last token_count
-  let pendingSkills = [];
-  let pendingExecEnds = []; // exec_command_end payloads since last token_count
+  let prevTotals = isResuming ? resumeState.prevTotals || null : null;
+  let pendingToolNames = isResuming
+    ? Array.from(resumeState.pendingToolNames || [])
+    : [];
+  let pendingSkills = isResuming ? Array.from(resumeState.pendingSkills || []) : [];
+  let pendingExecDetails = isResuming
+    ? Array.from(resumeState.pendingExecDetails || [])
+    : [];
+  let lastTokenTimestamp = isResuming
+    ? String(resumeState.lastTokenTimestamp || "") || null
+    : null;
+  let lastTimestampEventSignatures = new Set(
+    isResuming ? resumeState.lastTimestampEventSignatures || [] : [],
+  );
+  let lastTimestampLastUsage = null;
+  let lastTimestampTotalUsage = null;
+  let hasUnmaterializedLastTimestampUsage = false;
 
   const totals = emptyTotals();
   const byTool = new Map(); // tool_name -> {name,calls,totals}
@@ -639,9 +683,7 @@ async function parseCodexRolloutFile(filePath, {
     if (details.failed) row.failures += 1;
   }
 
-  function absorbExecEnd(p) {
-    const details = getExecKeys(p);
-    if (!details) return;
+  function absorbExecEnd(details) {
     absorbExecStats(byExecKind, details.kind, details);
     absorbExecStats(byExecExit, details.exitKey, details);
     absorbExecStats(byExecExecutable, details.executable, details);
@@ -652,18 +694,15 @@ async function parseCodexRolloutFile(filePath, {
 
   function attributeTurn(delta) {
     if (!delta || delta.total_tokens <= 0) {
-      for (const p of pendingExecEnds) absorbExecEnd(p);
-      pendingCalls = [];
+      for (const details of pendingExecDetails) absorbExecEnd(details);
+      pendingToolNames = [];
       pendingSkills = [];
-      pendingExecEnds = [];
+      pendingExecDetails = [];
       return;
     }
     turnCount += 1;
 
-    const toolNames = pendingCalls
-      .map((c) => normalizeToolName(c))
-      .filter(Boolean);
-    const unique = [...new Set(toolNames)];
+    const unique = [...new Set(pendingToolNames.filter(Boolean))];
     const tools = unique.length > 0 ? unique : ["text_response"];
     const share = 1 / tools.length;
 
@@ -710,11 +749,9 @@ async function parseCodexRolloutFile(filePath, {
       total_tokens: delta.total_tokens * execToolShare,
     } : null;
 
-    if (execDelta && pendingExecEnds.length > 0) {
-      const perExecShare = 1 / pendingExecEnds.length;
-      for (const p of pendingExecEnds) {
-        const details = getExecKeys(p);
-        if (!details) continue;
+    if (execDelta && pendingExecDetails.length > 0) {
+      const perExecShare = 1 / pendingExecDetails.length;
+      for (const details of pendingExecDetails) {
         const attributed = {
           input_tokens: execDelta.input_tokens * perExecShare,
           cached_input_tokens: execDelta.cached_input_tokens * perExecShare,
@@ -731,20 +768,76 @@ async function parseCodexRolloutFile(filePath, {
         addInto(ensureExec(byExecDuration, details.duration).totals, attributed);
         addInto(ensureExec(byExecOutput, details.output).totals, attributed);
 
-        absorbExecEnd(p);
+        absorbExecEnd(details);
       }
     } else {
       // Still ingest exec end stats without token attribution so the drill-down works.
-      for (const p of pendingExecEnds) absorbExecEnd(p);
+      for (const details of pendingExecDetails) absorbExecEnd(details);
     }
 
     addInto(totals, delta);
-    pendingCalls = [];
+    pendingToolNames = [];
     pendingSkills = [];
-    pendingExecEnds = [];
+    pendingExecDetails = [];
   }
 
-  for await (const obj of iterateCodexObjects(filePaths, diagnostics)) {
+  function usageEventSignature(lastUsage, totalUsage) {
+    return JSON.stringify({ lastUsage, totalUsage });
+  }
+
+  function materializeLastTimestampSignatures() {
+    if (hasUnmaterializedLastTimestampUsage) {
+      lastTimestampEventSignatures.add(
+        usageEventSignature(lastTimestampLastUsage, lastTimestampTotalUsage),
+      );
+      hasUnmaterializedLastTimestampUsage = false;
+    }
+    return lastTimestampEventSignatures;
+  }
+
+  function noteTokenEvent(timestamp, lastUsage, totalUsage) {
+    if (!isResuming) {
+      if (timestamp !== lastTokenTimestamp) {
+        lastTokenTimestamp = timestamp;
+        lastTimestampEventSignatures = new Set();
+        hasUnmaterializedLastTimestampUsage = false;
+      } else {
+        materializeLastTimestampSignatures();
+      }
+      lastTimestampLastUsage = lastUsage;
+      lastTimestampTotalUsage = totalUsage;
+      hasUnmaterializedLastTimestampUsage = true;
+      return true;
+    }
+    if (isResuming && lastTokenTimestamp && timestamp < lastTokenTimestamp) {
+      const error = new Error("Codex rollout append is not timestamp-monotonic");
+      error.code = CODEX_RESUME_INVALIDATED;
+      throw error;
+    }
+    if (!lastTokenTimestamp || timestamp > lastTokenTimestamp) {
+      lastTokenTimestamp = timestamp;
+      lastTimestampEventSignatures = new Set();
+      lastTimestampLastUsage = lastUsage;
+      lastTimestampTotalUsage = totalUsage;
+      hasUnmaterializedLastTimestampUsage = true;
+      return true;
+    }
+    if (timestamp === lastTokenTimestamp) {
+      const signature = usageEventSignature(lastUsage, totalUsage);
+      const signatures = materializeLastTimestampSignatures();
+      if (signatures.has(signature)) return false;
+      signatures.add(signature);
+    }
+    return true;
+  }
+
+  for await (const obj of iterateCodexObjects(filePaths, diagnostics, {
+    startOffset,
+    endOffset,
+    readProgress,
+    contentHasher,
+    sourceHandle,
+  })) {
     const ts = typeof obj?.timestamp === "string" ? obj.timestamp : null;
     if (!ts) continue;
     const inRequestedRange = isTimestampInRequestedDayRange(ts, { from, to, timeZoneContext });
@@ -765,14 +858,15 @@ async function parseCodexRolloutFile(filePath, {
     }
 
     if (obj.type === "response_item" && obj.payload?.type === "function_call") {
-      pendingCalls.push(obj.payload);
+      pendingToolNames.push(normalizeToolName(obj.payload));
       const skill = extractSkillNameFromFunctionCall(obj.payload, diagnostics);
       if (skill) pendingSkills.push(skill);
       continue;
     }
 
     if (obj.type === "event_msg" && obj.payload?.type === "exec_command_end") {
-      pendingExecEnds.push(obj.payload);
+      const details = getExecKeys(obj.payload);
+      if (details) pendingExecDetails.push(details);
       continue;
     }
 
@@ -783,25 +877,26 @@ async function parseCodexRolloutFile(filePath, {
       const totalUsage = info?.total_token_usage;
       const delta = pickDelta(lastUsage, totalUsage, prevTotals);
       if (totalUsage && typeof totalUsage === "object") prevTotals = totalUsage;
+      const isNewResumeEvent = noteTokenEvent(ts, lastUsage, totalUsage);
       if (inRequestedRange) {
         const eventSessionId = sessionId || rolloutSessionIdFromPath(primaryFilePath) || primaryFilePath;
-        const eventKey = `${eventSessionId}:${ts}:${JSON.stringify({ lastUsage, totalUsage })}`;
-        if (seenTokenEvents && seenTokenEvents.has(eventKey)) {
+        const eventKey = `${eventSessionId}:${ts}:${usageEventSignature(lastUsage, totalUsage)}`;
+        if (!isNewResumeEvent || (seenTokenEvents && seenTokenEvents.has(eventKey))) {
           attributeTurn(null);
         } else {
           if (seenTokenEvents && delta?.total_tokens > 0) seenTokenEvents.add(eventKey);
           attributeTurn(delta);
         }
       } else {
-        pendingCalls = [];
+        pendingToolNames = [];
         pendingSkills = [];
-        pendingExecEnds = [];
+        pendingExecDetails = [];
       }
       continue;
     }
   }
 
-  return {
+  const result = {
     sessionId: sessionId || rolloutSessionIdFromPath(primaryFilePath) || primaryFilePath,
     cwd,
     model: model || provider,
@@ -825,11 +920,178 @@ async function parseCodexRolloutFile(filePath, {
       byOutput: finalizeExecRows(byExecOutput),
     },
   };
+  if (captureResumeState && filePaths.length === 1) {
+    result.resumeState = {
+      sessionId,
+      cwd,
+      model,
+      provider,
+      cliVersion,
+      prevTotals,
+      pendingToolNames,
+      pendingSkills,
+      pendingExecDetails,
+      lastTokenTimestamp,
+      lastTimestampEventSignatures: Array.from(materializeLastTimestampSignatures()),
+    };
+    result.endOffset = readProgress.endOffset;
+    result.appendable = Boolean(contentHasher) && (
+      readProgress.endOffset === 0 || readProgress.lastByte === 0x0a
+    );
+    result.contentHashState = contentHasher;
+  }
+  return result;
 }
 
-async function* readCodexObjects(filePath, diagnostics, fileIndex) {
+function parseCodexLine(lineBuffer, diagnostics) {
+  let content = lineBuffer;
+  if (content.length > 0 && content[content.length - 1] === 0x0d) {
+    content = content.subarray(0, content.length - 1);
+  }
+  if (content.length === 0) return null;
+  try {
+    if (diagnostics) diagnostics.json_parse_calls += 1;
+    return JSON.parse(content.toString("utf8"));
+  } catch {
+    return null;
+  }
+}
+
+async function* readCodexObjectsIncremental(filePath, diagnostics, fileIndex, {
+  startOffset = 0,
+  endOffset = null,
+  readProgress = null,
+  contentHasher = null,
+  sourceHandle = null,
+} = {}) {
+  const start = Math.max(0, Number(startOffset) || 0);
+  const requestedEnd = Number(endOffset);
+  const hasBoundedEnd = endOffset !== null && endOffset !== undefined &&
+    Number.isFinite(requestedEnd) && requestedEnd >= 0;
+  if (hasBoundedEnd && requestedEnd <= start) {
+    if (readProgress) readProgress.endOffset = start;
+    return;
+  }
+
   if (diagnostics) diagnostics.opened_files += 1;
-  const stream = fs.createReadStream(filePath, { encoding: "utf8" });
+  const stream = sourceHandle && typeof sourceHandle.read === "function"
+    ? null
+    : fs.createReadStream(filePath, {
+        start,
+        ...(hasBoundedEnd ? { end: requestedEnd - 1 } : {}),
+      });
+  const chunks = stream || (async function* readStableHandleChunks() {
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    const limit = hasBoundedEnd ? requestedEnd : Number.MAX_SAFE_INTEGER;
+    let offset = start;
+    while (offset < limit) {
+      const length = Math.min(buffer.length, limit - offset);
+      const result = await sourceHandle.read(buffer, 0, length, offset);
+      if (!result.bytesRead) break;
+      offset += result.bytesRead;
+      yield buffer.subarray(0, result.bytesRead);
+    }
+  })();
+  const fragments = [];
+  let fragmentsBytes = 0;
+  let nextChunkOffset = start;
+  let lineStartOffset = start;
+  let lineIndex = 0;
+
+  try {
+    for await (const value of chunks) {
+      const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+      const chunkStart = nextChunkOffset;
+      nextChunkOffset += chunk.length;
+      if (contentHasher) contentHasher.update(chunk);
+      if (readProgress && chunk.length > 0) {
+        readProgress.lastByte = chunk[chunk.length - 1];
+      }
+      if (diagnostics) {
+        diagnostics.bytes_read = Number(diagnostics.bytes_read || 0) + chunk.length;
+      }
+
+      let cursor = 0;
+      while (cursor < chunk.length) {
+        const newline = chunk.indexOf(0x0a, cursor);
+        if (newline < 0) {
+          const tail = chunk.subarray(cursor);
+          if (tail.length > 0) {
+            // Stable-handle reads reuse their buffer, so retained fragments
+            // must own their bytes before the next read overwrites it.
+            fragments.push(Buffer.from(tail));
+            fragmentsBytes += tail.length;
+          }
+          break;
+        }
+
+        const tail = chunk.subarray(cursor, newline);
+        const lineBuffer = fragments.length > 0
+          ? Buffer.concat([...fragments, tail], fragmentsBytes + tail.length)
+          : tail;
+        fragments.length = 0;
+        fragmentsBytes = 0;
+
+        const absoluteEnd = chunkStart + newline + 1;
+        if (readProgress) readProgress.endOffset = absoluteEnd;
+        lineStartOffset = absoluteEnd;
+        const obj = parseCodexLine(lineBuffer, diagnostics);
+        if (obj) {
+          yield { obj, fileIndex, lineIndex };
+          lineIndex += 1;
+        }
+        cursor = newline + 1;
+      }
+    }
+
+    if (fragmentsBytes > 0) {
+      const lineBuffer = fragments.length === 1
+        ? fragments[0]
+        : Buffer.concat(fragments, fragmentsBytes);
+      const obj = parseCodexLine(lineBuffer, diagnostics);
+      if (obj) {
+        if (readProgress) readProgress.endOffset = lineStartOffset + fragmentsBytes;
+        yield { obj, fileIndex, lineIndex };
+      }
+    }
+  } finally {
+    if (readProgress) readProgress.endOffset = nextChunkOffset;
+    stream?.destroy();
+    if (diagnostics) diagnostics.parsed_files += 1;
+  }
+}
+
+async function* readCodexObjectsFull(filePath, diagnostics, fileIndex, {
+  startOffset = 0,
+  endOffset = null,
+  readProgress = null,
+  contentHasher = null,
+} = {}) {
+  const start = Math.max(0, Number(startOffset) || 0);
+  const requestedEnd = Number(endOffset);
+  const hasBoundedEnd = endOffset !== null && endOffset !== undefined &&
+    Number.isFinite(requestedEnd) && requestedEnd >= 0;
+  if (hasBoundedEnd && requestedEnd <= start) {
+    if (readProgress) readProgress.endOffset = start;
+    return;
+  }
+
+  if (diagnostics) diagnostics.opened_files += 1;
+  const stream = fs.createReadStream(filePath, {
+    ...(contentHasher ? {} : { encoding: "utf8" }),
+    start,
+    ...(hasBoundedEnd ? { end: requestedEnd - 1 } : {}),
+  });
+  const trackChunk = contentHasher
+    ? (value) => {
+        const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+        contentHasher.update(chunk);
+        if (readProgress && chunk.length > 0) {
+          readProgress.lastByte = chunk[chunk.length - 1];
+        }
+      }
+    : null;
+  if (trackChunk) stream.on("data", trackChunk);
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
   let lineIndex = 0;
   try {
@@ -846,15 +1108,29 @@ async function* readCodexObjects(filePath, diagnostics, fileIndex) {
       lineIndex += 1;
     }
   } finally {
+    const bytesRead = Number(stream.bytesRead || 0);
+    if (readProgress) readProgress.endOffset = start + bytesRead;
+    if (diagnostics) {
+      diagnostics.bytes_read = Number(diagnostics.bytes_read || 0) + bytesRead;
+      diagnostics.parsed_files += 1;
+    }
+    if (trackChunk) stream.off("data", trackChunk);
     rl.close();
     stream.close?.();
-    if (diagnostics) diagnostics.parsed_files += 1;
   }
 }
 
-async function* iterateCodexObjects(filePaths, diagnostics) {
+async function* readCodexObjects(filePath, diagnostics, fileIndex, options = {}) {
+  const start = Math.max(0, Number(options.startOffset) || 0);
+  const reader = start > 0 || options.sourceHandle
+    ? readCodexObjectsIncremental
+    : readCodexObjectsFull;
+  yield* reader(filePath, diagnostics, fileIndex, options);
+}
+
+async function* iterateCodexObjects(filePaths, diagnostics, options = {}) {
   if (filePaths.length <= 1) {
-    for await (const record of readCodexObjects(filePaths[0], diagnostics, 0)) {
+    for await (const record of readCodexObjects(filePaths[0], diagnostics, 0, options)) {
       yield record.obj;
     }
     return;
@@ -892,6 +1168,10 @@ function rolloutSessionIdFromPath(filePath) {
   return match ? match[1] : null;
 }
 
+function isCodexResumeInvalidated(error) {
+  return error?.code === CODEX_RESUME_INVALIDATED;
+}
+
 module.exports = {
   parseCodexRolloutFile,
   extractTokenCount,
@@ -913,6 +1193,7 @@ module.exports = {
   timestampDayKey,
   isTimestampInRequestedDayRange,
   rolloutSessionIdFromPath,
+  isCodexResumeInvalidated,
   finalizeToolRows,
   finalizeSkillRows,
   finalizeExecRows,
