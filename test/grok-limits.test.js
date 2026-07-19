@@ -9,6 +9,7 @@ const {
   normalizeGrokPeriodType,
   inferGrokPeriodTypeFromDates,
   sumProductUsagePercent,
+  fetchGrokBilling,
   fetchGrokLimits,
   readGrokAccessToken,
   isGrokInstalled,
@@ -310,13 +311,23 @@ describe("fetchGrokLimits", () => {
       );
 
       const urls = [];
+      let canceledBodies = 0;
       const result = await fetchGrokLimits({
         home: tmp,
         env: { GROK_HOME: grokHome },
         fetchImpl: async (url) => {
           urls.push(url);
           if (String(url).includes("format=credits")) {
-            return { ok: false, status: 500, async json() { return {}; } };
+            return {
+              ok: false,
+              status: 500,
+              body: {
+                async cancel() {
+                  canceledBodies += 1;
+                },
+              },
+              async json() { return {}; },
+            };
           }
           return {
             ok: true,
@@ -343,9 +354,31 @@ describe("fetchGrokLimits", () => {
       assert.equal(result.configured, true);
       assert.equal(result.period_type, "monthly");
       assert.equal(result.primary_window.used_percent, 25);
+      assert.equal(canceledBodies, 1);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
+  });
+
+  it("cancels an auth-error response body before surfacing reauthentication", async () => {
+    let canceledBodies = 0;
+
+    await assert.rejects(
+      fetchGrokBilling("test-token", {
+        timeoutMs: 100,
+        fetchImpl: async () => ({
+          ok: false,
+          status: 401,
+          body: {
+            async cancel() {
+              canceledBodies += 1;
+            },
+          },
+        }),
+      }),
+      /grok login/i,
+    );
+    assert.equal(canceledBodies, 1);
   });
 
   it("falls back to legacy /v1/billing after a format=credits network error", async () => {

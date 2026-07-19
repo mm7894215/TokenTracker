@@ -41,8 +41,15 @@ async function runBeforeBillingDeadline(operation, deadlineMs) {
 async function fetchGrokBillingAttempt(fetchImpl, url, headers, deadlineMs) {
   return runBeforeBillingDeadline(async (signal) => {
     const response = await fetchImpl(url, { method: "GET", headers, signal });
-    if (response.status === 401 || response.status === 403) throw grokAuthError();
-    if (!response.ok) return { ok: false, status: response.status };
+    if (!response.ok) {
+      try {
+        await response.body?.cancel?.();
+      } catch (_error) {
+        // The status remains authoritative even if discarding the body fails.
+      }
+      if (response.status === 401 || response.status === 403) throw grokAuthError();
+      return { ok: false, status: response.status };
+    }
     return { ok: true, body: await response.json() };
   }, deadlineMs);
 }
