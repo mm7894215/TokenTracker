@@ -69,6 +69,18 @@ it("keeps rolling card values compact when the global token format is full", () 
   expect(screen.queryByText("2,800,000,000")).not.toBeInTheDocument();
 });
 
+it("keeps the rolling stats readable in a narrow desktop sidebar", () => {
+  const { container } = renderPanel({ periodConversations: 42 });
+  const grid = container.querySelector(".grid.grid-cols-2");
+
+  expect(grid).toHaveClass("lg:grid-cols-2");
+  expect(grid).toHaveClass("xl:grid-cols-4");
+  expect(grid?.children).toHaveLength(4);
+  for (const tile of Array.from(grid?.children || [])) {
+    expect(tile).toHaveClass("min-w-0");
+  }
+});
+
 it("localizes compact rolling stats labels", () => {
   const cases = [
     ["en", ["7d", "30d", "avg", "convs"]],
