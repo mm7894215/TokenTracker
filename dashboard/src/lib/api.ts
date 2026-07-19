@@ -274,6 +274,7 @@ async function fetchInsforgeFunction(slug: string, options: {
   accessToken?: string;
   params?: AnyRecord;
   body?: unknown;
+  cache?: RequestCache;
 } = {}) {
   const baseUrl = getInsforgeRemoteUrl();
   if (!baseUrl) throw new Error("InsForge base URL not configured");
@@ -302,6 +303,7 @@ async function fetchInsforgeFunction(slug: string, options: {
   const res = await fetch(url.toString(), {
     method: options.method || "GET",
     headers,
+    cache: options.cache,
     ...(options.body != null ? { body: JSON.stringify(options.body) } : {}),
   });
   if (!res.ok) {
@@ -329,6 +331,7 @@ export async function getLeaderboard({
   // param lets the server compute `is_me` without ever touching the
   // Authorization header.
   return fetchInsforgeFunction("tokentracker-leaderboard", {
+    cache: "no-store",
     params: { period, limit, offset, user_id: userId },
   });
 }

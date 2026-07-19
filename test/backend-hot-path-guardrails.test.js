@@ -68,6 +68,19 @@ test("signed-in users cannot trigger expensive month, total, or all-period leade
   assert.match(clientSource, /body: JSON\.stringify\(\{ period: "week", source \}\)/u);
 });
 
+test("leaderboard reads expose snapshot freshness and disable response caching", () => {
+  const edgeSource = read("dashboard/edge-patches/tokentracker-leaderboard.ts");
+  const clientSource = read("dashboard/src/lib/api.ts");
+  assert.match(edgeSource, /const snapshotGeneratedAt =/u);
+  assert.match(edgeSource, /generated_at: snapshotGeneratedAt/u);
+  assert.doesNotMatch(edgeSource, /generated_at: new Date\(\)\.toISOString\(\)/u);
+  assert.match(edgeSource, /"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"/u);
+  assert.match(
+    clientSource,
+    /fetchInsforgeFunction\("tokentracker-leaderboard", \{\s*cache: "no-store"/u,
+  );
+});
+
 test("telemetry heartbeat uses one atomic database upsert RPC", () => {
   const source = read("dashboard/edge-patches/tokentracker-telemetry.ts");
   assert.match(source, /rpc\("upsert_tokentracker_telemetry_daily"/u);

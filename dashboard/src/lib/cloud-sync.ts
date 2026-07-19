@@ -5,6 +5,7 @@ import {
   getCloudUsageReady,
   getLastCloudSyncTs,
   getStoredDeviceSession,
+  emitCloudLeaderboardRefreshed,
   setLastCloudSyncTs,
   setStoredDeviceSession,
   type CloudDeviceSession,
@@ -31,9 +32,9 @@ function shouldRotateStoredDeviceSession(
 async function triggerLeaderboardRefresh(
   accessToken: string,
   source: "cloud-sync-auto" | "cloud-sync-now",
-): Promise<void> {
+): Promise<boolean> {
   const baseUrl = getInsforgeRemoteUrl();
-  if (!isRemoteHttpBase(baseUrl) || !accessToken) return;
+  if (!isRemoteHttpBase(baseUrl) || !accessToken) return false;
   const root = baseUrl.replace(/\/$/, "");
   const anon = getInsforgeAnonKey();
   const headers: Record<string, string> = {
@@ -47,12 +48,16 @@ async function triggerLeaderboardRefresh(
   // every 5 min per active user blew through the 5 GB plan). Server-side
   // schedules own the slower-moving month/total snapshots.
   try {
-    await fetch(`${root}/functions/tokentracker-leaderboard-refresh`, {
+    const response = await fetch(`${root}/functions/tokentracker-leaderboard-refresh`, {
       method: "POST",
       headers,
+      cache: "no-store",
       body: JSON.stringify({ period: "week", source }),
     });
-  } catch { /* best effort */ }
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -223,7 +228,9 @@ export async function runCloudUsageSyncIfDue(getAccessToken: () => Promise<strin
   });
   if (!accessToken) return;
   setLastCloudSyncTs(Date.now());
-  await triggerLeaderboardRefresh(accessToken, "cloud-sync-auto");
+  if (await triggerLeaderboardRefresh(accessToken, "cloud-sync-auto")) {
+    emitCloudLeaderboardRefreshed();
+  }
 }
 
 /** 用户打开「同步到云端」后立即尝试一次（忽略节流） */
@@ -231,5 +238,7 @@ export async function runCloudUsageSyncNow(getAccessToken: () => Promise<string 
   const accessToken = await syncCloudUsageWithRecovery(getAccessToken, { drain: true });
   if (!accessToken) return;
   setLastCloudSyncTs(Date.now());
-  await triggerLeaderboardRefresh(accessToken, "cloud-sync-now");
+  if (await triggerLeaderboardRefresh(accessToken, "cloud-sync-now")) {
+    emitCloudLeaderboardRefreshed();
+  }
 }

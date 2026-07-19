@@ -11,6 +11,7 @@ import {
 } from "../lib/dashboard-preload.js";
 import { getLeaderboard } from "../lib/api";
 import { runCloudUsageSyncNow } from "../lib/cloud-sync";
+import { CLOUD_LEADERBOARD_REFRESHED_EVENT } from "../lib/cloud-sync-prefs";
 import { LeaderboardPage } from "./LeaderboardPage.jsx";
 
 const openLoginModalMock = vi.hoisted(() => vi.fn());
@@ -222,6 +223,34 @@ describe("LeaderboardPage window-session cache reuse", () => {
         data: refreshedData,
         source: "page-load",
       });
+    });
+  });
+
+  it("reloads the active page after cloud sync publishes a fresh leaderboard snapshot", async () => {
+    const initialData = {
+      ...preloadedData,
+      entries: [{ ...preloadedData.entries[0], display_name: "Before sync" }],
+    };
+    const refreshedData = {
+      ...preloadedData,
+      entries: [{ ...preloadedData.entries[0], display_name: "After sync" }],
+    };
+    getLeaderboard.mockResolvedValueOnce(initialData).mockResolvedValueOnce(refreshedData);
+
+    renderLeaderboard();
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Before sync").length).toBeGreaterThan(0);
+      expect(getLeaderboard).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new Event(CLOUD_LEADERBOARD_REFRESHED_EVENT));
+    });
+
+    await waitFor(() => {
+      expect(getLeaderboard).toHaveBeenCalledTimes(2);
+      expect(screen.getAllByText("After sync").length).toBeGreaterThan(0);
     });
   });
 

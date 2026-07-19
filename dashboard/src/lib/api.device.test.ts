@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fetchCloudUsageSummary,
   fetchAccountDevices,
+  getLeaderboard,
   invalidateAccountResponseCache,
 } from "./api";
 
@@ -46,6 +47,12 @@ describe("api device filter", () => {
   it("fetchAccountDevices hits the account-devices slug", async () => {
     await fetchAccountDevices({ from: "2026-06-01", to: "2026-06-30", accessToken: JWT });
     expect(lastFetchUrl().pathname).toContain("tokentracker-account-devices");
+  });
+
+  it("forces leaderboard reads to bypass browser and CDN caches", async () => {
+    await getLeaderboard({ period: "week", limit: 20, offset: 0, userId: "user-1" });
+    const init = (globalThis.fetch as any).mock.calls.at(-1)?.[1];
+    expect(init?.cache).toBe("no-store");
   });
 
   it("reuses a fresh account response and supports explicit invalidation", async () => {
