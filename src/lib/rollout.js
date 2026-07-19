@@ -9657,6 +9657,22 @@ function resolvePiDefaultModel() {
   return "pi-unknown";
 }
 
+// Pi is a router: the same session can send turns to Anthropic, GitHub
+// Copilot, or another backend. Keep provider names in the queue source so
+// those turns cannot collapse into one bucket (or inherit the wrong pricing).
+// Missing providers are deliberately kept on the historical `pi` source for
+// compatibility with older session formats and already-synced data.
+function piSourceForProvider(provider) {
+  if (typeof provider !== "string" || !provider.trim()) return "pi";
+  const slug = provider
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+  return slug ? `pi-${slug}` : "pi";
+}
+
 async function parsePiIncremental({
   sessionFiles,
   cursors,
@@ -9773,6 +9789,7 @@ async function parsePiIncremental({
           : input + output + cacheRead + cacheWrite + reasoningTokens;
 
       const model = normalizeModelInput(msg.model) || fallbackModel;
+      const source = piSourceForProvider(msg.provider);
 
       const delta = {
         input_tokens: input,
@@ -9784,9 +9801,9 @@ async function parsePiIncremental({
         conversation_count: 1,
       };
 
-      const bucket = getHourlyBucket(hourlyState, "pi", model, bucketStart);
+      const bucket = getHourlyBucket(hourlyState, source, model, bucketStart);
       addTotals(bucket.totals, delta);
-      touchedBuckets.add(bucketKey("pi", model, bucketStart));
+      touchedBuckets.add(bucketKey(source, model, bucketStart));
       seenIds.add(entryId);
       eventsAggregated++;
 

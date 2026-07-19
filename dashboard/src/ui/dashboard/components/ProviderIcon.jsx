@@ -298,6 +298,9 @@ const PROVIDER_ICON_MAP = {
   OPENCODE: OpenCodeIcon,
   OMP: OmpIcon,
   PI: PiIcon,
+  "PI-ANTHROPIC": PiIcon,
+  "PI-GITHUB-COPILOT": PiIcon,
+  "PI-COPILOT": PiIcon,
   ROOCODE: RoocodeIcon,
   ZED: ZedIcon,
 };

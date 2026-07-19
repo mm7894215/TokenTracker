@@ -15,6 +15,7 @@ const {
 const { loadLitellmData } = require("./litellm-fetcher");
 
 const ZERO_PRICING = { input: 0, output: 0, cache_read: 0, cache_write: 0 };
+const PI_SUBSCRIPTION_SOURCES = new Set(["pi-github-copilot", "pi-copilot"]);
 const SEED_SNAPSHOT_PATH = path.resolve(__dirname, "seed-snapshot.json");
 
 // Sync seed load. Done at require-time so callers that haven't awaited
@@ -115,6 +116,10 @@ function getModelPricing(model, opts = {}) {
 // computeRowCost in src/lib/local-api.js. Moved here so vite mock + local
 // server share one source of truth.
 function computeRowCost(row) {
+  // Pi can route a turn through a subscription-backed Copilot provider. Pi's
+  // usage record reports a zero marginal cost for those turns; do not
+  // reinterpret the Claude model name as an Anthropic API bill.
+  if (PI_SUBSCRIPTION_SOURCES.has(String(row?.source || "").toLowerCase())) return 0;
   const pricing = getModelPricing(row.model, { source: row.source });
   const reasoningIncludedInOutput = row.source === "codex" || row.source === "every-code";
   const reasoningCost = reasoningIncludedInOutput

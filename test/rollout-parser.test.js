@@ -7874,7 +7874,7 @@ function buildOmpSessionHeader() {
   return JSON.stringify({ type: "session", id: "session-1", timestamp: new Date().toISOString() });
 }
 
-function buildOmpAssistantLine({ id, model, input, output, cacheRead = 0, cacheWrite = 0, timestamp, reasoningTokens = 0, totalTokens }) {
+function buildOmpAssistantLine({ id, model, input, output, cacheRead = 0, cacheWrite = 0, timestamp, reasoningTokens = 0, totalTokens, provider = "anthropic" }) {
   const usage = {
     input,
     output,
@@ -7892,7 +7892,7 @@ function buildOmpAssistantLine({ id, model, input, output, cacheRead = 0, cacheW
     timestamp: new Date(timestamp).toISOString(),
     message: {
       role: "assistant",
-      provider: "anthropic",
+      provider,
       model,
       usage,
       timestamp: Date.parse(new Date(timestamp).toISOString()),
@@ -8220,7 +8220,7 @@ test("parseOmpIncremental dedupes subagent entries across two runs", async () =>
 
 // ─── pi (@mariozechner/pi-coding-agent) tests — same on-disk format as omp ───
 
-test("parsePiIncremental parses a single session and queues with source 'pi'", async () => {
+test("parsePiIncremental preserves the legacy 'pi' source when provider is missing", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-pi-"));
   try {
     const sessionsDir = path.join(tmp, "sessions", "--test--");
@@ -8232,7 +8232,7 @@ test("parsePiIncremental parses a single session and queues with source 'pi'", a
     const ts = Date.UTC(2026, 3, 5, 14, 10, 0);
     const lines = [
       buildOmpSessionHeader(),
-      buildOmpAssistantLine({ id: "msg-1", model: "mimo-v2.5-pro", input: 100, output: 20, cacheRead: 0, cacheWrite: 0, timestamp: ts, totalTokens: 120 }),
+      buildOmpAssistantLine({ id: "msg-1", model: "mimo-v2.5-pro", input: 100, output: 20, cacheRead: 0, cacheWrite: 0, timestamp: ts, totalTokens: 120, provider: null }),
     ];
     await fs.writeFile(filePath, lines.join("\n") + "\n", "utf8");
 
@@ -8247,6 +8247,38 @@ test("parsePiIncremental parses a single session and queues with source 'pi'", a
     assert.equal(queued[0].output_tokens, 20);
     assert.equal(queued[0].total_tokens, 120);
     assert.equal(queued[0].hour_start, "2026-04-05T14:00:00.000Z");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parsePiIncremental splits Anthropic and GitHub Copilot providers into independent sources", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-pi-"));
+  try {
+    const sessionsDir = path.join(tmp, "sessions", "--test--");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const filePath = path.join(sessionsDir, "session.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    const ts = Date.UTC(2026, 3, 5, 14, 10, 0);
+    const lines = [
+      buildOmpSessionHeader(),
+      buildOmpAssistantLine({ id: "anthropic-1", provider: "anthropic", model: "claude-sonnet-4-6", input: 100, output: 20, timestamp: ts, totalTokens: 120 }),
+      buildOmpAssistantLine({ id: "copilot-1", provider: "github-copilot", model: "claude-sonnet-4-6", input: 300, output: 40, timestamp: ts, totalTokens: 340 }),
+    ];
+    await fs.writeFile(filePath, lines.join("\n") + "\n", "utf8");
+
+    const res = await parsePiIncremental({ sessionFiles: [filePath], cursors, queuePath });
+    assert.equal(res.eventsAggregated, 2);
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 2);
+    const bySource = new Map(queued.map((row) => [row.source, row]));
+    assert.equal(bySource.get("pi-anthropic").total_tokens, 120);
+    assert.equal(bySource.get("pi-github-copilot").total_tokens, 340);
+    assert.equal(bySource.get("pi-anthropic").input_tokens, 100);
+    assert.equal(bySource.get("pi-github-copilot").input_tokens, 300);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
@@ -8304,7 +8336,7 @@ test("parsePiIncremental counts pure-reasoning rows (only reasoningTokens > 0)",
 
     const queued = await readJsonLines(queuePath);
     assert.equal(queued.length, 1);
-    assert.equal(queued[0].source, "pi");
+    assert.equal(queued[0].source, "pi-anthropic");
     assert.equal(queued[0].reasoning_output_tokens, 7);
     assert.equal(queued[0].total_tokens, 7);
   } finally {

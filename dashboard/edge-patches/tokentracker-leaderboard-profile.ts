@@ -345,6 +345,9 @@ interface HourlyRow {
 }
 
 function computeRowCost(row: HourlyRow): number {
+  // Pi's GitHub Copilot provider is subscription-backed. Keep its token
+  // counts, but do not reprice the recorded Claude model as Anthropic API use.
+  if (row.source === "pi-github-copilot" || row.source === "pi-copilot") return 0;
   // WorkBuddy's auto-router logs model="auto"; price it as its default Hunyuan
   // model (hy3-preview-agent) so it isn't billed as Cursor's composer-1. Mirrors
   // normalizeWorkbuddyModel in src/lib/pricing/matcher.js.
@@ -370,7 +373,8 @@ function computeRowCost(row: HourlyRow): number {
 /** Map raw `source` to the canonical bucket used by the modal's by_provider list. */
 const KNOWN_SOURCES = new Set([
   "codex", "claude", "gemini", "cursor", "opencode", "openclaw",
-  "hermes", "kiro", "copilot", "kimi", "droid",
+  "hermes", "kiro", "copilot", "pi-anthropic", "pi-github-copilot",
+  "pi-copilot", "kimi", "droid",
 ]);
 function canonicalSource(s: string) {
   return KNOWN_SOURCES.has(s) ? s : "other";

@@ -1,5 +1,8 @@
 const SPECIAL_PROVIDER_NAMES = {
   anythingllm: "AnythingLLM",
+  pianthropic: "Pi · Anthropic",
+  pigithubcopilot: "Pi · GitHub Copilot",
+  picopilot: "Pi · Copilot",
 };
 
 function normalizedProviderKey(value) {

@@ -554,17 +554,20 @@ export default async function (req: Request): Promise<Response> {
             ? "hy3-preview-agent"
             : m.model;
         const p = getModelPricing(modelForPricing);
+        const subscriptionBacked =
+          s.source === "pi-github-copilot" || s.source === "pi-copilot";
         // Codex / every-code fold reasoning into output_tokens (OpenAI
         // convention), so charging reasoning again double-counts. Mirror the
         // guard in src/lib/pricing/index.js + tokentracker-leaderboard-refresh.ts.
         const reasoningIncludedInOutput = s.source === "codex" || s.source === "every-code";
-        const cost =
-          ((m.totals.input_tokens || 0) * (p.input || 0) +
+        const cost = subscriptionBacked
+          ? 0
+          : ((m.totals.input_tokens || 0) * (p.input || 0) +
             (m.totals.output_tokens || 0) * (p.output || 0) +
             (m.totals.cached_input_tokens || 0) * (p.cache_read || 0) +
             (m.totals.cache_creation_input_tokens || 0) * ((p.cache_write ?? 0)) +
             (reasoningIncludedInOutput ? 0 : (m.totals.reasoning_output_tokens || 0) * (p.output || 0))) /
-          1_000_000;
+            1_000_000;
         return {
           model: m.model,
           model_id: m.model_id,

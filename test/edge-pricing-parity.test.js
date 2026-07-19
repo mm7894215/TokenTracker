@@ -83,3 +83,24 @@ test("canonical pricing block retains regression-prone entries and matcher order
   order('lower.includes("kimi-k2.6")', 'lower.includes("kimi")');
   order('lower.includes("mimo-v2.5-pro")', 'lower.includes("mimo-v2.5")');
 });
+
+test("all cloud cost paths keep Pi Copilot subscription rows at zero cost", () => {
+  for (const name of [CANONICAL, ...MIRRORS]) {
+    const source = readEdge(name);
+    assert.ok(source.includes('"pi-github-copilot"'), `${name}: Pi Copilot source missing`);
+    assert.ok(source.includes('"pi-copilot"'), `${name}: Pi Copilot alias missing`);
+    if (name === "tokentracker-account-model-breakdown.ts") {
+      assert.match(
+        source,
+        /const cost = subscriptionBacked\s*\? 0/,
+        `${name}: subscription rows must bypass model pricing`,
+      );
+    } else {
+      assert.match(
+        source,
+        /if \(row\.source === "pi-github-copilot" \|\| row\.source === "pi-copilot"\) return 0;/,
+        `${name}: subscription rows must bypass model pricing`,
+      );
+    }
+  }
+});

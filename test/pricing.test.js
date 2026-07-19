@@ -751,6 +751,22 @@ test("index: computeRowCost on non-Codex source DOES bill reasoning tokens", asy
   assert.ok(w > wo, "reasoning must be billed for non-Codex sources");
 });
 
+test("index: Pi GitHub Copilot rows keep token usage but have zero estimated API cost", () => {
+  pricing.resetPricingForTests();
+  const row = {
+    source: "pi-github-copilot",
+    model: "claude-sonnet-4-6",
+    input_tokens: 100_000,
+    output_tokens: 20_000,
+    cached_input_tokens: 10_000,
+    cache_creation_input_tokens: 5_000,
+    reasoning_output_tokens: 0,
+  };
+  assert.equal(pricing.computeRowCost(row), 0);
+  assert.ok(pricing.computeRowCost({ ...row, source: "pi-anthropic" }) > 0);
+  assert.ok(pricing.getModelPricing("Claude Opus 4.8", { source: "pi-anthropic" }).output > 0);
+});
+
 test("index: getModelPricing returns ZERO for empty/null model", () => {
   pricing.resetPricingForTests();
   assert.equal(pricing.getModelPricing("").input, 0);
