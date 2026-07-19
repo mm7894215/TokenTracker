@@ -61,20 +61,27 @@ function buildWindow({ usedPercent, resetAt }) {
 /**
  * Map Grok's USAGE_PERIOD_TYPE_* enum (or a bare "weekly"/"monthly" string)
  * into a short period key the UI can switch labels on.
+ *
+ * Only daily / weekly / monthly are recognized end-to-end (dashboard + macOS).
+ * Hourly (and other unknown) types return null so UIs fall back to the generic
+ * Month label rather than inventing an unsupported period key.
  */
 function normalizeGrokPeriodType(value) {
   if (typeof value !== "string" || !value.trim()) return null;
   const upper = value.trim().toUpperCase();
   if (upper.includes("WEEK")) return "weekly";
   if (upper.includes("MONTH")) return "monthly";
-  if (upper.includes("DAY") || upper.includes("DAILY")) return "daily";
-  if (upper.includes("HOUR")) return "hourly";
+  // Prefer explicit DAILY / DAY over accidental "HOUR_OF_DAY" style matches.
+  if (upper.includes("DAILY") || /(^|_)DAY($|_)/.test(upper) || upper === "DAY") return "daily";
   return null;
 }
 
 /**
- * Infer weekly vs monthly from period length when the API omits `currentPeriod.type`
- * (legacy monthly payloads only expose start/end dates).
+ * Infer daily / weekly / monthly from period length when the API omits
+ * `currentPeriod.type` (legacy payloads only expose start/end dates).
+ *
+ * Windows used by Grok today: ~1d, ~7d, ~calendar month. Boundaries leave
+ * gaps for odd lengths (e.g. 12d, 2h) so we do not mislabel them.
  */
 function inferGrokPeriodTypeFromDates(startIso, endIso) {
   if (!startIso || !endIso) return null;
@@ -82,9 +89,29 @@ function inferGrokPeriodTypeFromDates(startIso, endIso) {
   const endMs = Date.parse(endIso);
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return null;
   const days = (endMs - startMs) / 86_400_000;
-  if (days <= 8) return "weekly";
+  if (days > 0.5 && days <= 1.5) return "daily";
+  if (days > 1.5 && days <= 8) return "weekly";
   if (days >= 25 && days <= 35) return "monthly";
   return null;
+}
+
+/**
+ * Sum per-product attribution percentages into the shared pool total.
+ * productUsage breaks down the same cap (GrokBuild + GrokChat + …), not
+ * independent quotas — a single product entry undercounts the pool.
+ */
+function sumProductUsagePercent(productUsage) {
+  if (!Array.isArray(productUsage)) return null;
+  let sum = 0;
+  let sawAny = false;
+  for (const entry of productUsage) {
+    if (!entry || typeof entry !== "object") continue;
+    const pct = clampPercent(entry.usagePercent);
+    if (pct === null) continue;
+    sawAny = true;
+    sum += pct;
+  }
+  return sawAny ? clampPercent(sum) : null;
 }
 
 function isGrokInstalled({ home, env } = {}) {
@@ -143,13 +170,10 @@ function normalizeGrokBillingResponse(body) {
   }
 
   // Unified billing: overall pool percent is what gates "You hit your weekly limit".
-  // productUsage is attribution only (GrokBuild vs GrokChat), not a separate cap.
+  // productUsage is attribution across products that share the same pool — sum it.
   let usedPercent = clampPercent(config.creditUsagePercent);
-  if (usedPercent === null && Array.isArray(config.productUsage)) {
-    const buildEntry = config.productUsage.find(
-      (entry) => entry && typeof entry === "object" && entry.product === "GrokBuild",
-    );
-    if (buildEntry) usedPercent = clampPercent(buildEntry.usagePercent);
+  if (usedPercent === null) {
+    usedPercent = sumProductUsagePercent(config.productUsage);
   }
 
   // Legacy monthly credit counters (pre-unified / non-format=credits responses).
@@ -256,6 +280,8 @@ module.exports = {
   loadGrokAuthEntry,
   readGrokAccessToken,
   normalizeGrokPeriodType,
+  inferGrokPeriodTypeFromDates,
+  sumProductUsagePercent,
   normalizeGrokBillingResponse,
   fetchGrokBilling,
   fetchGrokLimits,

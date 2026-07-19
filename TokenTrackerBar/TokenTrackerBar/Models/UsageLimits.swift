@@ -303,7 +303,7 @@ struct GrokLimits: Codable, Equatable {
     let configured: Bool
     let error: String?
     let planLabel: String?
-    /// "weekly" | "monthly" | "daily" | "hourly" from the billing API period type.
+    /// "weekly" | "monthly" | "daily" from the billing API period type (null if unknown).
     let periodType: String?
     let primaryWindow: GenericLimitWindow?
     let secondaryWindow: GenericLimitWindow?

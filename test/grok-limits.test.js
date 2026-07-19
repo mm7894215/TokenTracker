@@ -7,18 +7,65 @@ const path = require("node:path");
 const {
   normalizeGrokBillingResponse,
   normalizeGrokPeriodType,
+  inferGrokPeriodTypeFromDates,
+  sumProductUsagePercent,
   fetchGrokLimits,
   readGrokAccessToken,
   isGrokInstalled,
 } = require("../src/lib/grok-limits");
 
 describe("normalizeGrokPeriodType", () => {
-  it("maps USAGE_PERIOD_TYPE_* enums", () => {
+  it("maps USAGE_PERIOD_TYPE_* enums for daily/weekly/monthly only", () => {
     assert.equal(normalizeGrokPeriodType("USAGE_PERIOD_TYPE_WEEKLY"), "weekly");
     assert.equal(normalizeGrokPeriodType("USAGE_PERIOD_TYPE_MONTHLY"), "monthly");
+    assert.equal(normalizeGrokPeriodType("USAGE_PERIOD_TYPE_DAILY"), "daily");
     assert.equal(normalizeGrokPeriodType("weekly"), "weekly");
+    // Hourly is not a recognized end-to-end period — do not emit it.
+    assert.equal(normalizeGrokPeriodType("USAGE_PERIOD_TYPE_HOURLY"), null);
+    assert.equal(normalizeGrokPeriodType("hourly"), null);
     assert.equal(normalizeGrokPeriodType(""), null);
     assert.equal(normalizeGrokPeriodType(null), null);
+  });
+});
+
+describe("inferGrokPeriodTypeFromDates", () => {
+  it("classifies daily / weekly / monthly windows and leaves gaps null", () => {
+    assert.equal(
+      inferGrokPeriodTypeFromDates("2026-07-13T00:00:00Z", "2026-07-14T00:00:00Z"),
+      "daily",
+    );
+    assert.equal(
+      inferGrokPeriodTypeFromDates("2026-07-13T00:00:00Z", "2026-07-20T00:00:00Z"),
+      "weekly",
+    );
+    assert.equal(
+      inferGrokPeriodTypeFromDates("2026-07-01T00:00:00Z", "2026-08-01T00:00:00Z"),
+      "monthly",
+    );
+    // Sub-day and odd mid lengths must not be mislabeled as weekly.
+    assert.equal(
+      inferGrokPeriodTypeFromDates("2026-07-13T00:00:00Z", "2026-07-13T02:00:00Z"),
+      null,
+    );
+    assert.equal(
+      inferGrokPeriodTypeFromDates("2026-07-01T00:00:00Z", "2026-07-13T00:00:00Z"),
+      null,
+    );
+  });
+});
+
+describe("sumProductUsagePercent", () => {
+  it("sums shared-pool product attribution percentages", () => {
+    assert.equal(
+      sumProductUsagePercent([
+        { product: "GrokBuild", usagePercent: 17 },
+        { product: "GrokChat", usagePercent: 1 },
+      ]),
+      18,
+    );
+    assert.equal(sumProductUsagePercent([{ product: "GrokBuild", usagePercent: 42 }]), 42);
+    assert.equal(sumProductUsagePercent([]), null);
+    assert.equal(sumProductUsagePercent(null), null);
   });
 });
 
@@ -94,7 +141,29 @@ describe("normalizeGrokBillingResponse", () => {
     });
   });
 
-  it("falls back to GrokBuild productUsage when creditUsagePercent is missing", () => {
+  it("sums all productUsage entries when creditUsagePercent is missing", () => {
+    const result = normalizeGrokBillingResponse({
+      config: {
+        currentPeriod: {
+          type: "USAGE_PERIOD_TYPE_WEEKLY",
+          start: "2026-07-13T00:00:00Z",
+          end: "2026-07-20T00:00:00Z",
+        },
+        productUsage: [
+          { product: "GrokBuild", usagePercent: 17 },
+          { product: "GrokChat", usagePercent: 1 },
+        ],
+        billingPeriodEnd: "2026-07-20T00:00:00Z",
+      },
+    });
+
+    assert.equal(result.period_type, "weekly");
+    // Shared pool: 17 + 1 = 18, not GrokBuild-only 17.
+    assert.equal(result.primary_window.used_percent, 18);
+    assert.equal(result.credit_usage_percent, 18);
+  });
+
+  it("falls back to a single productUsage entry when only one is present", () => {
     const result = normalizeGrokBillingResponse({
       config: {
         currentPeriod: {
@@ -112,15 +181,53 @@ describe("normalizeGrokBillingResponse", () => {
     assert.equal(result.credit_usage_percent, 42);
   });
 
-  it("infers weekly from period length when type is omitted", () => {
+  it("infers daily / weekly / monthly from period length when type is omitted", () => {
+    assert.equal(
+      normalizeGrokBillingResponse({
+        config: {
+          creditUsagePercent: 5,
+          billingPeriodStart: "2026-07-13T00:00:00Z",
+          billingPeriodEnd: "2026-07-14T00:00:00Z",
+        },
+      }).period_type,
+      "daily",
+    );
+    assert.equal(
+      normalizeGrokBillingResponse({
+        config: {
+          creditUsagePercent: 5,
+          billingPeriodStart: "2026-07-13T00:00:00Z",
+          billingPeriodEnd: "2026-07-20T00:00:00Z",
+        },
+      }).period_type,
+      "weekly",
+    );
+    assert.equal(
+      normalizeGrokBillingResponse({
+        config: {
+          creditUsagePercent: 5,
+          billingPeriodStart: "2026-07-01T00:00:00Z",
+          billingPeriodEnd: "2026-08-01T00:00:00Z",
+        },
+      }).period_type,
+      "monthly",
+    );
+  });
+
+  it("does not emit hourly as a recognized period_type", () => {
     const result = normalizeGrokBillingResponse({
       config: {
-        creditUsagePercent: 5,
-        billingPeriodStart: "2026-07-13T00:00:00Z",
-        billingPeriodEnd: "2026-07-20T00:00:00Z",
+        currentPeriod: {
+          type: "USAGE_PERIOD_TYPE_HOURLY",
+          start: "2026-07-13T00:00:00Z",
+          end: "2026-07-13T01:00:00Z",
+        },
+        creditUsagePercent: 10,
       },
     });
-    assert.equal(result.period_type, "weekly");
+    // Type ignored; sub-day length also does not infer weekly/daily.
+    assert.equal(result.period_type, null);
+    assert.equal(result.primary_window.used_percent, 10);
   });
 });
 
