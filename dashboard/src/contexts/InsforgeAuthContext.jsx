@@ -40,15 +40,21 @@ export async function resolveInsforgeClientAccessToken(client, options = {}) {
   const skewMs = Math.max(0, Math.floor(Number(options.skewMs) || 60_000));
   const tm = /** @type {any} */ (client).tokenManager;
   const readToken = () => tm?.getAccessToken?.() ?? tm?.getSession?.()?.accessToken ?? null;
+  const firstUsableToken = (...candidates) =>
+    candidates.find((candidate) => candidate && !isLikelyExpiredAccessToken(candidate, skewMs)) ?? null;
 
   let token = readToken();
   if (!token || isLikelyExpiredAccessToken(token, skewMs)) {
     const { data } = await client.auth.refreshSession();
-    token = readToken() ?? accessTokenFromRefreshPayload(data) ?? null;
+    // Some SDK/storage combinations expose the old token from tokenManager for
+    // a short window after refreshSession resolves. Do not let that stale JWT
+    // mask the fresh token returned in the refresh payload.
+    const refreshedPayloadToken = accessTokenFromRefreshPayload(data);
+    token = firstUsableToken(readToken(), refreshedPayloadToken);
     if (!token && typeof client.auth.getCurrentUser === "function") {
       try {
         await client.auth.getCurrentUser();
-        token = readToken() ?? accessTokenFromRefreshPayload(data) ?? null;
+        token = firstUsableToken(readToken(), refreshedPayloadToken);
       } catch {
         /* ignore */
       }

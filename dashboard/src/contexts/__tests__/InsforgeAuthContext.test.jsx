@@ -66,6 +66,23 @@ describe("resolveInsforgeClientAccessToken", () => {
     expect(client.auth.refreshSession).toHaveBeenCalledTimes(1);
   });
 
+  it("uses the refreshed payload while the token manager still exposes the expired token", async () => {
+    const expiredToken = makeJwt(Math.floor(Date.now() / 1000) - 60);
+    const refreshedToken = makeJwt(Math.floor(Date.now() / 1000) + 3600);
+    const client = {
+      tokenManager: {
+        getAccessToken: vi.fn(() => expiredToken),
+        getSession: vi.fn(() => ({ accessToken: expiredToken })),
+      },
+      auth: {
+        refreshSession: vi.fn(async () => ({ data: { accessToken: refreshedToken } })),
+      },
+    };
+
+    await expect(resolveInsforgeClientAccessToken(client)).resolves.toBe(refreshedToken);
+    expect(client.auth.refreshSession).toHaveBeenCalledTimes(1);
+  });
+
   it("uses access_token from refresh payload when token manager stays empty", async () => {
     const accessToken = "snake-case-token";
     const client = {

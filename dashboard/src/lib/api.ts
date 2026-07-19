@@ -956,9 +956,14 @@ export async function renameAccountDevice({ deviceId, name, accessToken }: AnyRe
     err.status = 401;
     throw err;
   }
-  return fetchInsforgeFunction("tokentracker-device-rename", {
+  const result = await fetchInsforgeFunction("tokentracker-device-rename", {
     accessToken,
     method: "POST",
     body: { device_id: deviceId, device_name: name },
   });
+  // Account GETs are cached briefly to collapse dashboard fan-out. A rename
+  // changes the device list immediately, so the caller's follow-up refresh
+  // must not be satisfied by the pre-mutation snapshot.
+  invalidateAccountResponseCache();
+  return result;
 }
