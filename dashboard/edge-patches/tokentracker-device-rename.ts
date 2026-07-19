@@ -15,7 +15,11 @@
  *
  * Renaming also sets name_customized = true, which tells the token-issue /
  * device-flow-poll keep-fresh writes to stop refreshing device_name from the
- * client default (those writes used to revert every rename within ~12h).
+ * client default (those writes used to revert every rename within ~12h). A
+ * row's FIRST rename additionally preserves its pre-rename client-default
+ * name in default_device_name, which legacy adoption matches as a fallback —
+ * without it, renaming a machine_id-less row would make it un-adoptable and
+ * split off a fresh device on the next client-upgrade login.
  */
 import { createClient } from "npm:@insforge/sdk";
 
@@ -104,14 +108,32 @@ export default async function (req: Request): Promise<Response> {
   });
 
   try {
+    // A row's first rename captures its current (client-default) name so
+    // legacy adoption can still match the row afterwards. Once
+    // name_customized is set the capture is frozen — repeated renames must
+    // not overwrite the original default with a previous custom name.
+    let priorName: string | null = null;
+    const { data: current, error: readErr } = await client.database
+      .from("tokentracker_devices")
+      .select("id, device_name, name_customized")
+      .eq("id", deviceId)
+      .eq("user_id", userId)
+      .is("revoked_at", null)
+      .maybeSingle();
+    if (!readErr && current && !(current as { name_customized?: boolean }).name_customized) {
+      priorName = (current as { device_name?: string | null }).device_name ?? null;
+    }
+
     let { data, error } = await client.database
       .from("tokentracker_devices")
-      .update({ device_name: name, name_customized: true })
+      .update(priorName
+        ? { device_name: name, name_customized: true, default_device_name: priorName }
+        : { device_name: name, name_customized: true })
       .eq("id", deviceId)
       .eq("user_id", userId)
       .is("revoked_at", null)
       .select("id, device_name, platform");
-    if (error && /name_customized/i.test(error.message || "")) {
+    if (error && /name_customized|default_device_name/i.test(error.message || "")) {
       // Deploy-order safety net: this function is live but the
       // name_customized migration has not run yet. Fall back to the legacy
       // update so rename keeps working (unprotected) instead of 500ing.
