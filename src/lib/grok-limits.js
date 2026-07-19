@@ -3,6 +3,49 @@ const os = require("node:os");
 const path = require("node:path");
 
 const DEFAULT_BILLING_BASE_URL = "https://cli-chat-proxy.grok.com";
+const DEFAULT_BILLING_TIMEOUT_MS = 15_000;
+
+function grokAuthError() {
+  const error = new Error("Not logged in to Grok Build. Run `grok login` in Terminal to authenticate.");
+  error.code = "GROK_AUTH_REQUIRED";
+  return error;
+}
+
+function grokBillingTimeoutError() {
+  const error = new Error("Grok billing request timed out.");
+  error.code = "GROK_BILLING_TIMEOUT";
+  return error;
+}
+
+async function runBeforeBillingDeadline(operation, deadlineMs) {
+  const remainingMs = Math.ceil(deadlineMs - Date.now());
+  if (remainingMs <= 0) throw grokBillingTimeoutError();
+
+  const controller = new AbortController();
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const error = grokBillingTimeoutError();
+      controller.abort(error);
+      reject(error);
+    }, remainingMs);
+  });
+
+  try {
+    return await Promise.race([operation(controller.signal), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchGrokBillingAttempt(fetchImpl, url, headers, deadlineMs) {
+  return runBeforeBillingDeadline(async (signal) => {
+    const response = await fetchImpl(url, { method: "GET", headers, signal });
+    if (response.status === 401 || response.status === 403) throw grokAuthError();
+    if (!response.ok) return { ok: false, status: response.status };
+    return { ok: true, body: await response.json() };
+  }, deadlineMs);
+}
 
 function resolveGrokHome({ home, env = process.env } = {}) {
   if (typeof env.TOKENTRACKER_GROK_HOME === "string" && env.TOKENTRACKER_GROK_HOME.trim()) {
@@ -221,36 +264,60 @@ function normalizeGrokBillingResponse(body) {
  * used by the Grok Build TUI). Fall back to the bare `/v1/billing` payload for
  * older accounts that only expose monthlyLimit/used.
  */
-async function fetchGrokBilling(accessToken, { fetchImpl = fetch, baseUrl, env } = {}) {
+async function fetchGrokBilling(
+  accessToken,
+  { fetchImpl = fetch, baseUrl, env, timeoutMs = DEFAULT_BILLING_TIMEOUT_MS } = {},
+) {
   const root = (baseUrl || resolveGrokBillingBaseUrl(env)).replace(/\/$/, "");
   const headers = {
     Authorization: `Bearer ${accessToken}`,
     Accept: "application/json",
   };
+  const normalizedTimeoutMs =
+    Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_BILLING_TIMEOUT_MS;
+  const deadlineMs = Date.now() + normalizedTimeoutMs;
 
   const creditsUrl = `${root}/v1/billing?format=credits`;
-  const creditsRes = await fetchImpl(creditsUrl, { method: "GET", headers });
-  if (creditsRes.status === 401 || creditsRes.status === 403) {
-    throw new Error("Not logged in to Grok Build. Run `grok login` in Terminal to authenticate.");
-  }
-  if (creditsRes.ok) {
-    return creditsRes.json();
+  let creditsFailure = "request failed";
+  try {
+    const creditsResult = await fetchGrokBillingAttempt(
+      fetchImpl,
+      creditsUrl,
+      headers,
+      deadlineMs,
+    );
+    if (creditsResult.ok) return creditsResult.body;
+    creditsFailure = `HTTP ${creditsResult.status}`;
+  } catch (error) {
+    if (error?.code === "GROK_AUTH_REQUIRED") throw error;
+    if (error?.code === "GROK_BILLING_TIMEOUT") throw error;
   }
 
-  // Non-auth failure on format=credits → try the legacy shape once.
-  const legacyRes = await fetchImpl(`${root}/v1/billing`, { method: "GET", headers });
-  if (legacyRes.status === 401 || legacyRes.status === 403) {
-    throw new Error("Not logged in to Grok Build. Run `grok login` in Terminal to authenticate.");
+  // Non-auth HTTP, network, or response-decoding failure → try the legacy
+  // shape once, while sharing the original request deadline.
+  let legacyResult;
+  try {
+    legacyResult = await fetchGrokBillingAttempt(
+      fetchImpl,
+      `${root}/v1/billing`,
+      headers,
+      deadlineMs,
+    );
+  } catch (error) {
+    if (error?.code === "GROK_AUTH_REQUIRED" || error?.code === "GROK_BILLING_TIMEOUT") throw error;
+    throw new Error(`Grok billing request failed (format=credits: ${creditsFailure})`, {
+      cause: error,
+    });
   }
-  if (!legacyRes.ok) {
+  if (!legacyResult.ok) {
     throw new Error(
-      `Grok billing API returned ${legacyRes.status} (format=credits: ${creditsRes.status})`,
+      `Grok billing API returned ${legacyResult.status} (format=credits: ${creditsFailure})`,
     );
   }
-  return legacyRes.json();
+  return legacyResult.body;
 }
 
-async function fetchGrokLimits({ home, env, fetchImpl = fetch } = {}) {
+async function fetchGrokLimits({ home, env, fetchImpl = fetch, timeoutMs } = {}) {
   if (!isGrokInstalled({ home, env })) {
     return { configured: false };
   }
@@ -259,7 +326,7 @@ async function fetchGrokLimits({ home, env, fetchImpl = fetch } = {}) {
     return { configured: false };
   }
   try {
-    const body = await fetchGrokBilling(accessToken, { fetchImpl, env });
+    const body = await fetchGrokBilling(accessToken, { fetchImpl, env, timeoutMs });
     return {
       configured: true,
       error: null,

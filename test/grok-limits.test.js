@@ -347,4 +347,95 @@ describe("fetchGrokLimits", () => {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  it("falls back to legacy /v1/billing after a format=credits network error", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tt-grok-limits-network-fallback-"));
+    try {
+      const grokHome = path.join(tmp, ".grok");
+      fs.mkdirSync(grokHome, { recursive: true });
+      fs.writeFileSync(
+        path.join(grokHome, "auth.json"),
+        JSON.stringify({
+          "https://auth.x.ai::test": { key: "test-token" },
+        }),
+        "utf8",
+      );
+
+      const urls = [];
+      const result = await fetchGrokLimits({
+        home: tmp,
+        env: { GROK_HOME: grokHome },
+        fetchImpl: async (url) => {
+          urls.push(url);
+          if (String(url).includes("format=credits")) {
+            throw new TypeError("fetch failed");
+          }
+          return {
+            ok: true,
+            status: 200,
+            async json() {
+              return {
+                config: {
+                  monthlyLimit: { val: 1000 },
+                  used: { val: 250 },
+                  onDemandCap: { val: 0 },
+                  billingPeriodStart: "2026-07-01T00:00:00Z",
+                  billingPeriodEnd: "2026-08-01T00:00:00Z",
+                },
+              };
+            },
+          };
+        },
+      });
+
+      assert.deepEqual(urls, [
+        "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
+        "https://cli-chat-proxy.grok.com/v1/billing",
+      ]);
+      assert.equal(result.configured, true);
+      assert.equal(result.error, null);
+      assert.equal(result.period_type, "monthly");
+      assert.equal(result.primary_window.used_percent, 25);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("does not start a late fallback after the shared request deadline", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tt-grok-limits-timeout-"));
+    try {
+      const grokHome = path.join(tmp, ".grok");
+      fs.mkdirSync(grokHome, { recursive: true });
+      fs.writeFileSync(
+        path.join(grokHome, "auth.json"),
+        JSON.stringify({
+          "https://auth.x.ai::test": { key: "test-token" },
+        }),
+        "utf8",
+      );
+
+      const urls = [];
+      const result = await fetchGrokLimits({
+        home: tmp,
+        env: { GROK_HOME: grokHome },
+        timeoutMs: 30,
+        fetchImpl: async (url, options) => {
+          urls.push(url);
+          await new Promise((_, reject) => {
+            options.signal.addEventListener("abort", () => reject(options.signal.reason), {
+              once: true,
+            });
+          });
+        },
+      });
+
+      assert.deepEqual(urls, [
+        "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
+      ]);
+      assert.equal(result.configured, true);
+      assert.match(result.error, /timed out/i);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 });
