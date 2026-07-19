@@ -167,22 +167,34 @@ export default async function (req: Request): Promise<Response> {
   if (machineId) {
     const { data: byMachine } = await dbClient.database
       .from("tokentracker_devices")
-      .select("id, name_customized")
+      .select("id")
       .eq("user_id", userId)
       .eq("machine_id", machineId)
       .is("revoked_at", null)
       .limit(1)
       .maybeSingle();
     if (byMachine && (byMachine as { id: string }).id) {
-      const row = byMachine as { id: string; name_customized?: boolean };
+      const row = byMachine as { id: string };
       deviceId = row.id;
-      // Keep the display name fresh — identity is the machine_id, not the
-      // name — UNLESS the user renamed the device (name_customized): this
-      // write runs on every 12h token rotation and used to revert renames.
-      await dbClient.database
-        .from("tokentracker_devices")
-        .update(row.name_customized ? { platform } : { device_name: deviceName, platform })
-        .eq("id", deviceId);
+      // Refresh the client default and converge a matching machine_id-less
+      // legacy row in one database transaction. The RPC preserves custom
+      // names, canonicalizes duplicate hourly snapshots, moves old tokens,
+      // and absorbs a concurrent unique-name race without logging a 23505.
+      const { error: refreshErr } = await dbClient.database.rpc(
+        "refresh_tokentracker_device_identity",
+        {
+          p_user_id: userId,
+          p_device_id: deviceId,
+          p_device_name: deviceName,
+          p_platform: platform,
+        },
+      );
+      if (refreshErr) {
+        // Identity is already anchored by machine_id, so a transient refresh
+        // failure must not prevent token rotation. Surface it in function logs
+        // while leaving the canonical device untouched.
+        console.error("device identity refresh failed", refreshErr.message);
+      }
     }
 
     if (!deviceId) {

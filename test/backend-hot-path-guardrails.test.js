@@ -7,6 +7,12 @@ const test = require("node:test");
 
 const ROOT = path.resolve(__dirname, "..");
 const read = (relativePath) => fs.readFileSync(path.join(ROOT, relativePath), "utf8");
+const readMigrationBySuffix = (suffix) => {
+  const file = fs.readdirSync(path.join(ROOT, "migrations"))
+    .find((name) => name.endsWith(`_${suffix}.sql`));
+  assert.ok(file, `missing migration ending in _${suffix}.sql`);
+  return read(`migrations/${file}`);
+};
 
 const ACCOUNT_FUNCTIONS = [
   "tokentracker-account-summary.ts",
@@ -47,6 +53,20 @@ test("shared account cache is bounded, locked per key, and access controlled", (
   assert.match(source, /ENABLE ROW LEVEL SECURITY/u);
   assert.match(source, /REVOKE ALL ON public\.tokentracker_account_usage_cache FROM PUBLIC, anon, authenticated/u);
   assert.match(source, /REVOKE ALL ON FUNCTION public\.account_usage_grouped_cached/u);
+});
+
+test("shared account cache cleanup cannot deadlock concurrent cold fills", () => {
+  const source = readMigrationBySuffix("harden-backend-concurrency");
+  assert.match(
+    source,
+    /ORDER BY stale\.fetched_at, stale\.cache_key[\s\S]{0,80}FOR UPDATE SKIP LOCKED[\s\S]{0,80}LIMIT 256/u,
+    "cleanup must lock stale rows in one deterministic, non-blocking order",
+  );
+  assert.match(
+    source,
+    /DELETE FROM public\.tokentracker_account_usage_cache AS c[\s\S]{0,160}USING stale/u,
+    "cleanup must delete only the rows claimed by the skip-locked batch",
+  );
 });
 
 test("leaderboard refresh fetches all user metadata with one RPC", () => {

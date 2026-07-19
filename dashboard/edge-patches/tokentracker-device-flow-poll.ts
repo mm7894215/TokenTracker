@@ -53,22 +53,33 @@ async function issueDeviceToken(client: any, userId: string, clientInfo: string 
   if (machineId) {
     const { data: byMachine } = await client.database
       .from("tokentracker_devices")
-      .select("id, name_customized")
+      .select("id")
       .eq("user_id", userId)
       .eq("machine_id", machineId)
       .is("revoked_at", null)
       .limit(1)
       .maybeSingle();
     if (byMachine && (byMachine as { id: string }).id) {
-      const row = byMachine as { id: string; name_customized?: boolean };
+      const row = byMachine as { id: string };
       deviceId = row.id;
-      // Keep the display name fresh unless the user renamed the device
-      // (name_customized) — this write runs on every CLI re-login and used
-      // to revert renames to the default hostname-derived name.
-      await client.database
-        .from("tokentracker_devices")
-        .update(row.name_customized ? { platform } : { device_name: deviceName, platform })
-        .eq("id", deviceId);
+      // Refresh the client default and converge a matching machine_id-less
+      // legacy row in one database transaction. The RPC preserves custom
+      // names, canonicalizes duplicate hourly snapshots, moves old tokens,
+      // and absorbs a concurrent unique-name race without logging a 23505.
+      const { error: refreshErr } = await client.database.rpc(
+        "refresh_tokentracker_device_identity",
+        {
+          p_user_id: userId,
+          p_device_id: deviceId,
+          p_device_name: deviceName,
+          p_platform: platform,
+        },
+      );
+      if (refreshErr) {
+        // The machine_id match remains authoritative; keep login available and
+        // leave a structured runtime signal for a transient database failure.
+        console.error("device identity refresh failed", refreshErr.message);
+      }
     }
 
     if (!deviceId) {
