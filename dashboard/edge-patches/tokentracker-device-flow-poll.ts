@@ -53,17 +53,21 @@ async function issueDeviceToken(client: any, userId: string, clientInfo: string 
   if (machineId) {
     const { data: byMachine } = await client.database
       .from("tokentracker_devices")
-      .select("id")
+      .select("id, name_customized")
       .eq("user_id", userId)
       .eq("machine_id", machineId)
       .is("revoked_at", null)
       .limit(1)
       .maybeSingle();
     if (byMachine && (byMachine as { id: string }).id) {
-      deviceId = (byMachine as { id: string }).id;
+      const row = byMachine as { id: string; name_customized?: boolean };
+      deviceId = row.id;
+      // Keep the display name fresh unless the user renamed the device
+      // (name_customized) — this write runs on every CLI re-login and used
+      // to revert renames to the default hostname-derived name.
       await client.database
         .from("tokentracker_devices")
-        .update({ device_name: deviceName, platform })
+        .update(row.name_customized ? { platform } : { device_name: deviceName, platform })
         .eq("id", deviceId);
     }
 
@@ -80,14 +84,35 @@ async function issueDeviceToken(client: any, userId: string, clientInfo: string 
       const legacyBareName = `TokenTracker CLI${clientInfo ? ` (${clientInfo})` : ""}`.slice(0, 128);
       const { data: legacyRows } = await client.database
         .from("tokentracker_devices")
-        .select("id, device_name")
+        .select("id, device_name, name_customized")
         .eq("user_id", userId)
         .eq("platform", platform)
         .in("device_name", [deviceName, legacyBareName])
         .is("revoked_at", null)
         .is("machine_id", null)
         .order("created_at", { ascending: true });
-      const candidates = Array.isArray(legacyRows) ? (legacyRows as Array<{ id: string; device_name: string }>) : [];
+      let candidates = Array.isArray(legacyRows)
+        ? (legacyRows as Array<{ id: string; device_name: string; name_customized?: boolean }>)
+        : [];
+      if (candidates.length === 0) {
+        // A renamed legacy row matches no client default by device_name; the
+        // rename endpoint preserved its pre-rename default in
+        // default_device_name — match that as a fallback, with the exact same
+        // (user, platform, active, machine_id IS NULL) scope, so a rename
+        // doesn't leave the row un-adoptable and split off a fresh device.
+        const { data: renamedRows } = await client.database
+          .from("tokentracker_devices")
+          .select("id, device_name, name_customized")
+          .eq("user_id", userId)
+          .eq("platform", platform)
+          .in("default_device_name", [deviceName, legacyBareName])
+          .is("revoked_at", null)
+          .is("machine_id", null)
+          .order("created_at", { ascending: true });
+        candidates = Array.isArray(renamedRows)
+          ? (renamedRows as Array<{ id: string; device_name: string; name_customized?: boolean }>)
+          : [];
+      }
       // Prefer an exact new-name match, then the bare legacy name.
       const ordered = [
         ...candidates.filter((r) => r.device_name === deviceName),
@@ -96,7 +121,9 @@ async function issueDeviceToken(client: any, userId: string, clientInfo: string 
       for (const candidate of ordered) {
         const { error: adoptErr } = await client.database
           .from("tokentracker_devices")
-          .update({ machine_id: machineId, device_name: deviceName })
+          .update(candidate.name_customized
+            ? { machine_id: machineId }
+            : { machine_id: machineId, device_name: deviceName })
           .eq("id", candidate.id)
           .is("machine_id", null);
         if (!adoptErr) {
