@@ -25,7 +25,14 @@ export function syncTauriIcon(sourcePath = canonicalIconPath, destinationPath = 
   const rgbaPng = createRgbaPng(fs.readFileSync(sourcePath));
   fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
 
-  if (!fs.existsSync(destinationPath) || !fs.readFileSync(destinationPath).equals(rgbaPng)) {
+  let current;
+  try {
+    current = fs.readFileSync(destinationPath);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+
+  if (!current?.equals(rgbaPng)) {
     fs.writeFileSync(destinationPath, rgbaPng);
   }
 

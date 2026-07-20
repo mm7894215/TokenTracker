@@ -48,6 +48,12 @@ test('canonical dashboard icon converts to an 8-bit RGBA PNG', () => {
   );
 });
 
+test('icon sync reads the destination directly without an exists-then-read race', () => {
+  const script = fs.readFileSync(new URL('../scripts/sync-tauri-icon.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(script, /existsSync\s*\(/);
+  assert.match(script, /error\.code !== ['"]ENOENT['"]/);
+});
+
 test('sync writes a deterministic RGBA Tauri icon', () => {
   const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'tokentracker-icon-'));
   const destination = path.join(temporaryDirectory, 'icons', 'icon.png');
