@@ -252,7 +252,12 @@ struct ClawdCompanionView: View {
             .foregroundStyle(.primary)
             .frame(maxWidth: layout == .floating ? 320 : nil, alignment: .center)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, layout == .floating ? 13 : 10)
+            // The popover bubble's tail is carved out of the LEFT 6pt of the
+            // shape, so a symmetric horizontal padding leaves the content only
+            // ~4pt from the body edge. Add the tail width back on the leading
+            // side so text gets the intended inset from the rounded body.
+            .padding(.leading, layout == .floating ? 13 : 16)
+            .padding(.trailing, layout == .floating ? 13 : 10)
             .padding(.vertical, layout == .floating ? 7 : 9)
             // Floating bubble has a downward tail (6pt) carved out of the bottom; add
             // matching bottom padding so the text stays centered in the rounded body.

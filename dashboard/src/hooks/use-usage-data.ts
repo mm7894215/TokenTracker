@@ -10,6 +10,12 @@ import {
   getUsageSummary,
 } from "../lib/api";
 import { useLatestRequestGuard } from "./use-latest-request-guard";
+import { touchLocalStorageCacheKey } from "../lib/local-storage-lru";
+
+// Bounds the per-range response cache keys (they embed from/to/tz/device, so
+// every period/device switch mints one) — see lib/local-storage-lru.ts.
+const USAGE_CACHE_INDEX_KEY = "tokentracker.usage-cache-index";
+const USAGE_CACHE_MAX_ENTRIES = 24;
 
 export function useUsageData({
   baseUrl,
@@ -79,6 +85,7 @@ export function useUsageData({
         ? Boolean(parsed?.summary)
         : Array.isArray(parsed?.daily);
       if (!parsed || !hasRequestedData) return null;
+      touchLocalStorageCacheKey(USAGE_CACHE_INDEX_KEY, storageKey, USAGE_CACHE_MAX_ENTRIES);
       return parsed;
     } catch (_e) {
       return null;
@@ -90,6 +97,7 @@ export function useUsageData({
       if (!storageKey || typeof window === "undefined") return;
       try {
         window.localStorage.setItem(storageKey, JSON.stringify(payload));
+        touchLocalStorageCacheKey(USAGE_CACHE_INDEX_KEY, storageKey, USAGE_CACHE_MAX_ENTRIES);
       } catch (_e) {
         // ignore write errors (quota/private mode)
       }

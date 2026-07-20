@@ -75,13 +75,15 @@ test("local usage endpoints reuse one parsed queue until the file changes", asyn
     assert.equal(daily.data[0].total_tokens, 100);
     assert.equal(queueReads, 1);
 
+    // Appending invalidates the signature, but the queue is append-only, so
+    // the refresh reads just the new tail instead of the whole file.
     await fs.promises.appendFile(queuePath, `${JSON.stringify(queueRow(250))}\n`);
     const refreshed = await callEndpoint(
       handler,
       "/functions/tokentracker-usage-summary?from=2026-07-17&to=2026-07-17&tz=UTC",
     );
     assert.equal(refreshed.totals.total_tokens, 250);
-    assert.equal(queueReads, 2);
+    assert.equal(queueReads, 1);
   } finally {
     fs.readFileSync = originalReadFileSync;
     await fs.promises.rm(tmp, { recursive: true, force: true });

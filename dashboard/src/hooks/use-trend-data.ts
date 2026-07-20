@@ -12,9 +12,14 @@ import {
   getUsageMonthly,
 } from "../lib/api";
 import { useLatestRequestGuard } from "./use-latest-request-guard";
+import { touchLocalStorageCacheKey } from "../lib/local-storage-lru";
 
 const DEFAULT_MONTHS = 24;
 type AnyRecord = Record<string, any>;
+
+// Same bounded-LRU scheme as use-usage-data (keys embed range/tz/device).
+const TREND_CACHE_INDEX_KEY = "tokentracker.trend-cache-index";
+const TREND_CACHE_MAX_ENTRIES = 24;
 
 export function useTrendData({
   baseUrl,
@@ -81,6 +86,7 @@ export function useTrendData({
       if (!raw) return null;
       const parsed = JSON.parse(raw);
       if (!parsed || !Array.isArray(parsed.rows)) return null;
+      touchLocalStorageCacheKey(TREND_CACHE_INDEX_KEY, storageKey, TREND_CACHE_MAX_ENTRIES);
       return parsed;
     } catch (_e) {
       return null;
@@ -92,6 +98,7 @@ export function useTrendData({
       if (!storageKey || typeof window === "undefined") return;
       try {
         window.localStorage.setItem(storageKey, JSON.stringify(payload));
+        touchLocalStorageCacheKey(TREND_CACHE_INDEX_KEY, storageKey, TREND_CACHE_MAX_ENTRIES);
       } catch (_e) {
         // ignore write errors
       }

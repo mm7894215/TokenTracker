@@ -682,18 +682,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     }
 
     /// <summary>Diagnostics → %LOCALAPPDATA%\TokenTracker\windows-host.log (shared with ServerManager).</summary>
-    private static void DiagLog(string message)
-    {
-        try
-        {
-            var path = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "TokenTracker", "windows-host.log");
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.AppendAllText(path, $"{DateTimeOffset.Now:O} [tray] {message}{Environment.NewLine}");
-        }
-        catch { /* best-effort diagnostics */ }
-    }
+    private static void DiagLog(string message) => Diag.Log("tray", message);
 
     private void OnToggleStartup(object? sender, EventArgs e)
     {
@@ -842,12 +831,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
     /// <summary>Render the today summary into the menu + tooltip, in the user's currency.</summary>
     private async void RefreshSummary()
     {
-        // Convert USD → the dashboard's chosen currency. The live source is the dashboard
-        // WebView's localStorage; before it exists (cold launch with only the pet on
-        // screen) fall back to the natively-cached symbol/rate so the pet matches the
-        // app's last-used unit instead of flashing USD.
-        var (symbol, rate) = _dashboard is not null
-            ? await _dashboard.ReadCurrencyAsync()
+        // Convert USD → the dashboard's chosen currency. Reading the currency is a
+        // WebView2 ExecuteScript round-trip — the 2s _refreshTimer would otherwise
+        // poke the WebView forever, even while the window is hidden. Currency
+        // changes originate in the (visible) dashboard and already arrive via
+        // CurrencyChanged → persisted, so a hidden window can safely serve the
+        // natively-cached symbol/rate (which also covers a cold-launched pet).
+        var (symbol, rate) = IsDashboardOpen()
+            ? await _dashboard!.ReadCurrencyAsync()
             : Currency.ReadPersisted() ?? ("$", 1m);
         // Push currency + language to the pet even before the first usage poll lands, so
         // a freshly launched pet never sits in default USD/English until polling finishes

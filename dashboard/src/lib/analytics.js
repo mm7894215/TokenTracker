@@ -1,4 +1,3 @@
-import posthog from "posthog-js";
 import { isNativeEmbed, isNativeWindowsApp } from "./native-bridge.js";
 
 /**
@@ -35,7 +34,11 @@ export function resolveAnalyticsShell() {
   return "web";
 }
 
-function startPosthog(shell) {
+async function startPosthog(shell) {
+  // Dynamic import keeps posthog-js (~70-90 KB gzip) out of the eager entry
+  // chunk — analytics only ever activates in production builds, so localhost
+  // CLI users, native WebViews, and the share page should not pay for it.
+  const { default: posthog } = await import("posthog-js");
   posthog.init(POSTHOG_KEY, {
     api_host: POSTHOG_HOST,
     capture_pageview: "history_change", // SPA route changes count as pageviews
@@ -55,14 +58,19 @@ export function initAnalytics() {
   try {
     const shell = resolveAnalyticsShell();
     if (shell === "web") {
-      startPosthog(shell);
+      void startPosthog(shell).catch(() => {
+        /* analytics must never break the app */
+      });
       return;
     }
     // Local surfaces: honor the CLI-side telemetry opt-out, fail-closed.
     fetch("/functions/tokentracker-telemetry-pref")
       .then((res) => (res.ok ? res.json() : null))
       .then((pref) => {
-        if (pref && pref.disabled === false) startPosthog(shell);
+        if (pref && pref.disabled === false) {
+          return startPosthog(shell);
+        }
+        return undefined;
       })
       .catch(() => {
         /* preference unknown → analytics stays off */
@@ -71,5 +79,3 @@ export function initAnalytics() {
     /* analytics must never break the app */
   }
 }
-
-export { posthog };

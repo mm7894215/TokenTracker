@@ -188,9 +188,10 @@ async function readState(
 ): Promise<{ count: number; liked: boolean }> {
   // count:"exact" returns the precise full-set size via Content-Range even if
   // the row payload is capped — so this is exact regardless of max-rows.
+  // head:true skips transferring the id rows entirely; only the count is read.
   const { count, error } = await client.database
     .from(LIKES_TABLE)
-    .select("id", { count: "exact" })
+    .select("id", { count: "exact", head: true })
     .eq("target_user_id", target);
   if (error) throw new Error(error.message);
   let liked = false;

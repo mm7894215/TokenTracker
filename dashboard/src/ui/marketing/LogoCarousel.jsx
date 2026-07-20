@@ -121,9 +121,13 @@ export function LogoCarousel({ logos, columnCount = 2 }) {
 
   // Advance the clock that drives logo cycling. Hovering any column pauses it,
   // freezing every column on its current logo (whose name is then revealed).
+  // 400ms granularity = gcd(4000ms cycle, 400ms column stagger): every column
+  // flip lands exactly on a tick, so the staggered rhythm is preserved while
+  // the subtree re-renders 2.5x/s instead of 10x/s. (500ms would quantize the
+  // stagger — adjacent columns would flip on the same tick.)
   useEffect(() => {
     if (paused) return undefined;
-    const intervalId = setInterval(() => setCurrentTime((prev) => prev + 100), 100);
+    const intervalId = setInterval(() => setCurrentTime((prev) => prev + 400), 400);
     return () => clearInterval(intervalId);
   }, [paused]);
 

@@ -7,9 +7,11 @@
  * trend.
  *
  * Previous implementation returned the existing snapshot row. The modal
- * needs time-series data the snapshot table doesn't carry, so we scan
- * `tokentracker_hourly` directly (single-user scan — small enough to walk
- * in one request, much smaller than the cross-user refresh job).
+ * needs time-series data the snapshot table doesn't carry, so the usage rows
+ * come from the shared `account_usage_grouped(_cached)` RPC: Postgres does the
+ * two-class cross-device aggregation at DAY grain (the modal only aggregates
+ * by day), and repeat modal opens hit the shared 30s cache instead of
+ * re-walking up to 60 pages of raw hourly rows per view.
  *
  * Pricing tables are inline-mirrored from `tokentracker-leaderboard-refresh.ts`
  * to keep `getModelPricing` / `computeRowCost` byte-for-byte aligned across
@@ -340,11 +342,9 @@ function getModelPricing(model: string) {
   return ZERO_PRICING;
 }
 
-interface HourlyRow {
-  device_id: string;
+interface UsageRow {
   source: string;
   model: string;
-  hour_start: string;
   total_tokens: number | null;
   input_tokens: number | null;
   output_tokens: number | null;
@@ -353,7 +353,13 @@ interface HourlyRow {
   reasoning_output_tokens: number | null;
 }
 
-function computeRowCost(row: HourlyRow): number {
+// One row per (UTC day, source, model) as returned by account_usage_grouped
+// with p_trunc="day" and no tz override.
+interface GroupedRow extends UsageRow {
+  bucket: string;
+}
+
+function computeRowCost(row: UsageRow): number {
   // Pi's GitHub Copilot provider is subscription-backed. Keep its token
   // counts, but do not reprice the recorded Claude model as Anthropic API use.
   if (row.source === "pi-github-copilot" || row.source === "pi-copilot") return 0;
@@ -393,9 +399,11 @@ function canonicalSource(s: string) {
 // CSV — NOT machine-local logs) are stored IDENTICALLY on every device that
 // synced them, so they must be DEDUPED across devices, not summed. Machine-level
 // sources are real independent per-machine work and SUM across active devices.
-// Keep in sync with ACCOUNT_LEVEL_SOURCES in src/lib/source-metadata.js, the
-// account_usage_grouped RPC, and tokentracker-leaderboard-refresh.ts
+// The dedup itself now runs inside the account_usage_grouped RPC; this constant
+// remains as the parity anchor checked against src/lib/source-metadata.js, the
+// RPC, and tokentracker-leaderboard-refresh.ts
 // (parity: test/account-source-parity.test.js).
+// deno-lint-ignore no-unused-vars
 const ACCOUNT_LEVEL_SOURCES = new Set<string>(["cursor"]);
 
 // ─────────────────────────── Window bounds ──────────────────────────
@@ -458,114 +466,45 @@ function computeStreak(daysWithActivity: Set<string>): { current_days: number; l
 
 // ─────────────────────────── Main handler ──────────────────────────
 // deno-lint-ignore no-explicit-any
-async function scanHourlyForUser(client: any, userId: string, rangeStartIso: string, rangeEndIso: string) {
-  // Two-class cross-device aggregation, matching the account_usage_grouped RPC
-  // and tokentracker-leaderboard-refresh.ts:
-  //   * ACCOUNT-LEVEL sources (cursor): same data on every device → keep ONE
-  //     canonical whole row per (source, model, hour) (highest total_tokens),
-  //     across ALL devices (device-independent, not active-filtered).
-  //   * MACHINE-LEVEL sources: real per-machine work → SUM across the user's
-  //     ACTIVE devices (revoked_at IS NULL), dropping historic device churn.
-  // Returns one merged map; the handler consumes its values() unchanged.
-  const activeDeviceIds = new Set<string>();
+async function fetchDailyGroupedRows(client: any, userId: string, rangeStartIso: string, rangeEndIso: string): Promise<GroupedRow[]> {
+  // The two-class cross-device aggregation runs in Postgres
+  // (account_usage_grouped), matching tokentracker-leaderboard-refresh.ts:
+  //   * ACCOUNT-LEVEL sources (cursor): ONE canonical whole row per
+  //     (bucket, source, model), across ALL devices (device-independent).
+  //   * MACHINE-LEVEL sources: summed across the user's ACTIVE devices
+  //     (revoked_at IS NULL), dropping historic device churn.
+  // Day grain is enough — the modal only aggregates by day. The cached
+  // variant serves repeat modal opens from the shared 30s Postgres cache
+  // instead of re-walking raw hourly pages on every view.
+  let hasActiveDevice = false;
   {
-    let dOff = 0;
-    const DPAGE = 1000;
-    while (true) {
-      const { data: devs, error: dErr } = await client.database
-        .from("tokentracker_devices")
-        .select("id")
-        .eq("user_id", userId)
-        .is("revoked_at", null)
-        .order("id", { ascending: true })
-        .range(dOff, dOff + DPAGE - 1);
-      if (dErr) throw new Error(dErr.message);
-      if (!devs || devs.length === 0) break;
-      for (const d of devs as Array<{ id: string }>) activeDeviceIds.add(d.id);
-      if (devs.length < DPAGE) break;
-      dOff += DPAGE;
-    }
+    const { data: devs, error: dErr } = await client.database
+      .from("tokentracker_devices")
+      .select("id")
+      .eq("user_id", userId)
+      .is("revoked_at", null)
+      .limit(1);
+    if (dErr) throw new Error(dErr.message);
+    hasActiveDevice = Array.isArray(devs) && devs.length > 0;
   }
 
-  const accountMap = new Map<string, HourlyRow>(); // canonical whole row
-  const machineMap = new Map<string, HourlyRow>(); // SUM accumulator
-  let offset = 0;
-  const PAGE_SIZE = 1000;
-  // Runaway guard: this is a PUBLIC endpoint that walks one user's raw hourly
-  // rows with no server-side aggregation, so an unbounded loop lets a caller
-  // trigger arbitrarily large scans by targeting the heaviest public user.
-  // The heaviest real user is ~11.6k rows (365d); 60k pages is ~5x that, so no
-  // legitimate profile is ever truncated. If the cap is ever hit we log it
-  // loudly (a real user crossing it should become a rewrite-to-RPC signal, not
-  // silent undercounting).
-  const MAX_PAGES = 60;
-  let pages = 0;
-  while (true) {
-    const { data: rows, error } = await client.database
-      .from("tokentracker_hourly")
-      .select("device_id, source, model, hour_start, total_tokens, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens")
-      .eq("user_id", userId)
-      .gte("hour_start", rangeStartIso)
-      .lt("hour_start", rangeEndIso)
-      // hour_start alone is NOT unique (one row per device×source×model), and
-      // PostgREST pagination over a non-unique sort can skip/duplicate rows
-      // at page boundaries. The trailing keys make the order total — the
-      // five columns together are the table's upsert conflict key.
-      .order("hour_start", { ascending: true })
-      .order("device_id", { ascending: true })
-      .order("source", { ascending: true })
-      .order("model", { ascending: true })
-      .range(offset, offset + PAGE_SIZE - 1);
-    if (error) throw new Error(error.message);
-    if (!rows || rows.length === 0) break;
-    for (const row of rows as HourlyRow[]) {
-      const key = `${row.source}|${row.model}|${row.hour_start}`;
-      if (ACCOUNT_LEVEL_SOURCES.has(row.source)) {
-        const existing = accountMap.get(key);
-        if (!existing || (Number(row.total_tokens) || 0) > (Number(existing.total_tokens) || 0)) {
-          accountMap.set(key, row);
-        }
-      } else {
-        if (!activeDeviceIds.has(row.device_id)) continue;
-        const acc = machineMap.get(key);
-        if (!acc) {
-          machineMap.set(key, {
-            ...row,
-            total_tokens: Number(row.total_tokens) || 0,
-            input_tokens: Number(row.input_tokens) || 0,
-            output_tokens: Number(row.output_tokens) || 0,
-            cached_input_tokens: Number(row.cached_input_tokens) || 0,
-            cache_creation_input_tokens: Number(row.cache_creation_input_tokens) || 0,
-            reasoning_output_tokens: Number(row.reasoning_output_tokens) || 0,
-          });
-        } else {
-          acc.total_tokens = (Number(acc.total_tokens) || 0) + (Number(row.total_tokens) || 0);
-          acc.input_tokens = (Number(acc.input_tokens) || 0) + (Number(row.input_tokens) || 0);
-          acc.output_tokens = (Number(acc.output_tokens) || 0) + (Number(row.output_tokens) || 0);
-          acc.cached_input_tokens = (Number(acc.cached_input_tokens) || 0) + (Number(row.cached_input_tokens) || 0);
-          acc.cache_creation_input_tokens = (Number(acc.cache_creation_input_tokens) || 0) + (Number(row.cache_creation_input_tokens) || 0);
-          acc.reasoning_output_tokens = (Number(acc.reasoning_output_tokens) || 0) + (Number(row.reasoning_output_tokens) || 0);
-        }
-      }
-    }
-    if (rows.length < PAGE_SIZE) break;
-    offset += PAGE_SIZE;
-    pages += 1;
-    if (pages >= MAX_PAGES) {
-      console.warn(JSON.stringify({
-        scope: "leaderboard-profile",
-        event: "scan_cap_hit",
-        user_id: userId,
-        scanned_rows: offset,
-        note: "profile scan hit MAX_PAGES cap — data may undercount; consider server-side RPC",
-      }));
-      break;
-    }
-  }
-  // Merge (account and machine keys never collide — disjoint source sets).
-  const merged = new Map<string, HourlyRow>(machineMap);
-  for (const [k, v] of accountMap) merged.set(k, v);
-  return merged;
+  // account_usage_grouped_v2 (backing the cached variant) short-circuits to
+  // [] for users with no active devices — but account-level history (cursor)
+  // is device-independent and must still show on their profile. The uncached
+  // array variant with an empty id list returns exactly that account branch.
+  const common = {
+    p_user_id: userId,
+    p_from: rangeStartIso,
+    p_to: rangeEndIso,
+    p_trunc: "day",
+    p_tz: null,
+    p_offset_min: null,
+  };
+  const { data, error } = hasActiveDevice
+    ? await client.database.rpc("account_usage_grouped_cached", { ...common, p_device_id: null })
+    : await client.database.rpc("account_usage_grouped", { ...common, p_device_ids: [] });
+  if (error) throw new Error(error.message);
+  return (Array.isArray(data) ? data : []) as GroupedRow[];
 }
 
 export default async function (req: Request): Promise<Response> {
@@ -707,9 +646,9 @@ export default async function (req: Request): Promise<Response> {
     ? heatmapEnd.toISOString()
     : periodEndIso;
 
-  let bucketMap: Map<string, HourlyRow>;
+  let groupedRows: GroupedRow[];
   try {
-    bucketMap = await scanHourlyForUser(client, userId, scanStartIso, scanEndIso);
+    groupedRows = await fetchDailyGroupedRows(client, userId, scanStartIso, scanEndIso);
   } catch (e) {
     return json({ error: (e as Error).message || "scan failed" }, 500);
   }
@@ -731,12 +670,15 @@ export default async function (req: Request): Promise<Response> {
   let periodTotalTokens = 0;
   let periodTotalCost = 0;
 
-  for (const row of bucketMap.values()) {
-    const hourMs = new Date(row.hour_start).getTime();
-    const day = row.hour_start.slice(0, 10);
+  for (const row of groupedRows) {
+    const day = String(row.bucket || "");
+    if (!day) continue;
+    // Rows are already day-grained (UTC), and every window bound below is
+    // day-aligned, so a day-level comparison matches the old hour-level one.
+    const dayMs = Date.parse(`${day}T00:00:00Z`);
     const tokens = Number(row.total_tokens) || 0;
     const cost = computeRowCost(row);
-    if (hourMs >= heatmapStart.getTime() && hourMs < heatmapEnd.getTime()) {
+    if (dayMs >= heatmapStart.getTime() && dayMs < heatmapEnd.getTime()) {
       heatmapByDay.set(day, (heatmapByDay.get(day) || 0) + tokens);
       if (row.model && tokens > 0) {
         let dayModels = heatmapModelsByDay.get(day);
@@ -747,7 +689,7 @@ export default async function (req: Request): Promise<Response> {
         dayModels.set(row.model, (dayModels.get(row.model) || 0) + tokens);
       }
     }
-    if (hourMs >= periodFrom.getTime() && hourMs < periodTo.getTime()) {
+    if (dayMs >= periodFrom.getTime() && dayMs < periodTo.getTime()) {
       periodByDay.set(day, (periodByDay.get(day) || 0) + tokens);
       periodByDayCost.set(day, (periodByDayCost.get(day) || 0) + cost);
       const src = canonicalSource(row.source);

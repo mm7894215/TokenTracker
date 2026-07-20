@@ -278,9 +278,19 @@ final class StatusBarController: NSObject {
         let canResizeStatusItem = !popover.isShown
 
         if showStats && !displayItems.isEmpty {
+            let signature = statsTextSignature(displayItems)
+            let textLayer: (image: NSImage, width: CGFloat)
+            if let cached = statsTextCache, cached.signature == signature {
+                textLayer = (cached.image, cached.width)
+            } else {
+                let rendered = makeStatsTextImage(items: displayItems)
+                statsTextCache = (signature, rendered.image, rendered.width)
+                textLayer = rendered
+            }
             let compositeImage = makeDisplayMenuBarImage(
                 icon: animator?.currentImage ?? button.image,
-                items: displayItems
+                textImage: textLayer.image,
+                textWidth: textLayer.width
             )
 
             button.title = ""
@@ -443,14 +453,24 @@ final class StatusBarController: NSObject {
         return "\(Int(displayed.rounded()))%"
     }
 
-    private func formatResetTime(iso: String?) -> String? {
-        guard let iso else { return nil }
+    // ISO8601DateFormatter is expensive to allocate, and updateStatsDisplay
+    // reaches this once per limit item — up to ~12x/s while a runner icon
+    // sprints with stats visible. Share immutable instances instead.
+    private static let iso8601FractionalFormatter: ISO8601DateFormatter = {
         let fmt = ISO8601DateFormatter()
         fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let date = fmt.date(from: iso) ?? {
-            fmt.formatOptions = [.withInternetDateTime]
-            return fmt.date(from: iso)
-        }()
+        return fmt
+    }()
+    private static let iso8601PlainFormatter: ISO8601DateFormatter = {
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withInternetDateTime]
+        return fmt
+    }()
+
+    private func formatResetTime(iso: String?) -> String? {
+        guard let iso else { return nil }
+        let date = Self.iso8601FractionalFormatter.date(from: iso)
+            ?? Self.iso8601PlainFormatter.date(from: iso)
         guard let date else { return nil }
         let s = date.timeIntervalSince(Date())
         guard s > 0 else { return "now" }
@@ -493,7 +513,19 @@ final class StatusBarController: NSObject {
         return "\(pct) · \(reset)"
     }
 
-    private func makeDisplayMenuBarImage(icon: NSImage?, items: [MenuBarDisplayValue]) -> NSImage {
+    /// Cache for the stats text layer. The icon animates (runner sprint is
+    /// 12.5fps) and every frame re-composites the menu bar image, but the text
+    /// only changes when a displayed value does — re-laying it out per frame
+    /// was the menu bar's steady-state main-thread cost.
+    private var statsTextCache: (signature: String, image: NSImage, width: CGFloat)?
+
+    private func statsTextSignature(_ items: [MenuBarDisplayValue]) -> String {
+        items.map { "\($0.id)\u{1f}\($0.label)\u{1f}\($0.value)" }.joined(separator: "\u{1e}")
+    }
+
+    /// Renders just the label/value columns. Geometry matches the previous
+    /// single-pass composite: full menu-bar height, columns laid out from x=0.
+    private func makeStatsTextImage(items: [MenuBarDisplayValue]) -> (image: NSImage, width: CGFloat) {
         let valueFont = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
         let labelFont = NSFont.systemFont(ofSize: 7, weight: .regular)
         let valueColor = NSColor.labelColor
@@ -512,7 +544,6 @@ final class StatusBarController: NSObject {
             return (value: value, label: label, width: width)
         }
 
-        let iconTrailingPadding: CGFloat = 6
         let trailingPadding: CGFloat = 3
         let lineGap: CGFloat = -1
         let sepGap: CGFloat = 4
@@ -524,6 +555,39 @@ final class StatusBarController: NSObject {
         let labelOriginY = textOriginY
         let valueOriginY = labelOriginY + labelHeight + lineGap
 
+        let columnsWidth = columns.enumerated().reduce(CGFloat(0)) { total, pair in
+            let separatorWidth: CGFloat = pair.offset == 0 ? 0 : (sepGap + 1 + sepGap)
+            return total + separatorWidth + pair.element.width
+        }
+        let imageWidth = ceil(columnsWidth + trailingPadding)
+        let imageSize = NSSize(width: imageWidth, height: menuBarHeight)
+
+        let image = NSImage(size: imageSize, flipped: false) { [weak self] _ in
+            guard let self else { return false }
+            var cursorX: CGFloat = 0
+            for (index, column) in columns.enumerated() {
+                if index > 0 {
+                    let sepX = cursorX + sepGap
+                    NSColor.labelColor.withAlphaComponent(0.5).setFill()
+                    NSRect(x: sepX, y: labelOriginY + 1, width: 0.5, height: textBlockHeight - 2).fill()
+                    cursorX = sepX + 1 + sepGap
+                }
+
+                let valueRect = NSRect(x: cursorX, y: valueOriginY, width: column.width, height: valueHeight)
+                let labelRect = NSRect(x: cursorX, y: labelOriginY, width: column.width, height: labelHeight)
+                column.value.draw(in: self.centeredRect(for: column.value, in: valueRect))
+                column.label.draw(in: self.centeredRect(for: column.label, in: labelRect))
+                cursorX += column.width
+            }
+            return true
+        }
+        image.isTemplate = false
+        return (image, imageWidth)
+    }
+
+    private func makeDisplayMenuBarImage(icon: NSImage?, textImage: NSImage, textWidth: CGFloat) -> NSImage {
+        let iconTrailingPadding: CGFloat = 6
+
         // Respect the icon's own aspect ratio: Clawd frames are 22×22 but the
         // runner cat is 28×18 — squeezing it into the square slot distorts it.
         let iconSize: NSSize = {
@@ -532,11 +596,7 @@ final class StatusBarController: NSObject {
         }()
         let iconWidth = iconSize.width
         let textOriginX = iconWidth + iconTrailingPadding
-        let columnsWidth = columns.enumerated().reduce(CGFloat(0)) { total, pair in
-            let separatorWidth: CGFloat = pair.offset == 0 ? 0 : (sepGap + 1 + sepGap)
-            return total + separatorWidth + pair.element.width
-        }
-        let totalWidth = ceil(textOriginX + columnsWidth + trailingPadding)
+        let totalWidth = ceil(textOriginX + textWidth)
         let imageSize = NSSize(width: totalWidth, height: menuBarHeight)
 
         let image = NSImage(size: imageSize, flipped: false) { [weak self] _ in
@@ -560,22 +620,7 @@ final class StatusBarController: NSObject {
                 NSGraphicsContext.current?.imageInterpolation = .default
             }
 
-            var cursorX = textOriginX
-            for (index, column) in columns.enumerated() {
-                if index > 0 {
-                    let sepX = cursorX + sepGap
-                    NSColor.labelColor.withAlphaComponent(0.5).setFill()
-                    NSRect(x: sepX, y: labelOriginY + 1, width: 0.5, height: textBlockHeight - 2).fill()
-                    cursorX = sepX + 1 + sepGap
-                }
-
-                let valueRect = NSRect(x: cursorX, y: valueOriginY, width: column.width, height: valueHeight)
-                let labelRect = NSRect(x: cursorX, y: labelOriginY, width: column.width, height: labelHeight)
-                column.value.draw(in: self.centeredRect(for: column.value, in: valueRect))
-                column.label.draw(in: self.centeredRect(for: column.label, in: labelRect))
-                cursorX += column.width
-            }
-
+            textImage.draw(at: NSPoint(x: textOriginX, y: 0), from: .zero, operation: .sourceOver, fraction: 1)
             return true
         }
 

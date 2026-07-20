@@ -168,7 +168,10 @@ export default async function (req: Request): Promise<Response> {
   if (req.method !== "GET") return json({ error: "Method not allowed" }, 405);
 
   const url = new URL(req.url);
-  const weeks = parseInt(url.searchParams.get("weeks") || "52", 10);
+  // Clamp weeks so a buggy/malicious client cannot force a full-history scan
+  // (every distinct range is also a cold fill for the shared PG cache).
+  const weeksRaw = parseInt(url.searchParams.get("weeks") || "52", 10);
+  const weeks = Number.isFinite(weeksRaw) ? Math.min(Math.max(weeksRaw, 1), 104) : 52;
   const tz = url.searchParams.get("tz") || null;
   const tzOffsetRaw = url.searchParams.get("tz_offset_minutes");
   const tzOffsetMinutes = tzOffsetRaw != null && tzOffsetRaw !== "" ? Number(tzOffsetRaw) : null;

@@ -1,19 +1,15 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef } from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { Analytics } from "@vercel/analytics/react";
-import { SpeedInsights } from "@vercel/speed-insights/react";
 import { ErrorBoundary } from "./components/ErrorBoundary.jsx";
 import { useLocale } from "./hooks/useLocale.js";
 import { ThemeProvider } from "./ui/foundation/ThemeProvider.jsx";
 import { useInsforgeAuth } from "./contexts/InsforgeAuthContext.jsx";
 import { LoginModalProvider } from "./contexts/LoginModalContext.jsx";
-import { LoginModal } from "./components/LoginModal.jsx";
 import { getBackendBaseUrl, getLeaderboardBaseUrl } from "./lib/config";
 import { isMockEnabled } from "./lib/mock-data";
 import { isScreenshotModeEnabled } from "./lib/screenshot-mode";
 import { useCloudUsageSync } from "./hooks/use-cloud-usage-sync";
 import { AppLayout } from "./ui/components/Sidebar.jsx";
-import { CommandPalette } from "./ui/dashboard/components/CommandPalette.jsx";
 import { ToastProvider } from "./ui/components/Toast.jsx";
 import {
   getLeaderboardPreloadContextKey,
@@ -21,6 +17,34 @@ import {
   preloadDashboardPageResources,
   preloadLeaderboardDefaultState,
 } from "./lib/dashboard-preload.js";
+// Telemetry beacons and modal/palette UI are not first-paint critical; lazy
+// loading keeps them out of the eager entry chunk (which the anonymous share
+// page also downloads). The providers above must stay eager.
+// Every lazy import has a null fallback: after a deploy rotates chunk hashes,
+// a client holding the old index.html gets 404s on the new chunks — a rejected
+// lazy() would otherwise throw past the outer ErrorBoundary and blank the
+// whole app. Telemetry/modals must never have that power.
+const nullComponent = () => null;
+const Analytics = lazy(() =>
+  import("@vercel/analytics/react")
+    .then((m) => ({ default: m.Analytics }))
+    .catch(() => ({ default: nullComponent })),
+);
+const SpeedInsights = lazy(() =>
+  import("@vercel/speed-insights/react")
+    .then((m) => ({ default: m.SpeedInsights }))
+    .catch(() => ({ default: nullComponent })),
+);
+const LoginModal = lazy(() =>
+  import("./components/LoginModal.jsx")
+    .then((m) => ({ default: m.LoginModal }))
+    .catch(() => ({ default: nullComponent })),
+);
+const CommandPalette = lazy(() =>
+  import("./ui/dashboard/components/CommandPalette.jsx")
+    .then((m) => ({ default: m.CommandPalette }))
+    .catch(() => ({ default: nullComponent })),
+);
 // NativeAuthCallbackPage must be eager-imported: its module-level code
 // captures the OAuth `insforge_code` query param synchronously at app
 // boot, BEFORE the InsForge SDK's detectAuthCallback() strips it. Lazy
@@ -302,10 +326,12 @@ export default function App() {
         <ToastProvider>
           <LoginModalProvider>
             <Suspense fallback={null}>{content}</Suspense>
-            {showSidebar ? <CommandPalette /> : null}
-            <LoginModal />
-            <Analytics />
-            <SpeedInsights />
+            <Suspense fallback={null}>
+              {showSidebar ? <CommandPalette /> : null}
+              <LoginModal />
+              <Analytics />
+              <SpeedInsights />
+            </Suspense>
           </LoginModalProvider>
         </ToastProvider>
       </ThemeProvider>

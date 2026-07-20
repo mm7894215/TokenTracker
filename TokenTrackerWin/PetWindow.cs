@@ -145,9 +145,11 @@ internal sealed class PetWindow : Window
         // WS_EX_TRANSPARENT is window-wide, so poll the OS cursor and apply it only
         // while the pointer is over transparent padding. This preserves interaction
         // with the pet while allowing padding clicks to reach other processes.
+        // 50ms (20Hz) is imperceptible for hover/click hand-off and keeps the pet
+        // from waking the dispatcher 60x/s for its entire visible lifetime.
         _clickThroughTimer = new System.Windows.Threading.DispatcherTimer
         {
-            Interval = TimeSpan.FromMilliseconds(16),
+            Interval = TimeSpan.FromMilliseconds(50),
         };
         _clickThroughTimer.Tick += (_, _) => ClickThroughTick();
 
@@ -196,7 +198,7 @@ internal sealed class PetWindow : Window
     {
         // Skip while dragging or sliding: recomputing IsPointOnPet against the moving
         // window would thrash WS_EX_TRANSPARENT and issue a SWP_FRAMECHANGED (non-client
-        // recalc + redraw) every 16ms, fighting the edge slide and making it stutter.
+        // recalc + redraw) on every poll, fighting the edge slide and making it stutter.
         if (!IsVisible || _hwnd == nint.Zero || _isDragging || _isAnimating || !GetCursorPos(out var cursor)) return;
         SetClickThrough(!IsPointOnPet(new System.Windows.Point(cursor.X, cursor.Y)));
     }

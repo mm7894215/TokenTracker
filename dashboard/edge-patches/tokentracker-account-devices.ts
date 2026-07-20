@@ -94,9 +94,11 @@ async function sumDeviceTokens(
   tz: string | null,
   tzOffsetMinutes: number | null,
 ): Promise<number> {
-  const { data, error } = await client.database.rpc("account_usage_grouped", {
+  // The cached variant serves repeat device-card loads from the shared 30s
+  // Postgres cache instead of re-running the full scan per device.
+  const { data, error } = await client.database.rpc("account_usage_grouped_cached", {
     p_user_id: userId,
-    p_device_ids: [deviceId],
+    p_device_id: deviceId,
     p_from: fromIso,
     p_to: toIso,
     p_trunc: "day",
@@ -170,9 +172,19 @@ export default async function (req: Request): Promise<Response> {
   if (req.method !== "GET") return json({ error: "Method not allowed" }, 405);
 
   const url = new URL(req.url);
-  const from = url.searchParams.get("from") || "";
+  let from = url.searchParams.get("from") || "";
   const to = url.searchParams.get("to") || "";
   if (!from || !to) return json({ error: "Missing from/to" }, 400);
+  // Same span bound as the other account-* endpoints: every distinct range is
+  // a cold fill for the shared PG cache, so arbitrary from/to is not accepted
+  // verbatim (3 years covers every real view).
+  const MAX_RANGE_DAYS = 1095;
+  const fromMs = Date.parse(`${from}T00:00:00Z`);
+  const toMs = Date.parse(`${to}T00:00:00Z`);
+  if (Number.isFinite(fromMs) && Number.isFinite(toMs) && toMs > fromMs) {
+    const maxFromMs = toMs - MAX_RANGE_DAYS * 86_400_000;
+    if (fromMs < maxFromMs) from = new Date(maxFromMs).toISOString().slice(0, 10);
+  }
   const tz = url.searchParams.get("tz") || null;
   const tzOffsetRaw = url.searchParams.get("tz_offset_minutes");
   const tzOffsetMinutes = tzOffsetRaw != null && tzOffsetRaw !== "" ? Number(tzOffsetRaw) : null;

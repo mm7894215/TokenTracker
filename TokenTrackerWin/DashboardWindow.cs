@@ -696,18 +696,7 @@ internal sealed class DashboardWindow : Window
     }
 
     /// <summary>Diagnostics → %LOCALAPPDATA%\TokenTracker\windows-host.log (shared with ServerManager).</summary>
-    private static void Log(string message)
-    {
-        try
-        {
-            var path = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "TokenTracker", "windows-host.log");
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.AppendAllText(path, $"{DateTimeOffset.Now:O} [dashboard] {message}{Environment.NewLine}");
-        }
-        catch { /* best-effort diagnostics */ }
-    }
+    private static void Log(string message) => Diag.Log("dashboard", message);
 
     /// <summary>
     /// Read the user's currency choice + USD→currency rate from the dashboard's

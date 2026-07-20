@@ -12,13 +12,13 @@ const edgePath = path.join(
 );
 const edge = fs.readFileSync(edgePath, "utf8");
 
-test("badges-only profile requests return before the hourly profile scan", () => {
+test("badges-only profile requests return before the usage aggregation", () => {
   const fastPath = edge.indexOf('url.searchParams.get("view") === "badges"');
-  const hourlyScan = edge.indexOf("bucketMap = await scanHourlyForUser");
+  const usageScan = edge.indexOf("groupedRows = await fetchDailyGroupedRows");
 
   assert.notEqual(fastPath, -1, "missing badges-only fast path");
-  assert.notEqual(hourlyScan, -1, "missing full profile hourly scan");
-  assert.ok(fastPath < hourlyScan, "badges-only branch must precede the hourly scan");
+  assert.notEqual(usageScan, -1, "missing full profile usage aggregation");
+  assert.ok(fastPath < usageScan, "badges-only branch must precede the usage aggregation");
   assert.match(edge, /if \(!isSelf\) return json\(\{ error: "Forbidden" \}, 403\)/);
   assert.match(edge, /rpc\("user_badges_full", \{\s*p_user_id: userId,\s*p_include_unearned: true/);
 });

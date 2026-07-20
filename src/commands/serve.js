@@ -277,10 +277,27 @@ function startNativeBackgroundSync({
   const normalizedShell = String(appShell || "").trim().toLowerCase();
   if (normalizedShell !== "windows") return null;
 
-  const sync = runSync || (async (args) => {
-    const { cmdSync } = require("./sync");
-    await cmdSync(args);
-  });
+  // Run the periodic fallback sync in a child process, not in-process:
+  // several provider parsers read SQLite databases via execFileSync, which
+  // would otherwise freeze this server's event loop (and every dashboard
+  // endpoint) once a minute. sync.lock is file-based, so the child contends
+  // with hook-fired syncs exactly like an in-process run did.
+  const sync = runSync || ((args) => new Promise((resolve, reject) => {
+    const child = cp.spawn(
+      process.execPath,
+      [path.join(__dirname, "..", "..", "bin", "tracker.js"), "sync", ...args],
+      { stdio: "ignore", windowsHide: true },
+    );
+    child.unref();
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`background sync exited with ${code ?? `signal ${signal}`}`));
+      }
+    });
+  }));
   let inFlight = null;
   const run = () => {
     if (inFlight) return inFlight;

@@ -140,7 +140,10 @@ export default async function (req: Request): Promise<Response> {
   const url = new URL(req.url);
   let from = url.searchParams.get("from") || "";
   let to = url.searchParams.get("to") || "";
-  const monthsParam = parseInt(url.searchParams.get("months") || "", 10);
+  // Clamp months so a buggy/malicious client cannot force a full-history scan
+  // (every distinct range is also a cold fill for the shared PG cache).
+  const monthsParamRaw = parseInt(url.searchParams.get("months") || "", 10);
+  const monthsParam = Number.isFinite(monthsParamRaw) ? Math.min(monthsParamRaw, 36) : monthsParamRaw;
   // Matches local /functions/tokentracker-usage-monthly contract: caller
   // may send months (+ optional to) instead of an explicit from/to range.
   if ((!from || !to) && Number.isFinite(monthsParam) && monthsParam > 0) {
@@ -150,6 +153,14 @@ export default async function (req: Request): Promise<Response> {
     if (!from) from = fromDate.toISOString().slice(0, 10);
   }
   if (!from || !to) return json({ error: "Missing from/to or months" }, 400);
+  // Bound explicit ranges the same way (3 years covers every real view).
+  const MAX_RANGE_DAYS = 1095;
+  const fromMs = Date.parse(`${from}T00:00:00Z`);
+  const toMs = Date.parse(`${to}T00:00:00Z`);
+  if (Number.isFinite(fromMs) && Number.isFinite(toMs) && toMs > fromMs) {
+    const maxFromMs = toMs - MAX_RANGE_DAYS * 86_400_000;
+    if (fromMs < maxFromMs) from = new Date(maxFromMs).toISOString().slice(0, 10);
+  }
 
   const baseUrl = Deno.env.get("INSFORGE_BASE_URL")!;
   const incomingApiKey =

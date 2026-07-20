@@ -1,10 +1,15 @@
 import React, { useLayoutEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { gsap, ScrollTrigger } from "./gsap.js";
-import { TokenGalaxy } from "./TokenGalaxy.jsx";
 import { InstallCommand } from "./InstallCommand.jsx";
 import { DownloadButtons } from "./DownloadButtons.jsx";
 import { CountUp } from "../../components/CountUp.jsx";
+
+// three.js (~150KB gzip) is decorative and below the hero copy — keep it out
+// of the landing critical path and hydrate the galaxy right after first paint.
+const TokenGalaxy = React.lazy(() =>
+  import("./TokenGalaxy.jsx").then((m) => ({ default: m.TokenGalaxy })),
+);
 
 export function galaxyStageClassName(animate) {
   return animate
@@ -132,7 +137,9 @@ export function HeroSection({
             slice it — while the disc itself is parked in the lower half, with
             the live counter floating on its bright core. */}
         <div className={galaxyStageClassName(animate)}>
-          <TokenGalaxy mode={galaxyMode} progressRef={progressRef} />
+          <React.Suspense fallback={null}>
+            <TokenGalaxy mode={galaxyMode} progressRef={progressRef} />
+          </React.Suspense>
 
           {/* Outer div owns the centering; GSAP animates the inner one so the
               -50% translate never gets clobbered by the tween's transform. */}

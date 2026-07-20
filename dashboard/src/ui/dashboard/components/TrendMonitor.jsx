@@ -178,7 +178,9 @@ const PREVIEW_OPACITY = 0.35;
 const BASELINE_HEIGHT_PX = 2;
 const PREVIEW_MIN_HEIGHT_PX = 4;
 
-function TrendBar({
+// Memoized so hover state in the parent (tooltip) doesn't re-render every
+// bar on each mouseenter/mouseleave — props are all stable across hovers.
+const TrendBar = React.memo(function TrendBar({
   value,
   displayValue,
   scale,
@@ -280,7 +282,7 @@ function TrendBar({
       </div>
     </motion.div>
   );
-}
+});
 
 // Extract numeric tokens from a row, or null if the row carries no observation
 // (missing/future, no field, or non-finite). Real zeros stay as `0` — they are
@@ -426,7 +428,7 @@ export function TrendMonitor({
   const containerRef = React.useRef(null);
   const hideTimeoutRef = React.useRef(null);
 
-  const handleBarMouseEnter = (e, row, value, segments, kind, displayValue) => {
+  const handleBarMouseEnter = React.useCallback((e, row, value, segments, kind, displayValue) => {
     if (hideTimeoutRef.current) {
       clearTimeout(hideTimeoutRef.current);
       hideTimeoutRef.current = null;
@@ -474,14 +476,14 @@ export function TrendMonitor({
     const flipDown = y < estTooltipHeight + 12;
 
     setTooltipPos({ x, y, shiftX, flipDown });
-  };
+  }, [isZoom, granularity]);
 
-  const handleBarMouseLeave = () => {
+  const handleBarMouseLeave = React.useCallback(() => {
     if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
     hideTimeoutRef.current = setTimeout(() => {
       setHoveredBar(null);
     }, 150);
-  };
+  }, []);
 
   return (
     <div

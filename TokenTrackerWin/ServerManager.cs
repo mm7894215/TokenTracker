@@ -48,10 +48,6 @@ internal sealed class ServerManager : IDisposable
     // app then thinks startup failed even though the server is up. UseProxy=false = direct.
     private static readonly HttpClient Http =
         new(new HttpClientHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(3) };
-    private static readonly string LogPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "TokenTracker",
-        "windows-host.log");
 
     /// <summary>Raised on the thread-pool when the running state flips. UI must marshal to the UI thread.</summary>
     public event Action<ServerStatus>? StatusChanged;
@@ -404,17 +400,7 @@ internal sealed class ServerManager : IDisposable
         StatusChanged?.Invoke(ServerStatus.Failed);
     }
 
-    private static void Log(string message)
-    {
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
-            File.AppendAllText(
-                LogPath,
-                $"{DateTimeOffset.Now:O} {message}{Environment.NewLine}");
-        }
-        catch { /* best-effort diagnostics */ }
-    }
+    private static void Log(string message) => Diag.Log("server", message);
 
     public void Dispose()
     {
