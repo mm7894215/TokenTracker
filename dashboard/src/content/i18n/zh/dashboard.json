@@ -346,6 +346,7 @@
   "dashboard.device_filter.all": "全部设备",
   "dashboard.device_filter.aria": "按设备筛选",
   "dashboard.device_card.title": "设备分布",
+  "dashboard.device_card.current": "本机",
   "dashboard.device_card.unnamed": "未命名设备",
   "dashboard.device_card.rename_aria": "重命名设备",
   "dashboard.device_card.rename_placeholder": "设备名称",

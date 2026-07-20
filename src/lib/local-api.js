@@ -15,6 +15,19 @@ const { getOrCreateMachineId, computeStableMachineId } = require("./machine-id")
 
 const SYNC_TIMEOUT_MS = 120_000;
 const TRACKER_BIN = path.resolve(__dirname, "../../bin/tracker.js");
+const MAX_DEVICE_NAME_LENGTH = 128;
+
+function getSystemDeviceName() {
+  try {
+    const hostname = os.hostname()
+      .replace(/[\u0000-\u001f\u007f]/g, "")
+      .trim()
+      .slice(0, MAX_DEVICE_NAME_LENGTH);
+    return hostname || null;
+  } catch {
+    return null;
+  }
+}
 
 // Avatar proxy (see /api/avatar-proxy below). In-memory LRU; survives the
 // CLI server lifetime, which is good enough — the dashboard reloads cheaply.
@@ -1356,7 +1369,7 @@ function createLocalApiHandler({ queuePath }) {
           // 必须和 dashboard/src/lib/cloud-sync.ts 使用同一个设备身份。
           // 旧云端设备按 (platform, device_name) 认领；如果这里发明
           // local-sync 身份，会多出一个 active device，账户视图会把历史求和两次。
-          device_name: `Token Tracker (dashboard) #${machineId.slice(0, 8)}`,
+          device_name: getSystemDeviceName() || `Token Tracker (dashboard) #${machineId.slice(0, 8)}`,
           platform: dashboardPlatform,
           machine_id: machineId,
         }),
@@ -2577,7 +2590,10 @@ function createLocalApiHandler({ queuePath }) {
     // device_name keys on the MACHINE, not the browser — see
     // getOrCreateMachineId above and dashboard/src/lib/cloud-sync.ts.
     if (p === "/functions/tokentracker-machine-id") {
-      json(res, { machineId: getOrCreateMachineId(qp) });
+      json(res, {
+        machineId: getOrCreateMachineId(qp),
+        deviceName: getSystemDeviceName(),
+      });
       return true;
     }
 
@@ -2891,10 +2907,10 @@ module.exports = {
   // queue, wrapped aggregator) reports the same numbers for the same data.
   normalizeQueueRow,
   // Machine-stable identity (config.json machineId) — shared with
-  // `tracker device-login` so the CLI device-flow anchors its cloud device
-  // to the machine, not the hostname.
+  // `tracker device-login`; the hostname is only a human-readable label.
   getOrCreateMachineId,
   computeStableMachineId,
+  getSystemDeviceName,
   // Local achievement compute — exported for test/local-achievements.test.js.
   computeLocalAchievements,
   LOCAL_BADGE_THRESHOLDS,

@@ -23,6 +23,21 @@ describe("DeviceUsageCard", () => {
     expect(text).toContain("40.0%");
   });
 
+  it("marks the current device without exposing its machine id", () => {
+    render(
+      <DeviceUsageCard
+        devices={devices}
+        currentDeviceId="d1"
+        selectedDeviceId=""
+        onSelectDevice={() => {}}
+      />,
+    );
+    expect(screen.getByText("This device")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Filter by device: MacBook Pro (This device)" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Filter by device: Mac mini" })).toBeTruthy();
+    expect(screen.queryByText("d1")).toBeNull();
+  });
+
   it("selects a device on click and clears it when re-clicked", async () => {
     const onSelectDevice = vi.fn();
     const { rerender } = render(

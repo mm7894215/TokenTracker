@@ -28,7 +28,7 @@ function installFetchMock(options: { leaderboardOk?: boolean } = {}) {
   const leaderboardOk = options.leaderboardOk ?? true;
   const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
     if (url === "/functions/tokentracker-machine-id") {
-      return okJson({ machineId: "machine-abcdef12" });
+      return okJson({ machineId: "machine-abcdef12", deviceName: "office-win" });
     }
     if (url === "https://cloud.example/functions/tokentracker-device-token-issue") {
       return okJson({
@@ -100,6 +100,20 @@ describe("cloud usage sync", () => {
     expect(fetchMock.mock.calls.find(([url]) => url === "https://cloud.example/functions/tokentracker-leaderboard-refresh")?.[1])
       .toMatchObject({ cache: "no-store" });
     window.removeEventListener("tt.cloudUsageSynced", onSynced);
+  });
+
+  it("sends the local system name separately from the stable machine id", async () => {
+    const fetchMock = installFetchMock();
+
+    await runCloudUsageSyncNow(async () => "access-token");
+
+    const issueCall = fetchMock.mock.calls.find(([url]) => url === "https://cloud.example/functions/tokentracker-device-token-issue");
+    expect(issueCall).toBeTruthy();
+    const issueBody = JSON.parse(String((issueCall?.[1] as RequestInit | undefined)?.body));
+    expect(issueBody).toMatchObject({
+      device_name: "office-win",
+      machine_id: "machine-abcdef12",
+    });
   });
 
   it("drains the full queue before the first scheduled cloud view becomes ready", async () => {

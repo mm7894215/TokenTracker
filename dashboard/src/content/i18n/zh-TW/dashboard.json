@@ -346,6 +346,7 @@
   "dashboard.device_filter.all": "全部裝置",
   "dashboard.device_filter.aria": "依裝置篩選",
   "dashboard.device_card.title": "依裝置",
+  "dashboard.device_card.current": "本機",
   "dashboard.device_card.unnamed": "未命名裝置",
   "nav.pet": "桌面寵物",
   "pet.page.eyebrow": "桌面陪伴",

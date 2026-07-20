@@ -342,6 +342,7 @@
   "dashboard.expired_gate.feature.cloud.title": "Geräteübergreifende Synchronisation",
   "dashboard.expired_gate.feature.cloud.desc": "Über das synchronisierte Dashboard kannst du Token-Logs von überall einsehen.",
   "dashboard.device_card.title": "Nach Gerät",
+  "dashboard.device_card.current": "Dieses Gerät",
   "dashboard.device_card.unnamed": "Unbekanntes Gerät",
   "dashboard.device_filter.all": "Alle Geräte",
   "dashboard.device_filter.aria": "Nach Gerät filtern",

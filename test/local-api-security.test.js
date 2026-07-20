@@ -65,6 +65,13 @@ function loadLocalApiWithSpawn(fakeSpawn) {
   };
 }
 
+test("local device metadata exposes the system name separately from machine identity", () => {
+  const { getSystemDeviceName } = require("../src/lib/local-api");
+  const expected = os.hostname().replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 128) || null;
+  assert.equal(getSystemDeviceName(), expected);
+  assert.doesNotMatch(getSystemDeviceName() || "", /^Token Tracker .*#/u);
+});
+
 function createSuccessfulSpawn(calls) {
   return (cmd, args, options) => {
     calls.push({ cmd, args, options });
@@ -1183,7 +1190,7 @@ test("local sync drain request mints a device token from relayed login when none
       assert.equal(opts.headers.Authorization, "Bearer access-token");
       const body = JSON.parse(String(opts.body || "{}"));
       assert.equal(body.machine_id, "machine-abcdef12");
-      assert.equal(body.device_name, "Token Tracker (dashboard) #machine-");
+      assert.equal(body.device_name, os.hostname().replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 128));
       assert.equal(
         body.platform,
         process.platform === "darwin" ? "MacIntel" :

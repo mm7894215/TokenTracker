@@ -52,6 +52,7 @@ import { DashboardView } from "../ui/dashboard/views/DashboardView.jsx";
 import { useAccountDevices } from "../hooks/use-account-devices.js";
 import { DeviceUsageCard } from "../ui/dashboard/components/DeviceUsageCard.jsx";
 import { formatDeviceLabel } from "../lib/device-label.js";
+import { getCurrentDeviceId } from "../lib/cloud-sync-prefs";
 import { ShareModal } from "../ui/share/ShareModal";
 import { useShareCardData } from "../ui/share/use-share-card-data";
 
@@ -372,9 +373,12 @@ export function DashboardPage({
   // Only devices with usage in the selected range are shown anywhere — a
   // zero-usage registration (typically a stale fingerprint-drift duplicate) is
   // noise in both the filter dropdown and the breakdown card.
+  const currentDeviceId = getCurrentDeviceId();
   const activeDevices = useMemo(
-    () => accountDevices.filter((d) => (Number(d.total_tokens) || 0) > 0),
-    [accountDevices],
+    () => accountDevices
+      .filter((d) => (Number(d.total_tokens) || 0) > 0)
+      .map((d) => ({ ...d, isCurrent: d.id === currentDeviceId })),
+    [accountDevices, currentDeviceId],
   );
   const accountSourceRows = useMemo(
     () => accountDeviceSources.filter((s) => (Number(s.total_tokens) || 0) > 0),
@@ -402,7 +406,7 @@ export function DashboardPage({
       { value: "", label: copy("dashboard.device_filter.all") },
       ...activeDevices.map((d) => ({
         value: d.id,
-        label: formatDeviceLabel(d) || copy("dashboard.device_card.unnamed"),
+        label: `${formatDeviceLabel(d) || copy("dashboard.device_card.unnamed")}${d.isCurrent ? ` (${copy("dashboard.device_card.current")})` : ""}`,
       })),
     ];
   }, [showDeviceFilter, activeDevices, resolvedLocale]);
@@ -411,6 +415,7 @@ export function DashboardPage({
     <DeviceUsageCard
       devices={activeDevices}
       accountSources={accountSourceRows}
+      currentDeviceId={currentDeviceId}
       selectedDeviceId={selectedDevice || ""}
       onSelectDevice={(id) => setSelectedDevice(id || null)}
       onRenameDevice={async (id, name) => {

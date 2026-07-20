@@ -346,6 +346,7 @@
   "dashboard.device_filter.all": "すべてのデバイス",
   "dashboard.device_filter.aria": "デバイスで絞り込む",
   "dashboard.device_card.title": "デバイス別",
+  "dashboard.device_card.current": "このデバイス",
   "dashboard.device_card.unnamed": "名称未設定のデバイス",
   "nav.pet": "デスクトップペット",
   "pet.page.eyebrow": "デスクトップコンパニオン",

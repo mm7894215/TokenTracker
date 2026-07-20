@@ -23,7 +23,9 @@ async function loadModuleWithStorage(storage) {
 
 test("cloud device session stays in memory and clears legacy localStorage", async () => {
   const legacyKey = "tokentracker_cloud_device_session_v1";
+  const deviceIdKey = "tokentracker_cloud_device_id_v1";
   const storage = createStorage({
+    [deviceIdKey]: "persisted-device-id",
     [legacyKey]: JSON.stringify({
       token: "persisted-token",
       deviceId: "persisted-device",
@@ -37,6 +39,7 @@ test("cloud device session stays in memory and clears legacy localStorage", asyn
 
     assert.equal(mod.getStoredDeviceSession(), null);
     assert.equal(storage.getItem(legacyKey), null);
+    assert.equal(mod.getCurrentDeviceId(), "persisted-device-id");
 
     const session = {
       token: "memory-token",
@@ -47,9 +50,14 @@ test("cloud device session stays in memory and clears legacy localStorage", asyn
     mod.setStoredDeviceSession(session);
     assert.deepEqual(mod.getStoredDeviceSession(), session);
     assert.equal(storage.getItem(legacyKey), null);
+    assert.equal(storage.getItem(deviceIdKey), "memory-device");
+    assert.equal(mod.getCurrentDeviceId(), "memory-device");
+    assert.equal(String(storage.getItem(deviceIdKey)).includes("memory-token"), false);
 
     mod.clearCloudDeviceSession();
     assert.equal(mod.getStoredDeviceSession(), null);
+    assert.equal(mod.getCurrentDeviceId(), "");
+    assert.equal(storage.getItem(deviceIdKey), null);
   } finally {
     globalThis.localStorage = previous;
   }

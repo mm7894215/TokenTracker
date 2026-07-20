@@ -20,7 +20,11 @@ function PlatformIcon({ platform, className }) {
   return <MonitorSmartphone className={className} aria-hidden />;
 }
 
-export function DeviceUsageCard({ devices = [], accountSources = [], selectedDeviceId = "", onSelectDevice, onRenameDevice }) {
+function isCurrentDevice(device, currentDeviceId) {
+  return currentDeviceId === device?.id || device?.isCurrent === true;
+}
+
+export function DeviceUsageCard({ devices = [], accountSources = [], currentDeviceId = "", selectedDeviceId = "", onSelectDevice, onRenameDevice }) {
   const { formatTokens, formatTokensTooltip } = useTokenFormat();
   const [editingId, setEditingId] = useState("");
   const [draft, setDraft] = useState("");
@@ -197,7 +201,7 @@ export function DeviceUsageCard({ devices = [], accountSources = [], selectedDev
                   <button
                     type="button"
                     aria-pressed={isSelected}
-                    aria-label={`${copy("dashboard.device_filter.aria")}: ${name}`}
+                    aria-label={`${copy("dashboard.device_filter.aria")}: ${name}${isCurrentDevice(d, currentDeviceId) ? ` (${copy("dashboard.device_card.current")})` : ""}`}
                     onClick={() => onSelectDevice?.(isSelected ? "" : d.id)}
                     className={`w-full text-left rounded-md px-2 py-1.5 transition-all duration-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-oai-brand/50 ${itemOpacity} ${
                       isSelected
@@ -215,6 +219,11 @@ export function DeviceUsageCard({ devices = [], accountSources = [], selectedDev
                         <span className="block truncate text-[13px] font-medium text-oai-black dark:text-oai-white" title={name}>
                           {name}
                         </span>
+                        {isCurrentDevice(d, currentDeviceId) && (
+                          <span className="shrink-0 rounded-full bg-oai-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-oai-brand">
+                            {copy("dashboard.device_card.current")}
+                          </span>
+                        )}
                       </div>
                       <span
                         title={formatTokensTooltip(tokens)}

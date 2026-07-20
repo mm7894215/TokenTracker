@@ -169,7 +169,33 @@ test("renamed machine_id-less rows stay adoptable via their preserved default na
   const flowPoll = read("dashboard/edge-patches/tokentracker-device-flow-poll.ts");
   assert.match(
     flowPoll,
-    /\.in\("default_device_name", \[deviceName, legacyBareName\]\)/u,
+    /\.in\("default_device_name", legacyNames\)/u,
     "device-flow-poll adoption must fall back to the preserved pre-rename default name",
+  );
+});
+
+test("device uploads keep machine identity separate from readable system names", () => {
+  const tokenIssue = read("dashboard/edge-patches/tokentracker-device-token-issue.ts");
+  assert.match(
+    tokenIssue,
+    /`Token Tracker \(dashboard\) #\$\{machineId\.slice\(0, 8\)\}`/u,
+    "hostname rollout must still adopt the previous dashboard hash label",
+  );
+  assert.match(
+    tokenIssue,
+    /legacyNameCustomized[\s\S]{0,180}\{ machine_id: machineId, device_name: deviceName \}/u,
+    "legacy adoption must refresh generated labels without overwriting custom names",
+  );
+
+  const flowPoll = read("dashboard/edge-patches/tokentracker-device-flow-poll.ts");
+  assert.match(
+    flowPoll,
+    /clientInfo\?\.replace\(\/\^\\S\+\\s\+\/, ""\)\.trim\(\)/u,
+    "CLI device flow must extract the system hostname from client_info",
+  );
+  assert.match(
+    flowPoll,
+    /generatedLegacyName[\s\S]*?\.in\("device_name", legacyNames\)/u,
+    "CLI hostname rollout must continue adopting generated legacy names",
   );
 });

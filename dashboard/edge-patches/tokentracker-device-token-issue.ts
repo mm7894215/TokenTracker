@@ -198,19 +198,21 @@ export default async function (req: Request): Promise<Response> {
     }
 
     if (!deviceId) {
-      // Adopt an orphan under either the current suffixed name or the pre-suffix
-      // base name. machineId.slice(0,8) is the 8-hex suffix; strip " #<hex8>" to
-      // recover the base. A machine first seen under the old no-suffix scheme has
-      // a base-named orphan the exact-suffixed match would skip, splitting it off
-      // as a new device (issue #187). Adopting it backfills machine_id so the
-      // machine resolves to one row thereafter.
-      const legacyBaseName = deviceName.replace(/ #[0-9a-fA-F]{8}$/, "");
-      const legacyNames =
-        legacyBaseName === deviceName ? [deviceName] : [deviceName, legacyBaseName];
+      // Adopt an orphan under the current system name or one of the generated
+      // names used before hostname labels were introduced. A machine first
+      // seen under an older name must be adopted in place; otherwise the next
+      // upload would split its history into a second device.
+      const legacyNames = Array.from(new Set([
+        deviceName,
+        `Token Tracker (dashboard) #${machineId.slice(0, 8)}`,
+        "Token Tracker (dashboard)",
+        "Token Tracker",
+      ]));
       let legacyId: string | null = null;
+      let legacyNameCustomized = false;
       const { data: legacy } = await dbClient.database
         .from("tokentracker_devices")
-        .select("id")
+        .select("id, name_customized")
         .eq("user_id", userId)
         .eq("platform", platform)
         .in("device_name", legacyNames)
@@ -221,6 +223,7 @@ export default async function (req: Request): Promise<Response> {
         .maybeSingle();
       if (legacy && (legacy as { id: string }).id) {
         legacyId = (legacy as { id: string }).id;
+        legacyNameCustomized = Boolean((legacy as { name_customized?: boolean }).name_customized);
       }
       if (!legacyId) {
         // A renamed legacy row matches no client default by device_name; the
@@ -230,7 +233,7 @@ export default async function (req: Request): Promise<Response> {
         // doesn't leave the row un-adoptable and split off a fresh device.
         const { data: renamed } = await dbClient.database
           .from("tokentracker_devices")
-          .select("id")
+          .select("id, name_customized")
           .eq("user_id", userId)
           .eq("platform", platform)
           .in("default_device_name", legacyNames)
@@ -241,12 +244,15 @@ export default async function (req: Request): Promise<Response> {
           .maybeSingle();
         if (renamed && (renamed as { id: string }).id) {
           legacyId = (renamed as { id: string }).id;
+          legacyNameCustomized = Boolean((renamed as { name_customized?: boolean }).name_customized);
         }
       }
       if (legacyId) {
         const { error: adoptErr } = await dbClient.database
           .from("tokentracker_devices")
-          .update({ machine_id: machineId })
+          .update(legacyNameCustomized
+            ? { machine_id: machineId }
+            : { machine_id: machineId, device_name: deviceName })
           .eq("id", legacyId)
           .is("machine_id", null);
         if (!adoptErr) deviceId = legacyId;

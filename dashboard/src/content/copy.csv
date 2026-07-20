@@ -1138,6 +1138,7 @@ skills.usage.disclaimer,ui,SkillsPage,SkillDetailPanel,usage_disclaimer,"Counts 
 dashboard.device_filter.all,dashboard,DashboardPage,UsageOverview,option_all,"All devices",,active
 dashboard.device_filter.aria,dashboard,DashboardPage,UsageOverview,select_aria,"Filter by device",,active
 dashboard.device_card.title,dashboard,DashboardPage,DeviceUsageCard,title,"By device",,active
+dashboard.device_card.current,dashboard,DashboardPage,DeviceUsageCard,current,"This device",,active
 dashboard.device_card.unnamed,dashboard,DashboardPage,DeviceUsageCard,unnamed,"Unnamed device",,active
 dashboard.device_card.rename_aria,dashboard,DashboardPage,DeviceUsageCard,rename_aria,"Rename device",,active
 dashboard.device_card.rename_placeholder,dashboard,DashboardPage,DeviceUsageCard,rename_placeholder,"Device name",,active
