@@ -101,6 +101,45 @@ describe("useTrendData", () => {
     });
   });
 
+  it("keeps future daily buckets as estimates for week and month trends", async () => {
+    vi.mocked(getUsageDaily).mockResolvedValue({
+      from: "2026-05-01",
+      to: "2026-05-31",
+      data: [
+        {
+          day: "2026-05-10",
+          total_tokens: 100,
+          billable_total_tokens: 100,
+        },
+      ],
+    });
+    const now = new Date("2026-05-15T12:15:00Z");
+
+    const { result } = renderHook(() =>
+      useTrendData({
+        baseUrl: "http://localhost:7680",
+        accessToken: "test-token",
+        period: "month",
+        from: "2026-05-01",
+        to: "2026-05-31",
+        timeZone: "UTC",
+        now,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.rows).toHaveLength(31));
+
+    expect(result.current.rows.find((row) => row.day === "2026-05-15")).toMatchObject({
+      missing: true,
+      future: false,
+    });
+    expect(result.current.rows.find((row) => row.day === "2026-05-16")).toMatchObject({
+      total_tokens: null,
+      missing: false,
+      future: true,
+    });
+  });
+
   it("fills elapsed half-hour slots with zero observations without touching future slots", async () => {
     vi.mocked(getUsageHourly).mockResolvedValue({
       day: "2026-05-29",

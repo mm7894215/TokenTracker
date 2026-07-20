@@ -190,8 +190,17 @@ final class StatusBarController: NSObject {
     }
 
     private func selectedMenuBarSummaries() -> MenuBarSummarySelection {
-        guard showStats else { return [] }
-        return MenuBarDisplayPreferences.summarySelection(for: MenuBarDisplayPreferences.read())
+        var summaries = showStats
+            ? MenuBarDisplayPreferences.summarySelection(for: MenuBarDisplayPreferences.read())
+            : MenuBarSummarySelection()
+        // The floating pet is another always-visible consumer of today and
+        // rolling usage. When menu-bar stats are hidden, returning an empty
+        // selection here made queue writes animate the pet but left its usage
+        // numbers stale until the dashboard opened or Sync Now was clicked.
+        if desktopPetController.isVisible {
+            summaries.formUnion([.today, .rolling])
+        }
+        return summaries
     }
 
     /// Single derivation of the animator state from the view model.

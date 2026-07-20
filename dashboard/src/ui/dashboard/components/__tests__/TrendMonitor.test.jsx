@@ -58,7 +58,7 @@ describe("TrendMonitor", () => {
     expect(bars[1].parentElement?.style.height).toBe("2px");
   });
 
-  it("renders future bars at faint preview opacity with interpolated heights", () => {
+  it("renders future bars as striped estimates with an always-visible legend", () => {
     const rows = [
       { billable_total_tokens: 100 },
       { billable_total_tokens: 100 },
@@ -69,9 +69,22 @@ describe("TrendMonitor", () => {
     );
     const bars = Array.from(container.querySelectorAll('[data-trend-bar="true"]'));
     const previewBar = bars.at(-1);
-    expect(previewBar?.style.opacity).toBe("0.35");
+    expect(previewBar?.dataset.trendKind).toBe("predicted");
+    expect(previewBar?.style.opacity).toBe("0.55");
+    expect(previewBar?.style.backgroundImage).toContain("repeating-linear-gradient");
+    expect(container.querySelector('[data-trend-prediction-legend="true"]')?.textContent).toContain(
+      "~ Estimated",
+    );
     // Predicted heights are clipped to the y-axis max and rendered as a percentage.
     expect(previewBar?.parentElement?.style.height).toMatch(/%$/);
+  });
+
+  it("does not show the estimate legend when the range has no future rows", () => {
+    const { container } = render(
+      <TrendMonitor rows={[{ billable_total_tokens: 100 }]} showTimeZoneLabel={false} />,
+    );
+
+    expect(container.querySelector('[data-trend-prediction-legend="true"]')).toBeNull();
   });
 
   it("renders X-axis tick labels only in zoom mode (small card unchanged)", () => {

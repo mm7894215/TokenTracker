@@ -209,6 +209,7 @@ dashboard.cost_breakdown.close,ui,CostAnalysisModal,CostAnalysisModal,close_labe
 
 
 trend.monitor.label,ui,TrendMonitor,TrendMonitor,label,"Usage Trend",,active
+trend.monitor.predicted,ui,TrendMonitor,TrendMonitor,predicted_label,"Estimated",,active
 trend.zoom.open_aria,ui,TrendMonitor,TrendMonitor,zoom_open_aria,"Expand to full screen",,active
 trend.zoom.close_aria,ui,TrendMonitorZoomModal,TrendMonitorZoomModal,zoom_close_aria,"Close",,active
 trend.zoom.badge,ui,TrendMonitorZoomModal,TrendMonitorZoomModal,zoom_badge,"Trend Insight",,active

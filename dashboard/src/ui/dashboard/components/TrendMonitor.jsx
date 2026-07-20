@@ -240,13 +240,22 @@ function TrendBar({
           /* 占位/预测/真实零：单色背景条 */
           <div
             data-trend-bar="true"
+            data-trend-kind={kind}
             className={cn(
               "h-full w-full group-hover:brightness-110 transition-all",
-              kind === "real" ? "" : "bg-oai-gray-100 dark:bg-oai-gray-800",
+              kind === "real"
+                ? ""
+                : kind === "predicted"
+                  ? "text-oai-gray-400 dark:text-oai-gray-500"
+                  : "bg-oai-gray-100 dark:bg-oai-gray-800",
             )}
             style={{
-              opacity: isPreview ? PREVIEW_OPACITY : 1,
+              opacity: kind === "predicted" ? 0.55 : isPreview ? PREVIEW_OPACITY : 1,
               background: kind === "real" ? "#10b981" : undefined,
+              backgroundImage:
+                kind === "predicted"
+                  ? "repeating-linear-gradient(135deg, currentColor 0 2px, transparent 2px 5px)"
+                  : undefined,
             }}
           />
         ) : (
@@ -387,6 +396,10 @@ export function TrendMonitor({
   const series = React.useMemo(
     () => (Array.isArray(rows) && rows.length ? rows : []),
     [rows],
+  );
+  const hasPredictions = React.useMemo(
+    () => series.some((row) => row?.future),
+    [series],
   );
 
   // rawValues: real observations (incl. 0) pass through; missing/future are null.
@@ -569,6 +582,23 @@ export function TrendMonitor({
           </div>
         )}
 
+        {hasPredictions && (
+          <div
+            className="flex items-center justify-end gap-1.5 text-[10px] font-medium text-oai-gray-400 dark:text-oai-gray-500"
+            data-trend-prediction-legend="true"
+          >
+            <span
+              aria-hidden="true"
+              className="h-2.5 w-3 rounded-[2px] text-oai-gray-400 dark:text-oai-gray-500 opacity-50"
+              style={{
+                backgroundImage:
+                  "repeating-linear-gradient(135deg, currentColor 0 2px, transparent 2px 5px)",
+              }}
+            />
+            <span>~ {copy("trend.monitor.predicted")}</span>
+          </div>
+        )}
+
         {from && to && (
           <div className="flex justify-between text-xs text-oai-gray-500 dark:text-oai-gray-300 font-medium pt-2 border-t border-oai-gray-100 dark:border-oai-gray-800">
             <span>{from === to ? `${from} 00:00` : from}</span>
@@ -603,7 +633,7 @@ export function TrendMonitor({
               </span>
               {hoveredBar.kind === "predicted" && (
                 <span className="text-[9px] font-semibold uppercase tracking-wider text-oai-gray-400 dark:text-oai-gray-500">
-                  Predicted
+                  {copy("trend.monitor.predicted")}
                 </span>
               )}
               {hoveredBar.kind === "unsynced" && (

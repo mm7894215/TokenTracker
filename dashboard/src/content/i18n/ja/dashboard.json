@@ -51,6 +51,7 @@
   "dashboard.cost_breakdown.total_label": "推定総コスト",
   "dashboard.cost_breakdown.close": "閉じる",
   "trend.monitor.label": "使用トレンド",
+  "trend.monitor.predicted": "予測値",
   "trend.zoom.open_aria": "全画面表示",
   "trend.zoom.close_aria": "閉じる",
   "trend.zoom.badge": "トレンド分析",
