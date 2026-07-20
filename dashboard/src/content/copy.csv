@@ -666,6 +666,10 @@ usage.overview.expand,ui,DashboardPage,UsageOverview,expand,"expand",,active
 usage.overview.collapse,ui,DashboardPage,UsageOverview,collapse,"collapse",,active
 usage.overview.model_count,ui,DashboardPage,UsageOverview,model_count,"{{count}} models",,active
 usage.overview.model_details_aria,ui,DashboardPage,UsageOverview,model_details_aria,"{{provider}} model details",,active
+usage.overview.all_tools,ui,DashboardPage,UsageOverview,all_tools,"All",,active
+usage.overview.all_models,ui,DashboardPage,UsageOverview,all_models,"All models",,active
+usage.overview.all_models_note,ui,DashboardPage,UsageOverview,all_models_note,"Models with the same name are combined across tools and ranked by total usage.",,active
+usage.overview.all_tools_card_aria,ui,DashboardPage,UsageOverview,all_tools_card_aria,"All tools: {{tokens}} tokens, {{cost}}, {{count}} models. Show combined model ranking",,active
 usage.overview.cache_hit_rate_label,ui,DashboardPage,UsageOverview,cache_hit_rate_label,"Cache hit rate",,active
 usage.overview.cache_hit_rate_detail,ui,DashboardPage,UsageOverview,cache_hit_rate_detail,"{{reused}} reused / {{input}} input",,active
 usage.overview.antigravity_notice_title,ui,DashboardPage,UsageOverview,antigravity_notice_title,"Estimated tokens",,active

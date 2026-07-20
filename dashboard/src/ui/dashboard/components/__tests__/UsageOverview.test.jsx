@@ -63,7 +63,8 @@ describe("UsageOverview", () => {
     );
 
     expect(screen.getByRole("status")).toHaveTextContent(copy("qpd.card.updating"));
-    expect(screen.getByText("6.7M").closest('[aria-busy="true"]')).toBeTruthy();
+    expect(document.querySelector("[data-counter-root]")).toHaveTextContent("6.7M");
+    expect(document.querySelector("[data-counter-root]").closest('[aria-busy="true"]')).toBeTruthy();
     expect(screen.getByText("CODEX")).toBeVisible();
   });
 
@@ -108,6 +109,72 @@ describe("UsageOverview", () => {
 
     expect(weekTab).toHaveFocus();
     expect(onPeriodChange).toHaveBeenCalledWith("week");
+  });
+
+  it("defaults to an all-tools model ranking and combines matching models", async () => {
+    const user = userEvent.setup();
+    const fleetData = [
+      {
+        source: "codex",
+        label: "CODEX",
+        totalPercent: "60.00",
+        usage: 90,
+        usd: 0.9,
+        models: [
+          { id: "gpt-5.6", name: "GPT-5.6", share: 77.8, usage: 70, cost: 0.7 },
+          { id: "gpt-5.5", name: "gpt-5.5", share: 22.2, usage: 20, cost: 0.2 },
+        ],
+      },
+      {
+        source: "cursor",
+        label: "CURSOR",
+        totalPercent: "40.00",
+        usage: 60,
+        usd: 0.6,
+        models: [
+          { id: "gpt-5.6", name: "gpt-5.6", share: 50, usage: 30, cost: 0.3 },
+          { id: "claude", name: "claude-sonnet", share: 50, usage: 30, cost: 0.3 },
+        ],
+      },
+    ];
+
+    const { container, rerender } = render(
+      <UsageOverview
+        period="month"
+        periods={["month", "total"]}
+        summaryLabel="Total"
+        summaryValue="150"
+        fleetData={fleetData}
+        from="2026-07-01"
+        to="2026-07-31"
+      />,
+    );
+
+    const allButton = screen.getByRole("button", { name: /All tools:/i });
+    const codexButton = screen.getByRole("button", { name: /CODEX:/i });
+    expect(allButton).toHaveAttribute("aria-expanded", "true");
+    expect(container.querySelectorAll("[data-model-rank-row]")).toHaveLength(3);
+    expect(screen.getByText("66.7%")).toBeVisible();
+
+    await act(async () => {
+      await user.click(codexButton);
+    });
+    expect(codexButton).toHaveAttribute("aria-expanded", "true");
+    expect(container.querySelectorAll("[data-model-rank-row]")).toHaveLength(2);
+
+    rerender(
+      <UsageOverview
+        period="total"
+        periods={["month", "total"]}
+        summaryLabel="Total"
+        summaryValue="150"
+        fleetData={fleetData}
+        from="2025-01-01"
+        to="2026-07-31"
+      />,
+    );
+    expect(screen.getByRole("button", { name: /All tools:/i })).toHaveAttribute("aria-expanded", "true");
+    expect(container.querySelectorAll("[data-model-rank-row]")).toHaveLength(3);
   });
 
   it("renders AnythingLLM with its official name, icon, and stable accent", () => {

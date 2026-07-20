@@ -108,6 +108,70 @@ export function buildFleetData(modelBreakdown: any, { copyFn }: AnyRecord = {}) 
     });
 }
 
+/**
+ * Flatten the provider-oriented fleet data into one personal model ranking.
+ * The same model name can be emitted by several tools, so names are matched
+ * case-insensitively and their token/cost totals are combined before ranking.
+ */
+export function buildAllModels(fleetData: any) {
+  const providers: any[] = Array.isArray(fleetData) ? fleetData : [];
+  const byModel = new Map();
+
+  for (const provider of providers) {
+    const models: any[] = Array.isArray(provider?.models) ? provider.models : [];
+    for (const model of models) {
+      const usage = toFiniteNumber(model?.usage);
+      if (usage == null || usage <= 0) continue;
+      const name = typeof model?.name === "string" && model.name.trim()
+        ? model.name.trim()
+        : typeof model?.id === "string" && model.id.trim()
+          ? model.id.trim()
+          : null;
+      const key = normalizeModelId(name);
+      if (!key) continue;
+
+      const current = byModel.get(key) || {
+        id: key,
+        name,
+        usage: 0,
+        cost: 0,
+        hasCost: false,
+        nameWeight: 0,
+      };
+      current.usage += usage;
+      const cost = toFiniteNumber(model?.cost);
+      if (cost != null) {
+        current.cost += cost;
+        current.hasCost = true;
+      }
+      // Preserve the spelling from the source that contributes the most.
+      if (usage >= current.nameWeight) {
+        current.name = name;
+        current.nameWeight = usage;
+      }
+      byModel.set(key, current);
+    }
+  }
+
+  const totalUsage = Array.from(byModel.values())
+    .reduce((sum, model) => sum + model.usage, 0);
+
+  return Array.from(byModel.values())
+    .map((model) => ({
+      id: model.id,
+      name: model.name,
+      usage: model.usage,
+      cost: model.hasCost ? model.cost : null,
+      share: totalUsage > 0
+        ? Math.round((model.usage / totalUsage) * 1000) / 10
+        : 0,
+    }))
+    .sort((a, b) => {
+      if (b.usage !== a.usage) return b.usage - a.usage;
+      return String(a.name).localeCompare(String(b.name));
+    });
+}
+
 export function buildTopModels(modelBreakdown: any, { limit = 3, copyFn }: AnyRecord = {}) {
   const safeCopy = typeof copyFn === "function" ? copyFn : (key: string) => key;
   const sources: any[] = Array.isArray(modelBreakdown?.sources) ? modelBreakdown.sources : [];

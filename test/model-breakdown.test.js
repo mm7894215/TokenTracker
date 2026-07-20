@@ -208,6 +208,32 @@ test("buildTopModels aggregates by model name across sources", async () => {
   assert.equal(topModels[1].percent, "20.0");
 });
 
+test("buildAllModels creates a complete cross-tool personal model ranking", async () => {
+  const mod = await loadDashboardModule("dashboard/src/lib/model-breakdown.ts");
+  const models = mod.buildAllModels([
+    {
+      label: "CODEX",
+      models: [
+        { id: "gpt-5.6", name: "GPT-5.6", usage: 70, cost: 0.7 },
+        { id: "gpt-5.5", name: "gpt-5.5", usage: 20, cost: 0.2 },
+      ],
+    },
+    {
+      label: "CURSOR",
+      models: [
+        { id: "gpt-5.6", name: "gpt-5.6", usage: 30, cost: 0.3 },
+        { id: "claude", name: "claude-sonnet", usage: 80, cost: null },
+      ],
+    },
+  ]);
+
+  assert.deepEqual(models, [
+    { id: "gpt-5.6", name: "GPT-5.6", usage: 100, cost: 1, share: 50 },
+    { id: "claude-sonnet", name: "claude-sonnet", usage: 80, cost: null, share: 40 },
+    { id: "gpt-5.5", name: "gpt-5.5", usage: 20, cost: 0.2, share: 10 },
+  ]);
+});
+
 test("buildTopModels computes percent using billable tokens across all models", async () => {
   const mod = await loadDashboardModule("dashboard/src/lib/model-breakdown.ts");
   const buildTopModels = mod.buildTopModels;
