@@ -51,6 +51,7 @@
   "dashboard.cost_breakdown.total_label": "預計總成本",
   "dashboard.cost_breakdown.close": "關閉",
   "trend.monitor.label": "使用趨勢",
+  "trend.monitor.predicted": "預測值",
   "trend.zoom.open_aria": "展開全螢幕",
   "trend.zoom.close_aria": "關閉",
   "trend.zoom.badge": "趨勢洞察",

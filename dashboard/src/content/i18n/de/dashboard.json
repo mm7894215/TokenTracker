@@ -46,6 +46,7 @@
   "dashboard.cost_breakdown.total_label": "Geschätzte Gesamtkosten",
   "dashboard.cost_breakdown.close": "Schließen",
   "trend.monitor.label": "Nutzungstrend",
+  "trend.monitor.predicted": "Prognose",
   "trend.zoom.open_aria": "Vollbild öffnen",
   "trend.zoom.close_aria": "Schließen",
   "trend.zoom.badge": "Trendanalyse",
