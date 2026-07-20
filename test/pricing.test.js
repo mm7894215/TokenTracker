@@ -148,6 +148,27 @@ test("matcher: GPT-5.6 codex tiers resolve to their real curated rates (not the 
   }
 });
 
+test("matcher: Kimi K3 aliases resolve to curated k3 rates (not the kimi-k2.5 fallback)", () => {
+  const curated = require("../src/lib/pricing/curated-overrides.json");
+  // LiteLLM has no k3 yet; simulate that so curated must win.
+  const litellm = {};
+  const cases = [
+    // Kimi Code records the bare alias "k3" (modelAlias "kimi-code/k3")
+    ["k3", 3, 15, "curated:exact"],
+    ["kimi-k3", 3, 15, "curated:exact"],
+    // suffixed variants still land on k3, never the generic "kimi" → k2.5 fuzzy
+    ["kimi-k3-thinking", 3, 15, "curated:fuzzy"],
+  ];
+  for (const [model, input, output, source] of cases) {
+    const r = matcher.lookupPricing(model, { curated, litellm, source: "kimi" });
+    assert.equal(r.hit, true, `${model} should resolve`);
+    assert.equal(r.value.input, input, `${model} input`);
+    assert.equal(r.value.output, output, `${model} output`);
+    assert.equal(r.value.cache_read, 0.3, `${model} cache_read`);
+    if (source) assert.equal(r.source, source, `${model} source`);
+  }
+});
+
 test("matcher: lookupPricing fuzzy match restores `digit-digit` to `digit.digit` (droid GLM parity)", () => {
   // Droid dash-normalizes upstream `GLM-5.1` to `glm-5-1`, but curated keys
   // are dot-delimited. The matcher must retry a dot-restored variant of the
