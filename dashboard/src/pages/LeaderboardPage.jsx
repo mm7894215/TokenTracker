@@ -20,7 +20,7 @@ import { useInsforgeAuth } from "../contexts/InsforgeAuthContext.jsx";
 import { useLoginModal } from "../contexts/LoginModalContext.jsx";
 import { ProviderIcon } from "../ui/dashboard/components/ProviderIcon.jsx";
 import { isAccessTokenReady, resolveAuthAccessTokenWithRetry } from "../lib/auth-token";
-import { copy } from "../lib/copy";
+import { copy, getCopyLocale } from "../lib/copy";
 import { formatCompactNumber } from "../lib/format";
 import { cn } from "../lib/cn";
 import { useCurrency } from "../hooks/useCurrency.js";
@@ -101,6 +101,25 @@ function formatCost(value, currency, rate) {
   if (converted >= 1000) return `${symbol}${Math.round(converted).toLocaleString()}`;
   if (converted >= 10) return `${symbol}${Math.round(converted)}`;
   return `${symbol}${converted.toFixed(2)}`;
+}
+
+function formatLeaderboardUpdatedAt(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+
+  const locale = getCopyLocale();
+  return {
+    dateTime: date.toISOString(),
+    display: new Intl.DateTimeFormat(locale, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(date),
+    exact: new Intl.DateTimeFormat(locale, {
+      dateStyle: "full",
+      timeStyle: "long",
+    }).format(date),
+  };
 }
 
 function TotalTokens({ value }) {
@@ -720,6 +739,7 @@ export function LeaderboardPage({
   const from = listData?.from || null;
   const to = listData?.to || null;
   const generatedAt = listData?.generated_at || null;
+  const generatedAtTime = formatLeaderboardUpdatedAt(generatedAt);
 
   const communityStats = useCommunityStats();
   const me = listData?.me || null;
@@ -1038,10 +1058,14 @@ export function LeaderboardPage({
                 : from && to
                   ? copy("leaderboard.range", { period: periodLabel, from, to })
                   : copy("leaderboard.range_loading", { period: periodLabel })}
-              {generatedAt && (
-                <span className="ml-2 hidden border-l border-oai-gray-200 pl-2 text-xs text-oai-gray-400 dark:border-oai-gray-800 dark:text-oai-gray-500 sm:inline-block">
-                  {copy("leaderboard.generated_at", { ts: generatedAt })}
-                </span>
+              {generatedAtTime && (
+                <time
+                  dateTime={generatedAtTime.dateTime}
+                  title={copy("leaderboard.generated_at", { ts: generatedAtTime.exact })}
+                  className="ml-2 hidden border-l border-oai-gray-200 pl-2 text-xs text-oai-gray-500 dark:border-oai-gray-800 dark:text-oai-gray-400 sm:inline-block"
+                >
+                  {copy("leaderboard.generated_at", { ts: generatedAtTime.display })}
+                </time>
               )}
             </p>
             <div className="col-start-2 row-start-1 inline-flex h-9 shrink-0 items-center rounded-full border border-oai-gray-200 p-1 dark:border-oai-gray-800 sm:col-start-1 sm:row-start-3 sm:justify-self-start">
