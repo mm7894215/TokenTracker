@@ -818,6 +818,72 @@ test("v2 source-scoped sync commits a same-inode append without loading historic
   });
 });
 
+test("v2 source-scoped no-op sync keeps the current generation unchanged", async () => {
+  await withIsolatedCodexHome("tt-codex-v2-no-op-", async ({ codexHome, trackerDir }) => {
+    const sessionId = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
+    const dayDir = path.join(codexHome, "sessions", "2030", "06", "02");
+    const rolloutPath = path.join(
+      dayDir,
+      `rollout-2030-06-02T00-00-00-${sessionId}.jsonl`,
+    );
+    await fs.mkdir(dayDir, { recursive: true });
+    await fs.writeFile(
+      rolloutPath,
+      `${JSON.stringify(codexTokenEvent("2030-06-02T00:30:00.000Z", 10))}\n`,
+      "utf8",
+    );
+
+    const firstDiagnostics = {};
+    await cmdSync(
+      ["--auto", "--from-notify", "--source=codex"],
+      { diagnostics: firstDiagnostics, cursorStoreOptions: { forceV2: true } },
+    );
+    assert.equal(firstDiagnostics.cursor_commits, 1);
+
+    const manifestPath = path.join(trackerDir, STORE_DIRNAME, "manifest.json");
+    const manifestBefore = await fs.readFile(manifestPath, "utf8");
+    const coreBefore = await fs.readFile(firstDiagnostics.cursor_path, "utf8");
+
+    const noOpDiagnostics = {};
+    await cmdSync(
+      ["--auto", "--from-notify", "--source=codex"],
+      { diagnostics: noOpDiagnostics, cursorStoreOptions: { forceV2: true } },
+    );
+
+    assert.equal(noOpDiagnostics.cursor_commits, 0);
+    assert.equal(noOpDiagnostics.cursor_bytes, 0);
+    assert.equal(noOpDiagnostics.content_files_read, 0);
+    assert.equal(await fs.readFile(manifestPath, "utf8"), manifestBefore);
+    assert.equal(await fs.readFile(noOpDiagnostics.cursor_path, "utf8"), coreBefore);
+    assert.equal(
+      JSON.parse(
+        await fs.readFile(
+          path.join(trackerDir, STORE_DIRNAME, "deferred-codex-audit.json"),
+          "utf8",
+        ),
+      ).syncsSinceFullScan,
+      1,
+    );
+
+    await fs.appendFile(
+      rolloutPath,
+      `${JSON.stringify(codexTokenEvent("2030-06-02T00:35:00.000Z", 25))}\n`,
+      "utf8",
+    );
+    const appendDiagnostics = {};
+    await cmdSync(
+      ["--auto", "--from-notify", "--source=codex"],
+      { diagnostics: appendDiagnostics, cursorStoreOptions: { forceV2: true } },
+    );
+    assert.equal(appendDiagnostics.cursor_commits, 1);
+    assert.notEqual(await fs.readFile(manifestPath, "utf8"), manifestBefore);
+    await assert.rejects(
+      fs.stat(path.join(trackerDir, STORE_DIRNAME, "deferred-codex-audit.json")),
+      { code: "ENOENT" },
+    );
+  });
+});
+
 test("v2 source-scoped sync shards a custom CODEX_HOME outside the default path", async () => {
   await withIsolatedCodexHome("tt-codex-v2-custom-home-", async ({ home, trackerDir }) => {
     const customCodexHome = path.join(home, "custom-codex-data");

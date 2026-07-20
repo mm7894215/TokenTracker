@@ -80,6 +80,24 @@ function createSuccessfulSpawn(calls) {
   };
 }
 
+function createBusySpawn(calls) {
+  return (cmd, args, options) => {
+    calls.push({ cmd, args, options });
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => {};
+    process.nextTick(() => {
+      child.stderr.emit(
+        "data",
+        "Error: SYNC_BUSY: another sync is still running; no refresh was performed\n",
+      );
+      child.emit("close", 1);
+    });
+    return child;
+  };
+}
+
 function createDeferred() {
   let resolve;
   let reject;
@@ -162,6 +180,42 @@ test("local sync rejects arbitrary insforgeBaseUrl overrides", async () => {
     restore();
     if (prevBaseUrl === undefined) delete process.env.TOKENTRACKER_INSFORGE_BASE_URL;
     else process.env.TOKENTRACKER_INSFORGE_BASE_URL = prevBaseUrl;
+  }
+});
+
+test("local sync preserves the SYNC_BUSY failure code", async () => {
+  const calls = [];
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "tt-local-sync-busy-"));
+  const { mod, restore } = loadLocalApiWithSpawn(createBusySpawn(calls));
+
+  try {
+    const handler = mod.createLocalApiHandler({
+      queuePath: path.join(tempDir, "queue.jsonl"),
+    });
+    const localAuthToken = await getLocalAuthToken(handler);
+    const req = createRequest({
+      method: "POST",
+      headers: { "x-tokentracker-local-auth": localAuthToken },
+      body: JSON.stringify({ drain: true }),
+    });
+    const res = createResponse();
+
+    const handled = await handler(
+      req,
+      res,
+      new URL("http://127.0.0.1/functions/tokentracker-local-sync"),
+    );
+
+    assert.equal(handled, true);
+    assert.equal(res.statusCode, 500);
+    const body = JSON.parse(res.body.toString("utf8"));
+    assert.equal(body.ok, false);
+    assert.equal(body.code, "SYNC_BUSY");
+    assert.match(body.error, /no refresh was performed/);
+    assert.equal(calls.length, 1);
+  } finally {
+    restore();
+    fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
 

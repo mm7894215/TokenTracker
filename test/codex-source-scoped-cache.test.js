@@ -804,6 +804,16 @@ test("Codex cold scan audit treats future full-scan timestamps as due", () => {
     }, nowMs),
     true,
   );
+  assert.equal(
+    isCodexColdScanAuditDue({
+      codexColdScanAudit: {
+        version: 1,
+        lastFullScanAtMs: nowMs - 60 * 60 * 1000,
+        syncsSinceFullScan: 7,
+      },
+    }, nowMs, 281),
+    true,
+  );
 });
 
 test("Codex day inventory cache reduces repeated old-day readdir", async () => {

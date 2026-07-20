@@ -40,7 +40,7 @@ final class ServerManager: ObservableObject {
         } else if await APIClient.shared.checkServerHealth() {
             // No embedded server, but an external one is already running — reuse it
             status = .running
-            startHealthCheckLoop()
+            startHealthCheckLoop(ownership: .externalProcess)
             return
         } else if let binaryPath = findTokenTrackerBinary() {
             // Fall back to system-installed CLI
@@ -54,7 +54,7 @@ final class ServerManager: ObservableObject {
         let started = await waitForServer(timeout: 15)
         if started {
             status = .running
-            startHealthCheckLoop()
+            startHealthCheckLoop(ownership: .ownedProcess)
         } else {
             status = .failed(Strings.serverNotResponding(port: Constants.serverPort))
         }
@@ -268,11 +268,12 @@ final class ServerManager: ObservableObject {
 
     // MARK: - Health Check Loop
 
-    private func startHealthCheckLoop() {
+    private func startHealthCheckLoop(ownership: ServerHealthCheckPolicy.Ownership) {
         healthCheckTask?.cancel()
+        let interval = ServerHealthCheckPolicy.interval(for: ownership)
         healthCheckTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 30 * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
                 guard !Task.isCancelled, let self else { break }
                 let healthy = await APIClient.shared.checkServerHealth()
                 if healthy {

@@ -193,6 +193,10 @@ const DROID_DUP_SESSION_REPAIR_KEY = "droidDupSessionInflationRepair_2026_06";
 const CODEX_COLD_SCAN_AUDIT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const NOTIFY_LOCK_WAIT_MS = 130_000;
 const NOTIFY_LOCK_POLL_MS = 5_000;
+// Local API sync requests have a 120-second child-process budget. Reserve at
+// least 30 seconds for parsing, persistence, and the response after contention.
+const PRIORITY_LOCK_WAIT_MS = 90_000;
+const PRIORITY_LOCK_POLL_MS = 250;
 const CODEX_COLD_SCAN_AUDIT_MAX_SYNCS = 288;
 // 0.57.0 mis-attributed mimocode's mirrored Claude/claude-mem history to
 // source=mimo (read the whole DB instead of only providerID=mimo rows). This
@@ -302,10 +306,34 @@ async function acquireSyncLock(
   {
     notifyWaitMs = NOTIFY_LOCK_WAIT_MS,
     notifyPollMs = NOTIFY_LOCK_POLL_MS,
+    priorityWaitMs = PRIORITY_LOCK_WAIT_MS,
+    priorityPollMs = PRIORITY_LOCK_POLL_MS,
   } = {},
 ) {
-  let lock = await openLock(lockPath, { quietIfLocked: opts.auto });
-  if (lock || !opts.fromNotify || notifyWaitMs <= 0) return lock;
+  const waitsForPriority = Boolean(opts.drain || opts.publishAccount);
+  let lock = await openLock(lockPath, {
+    quietIfLocked: opts.auto || waitsForPriority,
+  });
+  if (lock) return lock;
+
+  if (waitsForPriority) {
+    const deadline = Date.now() + Math.max(0, priorityWaitMs);
+    while (!lock && Date.now() < deadline) {
+      const remaining = deadline - Date.now();
+      await sleep(Math.min(Math.max(1, priorityPollMs), remaining));
+      lock = await openLock(lockPath, { quietIfLocked: true });
+    }
+    if (!lock) {
+      const error = new Error(
+        "SYNC_BUSY: another sync is still running; no refresh was performed",
+      );
+      error.code = "SYNC_BUSY";
+      throw error;
+    }
+    return lock;
+  }
+
+  if (!opts.fromNotify || notifyWaitMs <= 0) return null;
 
   // One low-frequency waiter coalesces every notify that lands behind an
   // active native/background sync. This avoids both losing the final Codex
@@ -513,8 +541,11 @@ async function cmdSync(argv, context = {}) {
     }
 
     const codexColdSkipEnabled = opts.auto && sourceAllowed("codex");
+    const deferredCodexAuditSyncs = codexColdSkipEnabled
+      ? await cursorStore.readDeferredCodexAuditSyncs()
+      : 0;
     const codexColdAuditDue = codexColdSkipEnabled
-      ? isCodexColdScanAuditDue(cursors)
+      ? isCodexColdScanAuditDue(cursors, Date.now(), deferredCodexAuditSyncs)
       : false;
     let codexColdFilter = codexColdSkipEnabled
       ? await filterColdCodexRolloutFiles({
@@ -597,10 +628,12 @@ async function cmdSync(argv, context = {}) {
         warnProviderParseFailure("Codex", err, opts);
       }
     }
-    if (codexColdSkipEnabled && codexParseSucceeded) {
+    const codexAuditRecorded = codexColdSkipEnabled && codexParseSucceeded;
+    if (codexAuditRecorded) {
       recordCodexColdScanAudit(cursors, {
         fullAudit: codexColdAuditDue || codexFallbackRetryRan,
         skipped: codexColdFilter.skipped,
+        deferredSyncs: deferredCodexAuditSyncs,
       });
     }
 
@@ -1953,13 +1986,97 @@ async function cmdSync(argv, context = {}) {
       await applyCloudConversationsBackfill({ cursors, queueStatePath });
     }
 
-    cursors.updatedAt = new Date().toISOString();
-    await cursorStore.commit(cursors);
+    const totalParsed =
+      parseResult.filesProcessed +
+      openclawResult.filesProcessed +
+      claudeResult.filesProcessed +
+      geminiResult.filesProcessed +
+      antigravityResult.filesProcessed +
+      opencodeResult.filesProcessed +
+      cursorResult.recordsProcessed +
+      kiroResult.recordsProcessed +
+      kiroCliResult.recordsProcessed +
+      hermesResult.recordsProcessed +
+      kimiResult.recordsProcessed +
+      kimiCodeResult.recordsProcessed +
+      codebuddyResult.recordsProcessed +
+      workbuddyResult.recordsProcessed +
+      ompResult.recordsProcessed +
+      piResult.recordsProcessed +
+      craftResult.recordsProcessed +
+      grokResult.recordsProcessed +
+      copilotResult.recordsProcessed +
+      anythingllmResult.recordsProcessed +
+      kiloResult.recordsProcessed +
+      mimoResult.recordsProcessed +
+      zcodeResult.recordsProcessed +
+      kilocodeResult.recordsProcessed +
+      roocodeResult.recordsProcessed +
+      zedResult.recordsProcessed +
+      gooseResult.recordsProcessed +
+      droidResult.recordsProcessed;
+    const totalBuckets =
+      parseResult.bucketsQueued +
+      openclawResult.bucketsQueued +
+      claudeResult.bucketsQueued +
+      geminiResult.bucketsQueued +
+      antigravityResult.bucketsQueued +
+      opencodeResult.bucketsQueued +
+      cursorResult.bucketsQueued +
+      kiroResult.bucketsQueued +
+      kiroCliResult.bucketsQueued +
+      hermesResult.bucketsQueued +
+      kimiResult.bucketsQueued +
+      kimiCodeResult.bucketsQueued +
+      codebuddyResult.bucketsQueued +
+      workbuddyResult.bucketsQueued +
+      ompResult.bucketsQueued +
+      piResult.bucketsQueued +
+      craftResult.bucketsQueued +
+      grokResult.bucketsQueued +
+      copilotResult.bucketsQueued +
+      anythingllmResult.bucketsQueued +
+      kiloResult.bucketsQueued +
+      mimoResult.bucketsQueued +
+      zcodeResult.bucketsQueued +
+      kilocodeResult.bucketsQueued +
+      roocodeResult.bucketsQueued +
+      zedResult.bucketsQueued +
+      gooseResult.bucketsQueued +
+      droidResult.bucketsQueued;
+    const skipNoOpCursorCommit =
+      opts.auto &&
+      !isFullSourceScan &&
+      cursorStore.mode === "v2" &&
+      cursorStore.requiresCommit !== true &&
+      totalParsed === 0 &&
+      totalBuckets === 0 &&
+      !codexColdAuditDue &&
+      !codexFallbackRetryRan &&
+      !grokHookSignalConsumed &&
+      !opts.repairGrok;
+
     if (syncDiagnostics) {
-      const cursorStat = await fs.stat(cursorStore.currentCorePath);
-      syncDiagnostics.cursor_commits = Number(syncDiagnostics.cursor_commits || 0) + 1;
-      syncDiagnostics.cursor_bytes = Number(syncDiagnostics.cursor_bytes || 0) + cursorStat.size;
+      syncDiagnostics.cursor_commits = Number(syncDiagnostics.cursor_commits || 0);
+      syncDiagnostics.cursor_bytes = Number(syncDiagnostics.cursor_bytes || 0);
       syncDiagnostics.cursor_path = cursorStore.currentCorePath;
+    }
+    if (!skipNoOpCursorCommit) {
+      cursors.updatedAt = new Date().toISOString();
+      await cursorStore.commit(cursors);
+      if (codexAuditRecorded) {
+        await cursorStore.clearDeferredCodexAuditSyncs();
+      }
+      if (syncDiagnostics) {
+        const cursorStat = await fs.stat(cursorStore.currentCorePath);
+        syncDiagnostics.cursor_commits += 1;
+        syncDiagnostics.cursor_bytes += cursorStat.size;
+        syncDiagnostics.cursor_path = cursorStore.currentCorePath;
+      }
+    } else if (codexAuditRecorded) {
+      await cursorStore.writeDeferredCodexAuditSyncs(
+        deferredCodexAuditSyncs + 1,
+      );
     }
     if (grokHookSignalConsumed && grokHookSignalPath) {
       await fs.unlink(grokHookSignalPath).catch(() => {});
@@ -2074,64 +2191,6 @@ async function cmdSync(argv, context = {}) {
     }
 
     if (!opts.auto) {
-      const totalParsed =
-        parseResult.filesProcessed +
-        openclawResult.filesProcessed +
-        claudeResult.filesProcessed +
-        geminiResult.filesProcessed +
-        antigravityResult.filesProcessed +
-        opencodeResult.filesProcessed +
-        cursorResult.recordsProcessed +
-        kiroResult.recordsProcessed +
-        kiroCliResult.recordsProcessed +
-        hermesResult.recordsProcessed +
-        kimiResult.recordsProcessed +
-        kimiCodeResult.recordsProcessed +
-        codebuddyResult.recordsProcessed +
-        workbuddyResult.recordsProcessed +
-        ompResult.recordsProcessed +
-        piResult.recordsProcessed +
-        craftResult.recordsProcessed +
-        grokResult.recordsProcessed +
-        copilotResult.recordsProcessed +
-        anythingllmResult.recordsProcessed +
-        kiloResult.recordsProcessed +
-        mimoResult.recordsProcessed +
-        zcodeResult.recordsProcessed +
-        kilocodeResult.recordsProcessed +
-        roocodeResult.recordsProcessed +
-        zedResult.recordsProcessed +
-        gooseResult.recordsProcessed +
-        droidResult.recordsProcessed;
-      const totalBuckets =
-        parseResult.bucketsQueued +
-        openclawResult.bucketsQueued +
-        claudeResult.bucketsQueued +
-        geminiResult.bucketsQueued +
-        antigravityResult.bucketsQueued +
-        opencodeResult.bucketsQueued +
-        cursorResult.bucketsQueued +
-        kiroResult.bucketsQueued +
-        kiroCliResult.bucketsQueued +
-        hermesResult.bucketsQueued +
-        kimiResult.bucketsQueued +
-        kimiCodeResult.bucketsQueued +
-        codebuddyResult.bucketsQueued +
-        workbuddyResult.bucketsQueued +
-        ompResult.bucketsQueued +
-        piResult.bucketsQueued +
-        craftResult.bucketsQueued +
-        grokResult.bucketsQueued +
-        copilotResult.bucketsQueued +
-        anythingllmResult.bucketsQueued +
-        kiloResult.bucketsQueued +
-        mimoResult.bucketsQueued +
-        zcodeResult.bucketsQueued +
-        kilocodeResult.bucketsQueued +
-        roocodeResult.bucketsQueued +
-        zedResult.bucketsQueued +
-        gooseResult.bucketsQueued +
-        droidResult.bucketsQueued;
       process.stdout.write(
         [
           "Sync finished:",
@@ -2212,7 +2271,11 @@ function normalizeSyncSource(value) {
   return AUTO_SYNC_SOURCES.has(aliased) ? aliased : null;
 }
 
-function isCodexColdScanAuditDue(cursors, nowMs = Date.now()) {
+function isCodexColdScanAuditDue(
+  cursors,
+  nowMs = Date.now(),
+  deferredSyncs = 0,
+) {
   const state = cursors?.codexColdScanAudit;
   if (!state || typeof state !== "object" || state.version !== 1) return true;
   const lastFullScanAtMs = Number(state.lastFullScanAtMs);
@@ -2221,14 +2284,20 @@ function isCodexColdScanAuditDue(cursors, nowMs = Date.now()) {
   if (Number.isFinite(nowMs) && nowMs - lastFullScanAtMs >= CODEX_COLD_SCAN_AUDIT_INTERVAL_MS) {
     return true;
   }
-  const syncsSinceFullScan = Number(state.syncsSinceFullScan || 0);
+  const syncsSinceFullScan =
+    Number(state.syncsSinceFullScan || 0) +
+    Math.max(0, Number(deferredSyncs) || 0);
   return (
     Number.isFinite(syncsSinceFullScan) &&
     syncsSinceFullScan >= CODEX_COLD_SCAN_AUDIT_MAX_SYNCS
   );
 }
 
-function recordCodexColdScanAudit(cursors, { fullAudit = false, skipped = 0 } = {}, nowMs = Date.now()) {
+function recordCodexColdScanAudit(
+  cursors,
+  { fullAudit = false, skipped = 0, deferredSyncs = 0 } = {},
+  nowMs = Date.now(),
+) {
   if (!cursors || typeof cursors !== "object") return;
   const prev =
     cursors.codexColdScanAudit && typeof cursors.codexColdScanAudit === "object"
@@ -2241,9 +2310,9 @@ function recordCodexColdScanAudit(cursors, { fullAudit = false, skipped = 0 } = 
     lastFullScanAtMs: Number.isFinite(lastFullScanAtMs) && lastFullScanAtMs > 0
       ? lastFullScanAtMs
       : nowMs,
-    syncsSinceFullScan: Number.isFinite(previousSyncs) && previousSyncs > 0
-      ? previousSyncs
-      : 0,
+    syncsSinceFullScan:
+      (Number.isFinite(previousSyncs) && previousSyncs > 0 ? previousSyncs : 0) +
+      Math.max(0, Number(deferredSyncs) || 0),
     lastSkippedFiles: Math.max(0, Number(skipped) || 0),
     updatedAt: new Date(nowMs).toISOString(),
   };

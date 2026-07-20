@@ -51,6 +51,8 @@ struct ClawdCompanionView: View {
     @State private var lastTokens = 0
     @State private var modelStatusText: String? = nil
     @State private var modelStatusTask: Task<Void, Never>? = nil
+    @State private var blinkTask: Task<Void, Never>? = nil
+    @State private var idleVariantTask: Task<Void, Never>? = nil
 
     private let px: CGFloat = 4.0
     private let syncSpinPeriod: TimeInterval = 0.8
@@ -66,9 +68,20 @@ struct ClawdCompanionView: View {
             }
         }
         .onAppear {
-            startBlinkLoop()
-            startIdleVariantLoop()
+            updateDiscreteAnimationLoops(isVisible: isCharacterTimelineVisible)
             lastTokens = viewModel.todayTokens
+        }
+        .onChange(of: isCharacterTimelineVisible) { isVisible in
+            updateDiscreteAnimationLoops(isVisible: isVisible)
+        }
+        .onDisappear {
+            stopDiscreteAnimationLoops()
+            floatingBubbleTask?.cancel()
+            floatingBubbleTask = nil
+            modelStatusTask?.cancel()
+            modelStatusTask = nil
+            syncSpinStopTask?.cancel()
+            syncSpinStopTask = nil
         }
         .onChange(of: viewModel.todayTokens) { newTokens in
             if lastTokens > 0, newTokens > lastTokens {
@@ -1779,37 +1792,73 @@ struct ClawdCompanionView: View {
 
     /// Periodically switches between idle animations for visual variety
     private func startIdleVariantLoop() {
-        let delay = Double.random(in: 12...25)
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            var variants: [ClawdState] = [.idleLiving, .idleLook, .idleLiving, .idleLiving]
-            let tokens = viewModel.todayTokens
-            if tokens >= 200_000 { variants.append(.workingThinking) }
-            if tokens >= 500_000 { variants.append(.workingJuggling) }
-            // .workingOverheated is deliberately excluded: it draws the error visuals
-            // (X-eyes + red pulse), which must stay reserved for a real error state.
-            if tokens >= 2_000_000 { variants.append(.workingUltrathink) }
-            if viewModel.topModels.count >= 3 { variants.append(.workingJuggling) }
-            if (viewModel.heatmap?.streakDays ?? 0) >= 7 { variants.append(.workingWizard) }
-            idleVariant = variants.randomElement() ?? .idleLiving
-            startIdleVariantLoop()
+        guard idleVariantTask == nil else { return }
+        idleVariantTask = Task { @MainActor in
+            while !Task.isCancelled {
+                let delay = Double.random(in: 12...25)
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                } catch {
+                    break
+                }
+                guard !Task.isCancelled else { break }
+
+                var variants: [ClawdState] = [.idleLiving, .idleLook, .idleLiving, .idleLiving]
+                let tokens = viewModel.todayTokens
+                if tokens >= 200_000 { variants.append(.workingThinking) }
+                if tokens >= 500_000 { variants.append(.workingJuggling) }
+                // .workingOverheated is deliberately excluded: it draws the error visuals
+                // (X-eyes + red pulse), which must stay reserved for a real error state.
+                if tokens >= 2_000_000 { variants.append(.workingUltrathink) }
+                if viewModel.topModels.count >= 3 { variants.append(.workingJuggling) }
+                if (viewModel.heatmap?.streakDays ?? 0) >= 7 { variants.append(.workingWizard) }
+                idleVariant = variants.randomElement() ?? .idleLiving
+            }
         }
     }
 
     // MARK: - Idle Blink
 
     private func startBlinkLoop() {
-        let delay = Double.random(in: 2.5...5.0)
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            guard clawdState != .sleeping && clawdState != .idleDoze else {
-                startBlinkLoop()
-                return
-            }
-            eyesClosed = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+        guard blinkTask == nil else { return }
+        blinkTask = Task { @MainActor in
+            while !Task.isCancelled {
+                let delay = Double.random(in: 2.5...5.0)
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                } catch {
+                    break
+                }
+                guard !Task.isCancelled else { break }
+                guard clawdState != .sleeping && clawdState != .idleDoze else { continue }
+
+                eyesClosed = true
+                do {
+                    try await Task.sleep(nanoseconds: 120_000_000)
+                } catch {
+                    eyesClosed = false
+                    break
+                }
                 eyesClosed = false
-                startBlinkLoop()
             }
         }
+    }
+
+    private func updateDiscreteAnimationLoops(isVisible: Bool) {
+        if isVisible {
+            startBlinkLoop()
+            startIdleVariantLoop()
+        } else {
+            stopDiscreteAnimationLoops()
+        }
+    }
+
+    private func stopDiscreteAnimationLoops() {
+        blinkTask?.cancel()
+        blinkTask = nil
+        idleVariantTask?.cancel()
+        idleVariantTask = nil
+        eyesClosed = false
     }
 
     // MARK: - Types

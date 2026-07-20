@@ -14,6 +14,7 @@ const STORE_VERSION = 2;
 const STORE_DIRNAME = "cursor-store-v2";
 const MANIFEST_FILENAME = "manifest.json";
 const GENERATIONS_DIRNAME = "generations";
+const DEFERRED_CODEX_AUDIT_FILENAME = "deferred-codex-audit.json";
 const DEFAULT_ACTIVATION_BYTES = 16 * 1024 * 1024;
 const PROJECT_ABSENT_CONTEXT_RESCAN_MS = 24 * 60 * 60 * 1000;
 const CURSOR_STORE_RETRY_CODE = "TOKENTRACKER_CURSOR_STORE_RETRY";
@@ -35,6 +36,7 @@ async function openCursorStore({
   const normalizedCodexRoots = normalizeCodexRoots(codexRoots);
   const legacyFingerprint = await fingerprintFile(cursorsPath);
   let manifest = await readJson(manifestPath);
+  let migratedDuringOpen = false;
 
   if (isManifest(manifest)) {
     const legacyChanged = legacyFingerprint
@@ -49,6 +51,7 @@ async function openCursorStore({
         codexRoots: normalizedCodexRoots,
         failureInjector,
       });
+      migratedDuringOpen = true;
     }
 
     const opened = await openManifestGeneration({
@@ -58,7 +61,10 @@ async function openCursorStore({
       codexRoots: normalizedCodexRoots,
       failureInjector,
     });
-    if (opened) return opened;
+    if (opened) {
+      if (migratedDuringOpen) opened.requiresCommit = true;
+      return opened;
+    }
 
     manifest = await migrateLegacyCursorState({
       cursorsPath,
@@ -68,6 +74,7 @@ async function openCursorStore({
       codexRoots: normalizedCodexRoots,
       failureInjector,
     });
+    migratedDuringOpen = true;
     const recovered = await openManifestGeneration({
       cursorsPath,
       storeRoot,
@@ -75,7 +82,10 @@ async function openCursorStore({
       codexRoots: normalizedCodexRoots,
       failureInjector,
     });
-    if (recovered) return recovered;
+    if (recovered) {
+      recovered.requiresCommit = true;
+      return recovered;
+    }
   }
 
   const legacySize = Number(legacyFingerprint?.size || 0);
@@ -97,6 +107,7 @@ async function openCursorStore({
     codexRoots: normalizedCodexRoots,
     failureInjector,
   });
+  migratedDuringOpen = true;
   const opened = await openManifestGeneration({
     cursorsPath,
     storeRoot,
@@ -105,6 +116,7 @@ async function openCursorStore({
     failureInjector,
   });
   if (!opened) throw new Error("Unable to open migrated cursor store");
+  if (migratedDuringOpen) opened.requiresCommit = true;
   return opened;
 }
 
@@ -180,6 +192,14 @@ class LegacyCursorStore {
     return false;
   }
 
+  async readDeferredCodexAuditSyncs() {
+    return 0;
+  }
+
+  async writeDeferredCodexAuditSyncs() {}
+
+  async clearDeferredCodexAuditSyncs() {}
+
   async commit(cursors = this.cursors) {
     await writeJson(this.cursorsPath, cursors);
   }
@@ -205,12 +225,17 @@ class V2CursorStore {
     this.codexRoots = codexRoots;
     this.cursors = generation.core;
     this.failureInjector = failureInjector;
+    this.deferredCodexAuditPath = path.join(
+      storeRoot,
+      DEFERRED_CODEX_AUDIT_FILENAME,
+    );
     this.loadedFileShards = new Map();
     this.loadedEventSets = new Map();
     this.pendingEventKeys = new Map();
     this.skipValidationCache = new Map();
     this.fileShardLoadCount = 0;
     this.materializedCodexHashes = false;
+    this.requiresCommit = generation.metadata.id !== manifest.current;
 
     if (!this.cursors.files || typeof this.cursors.files !== "object") {
       this.cursors.files = {};
@@ -377,6 +402,29 @@ class V2CursorStore {
     return valid;
   }
 
+  async readDeferredCodexAuditSyncs() {
+    const state = await readJson(this.deferredCodexAuditPath);
+    const count = Number(state?.syncsSinceFullScan || 0);
+    return Number.isSafeInteger(count) && count > 0 ? count : 0;
+  }
+
+  async writeDeferredCodexAuditSyncs(count) {
+    const normalized = Math.max(0, Math.floor(Number(count) || 0));
+    if (normalized === 0) {
+      await this.clearDeferredCodexAuditSyncs();
+      return;
+    }
+    await writeJson(this.deferredCodexAuditPath, {
+      version: 1,
+      syncsSinceFullScan: normalized,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  async clearDeferredCodexAuditSyncs() {
+    await fs.unlink(this.deferredCodexAuditPath).catch(() => {});
+  }
+
   hasCodexEvent(key) {
     const shardKey = codexEventShardKey(key);
     if (this.pendingEventKeys.get(shardKey)?.has(key)) return true;
@@ -464,6 +512,7 @@ class V2CursorStore {
     this.pendingEventKeys.clear();
     this.skipValidationCache.clear();
     this.materializedCodexHashes = false;
+    this.requiresCommit = true;
     return true;
   }
 
@@ -594,6 +643,7 @@ class V2CursorStore {
       this.pendingEventKeys.clear();
       this.skipValidationCache.clear();
       this.materializedCodexHashes = false;
+      this.requiresCommit = false;
       await cleanupGenerations(this.storeRoot, new Set([
         nextManifest.current,
         nextManifest.previous,

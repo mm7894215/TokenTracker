@@ -189,6 +189,66 @@ test("Codex notify sync catches up after an overlapping background sync releases
   });
 });
 
+test("native account publication waits for an overlapping sync instead of reporting success", async () => {
+  await withTempSyncEnv(async (home) => {
+    const codexHome = process.env.CODEX_HOME;
+    await writeCodexRollout(
+      codexHome,
+      "2026-06-30",
+      "019f16bd-1010-7000-8000-aaaaaaaaaaaa",
+      79,
+    );
+
+    const trackerDir = path.join(home, ".tokentracker", "tracker");
+    await fs.mkdir(trackerDir, { recursive: true });
+    const active = await openLock(path.join(trackerDir, "sync.lock"), {
+      quietIfLocked: true,
+    });
+    assert.ok(active);
+
+    const publicationSync = cmdSync(
+      ["--auto", "--background", "--publish-account"],
+      { lockWaitOptions: { priorityWaitMs: 500, priorityPollMs: 10 } },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await active.release();
+    await publicationSync;
+
+    const queue = await readQueue(home);
+    assert.match(queue, /"source":"codex"/);
+    assert.match(queue, /"total_tokens":79/);
+  });
+});
+
+test("manual drain fails explicitly when the sync lock stays busy", async () => {
+  await withTempSyncEnv(async (home) => {
+    const trackerDir = path.join(home, ".tokentracker", "tracker");
+    await fs.mkdir(trackerDir, { recursive: true });
+    const active = await openLock(path.join(trackerDir, "sync.lock"), {
+      quietIfLocked: true,
+    });
+    assert.ok(active);
+
+    try {
+      await assert.rejects(
+        cmdSync(
+          ["--drain"],
+          { lockWaitOptions: { priorityWaitMs: 40, priorityPollMs: 5 } },
+        ),
+        (error) => {
+          assert.equal(error.code, "SYNC_BUSY");
+          assert.match(error.message, /no refresh was performed/);
+          return true;
+        },
+      );
+    } finally {
+      await active.release();
+    }
+
+    await assert.rejects(readQueue(home), { code: "ENOENT" });
+  });
+});
+
 test("Codex notify sync accepts an explicit null context", async () => {
   await withTempSyncEnv(async () => {
     await cmdSync(["--auto", "--from-notify", "--source=codex"], null);

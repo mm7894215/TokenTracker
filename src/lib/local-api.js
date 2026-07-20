@@ -802,9 +802,18 @@ function runSyncCommand(extraEnv = {}, opts = {}) {
     });
     child.on("close", (code) => {
       const r = { code: code ?? 1, stdout: trimOutput(stdout), stderr: trimOutput(stderr) };
-      code === 0
-        ? finish(resolve, r)
-        : finish(reject, Object.assign(new Error(r.stderr || r.stdout || `exit ${r.code}`), r));
+      if (code === 0) {
+        finish(resolve, r);
+        return;
+      }
+      const error = Object.assign(
+        new Error(r.stderr || r.stdout || `exit ${r.code}`),
+        r,
+      );
+      if (/\bSYNC_BUSY\b/.test(`${r.stderr}\n${r.stdout}`)) {
+        error.code = "SYNC_BUSY";
+      }
+      finish(reject, error);
     });
   });
 }
