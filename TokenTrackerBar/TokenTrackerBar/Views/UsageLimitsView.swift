@@ -85,7 +85,7 @@ struct UsageLimitsView: View {
                 groups.append(AnyView(toolSection(id: id, title: planTitle("Gemini", limits.gemini.planLabel), assetName: "GeminiLogo", toolName: "Gemini", specs: geminiSpecs(limits.gemini))))
             case "kimi":
                 if let kimi = limits.kimi, kimi.configured, kimi.error == nil {
-                    groups.append(AnyView(toolSection(id: id, title: planTitle("Kimi", kimi.planLabel), assetName: "KimiLogo", toolName: "Kimi", specs: kimiSpecs(kimi), footnote: kimi.parallelLimit.map { Strings.kimiParallelLabel($0) })))
+                    groups.append(AnyView(toolSection(id: id, title: planTitle("Kimi", kimi.planLabel), assetName: "KimiLogo", toolName: "Kimi", specs: kimiSpecs(kimi), titleSuffix: kimi.parallelLimit.map { "· \(Strings.kimiParallelLabel($0))" })))
                 }
             case "kiro" where limits.kiro.configured && limits.kiro.error == nil:
                 groups.append(AnyView(toolSection(id: id, title: planTitle("Kiro", limits.kiro.planLabel), assetName: "KiroLogo", toolName: "Kiro", specs: kiroSpecs(limits.kiro))))
@@ -124,7 +124,10 @@ struct UsageLimitsView: View {
         specs: [LimitWindowSpec],
         resetRows: [CodexResetRowSpec] = [],
         resetStatus: String? = nil,
-        footnote: String? = nil,
+        /// Inline plan-spec text pinned to the right of the title (e.g. Kimi's
+        /// "· Parallel: 20" concurrency cap). Renders caption2/tertiary so it
+        /// reads as metadata, not part of the provider name.
+        titleSuffix: String? = nil,
         // Provider's own last-fetch stamp (Claude/Codex); nil falls back to the
         // response-level `fetched_at`, which is when every live provider was read.
         updatedAtISO: String? = nil,
@@ -148,6 +151,11 @@ struct UsageLimitsView: View {
                 Text(title)
                     .font(.system(.caption, design: .default))
                     .modifier(FontWeightModifier(weight: .medium))
+                if let titleSuffix {
+                    Text(titleSuffix)
+                        .font(.system(.caption2, design: .default))
+                        .foregroundStyle(.tertiary)
+                }
             }
             VStack(spacing: 4) {
                 ForEach(specs) { spec in
@@ -156,11 +164,6 @@ struct UsageLimitsView: View {
             }
             if !resetRows.isEmpty || resetStatus != nil {
                 resetSection(rows: resetRows, status: resetStatus)
-            }
-            if let footnote {
-                Text(footnote)
-                    .font(.system(.caption2, design: .default))
-                    .foregroundStyle(.tertiary)
             }
         }
         .modifier(ProviderClickableStyle(isActive: explainingProvider == id, isStale: isStale))
