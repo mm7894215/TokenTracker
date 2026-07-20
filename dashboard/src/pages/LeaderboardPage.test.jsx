@@ -11,6 +11,7 @@ import {
 } from "../lib/dashboard-preload.js";
 import { getLeaderboard } from "../lib/api";
 import { runCloudUsageSyncNow } from "../lib/cloud-sync";
+import { CLOUD_LEADERBOARD_REFRESHED_EVENT } from "../lib/cloud-sync-prefs";
 import { LeaderboardPage } from "./LeaderboardPage.jsx";
 
 const openLoginModalMock = vi.hoisted(() => vi.fn());
@@ -125,6 +126,24 @@ describe("LeaderboardPage window-session cache reuse", () => {
     });
   });
 
+  it("keeps normal token-cell hover backgrounds opaque in dark mode", () => {
+    const contextKey = getLeaderboardPreloadContextKey({
+      accessMode: "cloud",
+      baseUrl: "https://edge.example",
+      mockEnabled: false,
+      userId: "user-1",
+    });
+    publishLeaderboardPreloadState(preloadedData, { contextKey });
+    getLeaderboard.mockReturnValue(new Promise(() => {}));
+
+    const { container } = renderLeaderboard();
+    const tokenCell = container.querySelector('td[data-column-key="gpt_tokens"]');
+
+    expect(tokenCell).not.toBeNull();
+    expect(tokenCell.className).toContain("dark:group-hover:bg-oai-gray-900");
+    expect(tokenCell.className).not.toContain("dark:group-hover:bg-oai-gray-900/60");
+  });
+
   it("keeps the pinned me-row rank cell sticky (twMerge must not drop it, issue 265)", () => {
     const contextKey = getLeaderboardPreloadContextKey({
       accessMode: "cloud",
@@ -204,6 +223,34 @@ describe("LeaderboardPage window-session cache reuse", () => {
         data: refreshedData,
         source: "page-load",
       });
+    });
+  });
+
+  it("reloads the active page after cloud sync publishes a fresh leaderboard snapshot", async () => {
+    const initialData = {
+      ...preloadedData,
+      entries: [{ ...preloadedData.entries[0], display_name: "Before sync" }],
+    };
+    const refreshedData = {
+      ...preloadedData,
+      entries: [{ ...preloadedData.entries[0], display_name: "After sync" }],
+    };
+    getLeaderboard.mockResolvedValueOnce(initialData).mockResolvedValueOnce(refreshedData);
+
+    renderLeaderboard();
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Before sync").length).toBeGreaterThan(0);
+      expect(getLeaderboard).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new Event(CLOUD_LEADERBOARD_REFRESHED_EVENT));
+    });
+
+    await waitFor(() => {
+      expect(getLeaderboard).toHaveBeenCalledTimes(2);
+      expect(screen.getAllByText("After sync").length).toBeGreaterThan(0);
     });
   });
 

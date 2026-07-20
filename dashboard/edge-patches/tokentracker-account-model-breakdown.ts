@@ -164,6 +164,11 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   "kimi-k2.5-free": { input: 0, output: 0, cache_read: 0 },
   "kimi-k2.6": { input: 0.95, output: 4, cache_read: 0.16 },
   "kimi-k2.7-code": { input: 0.95, output: 4, cache_read: 0.19 },
+  // Kimi K3 (released 2026-07-16; reported rates $3/M in, $15/M out, $0.30/M
+  // cached). Kimi Code records the alias as bare "k3" (kimi-code/k3), hence
+  // the separate "k3" exact key below. Not yet in LiteLLM.
+  "kimi-k3": { input: 3, output: 15, cache_read: 0.3 },
+  "k3": { input: 3, output: 15, cache_read: 0.3 },
   // ── Z.ai GLM (mirrored from src/lib/pricing/curated-overrides.json).
   //    LiteLLM only keys these under provider prefixes like `zai/glm-5`,
   //    `openrouter/z-ai/glm-4.6`, etc. The reverse-substring fallback in the
@@ -298,6 +303,10 @@ function getModelPricing(model: string) {
   // of the $0.20/$0.50 MTok fast-tier rate (15x / 30x overestimate).
   if (lower.includes("grok-4-1-fast")) return MODEL_PRICING["grok-4-1-fast-non-reasoning"];
   if (lower.includes("grok-4")) return MODEL_PRICING["grok-4"];
+  if (lower.includes("kimi-k3")) return MODEL_PRICING["kimi-k3"];
+  // Bare "k3" alias from Kimi Code (or provider-prefixed "*/k3"); the exact
+  // key above only catches the unprefixed form.
+  if (lower === "k3" || lower.endsWith("/k3")) return MODEL_PRICING["kimi-k3"];
   if (lower.includes("kimi-k2.7-code")) return MODEL_PRICING["kimi-k2.7-code"];
   if (lower.includes("kimi-k2.6")) return MODEL_PRICING["kimi-k2.6"];
   if (lower.includes("kimi")) return MODEL_PRICING["kimi-k2.5"];
@@ -403,7 +412,7 @@ async function fetchGroupedRows(
 
   const pending = (async () => {
     try {
-      const { data, error } = await client.database.rpc("account_usage_grouped_v2", {
+      const { data, error } = await client.database.rpc("account_usage_grouped_cached", {
         p_user_id: userId,
         p_device_id: requestedDeviceId,
         p_from: fromIso,
@@ -554,17 +563,20 @@ export default async function (req: Request): Promise<Response> {
             ? "hy3-preview-agent"
             : m.model;
         const p = getModelPricing(modelForPricing);
+        const subscriptionBacked =
+          s.source === "pi-github-copilot" || s.source === "pi-copilot";
         // Codex / every-code fold reasoning into output_tokens (OpenAI
         // convention), so charging reasoning again double-counts. Mirror the
         // guard in src/lib/pricing/index.js + tokentracker-leaderboard-refresh.ts.
         const reasoningIncludedInOutput = s.source === "codex" || s.source === "every-code";
-        const cost =
-          ((m.totals.input_tokens || 0) * (p.input || 0) +
+        const cost = subscriptionBacked
+          ? 0
+          : ((m.totals.input_tokens || 0) * (p.input || 0) +
             (m.totals.output_tokens || 0) * (p.output || 0) +
             (m.totals.cached_input_tokens || 0) * (p.cache_read || 0) +
             (m.totals.cache_creation_input_tokens || 0) * ((p.cache_write ?? 0)) +
             (reasoningIncludedInOutput ? 0 : (m.totals.reasoning_output_tokens || 0) * (p.output || 0))) /
-          1_000_000;
+            1_000_000;
         return {
           model: m.model,
           model_id: m.model_id,

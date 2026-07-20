@@ -1,8 +1,18 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { copy } from "../lib/copy";
 import { PetPage } from "./PetPage.jsx";
+
+const petApiMocks = vi.hoisted(() => ({
+  importCodexPets: vi.fn(),
+  importPetPackage: vi.fn(),
+  installPetFromUrl: vi.fn(),
+  listCodexImportable: vi.fn(),
+  removePet: vi.fn(),
+}));
+
+vi.mock("../lib/pets-api.js", () => petApiMocks);
 
 vi.mock("../ui/foundation/ClawdAnimated.jsx", () => ({
   ClawdAnimated: ({ state, character }) => <div data-state={state} data-character={character} />,
@@ -45,6 +55,14 @@ function installWindowsBridge() {
   };
   return messages;
 }
+
+beforeEach(() => {
+  for (const mock of Object.values(petApiMocks)) mock.mockReset();
+  // Most page tests do not exercise reverse import. Keeping discovery pending
+  // avoids unrelated post-assertion state updates while the component remains mounted.
+  petApiMocks.listCodexImportable.mockImplementation(() => new Promise(() => {}));
+  petApiMocks.importCodexPets.mockResolvedValue({ ok: true });
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -122,5 +140,37 @@ describe("PetPage", () => {
       }));
     });
     expect(messages).toContainEqual({ type: "setPetSetting", key: "character", value: "sprout" });
+  });
+
+  it("discovers Codex companions and imports a selected built-in pet", async () => {
+    const user = userEvent.setup();
+    const discovered = {
+      codexDetected: true,
+      importable: [{
+        id: "rocky",
+        displayName: "Rocky",
+        description: "Built-in Codex companion.",
+        spriteVersionNumber: 2,
+        assetUrl: "/api/pets/codex/rocky/spritesheet.webp?v=app2",
+      }],
+    };
+    petApiMocks.listCodexImportable
+      .mockResolvedValueOnce(discovered)
+      .mockResolvedValue({ codexDetected: false, importable: [] });
+
+    render(<PetPage />);
+    const browse = await screen.findByRole("button", { name: copy("pet.codex.browse") });
+    await act(async () => { await user.click(browse); });
+    const dialog = screen.getByRole("dialog", { name: copy("pet.codex.title") });
+    expect(dialog).toBeInTheDocument();
+    await waitFor(() => expect(dialog).toContainElement(document.activeElement));
+
+    await act(async () => { await user.click(screen.getByRole("button", { name: /Rocky/ })); });
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: new RegExp(copy("pet.codex.import")) }));
+    });
+
+    await waitFor(() => expect(petApiMocks.importCodexPets).toHaveBeenCalledWith(["rocky"]));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: copy("pet.codex.title") })).not.toBeInTheDocument());
   });
 });

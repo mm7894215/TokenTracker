@@ -10,9 +10,15 @@ let root;
 before(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-pets-test-"));
   process.env.TOKENTRACKER_PETS_DIR = root;
+  // Isolate the Codex-side sources so migration / reverse-import never read the real
+  // ~/.codex/pets or an installed Codex.app during tests.
+  process.env.TOKENTRACKER_CODEX_PETS_DIR = path.join(root, "codex-pets");
+  process.env.TOKENTRACKER_CODEX_ASAR = path.join(root, "no-such-app.asar");
 });
 after(() => {
   delete process.env.TOKENTRACKER_PETS_DIR;
+  delete process.env.TOKENTRACKER_CODEX_PETS_DIR;
+  delete process.env.TOKENTRACKER_CODEX_ASAR;
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -160,4 +166,235 @@ test("accepts pre-kind manifests and unknown future kinds (codex-pets.net legacy
     ),
     /kind must be a short lowercase label/,
   );
+});
+
+// --- Codex decoupling: own directory, one-way reverse import (never writes to Codex) ---
+
+async function withCodexEnv(fn) {
+  const prev = {
+    pets: process.env.TOKENTRACKER_PETS_DIR,
+    codex: process.env.TOKENTRACKER_CODEX_PETS_DIR,
+    asar: process.env.TOKENTRACKER_CODEX_ASAR,
+  };
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "tt-codex-sync-"));
+  const ttDir = path.join(base, "tt");
+  const codexDir = path.join(base, "codex");
+  process.env.TOKENTRACKER_PETS_DIR = ttDir;
+  process.env.TOKENTRACKER_CODEX_PETS_DIR = codexDir;
+  process.env.TOKENTRACKER_CODEX_ASAR = path.join(base, "none.asar");
+  try { return await fn({ base, ttDir, codexDir }); } finally {
+    for (const [key, envName] of [["pets", "TOKENTRACKER_PETS_DIR"], ["codex", "TOKENTRACKER_CODEX_PETS_DIR"], ["asar", "TOKENTRACKER_CODEX_ASAR"]]) {
+      if (prev[key] === undefined) delete process.env[envName]; else process.env[envName] = prev[key];
+    }
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+}
+
+function seedCodexPet(codexDir, id, { version = 2 } = {}) {
+  const dir = path.join(codexDir, id);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "pet.json"), JSON.stringify({
+    id,
+    displayName: id,
+    description: "seeded codex pet",
+    spritesheetPath: "spritesheet.webp",
+    ...(version === 2 ? { spriteVersionNumber: 2 } : {}),
+  }));
+  fs.writeFileSync(path.join(dir, "spritesheet.webp"), webpHeader(1536, version === 2 ? 2288 : 1872));
+}
+
+// Minimal asar writer matching the reader in pet-packages.js (Chromium Pickle prelude).
+function buildAsar(entries) {
+  const tree = { files: {} };
+  const chunks = [];
+  let dataOffset = 0;
+  for (const [rel, buf] of Object.entries(entries)) {
+    const parts = rel.split("/");
+    let node = tree;
+    for (let i = 0; i < parts.length - 1; i += 1) {
+      node.files[parts[i]] = node.files[parts[i]] || { files: {} };
+      node = node.files[parts[i]];
+    }
+    node.files[parts[parts.length - 1]] = { size: buf.length, offset: String(dataOffset) };
+    chunks.push(buf);
+    dataOffset += buf.length;
+  }
+  const json = Buffer.from(JSON.stringify(tree), "utf8");
+  const prelude = Buffer.alloc(16);
+  prelude.writeUInt32LE(4, 0);
+  prelude.writeUInt32LE(json.length + 8, 4);
+  prelude.writeUInt32LE(json.length + 4, 8);
+  prelude.writeUInt32LE(json.length, 12);
+  const base = 16 + json.length;
+  const pad = Buffer.alloc(base % 4 ? 4 - (base % 4) : 0);
+  return Buffer.concat([prelude, json, pad, ...chunks]);
+}
+
+test("pets live in TokenTracker's own directory, not ~/.codex/pets", () => {
+  const home = os.homedir();
+  const previous = process.env.TOKENTRACKER_PETS_DIR;
+  const previousCodex = process.env.TOKENTRACKER_CODEX_PETS_DIR;
+  delete process.env.TOKENTRACKER_PETS_DIR;
+  delete process.env.TOKENTRACKER_CODEX_PETS_DIR;
+  try {
+    assert.equal(pets.resolvePetsDir(), path.join(home, ".tokentracker", "pets"));
+    assert.equal(pets.resolveCodexPetsDir(), path.join(home, ".codex", "pets"));
+  } finally {
+    process.env.TOKENTRACKER_PETS_DIR = previous;
+    process.env.TOKENTRACKER_CODEX_PETS_DIR = previousCodex;
+  }
+});
+
+test("install never writes to Codex (TokenTracker stays independent)", async () => {
+  await withCodexEnv(async ({ ttDir, codexDir }) => {
+    await pets.importPetZip(storeZip({
+      "pet.json": manifest("stayhome", 2),
+      "spritesheet.webp": webpHeader(1536, 2288),
+    }));
+    assert.ok(fs.existsSync(path.join(ttDir, "stayhome")), "pet saved in TokenTracker dir");
+    assert.ok(!fs.existsSync(path.join(codexDir, "stayhome")), "pet must NOT leak into Codex");
+  });
+});
+
+test("one-time migration copies legacy Codex pets into the local dir", async () => {
+  await withCodexEnv(({ ttDir, codexDir }) => {
+    seedCodexPet(codexDir, "legacy-a", { version: 2 });
+    seedCodexPet(codexDir, "legacy-b", { version: 1 });
+    fs.mkdirSync(path.join(codexDir, "byte")); // reserved id — must be skipped
+    const first = pets.listInstalledPets().map((pet) => pet.id).sort();
+    assert.deepEqual(first, ["legacy-a", "legacy-b"]);
+    assert.ok(fs.existsSync(path.join(ttDir, ".migrated-v1")));
+    // Idempotent: a new legacy pet added after the marker is NOT re-migrated.
+    seedCodexPet(codexDir, "legacy-c", { version: 2 });
+    assert.deepEqual(pets.listInstalledPets().map((pet) => pet.id).sort(), ["legacy-a", "legacy-b"]);
+  });
+});
+
+test("one-time migration retries after a transient legacy-directory read failure", async () => {
+  await withCodexEnv(({ ttDir, codexDir }) => {
+    seedCodexPet(codexDir, "retry-me", { version: 2 });
+    const originalReaddirSync = fs.readdirSync;
+    fs.readdirSync = function failingLegacyRead(directory, ...args) {
+      if (path.resolve(String(directory)) === path.resolve(codexDir)) {
+        const error = new Error("temporary read failure");
+        error.code = "EIO";
+        throw error;
+      }
+      return originalReaddirSync.call(this, directory, ...args);
+    };
+    try {
+      assert.deepEqual(pets.listInstalledPets(), []);
+      assert.ok(!fs.existsSync(path.join(ttDir, ".migrated-v1")));
+    } finally {
+      fs.readdirSync = originalReaddirSync;
+    }
+
+    assert.deepEqual(pets.listInstalledPets().map((pet) => pet.id), ["retry-me"]);
+    assert.ok(fs.existsSync(path.join(ttDir, ".migrated-v1")));
+  });
+});
+
+test("resolving a persisted legacy pet triggers migration before the first catalog request", async () => {
+  await withCodexEnv(({ ttDir, codexDir }) => {
+    seedCodexPet(codexDir, "persisted", { version: 2 });
+
+    const resolved = pets.resolvePetAsset("persisted");
+
+    assert.equal(resolved?.manifest.id, "persisted");
+    assert.ok(fs.existsSync(path.join(ttDir, "persisted", "spritesheet.webp")));
+    assert.ok(fs.existsSync(path.join(ttDir, ".migrated-v1")));
+  });
+});
+
+test("Codex preview assets receive the same package validation as imports", async () => {
+  await withCodexEnv(({ codexDir }) => {
+    const invalidDir = path.join(codexDir, "invalid-preview");
+    fs.mkdirSync(invalidDir, { recursive: true });
+    fs.writeFileSync(path.join(invalidDir, "pet.json"), JSON.stringify({
+      id: "invalid-preview",
+      displayName: "Invalid preview",
+      description: "not a spritesheet",
+      spritesheetPath: "spritesheet.webp",
+      spriteVersionNumber: 2,
+    }));
+    fs.writeFileSync(path.join(invalidDir, "spritesheet.webp"), "not-webp");
+
+    assert.equal(pets.readCodexImportableAsset("invalid-preview"), null);
+  });
+});
+
+test("reverse-imports pets from ~/.codex/pets and from a Codex.app asar", async () => {
+  await withCodexEnv(({ ttDir, codexDir, base }) => {
+    // Simulate a machine where the one-time migration already ran, then the user
+    // installs a new pet through Codex — it should appear as importable, not be
+    // silently auto-migrated.
+    fs.mkdirSync(ttDir, { recursive: true });
+    fs.writeFileSync(path.join(ttDir, ".migrated-v1"), "done\n");
+    // A Codex-dir pet (installed via Codex), plus a bundled app pet inside a fake asar.
+    seedCodexPet(codexDir, "fromdir", { version: 2 });
+    const asarPath = path.join(base, "codex.asar");
+    fs.writeFileSync(asarPath, buildAsar({
+      "webview/assets/rocky-spritesheet-v5-abc.webp": webpHeader(1536, 2288),
+    }));
+    process.env.TOKENTRACKER_CODEX_ASAR = asarPath;
+
+    const originalOpenSync = fs.openSync;
+    let asarOpenCount = 0;
+    fs.openSync = function countedOpenSync(file, ...args) {
+      if (path.resolve(String(file)) === path.resolve(asarPath)) asarOpenCount += 1;
+      return originalOpenSync.call(this, file, ...args);
+    };
+
+    try {
+      const builtin = pets.readCodexBuiltinPets(asarPath);
+      assert.deepEqual(builtin.map((pet) => pet.id), ["rocky"]);
+      assert.equal(builtin[0].displayName, "Rocky");
+      assert.equal(builtin[0].spriteVersionNumber, 2);
+
+      const importable = pets.listCodexImportablePets().map((pet) => `${pet.id}:${pet.source}`).sort();
+      assert.deepEqual(importable, ["fromdir:codex-dir", "rocky:codex-app"]);
+
+      const result = pets.importFromCodex(["fromdir", "rocky"]);
+      assert.deepEqual(result.imported.map((pet) => pet.id).sort(), ["fromdir", "rocky"]);
+      assert.ok(fs.existsSync(path.join(ttDir, "rocky", "spritesheet.webp")));
+      assert.ok(fs.existsSync(path.join(ttDir, "fromdir", "spritesheet.webp")));
+      // Already-imported pets drop out of the importable list.
+      assert.deepEqual(pets.listCodexImportablePets(), []);
+      assert.equal(asarOpenCount, 1, "one parsed asar should serve listing, preview, and import");
+    } finally {
+      fs.openSync = originalOpenSync;
+    }
+  });
+});
+
+test("reverse import never overwrites an existing TokenTracker pet", async () => {
+  await withCodexEnv(async ({ ttDir, codexDir }) => {
+    fs.mkdirSync(ttDir, { recursive: true });
+    fs.writeFileSync(path.join(ttDir, ".migrated-v1"), "done\n");
+    await pets.importPetZip(storeZip({
+      "pet.json": manifest("protected"),
+      "spritesheet.webp": webpHeader(1536, 1872),
+    }));
+    const localSprite = fs.readFileSync(path.join(ttDir, "protected", "spritesheet.webp"));
+    seedCodexPet(codexDir, "protected", { version: 2 });
+
+    assert.throws(() => pets.importFromCodex(["protected"]), /already installed/);
+    assert.deepEqual(
+      fs.readFileSync(path.join(ttDir, "protected", "spritesheet.webp")),
+      localSprite,
+    );
+  });
+});
+
+test("removing a pet only touches TokenTracker's dir, never Codex", async () => {
+  await withCodexEnv(async ({ ttDir, codexDir }) => {
+    seedCodexPet(codexDir, "codex-native", { version: 2 }); // Codex's own — must survive
+    await pets.importPetZip(storeZip({
+      "pet.json": manifest("mine", 2),
+      "spritesheet.webp": webpHeader(1536, 2288),
+    }));
+    pets.removeInstalledPet("mine");
+    assert.ok(!fs.existsSync(path.join(ttDir, "mine")), "local pet removed");
+    assert.ok(fs.existsSync(path.join(codexDir, "codex-native")), "Codex pet untouched");
+  });
 });

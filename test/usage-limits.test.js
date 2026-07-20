@@ -1513,6 +1513,101 @@ describe("getUsageLimits", () => {
     }
   });
 
+  it("serves cached Claude windows with a reauth flag when the OAuth token is expired", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-claude-reauth-cache-"));
+    try {
+      const claudeDir = path.join(tmp, ".claude");
+      fs.mkdirSync(claudeDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(claudeDir, ".credentials.json"),
+        JSON.stringify({ claudeAiOauth: { accessToken: "expired-token" } }),
+      );
+      const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+      fs.mkdirSync(trackerDir, { recursive: true });
+      const futureReset = new Date(Date.now() + 3 * 86400 * 1000).toISOString();
+      fs.writeFileSync(
+        path.join(trackerDir, "claude-usage-limits-cache.json"),
+        JSON.stringify({
+          claude: {
+            five_hour: { utilization: 41, resets_at: futureReset },
+            seven_day: { utilization: 63, resets_at: futureReset },
+            seven_day_opus: null,
+            weekly_scoped: null,
+            extra_usage: null,
+            cached_at: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+          },
+        }),
+      );
+
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 1000,
+        forceRefresh: true,
+        securityRunner() {
+          return { status: 1, stdout: "" };
+        },
+        commandRunner() {
+          return { status: 1, stdout: "" };
+        },
+        fetchImpl(url) {
+          if (typeof url === "string" && url === "https://api.anthropic.com/api/oauth/usage") {
+            return Promise.resolve({ ok: false, status: 401 });
+          }
+          return pendingUnlessCodexReset(url);
+        },
+      });
+
+      // The cached bars stay visible, but the client is told why they stopped updating.
+      assert.equal(result.claude.error, null);
+      assert.equal(result.claude.stale, true);
+      assert.deepEqual(result.claude.five_hour, { utilization: 41, resets_at: futureReset });
+      assert.equal(result.claude.auth_action_required, "reauth");
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("surfaces the token-expired error with a reauth flag when no Claude cache exists", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-claude-reauth-nocache-"));
+    try {
+      const claudeDir = path.join(tmp, ".claude");
+      fs.mkdirSync(claudeDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(claudeDir, ".credentials.json"),
+        JSON.stringify({ claudeAiOauth: { accessToken: "expired-token" } }),
+      );
+
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 1000,
+        securityRunner() {
+          return { status: 1, stdout: "" };
+        },
+        commandRunner() {
+          return { status: 1, stdout: "" };
+        },
+        fetchImpl(url) {
+          if (typeof url === "string" && url === "https://api.anthropic.com/api/oauth/usage") {
+            return Promise.resolve({ ok: false, status: 401 });
+          }
+          return pendingUnlessCodexReset(url);
+        },
+      });
+
+      assert.equal(result.claude.configured, true);
+      assert.match(result.claude.error, /token expired/i);
+      assert.equal(result.claude.auth_action_required, "reauth");
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   for (const status of [401, 403, 404]) {
     it(`Codex reset headers do not fetch reset list when wham ${status} returns no-data`, async () => {
       resetUsageLimitsCache();

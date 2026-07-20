@@ -36,7 +36,15 @@ const BLOCKED_LEADERBOARD_USER_IDS = new Set(
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { ...cors, "Content-Type": "application/json" },
+    headers: {
+      ...cors,
+      "Content-Type": "application/json",
+      // A leaderboard response is a view of a mutable snapshot. Caching the
+      // edge response makes a freshly refreshed snapshot invisible until the
+      // browser/CDN TTL expires.
+      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+      "CDN-Cache-Control": "no-store",
+    },
   });
 }
 
@@ -207,6 +215,16 @@ export default async function (req: Request): Promise<Response> {
     badges: (e?.user_id && badgeMap[e.user_id]?.badges) || [],
     badge_count: (e?.user_id && badgeMap[e.user_id]?.badge_count) || 0,
   });
+  // `generated_at` belongs to the persisted snapshot, not to this read
+  // request. Returning the request time made stale month/total snapshots look
+  // fresh to both the dashboard and the freshness watchdog. Include `me` as a
+  // fallback because a page beyond the end of the public ranking can have no
+  // rows while the signed-in user's snapshot row still exists.
+  const snapshotGeneratedAt = [...(entries || []), ...(me ? [me] : [])]
+    .map((entry: { generated_at?: unknown }) =>
+      typeof entry.generated_at === "string" ? entry.generated_at : null,
+    )
+    .find((value): value is string => Boolean(value)) ?? null;
 
   return json({
     entries: visibleEntries.map((e: { user_id?: string }) => ({
@@ -219,6 +237,6 @@ export default async function (req: Request): Promise<Response> {
     total_pages: Math.ceil((count || 0) / limit),
     from: from_day,
     to: to_day,
-    generated_at: new Date().toISOString(),
+    generated_at: snapshotGeneratedAt,
   });
 }

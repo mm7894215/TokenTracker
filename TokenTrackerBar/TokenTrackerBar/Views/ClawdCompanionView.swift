@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Clawd pixel-art companion with full animation suite.
@@ -27,6 +28,8 @@ struct ClawdCompanionView: View {
     /// Appearance is shared with the floating pet so the popover changes immediately.
     @ObservedObject private var characterStore = PetCharacterStore.shared
     @ObservedObject private var petCatalog = PetCatalog.shared
+    /// Limit visibility / used-vs-remaining preferences also affect the compact pet line.
+    @ObservedObject private var limitsStore = LimitsSettingsStore.shared
 
     /// Floating pet: briefly reveal the quip bubble after a tap (hover shows data instead).
     @State private var floatingBubbleShown = false
@@ -150,7 +153,7 @@ struct ClawdCompanionView: View {
                 .opacity(floatingBubbleVisible ? 1 : 0)
                 .animation(.easeOut(duration: 0.18), value: floatingBubbleVisible)
                 .offset(x: petState.isSnapped ? (petState.isRightEdge ? -40 : 40) : 0)
-                .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36, alignment: .bottom)
+                .frame(maxWidth: .infinity, minHeight: 138, maxHeight: 138, alignment: .bottom)
 
             characterView
                 .frame(width: 15 * px, height: 16 * px)
@@ -232,20 +235,33 @@ struct ClawdCompanionView: View {
     @State private var hoveringBubble = false
 
     private var bubbleView: some View {
-        Text(bubbleText)
-            .font(.system(size: 12))
-            .foregroundStyle(.primary.opacity(0.75))
-            .lineLimit(layout == .floating ? 1 : 3)
+        bubbleContent
+            .foregroundStyle(.primary)
+            .frame(maxWidth: layout == .floating ? 320 : nil, alignment: .center)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 9)
+            .padding(.horizontal, layout == .floating ? 13 : 10)
+            .padding(.vertical, layout == .floating ? 7 : 9)
             // Floating bubble has a downward tail (6pt) carved out of the bottom; add
             // matching bottom padding so the text stays centered in the rounded body.
-            .padding(.bottom, layout == .floating ? 6 : 0)
+            .padding(.bottom, layout == .floating ? 7 : 0)
             .background {
-                BubbleShape(direction: layout == .floating ? .down : .left)
-                    .fill(.regularMaterial)
-                    .shadow(color: .black.opacity(0.08), radius: 1.5, y: 0.5)
+                if layout == .floating {
+                    PetBubbleGlassBackground()
+                        .clipShape(BubbleShape(direction: .down))
+                        .overlay {
+                            BubbleShape(direction: .down)
+                                .stroke(.white.opacity(0.18), lineWidth: 0.6)
+                        }
+                        .shadow(color: .black.opacity(0.16), radius: 4, y: 1)
+                } else {
+                    BubbleShape(direction: .left)
+                        .fill(.regularMaterial)
+                        .overlay {
+                            BubbleShape(direction: .left)
+                                .stroke(.white.opacity(0.12), lineWidth: 0.5)
+                        }
+                        .shadow(color: .black.opacity(0.08), radius: 1.5, y: 0.5)
+                }
             }
             .scaleEffect(hoveringBubble ? 1.03 : 1.0)
             .animation(.easeOut(duration: 0.12), value: hoveringBubble)
@@ -255,9 +271,84 @@ struct ClawdCompanionView: View {
             }
             .onTapGesture { handleTap() }
             .transition(.asymmetric(
-                insertion: .opacity.combined(with: .scale(scale: 0.92, anchor: .leading)),
+                insertion: .opacity.combined(with: .scale(
+                    scale: 0.92,
+                    anchor: layout == .floating ? .bottom : .leading
+                )),
                 removal: .opacity
             ))
+    }
+
+    @ViewBuilder
+    private var bubbleContent: some View {
+        if showsFloatingUsageBreakdown {
+            floatingUsageContent
+        } else {
+            Text(bubbleText)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .lineLimit(layout == .floating ? 2 : 3)
+                .lineSpacing(1)
+        }
+    }
+
+    /// Hover data gets an intentional hierarchy: the token total is the primary
+    /// metric, followed by one compact progress row for each active, non-full
+    /// limit. Exact percentages remain in the full Limits view, where they have
+    /// room and context.
+    private var floatingUsageContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if viewModel.todayTokens > 0 {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("\(TokenFormatter.formatCompact(viewModel.todayTokens)) tokens")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text(Strings.petCostToday(viewModel.todayCost))
+                        .font(.system(size: 9.5, weight: .regular, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .padding(.bottom, 6)
+                Rectangle()
+                    .fill(.white.opacity(0.13))
+                    .frame(height: 0.5)
+                    .padding(.bottom, 4)
+            }
+
+            ForEach(activePetLimits.indices, id: \.self) { index in
+                let reading = activePetLimits[index]
+                let display = petLimitDisplay(for: reading)
+                HStack(spacing: 7) {
+                    Circle()
+                        .fill(display.tone.color)
+                        .frame(width: 5, height: 5)
+                        .shadow(color: display.tone.color.opacity(0.45), radius: 3)
+                    Text("\(reading.provider) \(reading.window)")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 2)
+                    Capsule()
+                        .fill(.white.opacity(0.14))
+                        .frame(width: 50, height: 4)
+                        .overlay(alignment: .leading) {
+                            Capsule()
+                                .fill(display.tone.color)
+                                .frame(
+                                    width: CGFloat(max(0, min(100, display.value)) / 100 * 50),
+                                    height: 4
+                                )
+                        }
+                    Text(display.resetText ?? "")
+                        .font(.system(size: 8.5, weight: .regular, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 42, alignment: .trailing)
+                        .lineLimit(1)
+                }
+                .padding(.top, index > 0 ? 3 : 0)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Sync Button
@@ -369,7 +460,9 @@ struct ClawdCompanionView: View {
                     character: activeCharacter,
                     state: clawdState,
                     isVisible: isCharacterTimelineVisible,
-                    lookDirectionIndex: hoverDirectionIndex ?? (layout == .floating ? petState.lookDirectionIndex : nil)
+                    lookDirectionIndex: hoverDirectionIndex ?? (layout == .floating ? petState.lookDirectionIndex : nil),
+                    isDragging: petState.isDragging,
+                    dragDirection: petState.dragDirection
                 )
             }
         }
@@ -1271,22 +1364,234 @@ struct ClawdCompanionView: View {
 
     // MARK: - Quip Pool
 
+    private var showsFloatingUsageBreakdown: Bool {
+        layout == .floating
+            && hoveringCharacter
+            && viewModel.serverOnline
+            && !viewModel.isSyncing
+            && modelStatusText == nil
+            && (viewModel.todayTokens > 0 || !activePetLimits.isEmpty)
+    }
+
     /// Bubble text. In the floating desktop pet, hovering the sprite reveals the
-    /// precise today figure (tokens + cost) — porting the Windows pet's hover-bubble
-    /// idea to macOS so a glance always maps to a real number; otherwise the
-    /// data-rich rotating quip (which already bakes in real figures) is shown.
+    /// precise today figure plus every active provider limit. The structured
+    /// bubble uses the same rows; this text remains its accessible/fallback label.
     private var bubbleText: String {
         if let statusText = modelStatusText {
             return statusText
         }
-        if layout == .floating, hoveringCharacter, viewModel.serverOnline,
-           !viewModel.isSyncing, viewModel.todayTokens > 0 {
-            return Strings.tokensSpentToday(
-                tokens: TokenFormatter.formatCompact(viewModel.todayTokens),
-                cost: viewModel.todayCost
-            )
+        if layout == .floating, hoveringCharacter, viewModel.serverOnline, !viewModel.isSyncing {
+            let usage = viewModel.todayTokens > 0
+                ? Strings.tokensSpentToday(
+                    tokens: TokenFormatter.formatCompact(viewModel.todayTokens),
+                    cost: viewModel.todayCost
+                )
+                : nil
+            let limits = petLimitSummaries
+            if !limits.isEmpty {
+                return [usage, limits.joined(separator: "\n")].compactMap { $0 }.joined(separator: "\n")
+            }
+            if let usage { return usage }
         }
         return currentQuip
+    }
+
+    private struct PetLimitReading {
+        let provider: String
+        let window: String
+        let usedPercent: Double
+        let resetAt: Date?
+    }
+
+    private enum PetLimitTone {
+        case good, warning, danger
+
+        var color: Color {
+            switch self {
+            case .good: return .mint
+            case .warning: return .yellow
+            case .danger: return .red
+            }
+        }
+    }
+
+    private struct PetLimitDisplay {
+        let value: Double
+        let label: String
+        let tone: PetLimitTone
+        let resetText: String?
+    }
+
+    /// Keep the tooltip useful by surfacing every visible window that is in use
+    /// but not full. Zero-use and already-full windows stay in the full Limits view.
+    private var activePetLimits: [PetLimitReading] {
+        guard let limits = viewModel.usageLimits else { return [] }
+        let hidden = limitsStore.hiddenProviders
+        var readings: [PetLimitReading] = []
+
+        func providerName(_ id: String) -> String {
+            LimitsSettingsStore.displayNames[id] ?? id.capitalized
+        }
+
+        func add(_ id: String, _ label: String, _ used: Double, _ resetAt: Date?) {
+            guard !hidden.contains(id), used.isFinite else { return }
+            readings.append(PetLimitReading(
+                provider: providerName(id),
+                window: label,
+                usedPercent: min(max(used, 0), 100),
+                resetAt: resetAt
+            ))
+        }
+
+        func isoDate(_ value: String?) -> Date? {
+            guard let value else { return nil }
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return formatter.date(from: value) ?? {
+                formatter.formatOptions = [.withInternetDateTime]
+                return formatter.date(from: value)
+            }()
+        }
+
+        func generic(_ id: String, configured: Bool, error: String?, windows: [(String, GenericLimitWindow?)]) {
+            guard configured, error == nil else { return }
+            for (label, window) in windows {
+                if let window {
+                    add(id, label, window.usedPercent, isoDate(window.resetAt))
+                }
+            }
+        }
+
+        let claude = limits.claude
+        if claude.configured, claude.error == nil {
+            if let window = claude.fiveHour { add("claude", "5h", window.utilization, isoDate(window.resetsAt)) }
+            if let window = claude.sevenDay { add("claude", "7d", window.utilization, isoDate(window.resetsAt)) }
+            if let window = claude.sevenDayOpus { add("claude", "Opus", window.utilization, isoDate(window.resetsAt)) }
+            for window in claude.weeklyScoped ?? [] {
+                add("claude", window.label, window.utilization, isoDate(window.resetsAt))
+            }
+        }
+
+        let codex = limits.codex
+        if codex.configured, codex.error == nil {
+            if let window = codex.primaryWindow { add("codex", "5h", Double(window.usedPercent), epochDate(window.resetAt)) }
+            if let window = codex.secondaryWindow { add("codex", "7d", Double(window.usedPercent), epochDate(window.resetAt)) }
+            if let window = codex.creditWindow { add("codex", Strings.codexCreditsLabel, window.usedPercent, epochDate(window.resetAt)) }
+            if let window = codex.sparkPrimaryWindow { add("codex", "Spark 5h", Double(window.usedPercent), epochDate(window.resetAt)) }
+            if let window = codex.sparkSecondaryWindow { add("codex", "Spark 7d", Double(window.usedPercent), epochDate(window.resetAt)) }
+        }
+
+        generic("cursor", configured: limits.cursor.configured, error: limits.cursor.error, windows: [
+            (Strings.cursorPlanLabel, limits.cursor.primaryWindow), (Strings.cursorAutoLabel, limits.cursor.secondaryWindow), ("API", limits.cursor.tertiaryWindow)
+        ])
+        generic("gemini", configured: limits.gemini.configured, error: limits.gemini.error, windows: [
+            ("Pro", limits.gemini.primaryWindow), ("Flash", limits.gemini.secondaryWindow), ("Lite", limits.gemini.tertiaryWindow)
+        ])
+        if let kimi = limits.kimi {
+            generic("kimi", configured: kimi.configured, error: kimi.error, windows: [
+                (Strings.kimiWeeklyLabel, kimi.primaryWindow), (Strings.kimiFiveHourLabel, kimi.secondaryWindow), (Strings.kimiTotalLabel, kimi.tertiaryWindow)
+            ])
+        }
+        generic("kiro", configured: limits.kiro.configured, error: limits.kiro.error, windows: [
+            (Strings.kiroMonthLabel, limits.kiro.primaryWindow), (Strings.kiroBonusLabel, limits.kiro.secondaryWindow)
+        ])
+        if let grok = limits.grok {
+            generic("grok", configured: grok.configured, error: grok.error, windows: [
+                (Strings.grokPrimaryLabel(periodType: grok.periodType), grok.primaryWindow), (Strings.grokOndemandLabel, grok.secondaryWindow)
+            ])
+        }
+        if let copilot = limits.copilot {
+            generic("copilot", configured: copilot.configured, error: copilot.error, windows: [
+                ("Premium", copilot.primaryWindow), ("Chat", copilot.secondaryWindow)
+            ])
+        }
+        generic("antigravity", configured: limits.antigravity.configured, error: limits.antigravity.error, windows: [
+            ("Claude weekly", limits.antigravity.primaryWindow), ("Claude 5h", limits.antigravity.secondaryWindow),
+            ("Gemini weekly", limits.antigravity.tertiaryWindow), ("Gemini 5h", limits.antigravity.quaternaryWindow)
+        ])
+        if let zcode = limits.zcode {
+            generic("zcode", configured: zcode.configured, error: zcode.error, windows: [
+                ("GLM-5.2", zcode.primaryWindow), ("GLM-5 Turbo", zcode.secondaryWindow), ("Other", zcode.tertiaryWindow)
+            ])
+        }
+        if let opencodeGo = limits.opencodeGo {
+            generic("opencodeGo", configured: opencodeGo.configured, error: opencodeGo.error, windows: [
+                ("5h", opencodeGo.primaryWindow), ("Weekly", opencodeGo.secondaryWindow), ("Month", opencodeGo.tertiaryWindow)
+            ])
+        }
+
+        return readings
+            .filter { $0.usedPercent > 0 && $0.usedPercent < 100 }
+            .sorted {
+                if $0.usedPercent != $1.usedPercent { return $0.usedPercent > $1.usedPercent }
+                return ($0.resetAt ?? .distantFuture) < ($1.resetAt ?? .distantFuture)
+            }
+    }
+
+    private func epochDate(_ epoch: Int?) -> Date? {
+        epoch.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+    }
+
+    private func petLimitDisplay(for reading: PetLimitReading) -> PetLimitDisplay {
+        let isRemaining = limitsStore.displayMode == .remaining
+        let value = isRemaining ? 100 - reading.usedPercent : reading.usedPercent
+        let label: String
+        let tone: PetLimitTone
+
+        if isRemaining {
+            if value <= 0 {
+                label = Strings.petLimitDepleted
+                tone = .danger
+            } else if value <= 20 {
+                label = Strings.petLimitLow
+                tone = .warning
+            } else if value <= 50 {
+                label = Strings.petLimitSomeLeft
+                tone = .warning
+            } else {
+                label = Strings.petLimitAvailable
+                tone = .good
+            }
+        } else if value >= 100 {
+            label = Strings.petLimitAtLimit
+            tone = .danger
+        } else if value >= 80 {
+            label = Strings.petLimitNearLimit
+            tone = .warning
+        } else if value >= 50 {
+            label = Strings.petLimitWatch
+            tone = .warning
+        } else {
+            label = Strings.petLimitAvailable
+            tone = .good
+        }
+
+        let resetText = petLimitResetText(reading.resetAt)
+        return PetLimitDisplay(value: value, label: label, tone: tone, resetText: resetText)
+    }
+
+    private func petLimitSummary(for reading: PetLimitReading) -> String {
+        let display = petLimitDisplay(for: reading)
+        let reset = display.resetText.map { " · \(Strings.petLimitReset($0))" } ?? ""
+        return "\(reading.provider) \(reading.window) · \(display.label)\(reset)"
+    }
+
+    private var petLimitSummary: String? {
+        activePetLimits.first.map { petLimitSummary(for: $0) }
+    }
+
+    private var petLimitSummaries: [String] {
+        activePetLimits.map { petLimitSummary(for: $0) }
+    }
+
+    private func petLimitResetText(_ date: Date?) -> String? {
+        guard let date else { return nil }
+        let seconds = date.timeIntervalSinceNow
+        if seconds <= 0 { return Strings.limitResetNow }
+        let whole = Int(seconds)
+        if whole >= 86_400 { return "\(whole / 86_400)d" }
+        if whole >= 3_600 { return "\(whole / 3_600)h" }
+        return "\(max(1, whole / 60))m"
     }
 
     private var currentQuip: String {
@@ -1331,6 +1636,8 @@ struct ClawdCompanionView: View {
                 pool += Strings.massiveQuips
             }
         }
+
+        pool += petLimitSummaries
 
         // === 7-Day / 30-Day rolling stats ===
         let w7 = viewModel.last7dTokens
@@ -1555,27 +1862,86 @@ private struct BubbleShape: Shape {
     var direction: Direction = .left
 
     func path(in rect: CGRect) -> Path {
-        let r: CGFloat = 8
         let tail: CGFloat = 6
         var p = Path()
         switch direction {
         case .left:
             let tailY = rect.midY
-            p.addRoundedRect(in: CGRect(x: tail, y: 0, width: rect.width - tail, height: rect.height),
-                             cornerSize: CGSize(width: r, height: r))
+            let body = CGRect(x: tail, y: 0, width: rect.width - tail, height: rect.height)
+            let r = min(18, min(body.width, body.height) / 2)
+            p.addRoundedRect(in: body, cornerSize: CGSize(width: r, height: r))
             p.move(to: CGPoint(x: tail, y: tailY - 4))
             p.addLine(to: CGPoint(x: 0, y: tailY))
             p.addLine(to: CGPoint(x: tail, y: tailY + 4))
         case .down:
             let tailX = rect.midX
-            p.addRoundedRect(in: CGRect(x: 0, y: 0, width: rect.width, height: rect.height - tail),
-                             cornerSize: CGSize(width: r, height: r))
+            let body = CGRect(x: 0, y: 0, width: rect.width, height: rect.height - tail)
+            let r = min(18, min(body.width, body.height) / 2)
+            p.addRoundedRect(in: body, cornerSize: CGSize(width: r, height: r))
             p.move(to: CGPoint(x: tailX - 4, y: rect.height - tail))
             p.addLine(to: CGPoint(x: tailX, y: rect.height))
             p.addLine(to: CGPoint(x: tailX + 4, y: rect.height - tail))
         }
         p.closeSubpath()
         return p
+    }
+}
+
+/// Native Liquid Glass surface for the floating pet tooltip.
+///
+/// The app still supports macOS 12, while `NSGlassEffectView` only exists on
+/// macOS 26. Runtime lookup keeps older SDKs/build machines compiling and gives
+/// older systems the closest native fallback instead of a hand-drawn imitation.
+private struct PetBubbleGlassBackground: NSViewRepresentable {
+    func makeNSView(context: Context) -> PetBubbleGlassHostView {
+        PetBubbleGlassHostView()
+    }
+
+    func updateNSView(_ nsView: PetBubbleGlassHostView, context: Context) {}
+}
+
+private final class PetBubbleGlassHostView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+
+        let background = Self.makeBackgroundView()
+        background.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(background)
+        NSLayoutConstraint.activate([
+            background.leadingAnchor.constraint(equalTo: leadingAnchor),
+            background.trailingAnchor.constraint(equalTo: trailingAnchor),
+            background.topAnchor.constraint(equalTo: topAnchor),
+            background.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    private static func makeBackgroundView() -> NSView {
+        if #available(macOS 26, *),
+           let glassClass = NSClassFromString("NSGlassEffectView") as? NSView.Type {
+            let glass = glassClass.init(frame: .zero)
+            glass.alphaValue = 0.82
+            if glass.responds(to: NSSelectorFromString("setCornerRadius:")) {
+                glass.setValue(NSNumber(value: 22.0), forKey: "cornerRadius")
+            }
+            if glass.responds(to: NSSelectorFromString("setContentView:")) {
+                let content = NSView(frame: .zero)
+                content.wantsLayer = true
+                content.layer?.backgroundColor = NSColor.clear.cgColor
+                glass.setValue(content, forKey: "contentView")
+            }
+            return glass
+        }
+
+        let visualEffect = NSVisualEffectView(frame: .zero)
+        visualEffect.material = .popover
+        visualEffect.blendingMode = .withinWindow
+        visualEffect.state = .active
+        visualEffect.alphaValue = 0.82
+        return visualEffect
     }
 }
 

@@ -96,6 +96,22 @@ function post(message) {
   }
 }
 
+/** Post a generic message to either native host. */
+export function postNativeMessage(message) {
+  if (post(message)) return true;
+  if (typeof window === "undefined" || !window.chrome?.webview) return false;
+  try {
+    window.chrome.webview.postMessage(JSON.stringify(message));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function notifyNative({ title, body, id }) {
+  return postNativeMessage({ type: "notify", title, body, id });
+}
+
 export function requestNativeSettings() {
   return post({ type: "getSettings" });
 }

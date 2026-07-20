@@ -1,28 +1,35 @@
 import Foundation
 
+struct UsageSummaryFetchResult {
+    let summary: UsageSummaryResponse
+    let source: UsageSummaryViewSource
+    let completedAt: Date
+}
+
 actor APIClient {
     static let shared = APIClient()
     private static let usageLimitsRequestTimeout: TimeInterval = 25
+    private static let localSyncResourceTimeout: TimeInterval = 130
     private struct LocalAuthResponse: Decodable {
         let token: String
     }
 
     private let baseURL = Constants.serverBaseURL
     private let session: URLSession
+    private let syncSession: URLSession
     private let decoder: JSONDecoder
-
-    /// Whether the most recent account-eligible fetch returned cross-device
-    /// ("account view") data rather than local single-machine data. Mirrors the
-    /// dashboard: the local server serves the cross-device aggregate only when
-    /// the user is signed in and cloud sync is on, and reports which it served
-    /// via the `X-TokenTracker-Account-View` response header.
-    private(set) var accountViewActive: Bool = false
+    private(set) var latestAccountSummaryReadCompletedAt: Date?
 
     private init() {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 10
         config.timeoutIntervalForResource = 30
         self.session = URLSession(configuration: config)
+
+        let syncConfig = URLSessionConfiguration.default
+        syncConfig.timeoutIntervalForRequest = Self.localSyncResourceTimeout
+        syncConfig.timeoutIntervalForResource = Self.localSyncResourceTimeout
+        self.syncSession = URLSession(configuration: syncConfig)
 
         let jsonDecoder = JSONDecoder()
         // No .convertFromSnakeCase — all models use explicit CodingKeys with snake_case rawValues
@@ -32,11 +39,37 @@ actor APIClient {
     // MARK: - Public API
 
 	func fetchSummary(from: String, to: String) async throws -> UsageSummaryResponse {
-		try await fetch("/functions/tokentracker-usage-summary", queryItems: withAccountQueryItems([
-			URLQueryItem(name: "from", value: from),
-			URLQueryItem(name: "to", value: to)
-		]))
+        try await fetchSummaryWithSource(from: from, to: to).summary
 	}
+
+    func fetchSummaryWithSource(from: String, to: String) async throws -> UsageSummaryFetchResult {
+        let (data, response) = try await request(
+            "/functions/tokentracker-usage-summary",
+            queryItems: withAccountQueryItems([
+                URLQueryItem(name: "from", value: from),
+                URLQueryItem(name: "to", value: to)
+            ])
+        )
+        let source: UsageSummaryViewSource
+        switch response.value(forHTTPHeaderField: "X-TokenTracker-Account-View") {
+        case "1":
+            source = .accountUpload
+        case "0":
+            source = .localQueue
+        default:
+            throw APIError.invalidResponse
+        }
+        let completedAt = Date()
+        if source == .accountUpload {
+            latestAccountSummaryReadCompletedAt = completedAt
+        }
+        let summary = try decoder.decode(UsageSummaryResponse.self, from: data)
+        return UsageSummaryFetchResult(
+            summary: summary,
+            source: source,
+            completedAt: completedAt
+        )
+    }
 
 	func fetchDaily(from: String, to: String) async throws -> DailyUsageResponse {
 		try await fetch("/functions/tokentracker-usage-daily", queryItems: withAccountQueryItems([
@@ -91,7 +124,9 @@ actor APIClient {
         if drain {
             body = Data(#"{"drain":true}"#.utf8)
         } else if auto {
-            body = Data(#"{"auto":true,"background":true}"#.utf8)
+            body = Data(
+                #"{"auto":true,"background":true,"allLocalSources":true,"publishAccount":true}"#.utf8
+            )
         } else {
             body = Data("{}".utf8)
         }
@@ -121,6 +156,19 @@ actor APIClient {
         queryItems: [URLQueryItem] = [],
         requestTimeout: TimeInterval? = nil
     ) async throws -> T {
+        let (data, _) = try await request(
+            path,
+            queryItems: queryItems,
+            requestTimeout: requestTimeout
+        )
+        return try decoder.decode(T.self, from: data)
+    }
+
+    private func request(
+        _ path: String,
+        queryItems: [URLQueryItem] = [],
+        requestTimeout: TimeInterval? = nil
+    ) async throws -> (Data, HTTPURLResponse) {
         guard var components = URLComponents(string: baseURL + path) else {
             throw APIError.invalidURL
         }
@@ -140,14 +188,10 @@ actor APIClient {
             (data, response) = try await session.data(from: url)
         }
         try validateResponse(response)
-        // Account-eligible endpoints tag whether the server served cross-device
-        // (account) data or fell back to local single-machine data. Other
-        // endpoints omit the header, so only update when it's present.
-        if let httpResponse = response as? HTTPURLResponse,
-           let raw = httpResponse.value(forHTTPHeaderField: "X-TokenTracker-Account-View") {
-            accountViewActive = (raw == "1")
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
         }
-        return try decoder.decode(T.self, from: data)
+        return (data, httpResponse)
     }
 
 	private func withTimeZoneQueryItems(_ items: [URLQueryItem]) -> [URLQueryItem] {
@@ -176,7 +220,10 @@ actor APIClient {
             request.setValue(try await fetchLocalAuthToken(), forHTTPHeaderField: "x-tokentracker-local-auth")
         }
         request.httpBody = body
-        let (data, response) = try await session.data(for: request)
+        let requestSession = path == "/functions/tokentracker-local-sync"
+            ? syncSession
+            : session
+        let (data, response) = try await requestSession.data(for: request)
         try validateResponse(response)
         return try decoder.decode(T.self, from: data)
     }

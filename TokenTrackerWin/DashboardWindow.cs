@@ -61,6 +61,7 @@ internal sealed class DashboardWindow : Window
 
     public event Action? PetSettingsRequested;
     public event Action<string, string?>? PetSettingChanged;
+    public event Action<string, string>? NotificationRequested;
 
     public DashboardWindow(ServerManager server)
     {
@@ -343,6 +344,15 @@ internal sealed class DashboardWindow : Window
                             _ => petValue.GetRawText(),
                         };
                         if (petKey.GetString() is { } key) PetSettingChanged?.Invoke(key, value);
+                    }
+                    else if (t.GetString() == "notify"
+                             && doc.RootElement.TryGetProperty("title", out var notifyTitle)
+                             && doc.RootElement.TryGetProperty("body", out var notifyBody))
+                    {
+                        var title = notifyTitle.GetString();
+                        var body = notifyBody.GetString();
+                        if (!string.IsNullOrWhiteSpace(title) && !string.IsNullOrWhiteSpace(body))
+                            NotificationRequested?.Invoke(title[..Math.Min(title.Length, 120)], body[..Math.Min(body.Length, 500)]);
                     }
                 }
                 catch { /* not a JSON message we handle */ }

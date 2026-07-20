@@ -71,6 +71,31 @@
   /* Provider accents */
   --provider-anythingllm: #0ba5ec;
 
+  /* Global metrics data visualization */
+  --community-codex: #3b82f6;
+  --community-claude: #d97757;
+  --community-cursor: #10b981;
+  --community-opencode: #f59e0b;
+  --community-hermes: #8b5cf6;
+  --community-gemini: #2196f3;
+  --community-kimi: #a78bfa;
+  --community-zcode: #14b8a6;
+  --community-mimo: #ff6900;
+  --community-droid: #ef4444;
+  --community-workbuddy: #0ea5e9;
+  --community-copilot: #6366f1;
+  --community-kiro: #6366f1;
+  --community-grok: #f43f5e;
+  --community-deepseek: #4d6bfe;
+  --community-minimax: #f59e0b;
+  --community-token-input: #2563eb;
+  --community-token-cache-read: #06b6d4;
+  --community-token-cache-write: #8b5cf6;
+  --community-token-output: #f59e0b;
+  --community-token-reasoning: #ef4444;
+  --community-trend: #3b82f6;
+  --community-muted: #9ca3af;
+
   /* Typography - Font Families */
   --oai-font-sans: -apple-system, blinkmacsystemfont, "Segoe UI", roboto, oxygen, ubuntu, sans-serif;
   --oai-font-mono: "SF Mono", sfmono-regular, ui-monospace, menlo, monaco, consolas, monospace;

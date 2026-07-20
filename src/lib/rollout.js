@@ -167,6 +167,7 @@ async function listOpencodeMessageFiles(storageDir) {
 async function parseRolloutIncremental({
   rolloutFiles,
   cursors,
+  codexEventStore,
   queuePath,
   projectQueuePath,
   onProgress,
@@ -200,8 +201,16 @@ async function parseRolloutIncremental({
   // the claudeHashes pattern: it makes an inode-changing re-scan idempotent so an
   // external rewrite of a session file (Codex-Manager's atomic provider-patch on
   // account switch, issue #187) cannot re-count already-counted events.
+  const externalCodexEventStore =
+    codexEventStore &&
+    typeof codexEventStore.has === "function" &&
+    typeof codexEventStore.add === "function"
+      ? codexEventStore
+      : null;
   const prevCodexHashes = Array.isArray(cursors?.codexHashes) ? cursors.codexHashes : [];
-  if (!Array.isArray(cursors.codexHashes)) cursors.codexHashes = prevCodexHashes;
+  if (!externalCodexEventStore && !Array.isArray(cursors.codexHashes)) {
+    cursors.codexHashes = prevCodexHashes;
+  }
   let seenCodexEvents = null;
   let newCodexEventKeys = null;
   let newCodexEventKeySet = null;
@@ -229,7 +238,9 @@ async function parseRolloutIncremental({
       hash_set_constructions: 0,
       hash_array_materializations: 0,
       hash_array_materialized_items: 0,
-      codex_hash_count: prevCodexHashes.length,
+      codex_hash_count: externalCodexEventStore
+        ? Number(externalCodexEventStore.size || 0)
+        : prevCodexHashes.length,
     });
   }
   const ensureNewCodexEventKeys = () => {
@@ -242,6 +253,7 @@ async function parseRolloutIncremental({
     newCodexEventKeySet.add(key);
     newCodexEventKeys.push(key);
     if (seenCodexEvents) seenCodexEvents.add(key);
+    externalCodexEventStore?.add(key);
   };
   const getAppendOnlyCodexEvents = () => {
     if (!appendOnlyCodexEvents) {
@@ -258,6 +270,20 @@ async function parseRolloutIncremental({
     return appendOnlyCodexEvents;
   };
   const getHistoricalCodexEvents = () => {
+    if (externalCodexEventStore) {
+      if (!historicalCodexEvents) {
+        historicalCodexEvents = {
+          has(key) {
+            return Boolean(
+              newCodexEventKeySet?.has(key) ||
+              externalCodexEventStore.has(key)
+            );
+          },
+          add: recordNewCodexEvent,
+        };
+      }
+      return historicalCodexEvents;
+    }
     if (!seenCodexEvents) {
       seenCodexEvents = new Set(prevCodexHashes);
       for (const key of newCodexEventKeys || []) seenCodexEvents.add(key);
@@ -470,11 +496,15 @@ async function parseRolloutIncremental({
   const projectBucketsQueued = projectEnabled
     ? await enqueueTouchedProjectBuckets({ projectQueuePath, projectState, projectTouchedBuckets })
     : 0;
-  for (const key of newCodexEventKeys || []) prevCodexHashes.push(key);
+  if (!externalCodexEventStore) {
+    for (const key of newCodexEventKeys || []) prevCodexHashes.push(key);
+  }
   if (syncDiagnostics) {
-    syncDiagnostics.codex_hash_count = Array.isArray(cursors.codexHashes)
-      ? cursors.codexHashes.length
-      : prevCodexHashes.length;
+    syncDiagnostics.codex_hash_count = externalCodexEventStore
+      ? Number(externalCodexEventStore.size || 0)
+      : Array.isArray(cursors.codexHashes)
+        ? cursors.codexHashes.length
+        : prevCodexHashes.length;
   }
   hourlyState.updatedAt = new Date().toISOString();
   cursors.hourly = hourlyState;
@@ -489,6 +519,7 @@ async function parseRolloutIncremental({
 async function filterColdCodexRolloutFiles({
   rolloutFiles,
   cursors,
+  codexCursorStore = null,
   projectEnabled = false,
   auditDue = false,
   nowMs = Date.now(),
@@ -506,18 +537,50 @@ async function filterColdCodexRolloutFiles({
       0,
     );
     syncDiagnostics.discovered_rollouts = discoveredRollouts;
-    syncDiagnostics.cursor_keys = Object.keys(cursors?.files || {}).length;
+    syncDiagnostics.cursor_keys = Number.isFinite(codexCursorStore?.fileCount)
+      ? codexCursorStore.fileCount
+      : Object.keys(cursors?.files || {}).length;
     syncDiagnostics.cold_skipped = 0;
     syncDiagnostics.parse_candidates = discoveredRollouts;
   }
-  if (auditDue || !cursors?.files || typeof cursors.files !== "object") {
+  if (
+    !codexCursorStore &&
+    (auditDue || !cursors?.files || typeof cursors.files !== "object")
+  ) {
     return { rolloutFiles: files, skipped: 0 };
   }
 
   const activeDates = activeCodexRolloutDates(files, { nowMs, recentDays });
   const freshnessCache = new Map();
+  const cursorLoadDirectories = new Set();
+  const coldDaySkipDecisions = new Map();
   const out = [];
   let skipped = 0;
+  let cursorStoreRestarted = false;
+
+  const loadCodexCursorDirectory = async (filePath) => {
+    if (!codexCursorStore) return;
+    const directory = path.dirname(filePath);
+    if (cursorLoadDirectories.has(directory)) return;
+    cursorLoadDirectories.add(directory);
+    const result = await codexCursorStore.loadCodexFilesForPaths([filePath], cursors);
+    if (result?.restarted) cursorStoreRestarted = true;
+  };
+
+  const canSkipCodexDirectory = async (filePath) => {
+    if (!codexCursorStore) return false;
+    const directory = path.dirname(filePath);
+    if (coldDaySkipDecisions.has(directory)) {
+      return coldDaySkipDecisions.get(directory);
+    }
+    const decision = await codexCursorStore.canSkipCodexDay({
+      filePath,
+      dayInventoryCache: cursors?.codexDayInventoryCache,
+      nowMs,
+    });
+    coldDaySkipDecisions.set(directory, decision);
+    return decision;
+  };
 
   for (const entry of files) {
     const filePath = typeof entry === "string" ? entry : entry?.path;
@@ -532,9 +595,26 @@ async function filterColdCodexRolloutFiles({
 
     const rolloutDate = rolloutDateFromPath(filePath);
     if (!rolloutDate || activeDates.has(rolloutDate)) {
+      await loadCodexCursorDirectory(filePath);
+      if (cursorStoreRestarted) break;
       out.push(entry);
       continue;
     }
+
+    if (auditDue) {
+      await loadCodexCursorDirectory(filePath);
+      if (cursorStoreRestarted) break;
+      out.push(entry);
+      continue;
+    }
+
+    if (await canSkipCodexDirectory(filePath)) {
+      skipped += 1;
+      continue;
+    }
+
+    await loadCodexCursorDirectory(filePath);
+    if (cursorStoreRestarted) break;
 
     const prev = cursors.files[filePath];
     const cachedSize = Number(prev?.offset);
@@ -563,6 +643,18 @@ async function filterColdCodexRolloutFiles({
     skipped += 1;
   }
 
+  if (cursorStoreRestarted) {
+    await codexCursorStore.loadCodexFilesForPaths(files, cursors);
+    if (syncDiagnostics) {
+      syncDiagnostics.cold_skipped = 0;
+      syncDiagnostics.parse_candidates = files.reduce(
+        (count, entry) => count + (isCodexEntry(entry) ? 1 : 0),
+        0,
+      );
+    }
+    return { rolloutFiles: files, skipped: 0, restarted: true };
+  }
+
   if (syncDiagnostics) {
     syncDiagnostics.cold_skipped = skipped;
     syncDiagnostics.parse_candidates = out.reduce(
@@ -570,7 +662,7 @@ async function filterColdCodexRolloutFiles({
       0,
     );
   }
-  return { rolloutFiles: out, skipped };
+  return { rolloutFiles: out, skipped, restarted: false };
 }
 
 function activeCodexRolloutDates(
@@ -9565,6 +9657,22 @@ function resolvePiDefaultModel() {
   return "pi-unknown";
 }
 
+// Pi is a router: the same session can send turns to Anthropic, GitHub
+// Copilot, or another backend. Keep provider names in the queue source so
+// those turns cannot collapse into one bucket (or inherit the wrong pricing).
+// Missing providers are deliberately kept on the historical `pi` source for
+// compatibility with older session formats and already-synced data.
+function piSourceForProvider(provider) {
+  if (typeof provider !== "string" || !provider.trim()) return "pi";
+  const slug = provider
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+  return slug ? `pi-${slug}` : "pi";
+}
+
 async function parsePiIncremental({
   sessionFiles,
   cursors,
@@ -9681,6 +9789,7 @@ async function parsePiIncremental({
           : input + output + cacheRead + cacheWrite + reasoningTokens;
 
       const model = normalizeModelInput(msg.model) || fallbackModel;
+      const source = piSourceForProvider(msg.provider);
 
       const delta = {
         input_tokens: input,
@@ -9692,9 +9801,9 @@ async function parsePiIncremental({
         conversation_count: 1,
       };
 
-      const bucket = getHourlyBucket(hourlyState, "pi", model, bucketStart);
+      const bucket = getHourlyBucket(hourlyState, source, model, bucketStart);
       addTotals(bucket.totals, delta);
-      touchedBuckets.add(bucketKey("pi", model, bucketStart));
+      touchedBuckets.add(bucketKey(source, model, bucketStart));
       seenIds.add(entryId);
       eventsAggregated++;
 

@@ -2,8 +2,7 @@ import React from "react";
 import { Pencil } from "lucide-react";
 import { useLoginModal } from "../../contexts/LoginModalContext.jsx";
 import { copy } from "../../lib/copy";
-import { SectionCard, ToggleSwitch, SettingsRow } from "./Controls.jsx";
-import { useQualityPerDollarPref } from "../../hooks/use-quality-per-dollar-pref.js";
+import { SectionCard, ToggleSwitch } from "./Controls.jsx";
 
 function InlineEditorActions({ disabled, onCancel, onSave, saveLabel = copy("settings.account.save") }) {
   return (
@@ -213,8 +212,6 @@ function GithubProfileField({ github }) {
     startEditingGithub,
   } = github;
 
-  const { enabled: qpdEnabled, toggle: toggleQpd } = useQualityPerDollarPref();
-
   return (
     <>
       <SettingsField
@@ -244,26 +241,6 @@ function GithubProfileField({ github }) {
           </div>
         }
       />
-      {githubUrl && (
-        <SettingsRow
-          label={
-            <div className="flex items-center gap-1.5">
-              <span>{copy("settings.labs.qpd.label")}</span>
-              <span className="px-1.5 py-0.5 text-[8px] font-semibold tracking-wider text-oai-gray-500 bg-oai-gray-100 dark:text-oai-gray-400 dark:bg-oai-gray-800/80 rounded uppercase scale-90 origin-left">
-                {copy("qpd.card.badge")}
-              </span>
-            </div>
-          }
-          hint={copy("settings.labs.qpd.hint")}
-          control={
-            <ToggleSwitch
-              checked={qpdEnabled}
-              onChange={toggleQpd}
-              ariaLabel={copy("settings.labs.qpd.aria")}
-            />
-          }
-        />
-      )}
     </>
   );
 }

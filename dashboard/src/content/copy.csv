@@ -387,7 +387,7 @@ leaderboard.community.view_stats,ui,LeaderboardPage,CommunityStatsChip,view_stat
 leaderboard.community.tokens_chip,ui,LeaderboardPage,CommunityStatsChip,tokens_chip,"Community Tokens",,active
 leaderboard.community.devs_chip,ui,LeaderboardPage,CommunityStatsChip,devs_chip,"Devs",,active
 leaderboard.community.modal.title,ui,LeaderboardPage,CommunityStatsModal,title,"Global Metrics",,active
-leaderboard.community.modal.description,ui,LeaderboardPage,CommunityStatsModal,description,"Anonymous aggregates across all community syncs.",,active
+leaderboard.community.modal.description,ui,LeaderboardPage,CommunityStatsModal,description,"A privacy-safe view of how the community builds with AI.",,active
 leaderboard.community.modal.total_tokens,ui,LeaderboardPage,CommunityStatsModal,total_tokens,"Total Tokens",,active
 leaderboard.community.modal.active_devs,ui,LeaderboardPage,CommunityStatsModal,active_devs,"Active Devs",,active
 leaderboard.community.modal.active_devs_detail,ui,LeaderboardPage,CommunityStatsModal,active_devs_detail,"{{count}} syncing",,active
@@ -396,7 +396,58 @@ leaderboard.community.modal.global_spend_detail,ui,LeaderboardPage,CommunityStat
 leaderboard.community.modal.top_models,ui,LeaderboardPage,CommunityStatsModal,top_models,"Top Models",,active
 leaderboard.community.modal.all_time,ui,LeaderboardPage,CommunityStatsModal,all_time,"All time",,active
 leaderboard.community.modal.tokens_title,ui,LeaderboardPage,CommunityStatsModal,tokens_title,"{{count}} tokens",,active
-leaderboard.community.modal.note,ui,LeaderboardPage,CommunityStatsModal,note,"Model distribution aggregated from all-time cumulative syncs across the community.",,active
+leaderboard.community.modal.no_data,ui,LeaderboardPage,CommunityStatsModal,no_data,"No aggregate data yet",,active
+leaderboard.community.modal.activity_chart,ui,LeaderboardPage,CommunityStatsModal,activity_chart,"Daily community token activity",,active
+leaderboard.community.modal.developers_short,ui,LeaderboardPage,CommunityStatsModal,developers_short,"developers",,active
+leaderboard.community.modal.daily_tokens,ui,LeaderboardPage,CommunityStatsModal,daily_tokens,"Daily tokens",,active
+leaderboard.community.modal.seven_day_average,ui,LeaderboardPage,CommunityStatsModal,seven_day_average,"7-day average",,active
+leaderboard.community.modal.composition,ui,LeaderboardPage,CommunityStatsModal,composition,"Composition",,active
+leaderboard.community.modal.token_mix,ui,LeaderboardPage,CommunityStatsModal,token_mix,"Token mix",,active
+leaderboard.community.modal.token_mix.input,ui,LeaderboardPage,CommunityStatsModal,token_mix_input,"Input",,active
+leaderboard.community.modal.token_mix.cache_read,ui,LeaderboardPage,CommunityStatsModal,token_mix_cache_read,"Cache read",,active
+leaderboard.community.modal.token_mix.cache_write,ui,LeaderboardPage,CommunityStatsModal,token_mix_cache_write,"Cache write",,active
+leaderboard.community.modal.token_mix.output,ui,LeaderboardPage,CommunityStatsModal,token_mix_output,"Output",,active
+leaderboard.community.modal.token_mix.reasoning,ui,LeaderboardPage,CommunityStatsModal,token_mix_reasoning,"Reasoning",,active
+leaderboard.community.modal.last_30_days,ui,LeaderboardPage,CommunityStatsModal,last_30_days,"Last 30 days",,active
+leaderboard.community.modal.daily_average,ui,LeaderboardPage,CommunityStatsModal,daily_average,"Daily average",,active
+leaderboard.community.modal.peak_day,ui,LeaderboardPage,CommunityStatsModal,peak_day,"Peak day",,active
+leaderboard.community.modal.community_activity,ui,LeaderboardPage,CommunityStatsModal,community_activity,"Community activity",,active
+leaderboard.community.modal.utc_note,ui,LeaderboardPage,CommunityStatsModal,utc_note,"Daily totals in UTC",,active
+leaderboard.community.modal.ecosystem,ui,LeaderboardPage,CommunityStatsModal,ecosystem,"Ecosystem",,active
+leaderboard.community.modal.provider_distribution,ui,LeaderboardPage,CommunityStatsModal,provider_distribution,"Provider distribution",,active
+leaderboard.community.modal.rank,ui,LeaderboardPage,CommunityStatsModal,rank,"Rank",,active
+leaderboard.community.modal.provider,ui,LeaderboardPage,CommunityStatsModal,provider,"Provider",,active
+leaderboard.community.modal.usage_share,ui,LeaderboardPage,CommunityStatsModal,usage_share,"Usage share",,active
+leaderboard.community.modal.developer_count,ui,LeaderboardPage,CommunityStatsModal,developer_count,"{{count}} developers",,active
+leaderboard.community.modal.participation,ui,LeaderboardPage,CommunityStatsModal,participation,"Participation",,active
+leaderboard.community.modal.usage_distribution,ui,LeaderboardPage,CommunityStatsModal,usage_distribution,"Lifetime usage bands",,active
+leaderboard.community.modal.band.lt_1m,ui,LeaderboardPage,CommunityStatsModal,band_lt_1m,"Under 1M",,active
+leaderboard.community.modal.band.1m_10m,ui,LeaderboardPage,CommunityStatsModal,band_1m_10m,"1M–10M",,active
+leaderboard.community.modal.band.10m_100m,ui,LeaderboardPage,CommunityStatsModal,band_10m_100m,"10M–100M",,active
+leaderboard.community.modal.band.100m_1b,ui,LeaderboardPage,CommunityStatsModal,band_100m_1b,"100M–1B",,active
+leaderboard.community.modal.band.1b_plus,ui,LeaderboardPage,CommunityStatsModal,band_1b_plus,"1B+",,active
+leaderboard.community.modal.developer_share_title,ui,LeaderboardPage,CommunityStatsModal,developer_share_title,"{{share}} of contributors",,active
+leaderboard.community.modal.adoption,ui,LeaderboardPage,CommunityStatsModal,adoption,"Adoption",,active
+leaderboard.community.modal.platforms,ui,LeaderboardPage,CommunityStatsModal,platforms,"Platforms",,active
+leaderboard.community.modal.platform.darwin,ui,LeaderboardPage,CommunityStatsModal,platform_darwin,"macOS",,active
+leaderboard.community.modal.platform.win32,ui,LeaderboardPage,CommunityStatsModal,platform_win32,"Windows",,active
+leaderboard.community.modal.platform.linux,ui,LeaderboardPage,CommunityStatsModal,platform_linux,"Linux",,active
+leaderboard.community.modal.machine_count,ui,LeaderboardPage,CommunityStatsModal,machine_count,"{{count}} anonymous installs",,active
+leaderboard.community.modal.platform_privacy,ui,LeaderboardPage,CommunityStatsModal,platform_privacy,"Platform adoption uses anonymous installation hashes. No location or account identity is collected for this view.",,active
+leaderboard.community.modal.model_landscape,ui,LeaderboardPage,CommunityStatsModal,model_landscape,"Model landscape",,active
+leaderboard.community.modal.eyebrow,ui,LeaderboardPage,CommunityStatsModal,eyebrow,"Community intelligence",,active
+leaderboard.community.modal.tokens_30d,ui,LeaderboardPage,CommunityStatsModal,tokens_30d,"Tokens · 30d",,active
+leaderboard.community.modal.contributors,ui,LeaderboardPage,CommunityStatsModal,contributors,"Contributors",,active
+leaderboard.community.modal.with_usage,ui,LeaderboardPage,CommunityStatsModal,with_usage,"With recorded usage",,active
+leaderboard.community.modal.active_30d,ui,LeaderboardPage,CommunityStatsModal,active_30d,"Active · 30d",,active
+leaderboard.community.modal.vs_previous_week,ui,LeaderboardPage,CommunityStatsModal,vs_previous_week,"vs previous 7 days",,active
+leaderboard.community.modal.views,ui,LeaderboardPage,CommunityStatsModal,views,"Global metric views",,active
+leaderboard.community.modal.updated,ui,LeaderboardPage,CommunityStatsModal,updated,"Updated {{time}}",,active
+leaderboard.community.modal.tab.overview,ui,LeaderboardPage,CommunityStatsModal,tab_overview,"Overview",,active
+leaderboard.community.modal.tab.providers,ui,LeaderboardPage,CommunityStatsModal,tab_providers,"Providers",,active
+leaderboard.community.modal.tab.community,ui,LeaderboardPage,CommunityStatsModal,tab_community,"Community",,active
+leaderboard.community.modal.tab.models,ui,LeaderboardPage,CommunityStatsModal,tab_models,"Models",,active
+leaderboard.community.modal.note,ui,LeaderboardPage,CommunityStatsModal,note,"Aggregates are refreshed hourly from canonical community rollups. No user-level rows are exposed.",,active
 shared.dialog.close,shared,*,Dialog,close,"Close dialog",,active
 nav.group.general,shared,*,Sidebar,group_general,"General",,active
 nav.group.tools,shared,*,Sidebar,group_tools,"Tools",,active
@@ -409,11 +460,15 @@ settings.section.appearance,ui,SettingsPage,SettingsPage,sec_appearance,"Appeara
 settings.section.account,ui,SettingsPage,SettingsPage,sec_account,"Account",,active
 settings.section.limits,ui,SettingsPage,SettingsPage,sec_limits,"Limits Display",,active
 settings.labs.qpd.label,ui,SettingsPage,LabsSection,qpd_label,"Analyze PR cost-efficiency",,active
-settings.labs.qpd.hint,ui,SettingsPage,LabsSection,qpd_hint,"Link GitHub PR history to analyze average delivery costs and effective Tokens per model.",,active
+settings.labs.qpd.hint,ui,SettingsPage,LabsSection,qpd_hint,"Analyze average delivery costs and effective Tokens per model from merged PRs and AI-attributed commits.",,active
 settings.labs.qpd.aria,ui,SettingsPage,LabsSection,qpd_aria,"Toggle PR cost-efficiency analysis",,active
+settings.labs.sessions.label,ui,SettingsPage,LabsSection,sessions_label,"Session efficiency",,active
+settings.labs.sessions.hint,ui,SettingsPage,LabsSection,sessions_hint,"Analyze metadata-only edit coverage, first-pass delivery, and cost per edit across Claude and Codex.",,active
+settings.labs.sessions.aria,ui,SettingsPage,LabsSection,sessions_aria,"Toggle session efficiency analysis",,active
+settings.section.labs,ui,SettingsPage,LabsSection,sec_labs,"Labs",,active
 qpd.card.title,ui,DashboardView,QualityPerDollarCard,title,"Quality & Avg Cost/PR",,active
 qpd.card.badge,ui,DashboardView,QualityPerDollarCard,badge,"BETA",,active
-qpd.card.subtitle,ui,DashboardView,QualityPerDollarCard,subtitle,"Avg token cost per merged PR based on your history.",,active
+qpd.card.subtitle,ui,DashboardView,QualityPerDollarCard,subtitle,"Avg token cost per delivery, from merged PRs and AI-attributed commits.",,active
 qpd.card.updating,ui,DashboardView,QualityPerDollarCard,updating,"Updating…",,active
 qpd.card.best_value,ui,DashboardView,QualityPerDollarCard,best_value,"Best Value",,active
 qpd.card.col_model,ui,DashboardView,QualityPerDollarCard,col_model,"Model",,active
@@ -641,6 +696,8 @@ limits.reset_bank.hover_detail_today,ui,LimitsPage,UsageLimitsPanel,reset_bank_h
 limits.label.copilot_premium,ui,LimitsPage,UsageLimitsPanel,copilot_premium,"Premium",,active
 limits.label.copilot_chat,ui,LimitsPage,UsageLimitsPanel,copilot_chat,"Chat",,active
 limits.label.grok_month,ui,LimitsPage,UsageLimitsPanel,grok_month,"Month",,active
+limits.label.grok_week,ui,LimitsPage,UsageLimitsPanel,grok_week,"Weekly",,active
+limits.label.grok_day,ui,LimitsPage,UsageLimitsPanel,grok_day,"Daily",,active
 limits.label.grok_ondemand,ui,LimitsPage,UsageLimitsPanel,grok_ondemand,"On-demand",,active
 limits.provider.claude,ui,LimitsPage,UsageLimitsPanel,provider_claude,"Claude",,active
 limits.provider.codex,ui,LimitsPage,UsageLimitsPanel,provider_codex,"Codex",,active
@@ -1150,6 +1207,14 @@ pet.import.busy,dashboard,PetPage,PetPage,import_busy,"Importing…",,active
 pet.format.v2,dashboard,PetPage,PetPage,format_v2,"V2",,active
 pet.import.removed,dashboard,PetPage,PetPage,import_removed,"Imported pet removed.",,active
 pet.import.url_label,dashboard,PetPage,PetPage,import_url_label,"Codex Pets URL or pet id",,active
+pet.codex.title,dashboard,PetPage,PetPage,codex_title,"From Codex",,active
+pet.codex.subtitle,dashboard,PetPage,PetPage,codex_subtitle,"Import pets you already have in the Codex app — including its built-in companions.",,active
+pet.codex.import,dashboard,PetPage,PetPage,codex_import,"Import selected",,active
+pet.codex.browse,dashboard,PetPage,PetPage,codex_browse,"Import from Codex",,active
+pet.codex.close,dashboard,PetPage,PetPage,codex_close,"Close",,active
+pet.codex.select_all,dashboard,PetPage,PetPage,codex_select_all,"Select all",,active
+pet.codex.empty,dashboard,PetPage,PetPage,codex_empty,"No new Codex pets to import.",,active
+pet.codex.imported,dashboard,PetPage,PetPage,codex_imported,"Imported from Codex.",,active
 nav.achievements,shared,*,Sidebar,nav_achievements,"Achievements",,active
 achievements.section.title,dashboard,*,AchievementsSection,section_title,"Achievements",,active
 achievements.page.title,dashboard,AchievementsPage,AchievementsPage,page_title,"Achievements",,active
@@ -1204,3 +1269,31 @@ achievements.signin.action,dashboard,AchievementsPage,AchievementsPage,signin_ac
 achievements.scope.local,dashboard,*,AchievementsSection,scope_local,"Local",,active
 achievements.page.suggest,dashboard,AchievementsPage,AchievementsPage,suggest,"Have an idea for a new badge?",,active
 achievements.page.suggest_link,dashboard,AchievementsPage,AchievementsPage,suggest_link,"Suggest it on GitHub",,active
+sessions.card.title,dashboard,DashboardPage,SessionInsightsCard,title,"Session efficiency",,active
+sessions.card.subtitle,dashboard,DashboardPage,SessionInsightsCard,subtitle,"Comparable edit-turn signals across Claude and Codex",,active
+sessions.card.loading,dashboard,DashboardPage,SessionInsightsCard,loading,"Analyzing local session metadata…",,active
+sessions.card.edit_sessions,dashboard,DashboardPage,SessionInsightsCard,edit_sessions,"Edit sessions",,active
+sessions.card.first_pass,dashboard,DashboardPage,SessionInsightsCard,first_pass,"First-pass",,active
+sessions.card.cost_edit,dashboard,DashboardPage,SessionInsightsCard,cost_edit,"Cost / edit",,active
+sessions.card.model,dashboard,DashboardPage,SessionInsightsCard,model,"Model",,active
+sessions.card.edit_session_value,dashboard,DashboardPage,SessionInsightsCard,edit_session_value,"{{edits}} / {{sessions}}",,active
+sessions.card.edit_turn_count,dashboard,DashboardPage,SessionInsightsCard,edit_turn_count,"{{count}} edit turns",,active
+sessions.card.tokens_edit,dashboard,DashboardPage,SessionInsightsCard,tokens_edit,"Tokens / edit",,active
+sessions.card.sample,dashboard,DashboardPage,SessionInsightsCard,sample,"{{sessions}} sessions · {{edits}} edit turns",,active
+sessions.card.methodology_label,dashboard,DashboardPage,SessionInsightsCard,methodology_label,"How measured",,active
+sessions.card.methodology,dashboard,DashboardPage,SessionInsightsCard,methodology,"Edit = a user turn containing an observed edit tool. First-pass = exactly one edit turn with no repeated request.",,active
+sessions.card.context,dashboard,DashboardPage,SessionInsightsCard,context,"Estimated fixed context",,active
+sessions.card.context_tooltip,dashboard,DashboardPage,SessionInsightsCard,context_tooltip,"Instructions, installed skills, and inferred MCP tool schemas",,active
+sessions.card.privacy,dashboard,DashboardPage,SessionInsightsCard,privacy,"Local metadata only. Prompt, response, command output, and diff contents are never retained.",,active
+sessions.card.subagents,dashboard,DashboardPage,SessionInsightsCard,subagents,"Subagent dispatches",,active
+sessions.card.subagent_item,dashboard,DashboardPage,SessionInsightsCard,subagent_item,"{{name}} · {{calls}}",,active
+limits.alert.enable,limits,LimitsPage,LimitsPage,enable_alerts,"Enable predictive limit alerts",,active
+limits.alert.disable,limits,LimitsPage,LimitsPage,disable_alerts,"Disable predictive limit alerts",,active
+limits.alert.title,limits,LimitsPage,LimitsPage,alert_title,"{{provider}} limit may run out early",,active
+limits.alert.body,limits,LimitsPage,LimitsPage,alert_body,"At the current pace, usage may run out in {{eta}} ({{percent}}% used).",,active
+limits.alert.blocked,limits,LimitsPage,LimitsPage,alert_blocked,"Notifications are off — allow in System Settings",,active
+limits.provenance.fresh,limits,LimitsPage,UsageLimitsPanel,provenance_fresh,"Live",,active
+limits.provenance.stale,limits,LimitsPage,UsageLimitsPanel,provenance_stale,"Stale",,active
+limits.provenance.tooltip,limits,LimitsPage,UsageLimitsPanel,provenance_tooltip,"Source: {{source}}; confidence: {{confidence}}",,active
+limits.reauth.badge,limits,LimitsPage,UsageLimitsPanel,reauth_badge,"Re-auth",,active
+limits.reauth.tooltip,limits,LimitsPage,UsageLimitsPanel,reauth_tooltip,"Sign-in expired — run `{{command}}` in a terminal once to sign in again, then refresh.",,active

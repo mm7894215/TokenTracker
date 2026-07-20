@@ -220,13 +220,15 @@ async function cmdServe(argv) {
 
   await maybeShowStarCta({ trackerDir });
 
-  // Native desktop apps keep this server alive even when the dashboard window
-  // is closed. Provider hooks are the fast path, but they can be removed by a
-  // tool update or skipped by a provider. Scan every local source once a
+  // The Windows desktop app keeps this server alive even when the dashboard
+  // window is closed. Provider hooks are the fast path, but they can be removed
+  // by a tool update or skipped by a provider. Scan every local source once a
   // minute as a bounded fallback so the queue cannot remain stale indefinitely.
   // `--no-sync` still skips the blocking startup sync; this periodic pass is
-  // native-shell-only and uses the lightweight local mode (no cloud upload,
-  // Cursor network request, or deep Codex archive scan).
+  // Windows-only and uses the lightweight local mode (no cloud upload, Cursor
+  // network request, or deep Codex archive scan). The macOS app owns its own
+  // wake-aware refresh loop; running both loops made sync.lock nearly
+  // continuous and starved provider notify syncs.
   const nativeBackgroundSync = startNativeBackgroundSync({
     onError: (e) =>
       process.stdout.write(`Background local sync warning: ${e?.message || e}\n`),
@@ -273,7 +275,7 @@ function startNativeBackgroundSync({
   onError = () => {},
 } = {}) {
   const normalizedShell = String(appShell || "").trim().toLowerCase();
-  if (normalizedShell !== "macos" && normalizedShell !== "windows") return null;
+  if (normalizedShell !== "windows") return null;
 
   const sync = runSync || (async (args) => {
     const { cmdSync } = require("./sync");

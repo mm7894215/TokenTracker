@@ -174,12 +174,27 @@ export default async function (req: Request): Promise<Response> {
       .limit(1)
       .maybeSingle();
     if (byMachine && (byMachine as { id: string }).id) {
-      deviceId = (byMachine as { id: string }).id;
-      // Keep the display name fresh; identity is the machine_id, not the name.
-      await dbClient.database
-        .from("tokentracker_devices")
-        .update({ device_name: deviceName, platform })
-        .eq("id", deviceId);
+      const row = byMachine as { id: string };
+      deviceId = row.id;
+      // Refresh the client default and converge a matching machine_id-less
+      // legacy row in one database transaction. The RPC preserves custom
+      // names, canonicalizes duplicate hourly snapshots, moves old tokens,
+      // and absorbs a concurrent unique-name race without logging a 23505.
+      const { error: refreshErr } = await dbClient.database.rpc(
+        "refresh_tokentracker_device_identity",
+        {
+          p_user_id: userId,
+          p_device_id: deviceId,
+          p_device_name: deviceName,
+          p_platform: platform,
+        },
+      );
+      if (refreshErr) {
+        // Identity is already anchored by machine_id, so a transient refresh
+        // failure must not prevent token rotation. Surface it in function logs
+        // while leaving the canonical device untouched.
+        console.error("device identity refresh failed", refreshErr.message);
+      }
     }
 
     if (!deviceId) {
@@ -192,6 +207,7 @@ export default async function (req: Request): Promise<Response> {
       const legacyBaseName = deviceName.replace(/ #[0-9a-fA-F]{8}$/, "");
       const legacyNames =
         legacyBaseName === deviceName ? [deviceName] : [deviceName, legacyBaseName];
+      let legacyId: string | null = null;
       const { data: legacy } = await dbClient.database
         .from("tokentracker_devices")
         .select("id")
@@ -204,7 +220,30 @@ export default async function (req: Request): Promise<Response> {
         .limit(1)
         .maybeSingle();
       if (legacy && (legacy as { id: string }).id) {
-        const legacyId = (legacy as { id: string }).id;
+        legacyId = (legacy as { id: string }).id;
+      }
+      if (!legacyId) {
+        // A renamed legacy row matches no client default by device_name; the
+        // rename endpoint preserved its pre-rename default in
+        // default_device_name — match that as a fallback, with the exact same
+        // (user, platform, active, machine_id IS NULL) scope, so a rename
+        // doesn't leave the row un-adoptable and split off a fresh device.
+        const { data: renamed } = await dbClient.database
+          .from("tokentracker_devices")
+          .select("id")
+          .eq("user_id", userId)
+          .eq("platform", platform)
+          .in("default_device_name", legacyNames)
+          .is("revoked_at", null)
+          .is("machine_id", null)
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (renamed && (renamed as { id: string }).id) {
+          legacyId = (renamed as { id: string }).id;
+        }
+      }
+      if (legacyId) {
         const { error: adoptErr } = await dbClient.database
           .from("tokentracker_devices")
           .update({ machine_id: machineId })

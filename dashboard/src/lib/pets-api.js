@@ -51,3 +51,19 @@ export async function importPetPackage(file) {
 export function removePet(id) {
   return mutate({ action: "remove", id });
 }
+
+export async function listCodexImportable() {
+  const response = await fetch("/functions/tokentracker-pets?scope=codex", {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
+  const data = await payload(response);
+  return {
+    importable: Array.isArray(data.importable) ? data.importable : [],
+    codexDetected: data.codexDetected === true,
+  };
+}
+
+export function importCodexPets(ids) {
+  return mutate({ action: "import_codex", ids });
+}

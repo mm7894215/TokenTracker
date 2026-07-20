@@ -74,7 +74,6 @@ export function getOrCreateInsforgeClient(): ReturnType<typeof createClient> | n
     insforgeClientSingleton = createClient({
       baseUrl: getInsforgeBaseUrl(),
       anonKey: getInsforgeAnonKey() || undefined,
-      autoRefreshToken: true,
     });
   }
   return insforgeClientSingleton;

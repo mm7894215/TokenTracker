@@ -176,6 +176,7 @@ export function UsageOverview({
   fleetData = [],
   onRefresh,
   loading,
+  announceLoading = false,
   summaryLoading = false,
   providersLoading = false,
   hasSummary = true,
@@ -232,6 +233,25 @@ export function UsageOverview({
   const showSummarySkeleton = summaryLoading && !hasSummary;
   const showProviderSkeleton = providersLoading && !fleetData.some(hasProviderModels);
 
+  const handleTablistKeyDown = (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const tabElements = Array.from(
+      event.currentTarget.querySelectorAll('[role="tab"]'),
+    ).filter((tab) => !tab.disabled);
+    const currentIndex = tabElements.indexOf(event.target.closest('[role="tab"]'));
+    if (currentIndex === -1 || tabElements.length === 0) return;
+
+    event.preventDefault();
+    let nextIndex = currentIndex;
+    if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = tabElements.length - 1;
+    else if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % tabElements.length;
+    else nextIndex = (currentIndex - 1 + tabElements.length) % tabElements.length;
+
+    tabElements[nextIndex].focus();
+    tabElements[nextIndex].click();
+  };
+
   const summaryContent = showAnimatedSummary ? (
     <Counter
       value={summaryCounterValue}
@@ -256,11 +276,16 @@ export function UsageOverview({
 
   return (
     <Card className={className}>
-      <div aria-busy={showSummarySkeleton || showProviderSkeleton}>
+      <div aria-busy={loading || showSummarySkeleton || showProviderSkeleton}>
+        {announceLoading ? (
+          <span className="sr-only" role="status">
+            {copy("qpd.card.updating")}
+          </span>
+        ) : null}
         {/* Header: Period Tabs + Refresh. Tabs are a single horizontal-scroll
             strip (never wrap into stacked rows); actions stay pinned right. */}
         <div className="flex items-center gap-2 mb-6">
-          <div ref={tablistRef} role="tablist" aria-label={copy("usage.overview.tablist_aria")} className="flex flex-1 min-w-0 gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div ref={tablistRef} role="tablist" aria-label={copy("usage.overview.tablist_aria")} onKeyDown={handleTablistKeyDown} className="flex flex-1 min-w-0 gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {tabs.map((p) => {
               const isActive = period === p.key;
               const tabClass = `shrink-0 whitespace-nowrap text-xs font-medium px-3 py-1.5 rounded-md transition-colors ${
@@ -288,6 +313,7 @@ export function UsageOverview({
                         <button
                           role="tab"
                           aria-selected={isActive}
+                          tabIndex={isActive ? 0 : -1}
                           type="button"
                           className={tabClass}
                         />
@@ -316,6 +342,7 @@ export function UsageOverview({
                   key={p.key}
                   role="tab"
                   aria-selected={isActive}
+                  tabIndex={isActive ? 0 : -1}
                   type="button"
                   className={tabClass}
                   onClick={() => onPeriodChange?.(p.key)}

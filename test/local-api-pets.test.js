@@ -6,6 +6,9 @@ const { after, before, describe, it } = require("node:test");
 
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "tt-localapi-pets-"));
 process.env.TOKENTRACKER_PETS_DIR = path.join(sandbox, "pets");
+// Keep the Codex-side sources isolated so tests never touch a real Codex install.
+process.env.TOKENTRACKER_CODEX_PETS_DIR = path.join(sandbox, "codex-pets");
+process.env.TOKENTRACKER_CODEX_ASAR = path.join(sandbox, "no-such-app.asar");
 const { createLocalApiHandler } = require("../src/lib/local-api");
 
 function webpHeader(width, height) {
@@ -30,6 +33,19 @@ function seedPet() {
     spritesheetPath: "spritesheet.webp",
     spriteVersionNumber: 2,
     kind: "creature",
+  }));
+  fs.writeFileSync(path.join(directory, "spritesheet.webp"), webpHeader(1536, 2288));
+}
+
+function seedCodexPet() {
+  const directory = path.join(process.env.TOKENTRACKER_CODEX_PETS_DIR, "codex-import");
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, "pet.json"), JSON.stringify({
+    id: "codex-import",
+    displayName: "Codex Import",
+    description: "A reverse-import API test pet.",
+    spritesheetPath: "spritesheet.webp",
+    spriteVersionNumber: 2,
   }));
   fs.writeFileSync(path.join(directory, "spritesheet.webp"), webpHeader(1536, 2288));
 }
@@ -78,6 +94,8 @@ describe("local Codex pet API", () => {
 
   after(() => {
     delete process.env.TOKENTRACKER_PETS_DIR;
+    delete process.env.TOKENTRACKER_CODEX_PETS_DIR;
+    delete process.env.TOKENTRACKER_CODEX_ASAR;
     fs.rmSync(sandbox, { recursive: true, force: true });
   });
 
@@ -87,6 +105,39 @@ describe("local Codex pet API", () => {
     assert.equal(result.body.pets[0].id, "api-v2-pet");
     assert.equal(result.body.pets[0].spriteVersionNumber, 2);
     assert.match(result.body.pets[0].assetUrl, /^\/api\/pets\/local\/api-v2-pet\/spritesheet\.webp\?v=/);
+  });
+
+  it("lists, previews, and protects reverse imports from Codex", async () => {
+    seedCodexPet();
+    const listed = await call(handler, { pathname: "/functions/tokentracker-pets?scope=codex" });
+    assert.equal(listed.status, 200);
+    assert.equal(listed.body.codexDetected, true);
+    assert.equal(listed.body.importable[0].id, "codex-import");
+    assert.match(listed.body.importable[0].assetUrl, /^\/api\/pets\/codex\/codex-import\/spritesheet\.webp\?v=/);
+
+    const preview = await call(handler, {
+      method: "HEAD",
+      pathname: "/api/pets/codex/codex-import/spritesheet.webp",
+    });
+    assert.equal(preview.status, 200);
+
+    const unauthorized = await call(handler, {
+      method: "POST",
+      pathname: "/functions/tokentracker-pets",
+      headers: { origin: "http://localhost:7680" },
+      body: { action: "import_codex", ids: ["codex-import"] },
+    });
+    assert.equal(unauthorized.status, 401);
+
+    const imported = await call(handler, {
+      method: "POST",
+      pathname: "/functions/tokentracker-pets",
+      headers: { origin: "http://localhost:7680", "x-tokentracker-local-auth": token },
+      body: { action: "import_codex", ids: ["codex-import"] },
+    });
+    assert.equal(imported.status, 200);
+    assert.deepEqual(imported.body.imported.map((pet) => pet.id), ["codex-import"]);
+    assert.equal(fs.existsSync(path.join(process.env.TOKENTRACKER_PETS_DIR, "codex-import")), true);
   });
 
   it("protects removal with loopback local auth", async () => {

@@ -38,14 +38,17 @@ import { getDashboardEntryPath } from "../lib/host-mode";
 import { isMockEnabled } from "../lib/mock-data";
 import {
   getLeaderboard,
-  refreshLeaderboard,
 } from "../lib/api";
 import {
   getLeaderboardPreloadContextKey,
   publishLeaderboardPreloadState,
   readLeaderboardPreloadState,
 } from "../lib/dashboard-preload.js";
-import { getCloudSyncEnabled, setCloudSyncEnabled } from "../lib/cloud-sync-prefs";
+import {
+  CLOUD_LEADERBOARD_REFRESHED_EVENT,
+  getCloudSyncEnabled,
+  setCloudSyncEnabled,
+} from "../lib/cloud-sync-prefs";
 import { runCloudUsageSyncNow } from "../lib/cloud-sync";
 import { LeaderboardAvatar } from "../components/LeaderboardAvatar.jsx";
 import { LeaderboardProviderColumnHeader } from "../components/LeaderboardProviderColumnHeader.jsx";
@@ -154,7 +157,7 @@ function LeaderboardTokenCells({ entry, isMe, orderedColumns }) {
     : "text-oai-gray-500 dark:text-oai-gray-400";
   const cellBg = isMe
     ? "bg-oai-brand-50 dark:bg-oai-brand-900/10"
-    : "bg-white dark:bg-oai-gray-950 group-hover:bg-oai-gray-50 dark:group-hover:bg-oai-gray-900/60";
+    : "bg-white dark:bg-oai-gray-950 group-hover:bg-oai-gray-50 dark:group-hover:bg-oai-gray-900";
   return orderedColumns.map((col) => (
     <td
       key={col.key}
@@ -527,6 +530,17 @@ export function LeaderboardPage({
   const [cloudSyncOn, setCloudSyncOn] = useState(() => getCloudSyncEnabled());
   const [syncing, setSyncing] = useState(false);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const handleLeaderboardRefresh = () => {
+      setListReloadToken((value) => value + 1);
+    };
+    window.addEventListener(CLOUD_LEADERBOARD_REFRESHED_EVENT, handleLeaderboardRefresh);
+    return () => {
+      window.removeEventListener(CLOUD_LEADERBOARD_REFRESHED_EVENT, handleLeaderboardRefresh);
+    };
+  }, []);
+
   const period = useMemo(() => {
     const params = new URLSearchParams(location?.search || "");
     return normalizePeriod(params.get("period")) || "total";
@@ -736,9 +750,6 @@ export function LeaderboardPage({
       setCloudSyncEnabled(true);
       setCloudSyncOn(true);
       await runCloudUsageSyncNow(() => resolveAuthAccessTokenWithRetry(effectiveAuthToken));
-      const token = await resolveAuthAccessTokenWithRetry(effectiveAuthToken);
-      if (token) await refreshLeaderboard({ accessToken: token, period, source: "leaderboard-enable-sync" });
-      setListReloadToken((v) => v + 1);
     } catch (e) {
       console.warn("[tokentracker] sync:", e);
     } finally {

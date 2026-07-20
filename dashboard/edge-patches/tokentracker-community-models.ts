@@ -1,5 +1,5 @@
 /**
- * InsForge Edge: public community model-level token breakdown.
+ * InsForge Edge: public, privacy-safe community insights snapshot.
  *
  * Reads the singleton snapshot maintained by the database-native hourly
  * refresh_tokentracker_community_stats job.
@@ -8,6 +8,11 @@
  * Response:
  * {
  *   top_models: [{ name, tokens, share }],
+ *   providers: [{ name, tokens, developers, share }],
+ *   daily_growth: [{ day, tokens, tokens_7d_avg, active_developers }],
+ *   token_mix: [{ key, tokens, share }],
+ *   user_distribution: [{ key, developers, tokens, ... }],
+ *   platforms: [{ name, machines, share }],
  *   total_tokens: number,
  *   period: "total",
  *   from: string,
@@ -21,6 +26,24 @@ const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey",
+};
+
+type CommunityStatsRow = {
+  total_tokens: number | string | null;
+  top_models: unknown;
+  provider_breakdown: unknown;
+  daily_growth: unknown;
+  token_mix: unknown;
+  user_distribution: unknown;
+  platform_distribution: unknown;
+  active_developers_total: number | string | null;
+  active_developers_30d: number | string | null;
+  tokens_30d: number | string | null;
+  token_growth_pct: number | string | null;
+  developer_growth_pct: number | string | null;
+  from_day: string | null;
+  to_day: string | null;
+  generated_at: string | null;
 };
 
 function json(data: unknown, status = 200, extraHeaders: Record<string, string> = {}) {
@@ -59,12 +82,29 @@ export default async function (req: Request): Promise<Response> {
   try {
     const { data, error } = await client.database
       .from("tokentracker_community_stats")
-      .select("total_tokens, top_models, from_day, to_day, generated_at")
+      .select([
+        "total_tokens",
+        "top_models",
+        "provider_breakdown",
+        "daily_growth",
+        "token_mix",
+        "user_distribution",
+        "platform_distribution",
+        "active_developers_total",
+        "active_developers_30d",
+        "tokens_30d",
+        "token_growth_pct",
+        "developer_growth_pct",
+        "from_day",
+        "to_day",
+        "generated_at",
+      ].join(","))
       .eq("id", "total")
       .limit(1);
     if (error) return json({ error: error.message }, 500);
 
-    const row = Array.isArray(data) ? data[0] : null;
+    const rows = data as unknown as CommunityStatsRow[] | null;
+    const row = Array.isArray(rows) ? rows[0] : null;
     if (!row) {
       return json(
         { error: "community stats snapshot is not ready" },
@@ -81,7 +121,21 @@ export default async function (req: Request): Promise<Response> {
     return json(
       {
         top_models: Array.isArray(row.top_models) ? row.top_models : [],
+        providers: Array.isArray(row.provider_breakdown) ? row.provider_breakdown : [],
+        daily_growth: Array.isArray(row.daily_growth) ? row.daily_growth : [],
+        token_mix: Array.isArray(row.token_mix) ? row.token_mix : [],
+        user_distribution: Array.isArray(row.user_distribution) ? row.user_distribution : [],
+        platforms: Array.isArray(row.platform_distribution) ? row.platform_distribution : [],
         total_tokens: Number(row.total_tokens) || 0,
+        active_developers_total: Number(row.active_developers_total) || 0,
+        active_developers_30d: Number(row.active_developers_30d) || 0,
+        tokens_30d: Number(row.tokens_30d) || 0,
+        token_growth_pct: row.token_growth_pct == null
+          ? null
+          : Number(row.token_growth_pct),
+        developer_growth_pct: row.developer_growth_pct == null
+          ? null
+          : Number(row.developer_growth_pct),
         period: "total",
         from: row.from_day,
         to: row.to_day,

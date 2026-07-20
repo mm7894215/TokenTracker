@@ -165,6 +165,11 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   "kimi-k2.5-free": { input: 0, output: 0, cache_read: 0 },
   "kimi-k2.6": { input: 0.95, output: 4, cache_read: 0.16 },
   "kimi-k2.7-code": { input: 0.95, output: 4, cache_read: 0.19 },
+  // Kimi K3 (released 2026-07-16; reported rates $3/M in, $15/M out, $0.30/M
+  // cached). Kimi Code records the alias as bare "k3" (kimi-code/k3), hence
+  // the separate "k3" exact key below. Not yet in LiteLLM.
+  "kimi-k3": { input: 3, output: 15, cache_read: 0.3 },
+  "k3": { input: 3, output: 15, cache_read: 0.3 },
   // ── Z.ai GLM (mirrored from src/lib/pricing/curated-overrides.json).
   //    LiteLLM only keys these under provider prefixes like `zai/glm-5`,
   //    `openrouter/z-ai/glm-4.6`, etc. The reverse-substring fallback in the
@@ -299,6 +304,10 @@ function getModelPricing(model: string) {
   // of the $0.20/$0.50 MTok fast-tier rate (15x / 30x overestimate).
   if (lower.includes("grok-4-1-fast")) return MODEL_PRICING["grok-4-1-fast-non-reasoning"];
   if (lower.includes("grok-4")) return MODEL_PRICING["grok-4"];
+  if (lower.includes("kimi-k3")) return MODEL_PRICING["kimi-k3"];
+  // Bare "k3" alias from Kimi Code (or provider-prefixed "*/k3"); the exact
+  // key above only catches the unprefixed form.
+  if (lower === "k3" || lower.endsWith("/k3")) return MODEL_PRICING["kimi-k3"];
   if (lower.includes("kimi-k2.7-code")) return MODEL_PRICING["kimi-k2.7-code"];
   if (lower.includes("kimi-k2.6")) return MODEL_PRICING["kimi-k2.6"];
   if (lower.includes("kimi")) return MODEL_PRICING["kimi-k2.5"];
@@ -393,7 +402,7 @@ async function fetchGroupedRows(
 
   const pending = (async () => {
     try {
-      const { data, error } = await client.database.rpc("account_usage_grouped_v2", {
+      const { data, error } = await client.database.rpc("account_usage_grouped_cached", {
         p_user_id: userId,
         p_device_id: requestedDeviceId,
         p_from: fromIso,
@@ -421,6 +430,9 @@ async function fetchGroupedRows(
 }
 
 function computeRowCost(row: GroupedRow): number {
+  // Pi's GitHub Copilot provider is subscription-backed. Keep its token
+  // counts, but do not reprice the recorded Claude model as Anthropic API use.
+  if (row.source === "pi-github-copilot" || row.source === "pi-copilot") return 0;
   // WorkBuddy's auto-router logs model="auto"; price it as its default Hunyuan
   // model (hy3-preview-agent) so it isn't billed as Cursor's composer-1. Mirrors
   // normalizeWorkbuddyModel in src/lib/pricing/matcher.js.

@@ -1,3 +1,5 @@
+import { adaptiveRefreshDelay } from "./adaptive-refresh";
+
 export const LOCAL_USAGE_REFRESH_INTERVAL_MS = 30_000;
 
 type AutoRefreshOptions = {
@@ -22,6 +24,8 @@ export function startLocalUsageAutoRefresh({
 }: AutoRefreshOptions) {
   let stopped = false;
   let inFlight: Promise<void> | null = null;
+  let lastInteractionAt = Date.now();
+  let nextDueAt = 0;
 
   const run = () => {
     if (stopped || documentRef.visibilityState !== "visible") return inFlight;
@@ -38,12 +42,26 @@ export function startLocalUsageAutoRefresh({
   };
 
   const timer = windowRef.setInterval(() => {
+    const now = Date.now();
+    if (now < nextDueAt) return;
+    nextDueAt = now + adaptiveRefreshDelay({
+      visible: documentRef.visibilityState === "visible",
+      lastInteractionAt,
+      now,
+    });
     void run();
   }, intervalMs);
   const handleVisible = () => {
-    if (documentRef.visibilityState === "visible") void run();
+    if (documentRef.visibilityState === "visible") {
+      lastInteractionAt = Date.now();
+      nextDueAt = 0;
+      void run();
+    }
   };
+  const handleInteraction = () => { lastInteractionAt = Date.now(); };
   windowRef.addEventListener("focus", handleVisible);
+  windowRef.addEventListener("pointerdown", handleInteraction);
+  windowRef.addEventListener("keydown", handleInteraction);
   documentRef.addEventListener("visibilitychange", handleVisible);
 
   return {
@@ -52,6 +70,8 @@ export function startLocalUsageAutoRefresh({
       stopped = true;
       windowRef.clearInterval(timer);
       windowRef.removeEventListener("focus", handleVisible);
+      windowRef.removeEventListener("pointerdown", handleInteraction);
+      windowRef.removeEventListener("keydown", handleInteraction);
       documentRef.removeEventListener("visibilitychange", handleVisible);
     },
   };

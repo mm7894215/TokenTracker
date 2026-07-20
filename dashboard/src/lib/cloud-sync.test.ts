@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  CLOUD_LEADERBOARD_REFRESHED_EVENT,
   clearCloudDeviceSession,
   getCloudUsageReady,
   setCloudUsageReady,
@@ -23,8 +24,9 @@ function okJson(data: unknown): Response {
   } as Response;
 }
 
-function installFetchMock() {
-  const fetchMock = vi.fn(async (url: string) => {
+function installFetchMock(options: { leaderboardOk?: boolean } = {}) {
+  const leaderboardOk = options.leaderboardOk ?? true;
+  const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
     if (url === "/functions/tokentracker-machine-id") {
       return okJson({ machineId: "machine-abcdef12" });
     }
@@ -39,7 +41,11 @@ function installFetchMock() {
       return okJson({ ok: true });
     }
     if (url === "https://cloud.example/functions/tokentracker-leaderboard-refresh") {
-      return okJson({ ok: true });
+      return {
+        ok: leaderboardOk,
+        status: leaderboardOk ? 200 : 403,
+        json: async () => ({ ok: leaderboardOk }),
+      } as Response;
     }
     throw new Error(`Unexpected fetch: ${url}`);
   });
@@ -91,13 +97,17 @@ describe("cloud usage sync", () => {
       insforgeBaseUrl: "https://cloud.example",
     });
     expect(onSynced).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.find(([url]) => url === "https://cloud.example/functions/tokentracker-leaderboard-refresh")?.[1])
+      .toMatchObject({ cache: "no-store" });
     window.removeEventListener("tt.cloudUsageSynced", onSynced);
   });
 
   it("drains the full queue before the first scheduled cloud view becomes ready", async () => {
     const fetchMock = installFetchMock();
     const onSynced = vi.fn();
+    const onLeaderboardRefresh = vi.fn();
     window.addEventListener("tt.cloudUsageSynced", onSynced);
+    window.addEventListener(CLOUD_LEADERBOARD_REFRESHED_EVENT, onLeaderboardRefresh);
 
     await runCloudUsageSyncIfDue(async () => "access-token");
 
@@ -107,8 +117,21 @@ describe("cloud usage sync", () => {
       insforgeBaseUrl: "https://cloud.example",
     });
     expect(onSynced).toHaveBeenCalledTimes(1);
+    expect(onLeaderboardRefresh).toHaveBeenCalledTimes(1);
     expect(getCloudUsageReady()).toBe(true);
     window.removeEventListener("tt.cloudUsageSynced", onSynced);
+    window.removeEventListener(CLOUD_LEADERBOARD_REFRESHED_EVENT, onLeaderboardRefresh);
+  });
+
+  it("does not announce a leaderboard refresh when the refresh endpoint fails", async () => {
+    installFetchMock({ leaderboardOk: false });
+    const onLeaderboardRefresh = vi.fn();
+    window.addEventListener(CLOUD_LEADERBOARD_REFRESHED_EVENT, onLeaderboardRefresh);
+
+    await runCloudUsageSyncNow(async () => "access-token");
+
+    expect(onLeaderboardRefresh).not.toHaveBeenCalled();
+    window.removeEventListener(CLOUD_LEADERBOARD_REFRESHED_EVENT, onLeaderboardRefresh);
   });
 
   it("keeps scheduled sync lightweight after cloud usage is ready", async () => {

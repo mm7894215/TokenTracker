@@ -68,7 +68,18 @@ enum Strings {
     static var kiroMonthLabel: String { t("Month", "本月", "本月", "今月", "이번 달") }
     static var kiroBonusLabel: String { t("Bonus", "奖励", "獎勵", "ボーナス", "보너스") }
     static var grokMonthLabel: String { t("Month", "月度", "月度", "月間", "월간") }
+    static var grokWeekLabel: String { t("Weekly", "周", "週", "週間", "주간") }
+    static var grokDayLabel: String { t("Daily", "日", "日", "日", "일") }
     static var grokOndemandLabel: String { t("On-demand", "按需", "按需", "オンデマンド", "온디맨드") }
+
+    /// Primary Grok Build window label, driven by `period_type` from the billing API.
+    static func grokPrimaryLabel(periodType: String?) -> String {
+        switch periodType {
+        case "weekly": return grokWeekLabel
+        case "daily": return grokDayLabel
+        default: return grokMonthLabel
+        }
+    }
     static var limitResetNow: String { t("now", "现在", "現在", "今", "지금") }
     static func kimiParallelLabel(_ count: Int) -> String {
         t("Parallel: \(count)", "并发：\(count)", "併發：\(count)", "並列：\(count)", "병렬: \(count)")
@@ -185,6 +196,22 @@ enum Strings {
     static var limitDisplayModeRemaining: String { t("Remaining", "剩余", "剩餘", "残り", "남음") }
     static var limitSuffixUsed: String { t("used", "已用", "已用", "使用済み", "사용됨") }
     static var limitSuffixRemaining: String { t("remaining", "剩余", "剩餘", "残り", "남음") }
+    // Compact desktop-pet statuses. The full Limits surface keeps the exact
+    // percentage; the floating bubble uses a human state so it reads like a
+    // conversation rather than a raw monitor.
+    static var petLimitAtLimit: String { t("at limit", "已达上限", "已達上限", "上限到達", "한도 도달") }
+    static var petLimitNearLimit: String { t("near limit", "接近上限", "接近上限", "上限間近", "한도 임박") }
+    static var petLimitWatch: String { t("watch", "注意", "注意", "注意", "주의") }
+    static var petLimitAvailable: String { t("available", "充足", "充足", "余裕あり", "여유 있음") }
+    static var petLimitDepleted: String { t("depleted", "已用尽", "已用盡", "使い切り", "소진됨") }
+    static var petLimitLow: String { t("low", "余量偏低", "餘量偏低", "残りわずか", "얼마 안 남음") }
+    static var petLimitSomeLeft: String { t("some left", "还有余量", "還有餘量", "残りあり", "남아 있음") }
+    static func petLimitReset(_ value: String) -> String {
+        t("in (value)", "(value)后重置", "(value)後重置", "(value)でリセット", "(value) 후 초기화")
+    }
+    static func petCostToday(_ cost: String) -> String {
+        t("(cost) today", "今日 (cost)", "今日 (cost)", "今日 (cost)", "오늘 (cost)")
+    }
 
 
     static var menuSyncNow: String { t("Sync Now", "立即同步", "立即同步", "今すぐ同期", "지금 동기화") }

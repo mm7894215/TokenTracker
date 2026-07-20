@@ -74,9 +74,26 @@ export const PROVIDER_LIMIT_SPECS = {
     },
   },
   grok: {
+    // Grok unified billing is weekly for SuperGrok / free-tier accounts and
+    // monthly for legacy credit counters. period_type comes from the billing
+    // API (USAGE_PERIOD_TYPE_WEEKLY / MONTHLY) via grok-limits.js.
     windows(data) {
+      const period = typeof data.period_type === "string" ? data.period_type : null;
+      const primaryLabelKey =
+        period === "weekly"
+          ? "limits.label.grok_week"
+          : period === "daily"
+            ? "limits.label.grok_day"
+            : "limits.label.grok_month";
+      const windowSeconds =
+        period === "weekly" ? 7 * 86400 : period === "daily" ? 86400 : undefined;
       return [
-        { key: "month", labelKey: "limits.label.grok_month", window: data.primary_window },
+        {
+          key: period === "weekly" ? "week" : period === "daily" ? "day" : "month",
+          labelKey: primaryLabelKey,
+          window: data.primary_window,
+          windowSeconds,
+        },
         { key: "ondemand", labelKey: "limits.label.grok_ondemand", window: data.secondary_window },
       ];
     },
@@ -157,6 +174,8 @@ export function usageLimitsLabelCopyAnchor() {
     copy("limits.label.kiro_month"),
     copy("limits.label.kiro_bonus"),
     copy("limits.label.grok_month"),
+    copy("limits.label.grok_week"),
+    copy("limits.label.grok_day"),
     copy("limits.label.grok_ondemand"),
     copy("limits.label.antigravity_claude_weekly"),
     copy("limits.label.antigravity_claude_5h"),

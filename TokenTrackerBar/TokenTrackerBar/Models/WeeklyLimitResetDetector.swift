@@ -191,7 +191,7 @@ extension UsageLimitsResponse {
         addGeneric("kiro", kiro.configured, kiro.error, [("primary", Strings.kiroMonthLabel, kiro.primaryWindow), ("secondary", Strings.kiroBonusLabel, kiro.secondaryWindow)])
         addGeneric("antigravity", antigravity.configured, antigravity.error, [("primary", "Claude 7d", antigravity.primaryWindow), ("secondary", "Claude 5h", antigravity.secondaryWindow), ("tertiary", "Gemini 7d", antigravity.tertiaryWindow), ("quaternary", "Gemini 5h", antigravity.quaternaryWindow)])
         if let kimi { addGeneric("kimi", kimi.configured, kimi.error, [("primary", Strings.kimiWeeklyLabel, kimi.primaryWindow), ("secondary", Strings.kimiFiveHourLabel, kimi.secondaryWindow), ("tertiary", Strings.kimiTotalLabel, kimi.tertiaryWindow)]) }
-        if let grok { addGeneric("grok", grok.configured, grok.error, [("primary", Strings.grokMonthLabel, grok.primaryWindow), ("secondary", Strings.grokOndemandLabel, grok.secondaryWindow)]) }
+        if let grok { addGeneric("grok", grok.configured, grok.error, [("primary", Strings.grokPrimaryLabel(periodType: grok.periodType), grok.primaryWindow), ("secondary", Strings.grokOndemandLabel, grok.secondaryWindow)]) }
         if let copilot { addGeneric("copilot", copilot.configured, copilot.error, [("primary", "Premium", copilot.primaryWindow), ("secondary", "Chat", copilot.secondaryWindow)]) }
 
         return out

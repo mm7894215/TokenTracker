@@ -60,7 +60,9 @@ enum MenuBarDisplayMetric: String, CaseIterable {
         case .kimiTotal: return "Km Tot"
         case .kiroMonth: return "Kr Mo"
         case .kiroBonus: return "Kr Bn"
-        case .grokMonth: return "Gk Mo"
+        // Preference id stays `grokMonth` for storage stability; label is period-agnostic
+        // because SuperGrok accounts use a weekly pool while legacy is monthly.
+        case .grokMonth: return "Gk"
         case .grokOndemand: return "Gk OD"
         case .copilotPremium: return "Co Prem"
         case .copilotChat: return "Co Chat"
@@ -98,7 +100,7 @@ enum MenuBarDisplayMetric: String, CaseIterable {
         case .kimiTotal: return "Kimi Total Limit"
         case .kiroMonth: return "Kiro Monthly Limit"
         case .kiroBonus: return "Kiro Bonus Limit"
-        case .grokMonth: return "Grok Build Monthly Limit"
+        case .grokMonth: return "Grok Build Limit"
         case .grokOndemand: return "Grok Build On-demand Limit"
         case .copilotPremium: return "Copilot Premium Limit"
         case .copilotChat: return "Copilot Chat Limit"
@@ -149,6 +151,15 @@ enum MenuBarDisplayMetric: String, CaseIterable {
         case .zcodeGlm52, .zcodeGlm5Turbo: return "zcode"
         }
     }
+}
+
+struct MenuBarSummarySelection: OptionSet, Equatable {
+    let rawValue: Int
+
+    static let today = MenuBarSummarySelection(rawValue: 1 << 0)
+    static let rolling = MenuBarSummarySelection(rawValue: 1 << 1)
+    static let total = MenuBarSummarySelection(rawValue: 1 << 2)
+    static let all: MenuBarSummarySelection = [.today, .rolling, .total]
 }
 
 private extension UsageLimitsResponse {
@@ -272,6 +283,34 @@ enum MenuBarDisplayPreferences {
 
     static func write(_ ids: [String], to defaults: UserDefaults = .standard) {
         defaults.set(normalize(ids), forKey: key)
+    }
+
+    /// Queue writes only affect token and cost summaries. Limit-only menu bar
+    /// configurations need no local usage request when the queue changes.
+    static func summarySelection(for ids: [String]) -> MenuBarSummarySelection {
+        ids.reduce(into: MenuBarSummarySelection()) { selection, id in
+            guard let metric = MenuBarDisplayMetric(rawValue: id) else { return }
+            switch metric {
+            case .todayTokens, .todayCost:
+                selection.insert(.today)
+            case .last7dTokens:
+                selection.insert(.rolling)
+            case .totalTokens, .totalCost:
+                selection.insert(.total)
+            case .claude5h, .claude7d,
+                 .codex5h, .codex7d, .codexCredits, .codexSpark5h, .codexSpark7d,
+                 .cursorPlan, .cursorAuto, .cursorAPI,
+                 .geminiPro, .geminiFlash, .geminiLite,
+                 .kimiWeekly, .kimi5h, .kimiTotal,
+                 .kiroMonth, .kiroBonus,
+                 .grokMonth, .grokOndemand,
+                 .copilotPremium, .copilotChat,
+                 .antigravityClaudeWeekly, .antigravityClaude5h,
+                 .antigravityGeminiWeekly, .antigravityGemini5h,
+                 .zcodeGlm52, .zcodeGlm5Turbo:
+                break
+            }
+        }
     }
 
     static func normalize(_ ids: [String]) -> [String] {

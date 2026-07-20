@@ -72,6 +72,12 @@ class DashboardViewModel: ObservableObject {
     private var lastBackgroundSyncAt: Date?
     private var lastPopoverOpenSyncAttemptAt: Date?
     private var shouldReloadAfterCurrentLoad = false
+    private var isMenuBarSummaryLoading = false
+    private var hiddenRefreshInFlight = false
+    private var pendingFullRefreshAfterHiddenRefresh = false
+    private var pendingUsagePublications = PendingUsagePublicationQueue()
+    private var needsFullRefreshOnPopoverOpen = false
+    private var summaryPublicationState = SummaryPublicationState()
     private let resetDetector = WeeklyLimitResetDetector()
 
     // MARK: - Computed Properties
@@ -95,6 +101,9 @@ class DashboardViewModel: ObservableObject {
     func setPopoverVisible(_ isVisible: Bool) {
         guard isPopoverVisible != isVisible else { return }
         isPopoverVisible = isVisible
+        if isVisible && hiddenRefreshInFlight {
+            pendingFullRefreshAfterHiddenRefresh = true
+        }
     }
 
     func switchPeriod(_ newPeriod: DateHelpers.Period) {
@@ -113,12 +122,24 @@ class DashboardViewModel: ObservableObject {
             return
         }
         isLoading = true
+        pendingFullRefreshAfterHiddenRefresh = false
+        needsFullRefreshOnPopoverOpen = false
         error = nil
+
+        // Events already queued are covered by this full load. Remove only
+        // that starting snapshot so events arriving while the health check or
+        // fetches are in flight remain queued for the next pass.
+        let pendingAtLoadStart = pendingUsagePublications
+        pendingUsagePublications.removeAll()
 
         serverOnline = await APIClient.shared.checkServerHealth()
         guard serverOnline else {
+            pendingUsagePublications.enqueue(
+                pendingAtLoadStart.sources,
+                summaries: pendingAtLoadStart.summaries
+            )
             isLoading = false
-            await runQueuedReloadIfNeeded()
+            await finishDataLoad()
             return
         }
 
@@ -136,7 +157,16 @@ class DashboardViewModel: ObservableObject {
             group.addTask { @MainActor in
                 do {
                     let today = DateHelpers.todayString()
-                    self.todaySummary = try await APIClient.shared.fetchSummary(from: today, to: today)
+                    let result = try await APIClient.shared.fetchSummaryWithSource(
+                        from: today,
+                        to: today
+                    )
+                    self.todaySummary = result.summary
+                    self.summaryPublicationState.record(
+                        source: result.source,
+                        completedAt: result.completedAt,
+                        for: .today
+                    )
                 } catch {
                     errorCount += 1
                     if firstError == nil { firstError = error.localizedDescription }
@@ -154,7 +184,16 @@ class DashboardViewModel: ObservableObject {
             // Rolling summary (always 30-day for the rolling cards)
             group.addTask { @MainActor in
                 do {
-                    self.rollingSummary = try await APIClient.shared.fetchSummary(from: rollingFrom, to: rollingTo)
+                    let result = try await APIClient.shared.fetchSummaryWithSource(
+                        from: rollingFrom,
+                        to: rollingTo
+                    )
+                    self.rollingSummary = result.summary
+                    self.summaryPublicationState.record(
+                        source: result.source,
+                        completedAt: result.completedAt,
+                        for: .rolling
+                    )
                 } catch {
                     errorCount += 1
                     if firstError == nil { firstError = error.localizedDescription }
@@ -163,7 +202,16 @@ class DashboardViewModel: ObservableObject {
             // All-time total summary (matches dashboard "Total" range)
             group.addTask { @MainActor in
                 do {
-                    self.totalSummary = try await APIClient.shared.fetchSummary(from: totalRange.from, to: totalRange.to)
+                    let result = try await APIClient.shared.fetchSummaryWithSource(
+                        from: totalRange.from,
+                        to: totalRange.to
+                    )
+                    self.totalSummary = result.summary
+                    self.summaryPublicationState.record(
+                        source: result.source,
+                        completedAt: result.completedAt,
+                        for: .total
+                    )
                 } catch {
                     errorCount += 1
                     if firstError == nil { firstError = error.localizedDescription }
@@ -235,6 +283,16 @@ class DashboardViewModel: ObservableObject {
             }
         }
 
+        // A partial API failure means the starting snapshot was not fully
+        // covered. Restore it alongside any events that arrived during the
+        // load so the next pass can retry without dropping the publication.
+        if errorCount > 0 {
+            pendingUsagePublications.enqueue(
+                pendingAtLoadStart.sources,
+                summaries: pendingAtLoadStart.summaries
+            )
+        }
+
         if errorCount >= totalFetches {
             self.error = firstError
         }
@@ -248,13 +306,195 @@ class DashboardViewModel: ObservableObject {
         // Push the latest data to the widget snapshot file so the desktop
         // widgets pick it up on their next timeline reload.
         await WidgetSnapshotWriter.update(from: self)
-        await runQueuedReloadIfNeeded()
+        await finishDataLoad(allowPendingRefresh: errorCount == 0)
     }
 
-    private func runQueuedReloadIfNeeded() async {
-        guard shouldReloadAfterCurrentLoad else { return }
-        shouldReloadAfterCurrentLoad = false
-        await loadAll()
+    private func finishDataLoad(allowPendingRefresh: Bool = true) async {
+        // Preserve pending publications while the local API is offline, or
+        // when a partial load failed, but do not immediately feed them back
+        // into another retry loop. The next scheduled/manual load retries.
+        guard serverOnline, allowPendingRefresh else { return }
+        if shouldReloadAfterCurrentLoad {
+            shouldReloadAfterCurrentLoad = false
+            await loadAll()
+            return
+        }
+        await runPendingQueueRefreshIfNeeded()
+    }
+
+    private func runPendingQueueRefreshIfNeeded() async {
+        // Keep the publication queued until every owning operation has fully
+        // released its state. Otherwise finishDataLoad() can dequeue it while
+        // syncInFlight is still true and leave it stranded indefinitely.
+        guard let pending = pendingUsagePublications.takeIfReady(
+            isLoading: isLoading,
+            syncInFlight: syncInFlight,
+            hiddenRefreshInFlight: hiddenRefreshInFlight
+        ) else { return }
+        await refreshAfterUsagePublication(
+            pending.sources,
+            menuBarSummaries: pending.summaries
+        )
+    }
+
+    /// Queue writes are already-synced data. Refresh only what is visible in
+    /// the menu bar while the popover is closed; a visible popover gets the
+    /// normal complete load. Concurrent loads are serialized so an older
+    /// response cannot overwrite data fetched after the queue event.
+    func refreshAfterQueueChange(menuBarSummaries summaries: MenuBarSummarySelection) async {
+        await refreshAfterUsagePublication(.localQueue, menuBarSummaries: summaries)
+    }
+
+    /// Account summaries become authoritative only after this machine's queue
+    /// offset advances. This avoids re-reading an old cloud aggregate merely
+    /// because the local parser wrote its queue first.
+    func refreshAfterAccountUpload(menuBarSummaries summaries: MenuBarSummarySelection) async {
+        let relevantSummaries = isPopoverVisible ? .all : summaries
+        await waitForAccountCacheVisibility(for: relevantSummaries)
+        await refreshAfterUsagePublication(.accountUpload, menuBarSummaries: summaries)
+    }
+
+    private func waitForAccountCacheVisibility(
+        for summaries: MenuBarSummarySelection
+    ) async {
+        while !Task.isCancelled {
+            let slotDelay: TimeInterval = summaries.isEmpty
+                ? 0
+                : UsagePublicationPolicy.remainingAccountCacheDelay(
+                    state: summaryPublicationState,
+                    summaries: summaries,
+                    now: Date()
+                )
+            let latestAccountRead = await APIClient.shared.latestAccountSummaryReadCompletedAt
+            let globalDelay = UsagePublicationPolicy.remainingAccountCacheDelay(
+                latestReadCompletedAt: latestAccountRead,
+                now: Date()
+            )
+            let delay = max(slotDelay, globalDelay)
+            guard delay > 0 else { return }
+            do {
+                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            } catch {
+                return
+            }
+            // Re-evaluate after sleeping because another account read may have
+            // populated the edge cache while this publication was waiting.
+        }
+    }
+
+    private func refreshAfterUsagePublication(
+        _ source: UsagePublicationSource,
+        menuBarSummaries summaries: MenuBarSummarySelection
+    ) async {
+        guard !UsagePublicationPolicy.shouldQueueRefresh(
+            isLoading: isLoading,
+            syncInFlight: syncInFlight,
+            hiddenRefreshInFlight: hiddenRefreshInFlight
+        ) else {
+            pendingUsagePublications.enqueue(source, summaries: summaries)
+            return
+        }
+
+        let affectedSummaries = UsagePublicationPolicy.summariesToRefresh(
+            state: summaryPublicationState,
+            sources: source,
+            requested: .all
+        )
+        guard !affectedSummaries.isEmpty else { return }
+
+        if isPopoverVisible {
+            await loadAll()
+        } else {
+            needsFullRefreshOnPopoverOpen = true
+            let visibleSummaries = affectedSummaries.intersection(summaries)
+            guard !visibleSummaries.isEmpty else { return }
+            await loadMenuBarSummaries(visibleSummaries)
+        }
+    }
+
+    private func loadMenuBarSummaries(
+        _ summaries: MenuBarSummarySelection,
+        checkHealth: Bool = true
+    ) async {
+        guard !summaries.isEmpty else { return }
+        guard !isLoading else { return }
+
+        isLoading = true
+        isMenuBarSummaryLoading = true
+        if checkHealth {
+            serverOnline = await APIClient.shared.checkServerHealth()
+            guard serverOnline else {
+                isMenuBarSummaryLoading = false
+                isLoading = false
+                await finishDataLoad()
+                return
+            }
+        }
+        var successfulFetches = 0
+        var firstError: Error?
+
+        await withTaskGroup(of: Void.self) { group in
+            if summaries.contains(.today) || summaries.contains(.rolling) {
+                group.addTask { @MainActor in
+                    do {
+                        let today = DateHelpers.todayString()
+                        let result = try await APIClient.shared.fetchSummaryWithSource(
+                            from: today,
+                            to: today
+                        )
+                        if summaries.contains(.today) {
+                            self.todaySummary = result.summary
+                        }
+                        // Rolling windows are identical on every summary
+                        // response, so today + 7d needs only one request.
+                        if summaries.contains(.rolling) {
+                            self.rollingSummary = result.summary
+                        }
+                        self.summaryPublicationState.record(
+                            source: result.source,
+                            completedAt: result.completedAt,
+                            for: summaries.intersection([.today, .rolling])
+                        )
+                        successfulFetches += 1
+                    } catch {
+                        if firstError == nil { firstError = error }
+                    }
+                }
+            }
+
+            if summaries.contains(.total) {
+                group.addTask { @MainActor in
+                    do {
+                        let range = DateHelpers.rangeForPeriod(.total)
+                        let result = try await APIClient.shared.fetchSummaryWithSource(
+                            from: range.from,
+                            to: range.to
+                        )
+                        self.totalSummary = result.summary
+                        self.summaryPublicationState.record(
+                            source: result.source,
+                            completedAt: result.completedAt,
+                            for: .total
+                        )
+                        successfulFetches += 1
+                    } catch {
+                        if firstError == nil { firstError = error }
+                    }
+                }
+            }
+        }
+
+        if successfulFetches > 0 {
+            serverOnline = true
+        } else if let firstError {
+            Self.logger.warning(
+                "Queue summary refresh failed: \(firstError.localizedDescription, privacy: .public)"
+            )
+        }
+
+        isMenuBarSummaryLoading = false
+        isLoading = false
+        await finishDataLoad(allowPendingRefresh: firstError == nil)
     }
 
     // MARK: - Sync
@@ -267,10 +507,6 @@ class DashboardViewModel: ObservableObject {
         guard !syncInFlight else { return }
         syncInFlight = true
         if !silent { isSyncing = true }
-        defer {
-            syncInFlight = false
-            if !silent { isSyncing = false }
-        }
         var didSync = false
         do {
             _ = try await APIClient.shared.triggerSync(auto: true)
@@ -282,6 +518,85 @@ class DashboardViewModel: ObservableObject {
             lastBackgroundSyncAt = Date()
         }
         await loadAll()
+        syncInFlight = false
+        if !silent { isSyncing = false }
+        await runPendingQueueRefreshIfNeeded()
+    }
+
+    /// The hidden app only needs menu-bar summaries and limits after its
+    /// five-minute sync. Full charts are marked dirty and loaded when the user
+    /// opens the popover, avoiding nine endpoint requests while idle.
+    private func syncThenRefreshHidden(
+        menuBarSummaries summaries: MenuBarSummarySelection
+    ) async {
+        guard !syncInFlight, !hiddenRefreshInFlight else { return }
+        syncInFlight = true
+        hiddenRefreshInFlight = true
+        isSyncing = true
+        var didSync = false
+        do {
+            _ = try await APIClient.shared.triggerSync(auto: true)
+            didSync = true
+        } catch {
+            // Sync failure is non-fatal; visible cached data can still refresh.
+        }
+        if didSync {
+            lastBackgroundSyncAt = Date()
+        }
+        if isPopoverVisible {
+            pendingFullRefreshAfterHiddenRefresh = true
+        } else {
+            await refreshHiddenDataContents(menuBarSummaries: summaries)
+        }
+        syncInFlight = false
+        isSyncing = false
+        await finishHiddenRefresh()
+        await runPendingQueueRefreshIfNeeded()
+    }
+
+    private func refreshHiddenData(
+        menuBarSummaries summaries: MenuBarSummarySelection
+    ) async {
+        guard !hiddenRefreshInFlight else { return }
+        hiddenRefreshInFlight = true
+        await refreshHiddenDataContents(menuBarSummaries: summaries)
+        await finishHiddenRefresh()
+        await runPendingQueueRefreshIfNeeded()
+    }
+
+    private func refreshHiddenDataContents(
+        menuBarSummaries summaries: MenuBarSummarySelection
+    ) async {
+        needsFullRefreshOnPopoverOpen = true
+        serverOnline = await APIClient.shared.checkServerHealth()
+        guard serverOnline,
+              !pendingFullRefreshAfterHiddenRefresh,
+              !isPopoverVisible else { return }
+        if await WidgetSnapshotWriter.hasConfiguredWidgets() {
+            // Active desktop widgets are visible even while the popover is
+            // closed. Preserve their complete snapshot refresh; the cheaper
+            // summary-only path is for installations without configured
+            // widgets.
+            await loadAll()
+            return
+        }
+        // Publications observed while sync/health work was in flight are
+        // covered by the summary request that starts after this point. Events
+        // arriving once the request is active are queued by `isLoading` and
+        // replayed after it finishes.
+        pendingUsagePublications.removeAll()
+        await loadMenuBarSummaries(summaries, checkHealth: false)
+        guard !pendingFullRefreshAfterHiddenRefresh,
+              !isPopoverVisible else { return }
+        await refreshUsageLimits()
+    }
+
+    private func finishHiddenRefresh() async {
+        hiddenRefreshInFlight = false
+        guard pendingFullRefreshAfterHiddenRefresh else { return }
+        pendingFullRefreshAfterHiddenRefresh = false
+        guard isPopoverVisible else { return }
+        await loadAll()
     }
 
     func catchUpAfterWakeOrSessionActive(now: Date = Date()) async {
@@ -289,10 +604,19 @@ class DashboardViewModel: ObservableObject {
             now: now,
             lastSyncAt: lastBackgroundSyncAt
         )
+        let summaries = MenuBarDisplayPreferences.summarySelection(
+            for: MenuBarDisplayPreferences.read()
+        )
         if shouldSync {
-            await syncThenLoad()
-        } else {
+            if isPopoverVisible {
+                await syncThenLoad()
+            } else {
+                await syncThenRefreshHidden(menuBarSummaries: summaries)
+            }
+        } else if isPopoverVisible {
             await loadAll()
+        } else {
+            await refreshHiddenData(menuBarSummaries: summaries)
         }
     }
 
@@ -301,7 +625,19 @@ class DashboardViewModel: ObservableObject {
         syncInterval: TimeInterval = BackgroundRefreshPolicy.defaultPopoverOpenSyncInterval,
         loadInterval: TimeInterval = BackgroundRefreshPolicy.defaultPopoverOpenLoadInterval
     ) async {
-        guard !isLoading, !syncInFlight else { return }
+        if hiddenRefreshInFlight {
+            pendingFullRefreshAfterHiddenRefresh = true
+            return
+        }
+        if isLoading {
+            // A menu-only publication load does not cover the dashboard the
+            // user just opened. Queue one complete load behind it.
+            if isMenuBarSummaryLoading {
+                shouldReloadAfterCurrentLoad = true
+            }
+            return
+        }
+        guard !syncInFlight else { return }
         let shouldSync = BackgroundRefreshPolicy.shouldRunPopoverOpenSync(
             now: now,
             lastAttemptAt: lastPopoverOpenSyncAttemptAt,
@@ -311,7 +647,7 @@ class DashboardViewModel: ObservableObject {
         if shouldSync {
             lastPopoverOpenSyncAttemptAt = now
             await syncThenLoad(silent: true)
-        } else if BackgroundRefreshPolicy.shouldRunPopoverOpenLoad(
+        } else if needsFullRefreshOnPopoverOpen || BackgroundRefreshPolicy.shouldRunPopoverOpenLoad(
             now: now,
             lastRefreshedAt: lastRefreshed,
             loadInterval: loadInterval
@@ -333,6 +669,7 @@ class DashboardViewModel: ObservableObject {
         }
         isSyncing = false
         syncInFlight = false
+        await runPendingQueueRefreshIfNeeded()
     }
 
     // MARK: - Auto Refresh
@@ -351,10 +688,15 @@ class DashboardViewModel: ObservableObject {
                     lastSyncAt: self.lastBackgroundSyncAt,
                     syncInterval: syncInterval
                 )
+                let summaries = MenuBarDisplayPreferences.summarySelection(
+                    for: MenuBarDisplayPreferences.read()
+                )
                 if shouldSync {
-                    await self.syncThenLoad()
-                } else {
+                    await self.syncThenRefreshHidden(menuBarSummaries: summaries)
+                } else if self.isPopoverVisible {
                     await self.loadAll()
+                } else {
+                    await self.refreshHiddenData(menuBarSummaries: summaries)
                 }
             }
         }

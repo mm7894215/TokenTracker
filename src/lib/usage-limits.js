@@ -191,7 +191,9 @@ async function fetchClaudeUsageLimits(accessToken, { fetchImpl = fetch, maxAttem
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const res = await fetchImpl(url, { method: "GET", headers });
     if (res.status === 401) {
-      throw new Error("Claude token expired — run `claude` once to refresh.");
+      const err = new Error("Claude token expired — run `claude` once to refresh.");
+      err.code = "AUTH_EXPIRED";
+      throw err;
     }
     if ((res.status === 429 || res.status === 503) && attempt < maxAttempts - 1) {
       const ra = res.headers.get("retry-after");
@@ -2962,6 +2964,12 @@ async function fetchUsageLimitsUncached({
           : reason?.message || "Unknown error",
       };
     }
+    // An expired OAuth token means every future fetch fails the same way until the
+    // user runs `claude` again — serving the cache silently would make refresh look
+    // broken (issue #330). Flag it so the client can say why the bars stopped moving.
+    if (reason?.code === "AUTH_EXPIRED") {
+      claude = { ...claude, auth_action_required: "reauth" };
+    }
   }
 
   // Expose the active 429 cool-down expiry (if any) on the Claude object so the
@@ -3036,6 +3044,27 @@ async function fetchUsageLimitsUncached({
     zcode: withPlanLabel(zcode, zcode.plan_label, "ZCode"),
     opencodeGo: withPlanLabel(opencodeGo, opencodeGo?.plan_label, "OpenCode Go"),
   };
+
+  for (const [providerName, provider] of Object.entries(data)) {
+    if (providerName === "fetched_at" || !provider || typeof provider !== "object") continue;
+    const capturedAt = provider.cached_at || data.fetched_at;
+    const ageMs = Math.max(0, nowMs - Date.parse(capturedAt || ""));
+    const stale = provider.stale === true || (Number.isFinite(ageMs) && ageMs > 10 * 60 * 1000);
+    const explicitSource = typeof provider.source === "string" ? provider.source : "";
+    const source = explicitSource || (stale ? "disk-cache" : "provider-api");
+    const confidence = /estimate|inferred/i.test(source)
+      ? "inferred"
+      : /local|database|sqlite|cache/i.test(source)
+        ? "observed"
+        : "official";
+    provider.provenance = {
+      source,
+      confidence,
+      captured_at: capturedAt,
+      stale,
+      age_seconds: Number.isFinite(ageMs) ? Math.round(ageMs / 1000) : null,
+    };
+  }
 
   cache = { data, expiresAtMs: cacheExpiresAtMs(data, nowMs) };
   return data;

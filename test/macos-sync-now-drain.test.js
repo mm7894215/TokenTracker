@@ -21,8 +21,8 @@ test("macOS manual Sync now requests drain while launch sync stays lightweight",
   );
   assert.match(
     apiClient,
-    /if drain \{[\s\S]*Data\(#"\{"drain":true\}"#\.utf8\)[\s\S]*\} else if auto \{[\s\S]*Data\(#"\{"auto":true,"background":true\}"#\.utf8\)/,
-    "APIClient should send drain=true for manual sync and auto+background=true for background sync",
+    /if drain \{[\s\S]*Data\(#"\{"drain":true\}"#\.utf8\)[\s\S]*\} else if auto \{[\s\S]*Data\([\s\S]*#"\{"auto":true,"background":true,"allLocalSources":true,"publishAccount":true\}"#\.utf8/,
+    "APIClient should send drain=true for manual sync and publish all local sources for background sync",
   );
   assert.match(
     viewModel,

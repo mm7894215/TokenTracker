@@ -35,7 +35,7 @@ function buildSubscriptionItems(subscriptions) {
 }
 
 export function StatsPanel({
-  rankLabel,
+  startDate,
   streakDays,
   subscriptions = [],
   periodConversations,
@@ -47,7 +47,7 @@ export function StatsPanel({
   const placeholder = copy("shared.placeholder.short");
   const percentSymbol = copy("shared.unit.percent");
 
-  const rankValue = rankLabel ?? copy("identity_card.rank_placeholder");
+  const startDateValue = startDate ?? copy("identity_card.rank_placeholder");
   const streakDaysNum = Number.isFinite(Number(streakDays)) ? Number(streakDays) : 0;
   const streakValue = streakDaysNum
     ? copy("identity_card.streak_value", { days: streakDaysNum })
@@ -76,39 +76,39 @@ export function StatsPanel({
   return (
     <Card className={`h-full ${className}`}>
         {/* Rolling Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <div className="flex flex-col items-center justify-center px-2 py-2 bg-oai-gray-50 dark:bg-oai-gray-800 rounded-lg">
+        <div className="grid grid-cols-2 lg:grid-cols-2 xl:grid-cols-4 gap-2">
+          <div className="min-w-0 flex flex-col items-center justify-center px-2 py-2 bg-oai-gray-50 dark:bg-oai-gray-800 rounded-lg">
             <span
               title={formatTokensTooltip(rolling?.last_7d?.totals?.billable_total_tokens)}
-              className="text-sm font-semibold text-oai-black dark:text-oai-white tabular-nums"
+              className="w-full min-w-0 truncate text-center text-sm font-semibold text-oai-black dark:text-oai-white tabular-nums"
             >
               {formatCountValue(rolling?.last_7d?.totals?.billable_total_tokens)}
             </span>
-            <span className="text-[10px] text-oai-gray-400 dark:text-oai-gray-400 mt-0.5 whitespace-nowrap">{rollingLabels.last7d}</span>
+            <span className="w-full min-w-0 truncate text-center text-[10px] text-oai-gray-400 dark:text-oai-gray-400 mt-0.5 whitespace-nowrap">{rollingLabels.last7d}</span>
           </div>
-          <div className="flex flex-col items-center justify-center px-2 py-2 bg-oai-gray-50 dark:bg-oai-gray-800 rounded-lg">
+          <div className="min-w-0 flex flex-col items-center justify-center px-2 py-2 bg-oai-gray-50 dark:bg-oai-gray-800 rounded-lg">
             <span
               title={formatTokensTooltip(rolling?.last_30d?.totals?.billable_total_tokens)}
-              className="text-sm font-semibold text-oai-black dark:text-oai-white tabular-nums"
+              className="w-full min-w-0 truncate text-center text-sm font-semibold text-oai-black dark:text-oai-white tabular-nums"
             >
               {formatCountValue(rolling?.last_30d?.totals?.billable_total_tokens)}
             </span>
-            <span className="text-[10px] text-oai-gray-400 dark:text-oai-gray-400 mt-0.5 whitespace-nowrap">{rollingLabels.last30d}</span>
+            <span className="w-full min-w-0 truncate text-center text-[10px] text-oai-gray-400 dark:text-oai-gray-400 mt-0.5 whitespace-nowrap">{rollingLabels.last30d}</span>
           </div>
-          <div className="flex flex-col items-center justify-center px-2 py-2 bg-oai-gray-50 dark:bg-oai-gray-800 rounded-lg">
+          <div className="min-w-0 flex flex-col items-center justify-center px-2 py-2 bg-oai-gray-50 dark:bg-oai-gray-800 rounded-lg">
             <span
               title={formatTokensTooltip(rolling?.last_30d?.avg_per_active_day)}
-              className="text-sm font-semibold text-oai-black dark:text-oai-white tabular-nums"
+              className="w-full min-w-0 truncate text-center text-sm font-semibold text-oai-black dark:text-oai-white tabular-nums"
             >
               {formatCountValue(rolling?.last_30d?.avg_per_active_day)}
             </span>
-            <span className="text-[10px] text-oai-gray-400 dark:text-oai-gray-400 mt-0.5 whitespace-nowrap">{rollingLabels.avg}</span>
+            <span className="w-full min-w-0 truncate text-center text-[10px] text-oai-gray-400 dark:text-oai-gray-400 mt-0.5 whitespace-nowrap">{rollingLabels.avg}</span>
           </div>
-          <div className="flex flex-col items-center justify-center px-2 py-2 bg-oai-gray-50 dark:bg-oai-gray-800 rounded-lg">
-            <span className="text-sm font-semibold text-oai-black dark:text-oai-white tabular-nums">
+          <div className="min-w-0 flex flex-col items-center justify-center px-2 py-2 bg-oai-gray-50 dark:bg-oai-gray-800 rounded-lg">
+            <span className="w-full min-w-0 truncate text-center text-sm font-semibold text-oai-black dark:text-oai-white tabular-nums">
               {formatCountValue(periodConversations)}
             </span>
-            <span className="text-[10px] text-oai-gray-400 dark:text-oai-gray-400 mt-0.5 whitespace-nowrap">{rollingLabels.convs}</span>
+            <span className="w-full min-w-0 truncate text-center text-[10px] text-oai-gray-400 dark:text-oai-gray-400 mt-0.5 whitespace-nowrap">{rollingLabels.convs}</span>
           </div>
         </div>
 
@@ -160,7 +160,7 @@ export function StatsPanel({
         <div className="mt-4 pt-3 border-t border-oai-gray-100 dark:border-oai-gray-800 flex items-center justify-between text-xs text-oai-gray-400 dark:text-oai-gray-400">
           <div className="flex items-center gap-1.5">
             <span>{copy("identity_card.rank_label")}</span>
-            <span className="text-oai-gray-500 dark:text-oai-gray-300 tabular-nums">{rankValue}</span>
+            <span className="text-oai-gray-500 dark:text-oai-gray-300 tabular-nums">{startDateValue}</span>
           </div>
           <div className="flex items-center gap-1">
             <span>{copy("identity_card.streak_label")}</span>

@@ -60,6 +60,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem _quitItem;
 
     private UsagePoller.UsageStats? _lastStats;
+    private string? _lastLimitsJson;
     private string _localePreference = NativeLocalization.CurrentPreference;
     private string _themePreference = NativeTheme.CurrentPreference;
     private TrayStrings _strings = TrayStrings.For(NativeLocalization.CurrentResolvedLocale);
@@ -211,6 +212,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _server.SyncStarted += OnSyncStarted;
         _server.SyncCompleted += OnSyncCompleted;
         _poller.StatsUpdated += OnStatsUpdated;
+        _poller.LimitsUpdated += OnLimitsUpdated;
         _refreshTimer.Tick += (_, _) => RefreshSummary();
         _syncTimer.Tick += (_, _) => TriggerBackgroundSync();
         _refreshTimer.Start();
@@ -233,6 +235,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 EnsurePet();
                 _petWindow!.ShowPet();
                 _poller.IncludeRichStats = true;   // gather the pet's quip-pool stats
+                _poller.IncludeLimits = true;
                 UpdatePetMenuText();
                 RefreshSummary();
             }));
@@ -416,6 +419,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         // The pet's quip pool needs the heatmap + model-breakdown stats; only gather them
         // (two extra calls per poll) while the pet is actually on screen.
         _poller.IncludeRichStats = _petWindow.IsVisible;
+        _poller.IncludeLimits = _petWindow.IsVisible;
         if (_petWindow.IsVisible)
         {
             RefreshSummary();      // push the current numbers right away
@@ -492,26 +496,37 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private static IEnumerable<(string Id, string Name)> InstalledCustomPets()
     {
-        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "pets");
-        if (!Directory.Exists(root)) yield break;
-        foreach (var directory in Directory.EnumerateDirectories(root))
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var root = Path.Combine(home, ".tokentracker", "pets");
+        var legacyRoot = Path.Combine(home, ".codex", "pets");
+        var migrationComplete = File.Exists(Path.Combine(root, ".migrated-v1"));
+        // The tray can build its menu before the embedded Node server migrates
+        // legacy packages. Keep a read-only fallback until Node writes the marker.
+        var roots = migrationComplete ? new[] { root } : new[] { root, legacyRoot };
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var sourceRoot in roots)
         {
-            var id = Path.GetFileName(directory).ToLowerInvariant();
-            if (PetWindow.NormalizeCharacter(id) != id || id is PetWindow.CharacterClawd or PetWindow.CharacterSprout or PetWindow.CharacterByte or PetWindow.CharacterEmber) continue;
-            var manifestPath = Path.Combine(directory, "pet.json");
-            var spritesheetPath = Path.Combine(directory, "spritesheet.webp");
-            if (!File.Exists(manifestPath) || !File.Exists(spritesheetPath)) continue;
-            string name = id;
-            try
+            if (!Directory.Exists(sourceRoot)) continue;
+            foreach (var directory in Directory.EnumerateDirectories(sourceRoot))
             {
-                var manifest = JsonNode.Parse(File.ReadAllText(manifestPath))?.AsObject();
-                if (manifest?["id"]?.GetValue<string>()?.ToLowerInvariant() != id) continue;
-                name = manifest?["displayName"]?.GetValue<string>()?.Trim() is { Length: > 0 } displayName
-                    ? displayName
-                    : id;
+                var id = Path.GetFileName(directory).ToLowerInvariant();
+                if (seen.Contains(id) || PetWindow.NormalizeCharacter(id) != id || id is PetWindow.CharacterClawd or PetWindow.CharacterSprout or PetWindow.CharacterByte or PetWindow.CharacterEmber) continue;
+                var manifestPath = Path.Combine(directory, "pet.json");
+                var spritesheetPath = Path.Combine(directory, "spritesheet.webp");
+                if (!File.Exists(manifestPath) || !File.Exists(spritesheetPath)) continue;
+                string name = id;
+                try
+                {
+                    var manifest = JsonNode.Parse(File.ReadAllText(manifestPath))?.AsObject();
+                    if (manifest?["id"]?.GetValue<string>()?.ToLowerInvariant() != id) continue;
+                    name = manifest?["displayName"]?.GetValue<string>()?.Trim() is { Length: > 0 } displayName
+                        ? displayName
+                        : id;
+                }
+                catch { continue; }
+                seen.Add(id);
+                yield return (id, name);
             }
-            catch { continue; }
-            yield return (id, name);
         }
     }
 
@@ -564,6 +579,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _petWindow.HidePet();
         _petWindow.StoreVisible(false);
         _poller.IncludeRichStats = false;   // stop gathering the pet-only stats
+        _poller.IncludeLimits = false;
         UpdatePetMenuText();
         PushDashboardPetSettings();
     }
@@ -582,6 +598,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _dashboard.ThemeChanged += () => PostToUi(RefreshThemeFromDashboard);
         _dashboard.PetSettingsRequested += () => PostToUi(PushDashboardPetSettings);
         _dashboard.PetSettingChanged += (key, value) => PostToUi(() => ApplyDashboardPetSetting(key, value));
+        _dashboard.NotificationRequested += (title, body) => PostToUi(() =>
+            _trayIcon.ShowBalloonTip(7000, title, body, ToolTipIcon.Warning));
     }
 
     private void ApplyDashboardPetSetting(string key, string? value)
@@ -595,6 +613,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
                     _petWindow!.ShowPet();
                     _petWindow.StoreVisible(true);
                     _poller.IncludeRichStats = true;
+                    _poller.IncludeLimits = true;
                     _poller.RefreshNow();
                 }
                 else
@@ -602,6 +621,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
                     _petWindow!.HidePet();
                     _petWindow.StoreVisible(false);
                     _poller.IncludeRichStats = false;
+                    _poller.IncludeLimits = false;
                 }
                 UpdatePetMenuText();
                 // Echo the applied state back; the size/character cases push inside
@@ -808,6 +828,17 @@ internal sealed class TrayApplicationContext : ApplicationContext
         PostToUi(RefreshSummary);
     }
 
+    private void OnLimitsUpdated(string limitsJson)
+    {
+        // The JSON is parsed and safely re-serialized by PetWindow before it is
+        // sent into WebView2; this callback only crosses the thread boundary.
+        PostToUi(() =>
+        {
+            _lastLimitsJson = limitsJson;
+            _petWindow?.ApplyLimits(limitsJson);
+        });
+    }
+
     /// <summary>Render the today summary into the menu + tooltip, in the user's currency.</summary>
     private async void RefreshSummary()
     {
@@ -823,6 +854,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         // (connection state is owned by OnServerStatusChanged).
         _petWindow?.ApplyCurrency(symbol, rate);
         _petWindow?.ApplyLocale(NativeLocalization.ResolveLocale(_localePreference));
+        _petWindow?.ApplyLimits(_lastLimitsJson);
 
         if (_lastStats is not { } s)
         {

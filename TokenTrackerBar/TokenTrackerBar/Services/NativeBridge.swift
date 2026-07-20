@@ -3,6 +3,7 @@ import Combine
 import ServiceManagement
 import WebKit
 import WidgetKit
+import UserNotifications
 
 /// Bridges menu-bar app preferences and actions to the embedded dashboard WebView.
 ///
@@ -104,6 +105,22 @@ final class NativeBridge {
             if let key = dict["key"] as? String {
                 applyPetSetting(key: key, value: dict["value"])
             }
+        case "notify":
+            if let title = dict["title"] as? String,
+               let body = dict["body"] as? String {
+                postNotification(
+                    title: String(title.prefix(120)),
+                    body: String(body.prefix(500)),
+                    identifier: (dict["id"] as? String).map { String($0.prefix(160)) }
+                )
+            }
+        case "getNotificationStatus":
+            syncNotificationPermission(requestIfNeeded: false)
+        case "requestNotificationPermission":
+            // Sent when the user switches limit alerts on, so the system
+            // permission dialog appears in direct response to that gesture
+            // instead of surprising them when the first alert fires.
+            syncNotificationPermission(requestIfNeeded: true)
         case "action":
             if let name = dict["name"] as? String {
                 if name == "saveImageToDownloads" {
@@ -119,6 +136,50 @@ final class NativeBridge {
             }
         default:
             break
+        }
+    }
+
+    private func syncNotificationPermission(requestIfNeeded: Bool) {
+        let center = UNUserNotificationCenter.current()
+        Task {
+            var settings = await center.notificationSettings()
+            if requestIfNeeded && settings.authorizationStatus == .notDetermined {
+                _ = try? await center.requestAuthorization(options: [.alert, .sound])
+                settings = await center.notificationSettings()
+            }
+            let status: String
+            switch settings.authorizationStatus {
+            case .authorized, .provisional:
+                status = "granted"
+            case .denied:
+                status = "denied"
+            default:
+                status = "notDetermined"
+            }
+            let js = "window.dispatchEvent(new CustomEvent('native:notificationPermission', { detail: { status: \"\(status)\" } }));"
+            webView?.evaluateJavaScript(js, completionHandler: nil)
+        }
+    }
+
+    private func postNotification(title: String, body: String, identifier: String?) {
+        let center = UNUserNotificationCenter.current()
+        Task {
+            let settings = await center.notificationSettings()
+            var allowed = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
+            if settings.authorizationStatus == .notDetermined {
+                allowed = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+            }
+            guard allowed else { return }
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            content.sound = .default
+            let request = UNNotificationRequest(
+                identifier: identifier ?? UUID().uuidString,
+                content: content,
+                trigger: nil
+            )
+            try? await center.add(request)
         }
     }
 

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
@@ -54,10 +55,14 @@ internal sealed class PetWindow : Window
     private decimal _curRate = 1m;
     private string _locale = "en";
     private bool _syncing;
+    private JsonNode? _limits;
     private string _character = CurrentCharacter;
     private UsagePoller.UsageStats _stats;
     private bool _connected = true;
+    private double _bubbleBand = MinBubbleBand;
+    private bool _isAdjustingBubbleLayout;
     private bool _isDragging;
+    private double _lastDragLeft;
     private bool _isAnimating;
     private EventHandler? _renderHandler;
     private System.Diagnostics.Stopwatch? _animStopwatch;
@@ -120,7 +125,13 @@ internal sealed class PetWindow : Window
             Interval = TimeSpan.FromMilliseconds(500),
         };
         _saveTimer.Tick += (_, _) => { _saveTimer.Stop(); SavePlacement(); };
-        LocationChanged += (_, _) => { _saveTimer.Stop(); _saveTimer.Start(); };
+        LocationChanged += (_, _) =>
+        {
+            if (_isAdjustingBubbleLayout) return;
+            UpdateDragDirectionFromWindowMove();
+            _saveTimer.Stop();
+            _saveTimer.Start();
+        };
 
         // WebView2 does not reliably deliver mouse-leave to this transparent, never-
         // activated topmost window, so the page's own hover detection sticks. Poll the
@@ -164,12 +175,12 @@ internal sealed class PetWindow : Window
             // The WebView2 surface is rectangular even though most of it is transparent.
             // Keep only the lower centered sprite square mouse-active; clicks on the
             // bubble band or horizontal padding should pass through to whatever is behind.
-            double spriteSize = SpriteSizeFor(ActualWidth, ActualHeight);
+            double spriteSize = SpriteSizeFor(ActualWidth, ActualHeight, _bubbleBand);
             double pad = Math.Max(8, spriteSize * 0.08);
             double left = (ActualWidth - spriteSize) / 2 - pad;
             double right = left + spriteSize + (pad * 2);
-            double top = BubbleBand - pad;
-            double bottom = Math.Min(ActualHeight, BubbleBand + spriteSize + pad);
+            double top = _bubbleBand - pad;
+            double bottom = Math.Min(ActualHeight, _bubbleBand + spriteSize + pad);
 
             return p.X >= left && p.X <= right && p.Y >= top && p.Y <= bottom;
         }
@@ -254,12 +265,26 @@ internal sealed class PetWindow : Window
 
             switch (msg)
             {
+                case string bubbleMessage when bubbleMessage.StartsWith("pet:bubble-height:", StringComparison.Ordinal):
+                {
+                    var rawHeight = bubbleMessage["pet:bubble-height:".Length..];
+                    if (double.TryParse(rawHeight, NumberStyles.Float, CultureInfo.InvariantCulture, out var height))
+                    {
+                        ApplyBubbleBand(height);
+                    }
+                    break;
+                }
                 case "pet:drag":
+                case "pet:drag-left":
+                case "pet:drag-right":
+                {
                     // Hand the press off to the OS so the borderless window moves natively.
                     // finally guarantees _isDragging resets even if the modal move loop
                     // throws; a stuck true would permanently disable hover/click-through
                     // ticks and placement saves.
                     _isDragging = true;
+                    _lastDragLeft = Left;
+                    PushDragState(msg == "pet:drag-left" ? "running-left" : "running-right");
                     try
                     {
                         StopEdgeAnimation();
@@ -269,6 +294,7 @@ internal sealed class PetWindow : Window
                     finally
                     {
                         _isDragging = false;
+                        PushDragState(null);
                     }
                     // Settle placement synchronously, right here on the UI thread, before
                     // any DispatcherTimer tick can run. Deferring to the 500ms _saveTimer
@@ -280,6 +306,7 @@ internal sealed class PetWindow : Window
                     _saveTimer.Stop();
                     SavePlacement();
                     break;
+                }
                 case "pet:context-menu":
                     ContextMenuRequested?.Invoke();
                     break;
@@ -319,6 +346,8 @@ internal sealed class PetWindow : Window
 
     public void HidePet()
     {
+        _isDragging = false;
+        PushDragState(null);
         _clickThroughTimer.Stop();
         StopEdgeAnimation();
         SetClickThrough(false);
@@ -365,7 +394,9 @@ internal sealed class PetWindow : Window
         try
         {
             var tl = PointToScreen(new System.Windows.Point(0, 0));
-            var br = PointToScreen(new System.Windows.Point(ActualWidth, ActualHeight));
+            double pad = Math.Max(8, SpriteSize * 0.08);
+            double spriteTop = tl.Y + _bubbleBand - pad;
+            double spriteBottom = tl.Y + _bubbleBand + SpriteSize + pad;
             if (_miniMode)
             {
                 // Anchor the hover test to the *target* geometry (both peek and revealed
@@ -374,15 +405,21 @@ internal sealed class PetWindow : Window
                 // let the inside/outside result flip against the animating edge and re-
                 // toggle _isRevealed, cancelling and restarting the slide — the retract
                 // stutter. Using _isRevealed as the reference gives stable hysteresis:
-                // tucked → only the peek strip is "inside"; revealed → the full window is.
+                // tucked → only the peek strip is "inside"; revealed → the full sprite is.
                 var wa = SystemParameters.WorkArea;
-                double leftX = _isRevealed ? wa.Right - Width : TuckedLeft(wa.Right);
+                double targetLeft = _isRevealed ? wa.Right - Width : TuckedLeft(wa.Right);
+                double leftX = targetLeft + SpriteLeftInset - pad;
+                double spriteRight = targetLeft + SpriteLeftInset + SpriteSize + pad;
                 double rightLimit = wa.Right + EdgeTolerance; // cursor clamps at the screen edge
-                inside = p.X >= leftX && p.X < rightLimit && p.Y >= tl.Y && p.Y < br.Y;
+                inside = p.X >= leftX && p.X < Math.Min(spriteRight, rightLimit)
+                    && p.Y >= spriteTop && p.Y < spriteBottom;
             }
             else
             {
-                inside = p.X >= tl.X && p.X < br.X && p.Y >= tl.Y && p.Y < br.Y;
+                double spriteLeft = tl.X + SpriteLeftInset - pad;
+                double spriteRight = tl.X + SpriteLeftInset + SpriteSize + pad;
+                inside = p.X >= spriteLeft && p.X < spriteRight
+                    && p.Y >= spriteTop && p.Y < spriteBottom;
             }
         }
         catch { return; }   // not laid out yet
@@ -392,7 +429,7 @@ internal sealed class PetWindow : Window
         // matching the Codex Pets cursor preview and the macOS native companion.
         try
         {
-            var center = PointToScreen(new System.Windows.Point(ActualWidth / 2, (BubbleBand + ActualHeight) / 2));
+            var center = PointToScreen(new System.Windows.Point(ActualWidth / 2, (_bubbleBand + ActualHeight) / 2));
             double dx = p.X - center.X;
             double dy = p.Y - center.Y; // screen coordinates grow downward
             double degrees = (Math.Atan2(dx, -dy) * 180 / Math.PI + 360) % 360;
@@ -435,6 +472,69 @@ internal sealed class PetWindow : Window
             _ = _webView.CoreWebView2.ExecuteScriptAsync(
                 $"window.__ttPetHover={(hovering ? "true" : "false")};" +
                 "window.dispatchEvent(new Event('pet:hover'));");
+        }
+        catch { /* page mid-navigation */ }
+    }
+
+    private void ApplyBubbleBand(double requestedHeight)
+    {
+        if (!double.IsFinite(requestedHeight)) return;
+
+        var baseHeight = BaseHeightFor(CurrentSize);
+        var spriteAreaHeight = baseHeight - MinBubbleBand;
+        var workArea = SystemParameters.WorkArea;
+        var maxBand = Math.Max(MinBubbleBand, workArea.Height - spriteAreaHeight);
+        var nextBand = Math.Clamp(Math.Ceiling(requestedHeight), MinBubbleBand, maxBand);
+        if (Math.Abs(nextBand - _bubbleBand) < 0.5) return;
+
+        var oldBottom = Top + Height;
+        _isAdjustingBubbleLayout = true;
+        try
+        {
+            _bubbleBand = nextBand;
+            Height = baseHeight + (_bubbleBand - MinBubbleBand);
+            if (!double.IsNaN(oldBottom))
+            {
+                Top = Math.Max(workArea.Top, Math.Min(oldBottom - Height, workArea.Bottom - Height));
+            }
+        }
+        finally { _isAdjustingBubbleLayout = false; }
+        PushBubbleBand();
+        if (_miniMode) ApplyEdgePlacement(animated: false);
+    }
+
+    private void PushBubbleBand()
+    {
+        if (!_coreReady) return;
+        try
+        {
+            var value = _bubbleBand.ToString(CultureInfo.InvariantCulture);
+            _ = _webView.CoreWebView2.ExecuteScriptAsync(
+                $"window.__ttPetBubbleBand={value};" +
+                "window.dispatchEvent(new Event('pet:bubble-band'));");
+        }
+        catch { /* page mid-navigation */ }
+    }
+
+    private void UpdateDragDirectionFromWindowMove()
+    {
+        if (!_isDragging || double.IsNaN(Left)) return;
+        var deltaX = Left - _lastDragLeft;
+        if (Math.Abs(deltaX) < 0.5) return;
+        _lastDragLeft = Left;
+        PushDragState(deltaX < 0 ? "running-left" : "running-right");
+    }
+
+    private void PushDragState(string? state)
+    {
+        if (!_coreReady) return;
+        try
+        {
+            var value = System.Text.Json.JsonSerializer.Serialize(state);
+            _ = _webView.CoreWebView2.ExecuteScriptAsync(
+                $"window.__ttPetDragState={value};" +
+                "window.dispatchEvent(new Event('pet:drag-state'));" +
+                (state is null ? "window.dispatchEvent(new Event('pet:drag-end'));" : ""));
         }
         catch { /* page mid-navigation */ }
     }
@@ -544,6 +644,21 @@ internal sealed class PetWindow : Window
         PushContext();
     }
 
+    /// <summary>Push the native usage-limits snapshot without letting raw JSON become executable script.</summary>
+    public void ApplyLimits(string? json)
+    {
+        try
+        {
+            _limits = string.IsNullOrWhiteSpace(json) ? null : JsonNode.Parse(json);
+        }
+        catch
+        {
+            // Keep the last good snapshot if a provider returns malformed data.
+            return;
+        }
+        PushContext();
+    }
+
     /// <summary>
     /// Push the usage stats (the SAME numbers the tray's UsagePoller fetched) so the
     /// pet's bubble + animation tier + data-rich quip pool always match the tray exactly
@@ -588,6 +703,8 @@ internal sealed class PetWindow : Window
         var character = System.Text.Json.JsonSerializer.Serialize(_character);
         var syncing = _syncing ? "true" : "false";
         var cost = _stats.TodayCostUsd.ToString(inv);
+        var limitsJson = _limits?.ToJsonString() ?? "null";
+        var bubbleBand = _bubbleBand.ToString(inv);
         var connected = _connected ? "true" : "false";
         var statsJson = System.Text.Json.JsonSerializer.Serialize(new
         {
@@ -616,6 +733,8 @@ internal sealed class PetWindow : Window
                 $"window.__ttPetTokens={_stats.TodayTokens};" +
                 $"window.__ttPetCostUsd={cost};" +
                 $"window.__ttPetStats={statsJson};" +
+                $"window.__ttPetLimits={limitsJson};" +
+                $"window.__ttPetBubbleBand={bubbleBand};" +
                 $"window.__ttPetConnected={connected};" +
                 $"window.__ttPetMiniMode={mini};" +
                 "window.dispatchEvent(new Event('pet:currency'));" +
@@ -624,6 +743,8 @@ internal sealed class PetWindow : Window
                 "window.dispatchEvent(new Event('pet:look'));" +
                 "window.dispatchEvent(new Event('pet:syncing'));" +
                 "window.dispatchEvent(new Event('pet:usage'));" +
+                "window.dispatchEvent(new Event('pet:limits'));" +
+                "window.dispatchEvent(new Event('pet:bubble-band'));" +
                 "window.dispatchEvent(new Event('pet:connected'));" +
                 "window.dispatchEvent(new Event('pet:minimode'));");
         }
@@ -635,8 +756,10 @@ internal sealed class PetWindow : Window
     {
         var normalized = NormalizeSize(size);
         var (w, h) = SizeDimensions(normalized);
+        var oldBottom = Top + Height;
         Width = w;
-        Height = h;
+        Height = h + (_bubbleBand - MinBubbleBand);
+        if (!double.IsNaN(oldBottom)) Top = oldBottom - Height;
         if (_miniMode) ApplyEdgePlacement(animated: false);
         WriteSettings(s => s["PetSize"] = normalized);
     }
@@ -756,31 +879,45 @@ internal sealed class PetWindow : Window
         };
     }
 
-    // Height includes a ~46px top band reserved for the hover/quip bubble (pet.jsx
-    // BUBBLE_BAND) so the bubble floats above Clawd instead of overlapping it. The band
-    // is sized for a two-line bubble (the data-rich quips wrap), and the widths are a
-    // little roomier than the sprite needs so longer lines have horizontal space. The
-    // sprite tracks (height − band), so these heights keep it the same visual size as
-    // before the taller band.
-    private const double BubbleBand = 46;
+    // The bubble starts at the macOS-parity compact height, then expands upward when
+    // the WebView reports taller content. Keeping this value separate from the preset's
+    // sprite area prevents dynamic rows from resizing the pet itself.
+    private const double MinBubbleBand = 138;
+    // The WebView surface must be wider than the 340px bubble so its border and
+    // shadow never hit the layered-window edge. The extra area remains transparent
+    // and click-through; the sprite stays centered at its original visual size.
+    private const double WindowWidth = 400;
 
     // Keep the native edge geometry in lockstep with pet.jsx:sizeFor(). The window is
     // wider than the sprite so the bubble has room; hiding the window by a fixed number
     // of pixels would therefore hide only transparent horizontal padding.
-    private static double SpriteSizeFor(double width, double height) => Math.Max(
+    private static double SpriteSizeFor(double width, double height, double bubbleBand) => Math.Max(
         40,
-        Math.Min(width, height - BubbleBand) - 8);
-    private double SpriteSize => SpriteSizeFor(Width, Height);
+        Math.Min(width, height - bubbleBand) - 8);
+    private double SpriteSize => SpriteSizeFor(Width, Height, _bubbleBand);
     private double SpriteLeftInset => (Width - SpriteSize) / 2;
+    private double SpriteRight(double windowLeft)
+        => windowLeft + SpriteLeftInset + SpriteSize;
 
     private double TuckedLeft(double workAreaRight)
         => workAreaRight - SpriteLeftInset - EdgePeek;
 
     private static (double Width, double Height) SizeDimensions(string size) => size switch
     {
-        SizeSmall => (150, 138),
-        SizeLarge => (210, 194),
-        _ => (180, 162),
+        SizeSmall => (WindowWidth, 230),
+        SizeLarge => (WindowWidth, 286),
+        _ => (WindowWidth, 254),
+    };
+
+    private static double BaseHeightFor(string size) => SizeDimensions(size).Height;
+
+    // v0.81.2 persisted the top-left of the old narrow host. Use its width once
+    // when migrating to center-based placement so the visible sprite does not jump.
+    private static double LegacyWindowWidth(string size) => size switch
+    {
+        SizeSmall => 150,
+        SizeLarge => 210,
+        _ => 180,
     };
 
     /// <summary>The persisted size choice (defaults to medium).</summary>
@@ -823,12 +960,23 @@ internal sealed class PetWindow : Window
         {
             if (File.Exists(SettingsPath)
                 && JsonNode.Parse(File.ReadAllText(SettingsPath))?.AsObject() is { } s
-                && s["PetX"]?.GetValue<double>() is { } x
-                && s["PetY"]?.GetValue<double>() is { } y
-                && IsOnScreen(x, y))
+                && s["PetY"]?.GetValue<double>() is { } y)
             {
-                left = x;
-                top = y;
+                if (s["PetCenterX"]?.GetValue<double>() is { } centerX
+                    && IsOnScreen(centerX - Width / 2, y, Width, Height))
+                {
+                    left = ClampXToVirtualScreen(centerX - Width / 2, Width);
+                    top = ClampYToVirtualScreen(y, Height);
+                }
+                else if (s["PetX"]?.GetValue<double>() is { } legacyX)
+                {
+                    double migratedLeft = legacyX - (Width - LegacyWindowWidth(CurrentSize)) / 2;
+                    if (IsOnScreen(legacyX, y, LegacyWindowWidth(CurrentSize), Height))
+                    {
+                        left = ClampXToVirtualScreen(migratedLeft, Width);
+                        top = ClampYToVirtualScreen(y, Height);
+                    }
+                }
             }
         }
         catch { /* fall back to the default bottom-right anchor */ }
@@ -850,7 +998,7 @@ internal sealed class PetWindow : Window
 
         var wa = SystemParameters.WorkArea;
         // Snap to right edge of screen
-        if (x >= wa.Right - Width - SnapMargin)
+        if (SpriteRight(x) >= wa.Right - SnapMargin)
         {
             if (!_miniMode)
             {
@@ -872,7 +1020,12 @@ internal sealed class PetWindow : Window
                 // Return to normal layout y
                 Left = x;
             }
-            WriteSettings(s => { s["PetX"] = x; s["PetY"] = y; });
+            WriteSettings(s =>
+            {
+                s["PetX"] = x;
+                s["PetCenterX"] = x + Width / 2;
+                s["PetY"] = y;
+            });
         }
     }
 
@@ -953,13 +1106,28 @@ internal sealed class PetWindow : Window
 
     /// <summary>Keep the saved top-left within the virtual desktop (guards against a
     /// monitor that was unplugged since the last save).</summary>
-    private static bool IsOnScreen(double x, double y)
+    private static bool IsOnScreen(double x, double y, double width, double height)
     {
         double minX = SystemParameters.VirtualScreenLeft;
         double minY = SystemParameters.VirtualScreenTop;
         double maxX = minX + SystemParameters.VirtualScreenWidth;
         double maxY = minY + SystemParameters.VirtualScreenHeight;
-        return x >= minX - 8 && y >= minY - 8 && x <= maxX - 32 && y <= maxY - 32;
+        return x + width >= minX + 32 && y + height >= minY + 32
+            && x <= maxX - 32 && y <= maxY - 32;
+    }
+
+    private static double ClampXToVirtualScreen(double x, double width)
+    {
+        double minX = SystemParameters.VirtualScreenLeft;
+        double maxX = minX + SystemParameters.VirtualScreenWidth - width;
+        return Math.Max(minX, Math.Min(x, Math.Max(minX, maxX)));
+    }
+
+    private static double ClampYToVirtualScreen(double y, double height)
+    {
+        double minY = SystemParameters.VirtualScreenTop;
+        double maxY = minY + SystemParameters.VirtualScreenHeight - height;
+        return Math.Max(minY, Math.Min(y, Math.Max(minY, maxY)));
     }
 
     private static void WriteSettings(Action<JsonObject> mutate)

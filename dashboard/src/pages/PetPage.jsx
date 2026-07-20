@@ -1,10 +1,18 @@
-import React, { useEffect, useRef, useState } from "react";
-import { FileArchive, Link2, Loader2, MonitorUp, Trash2, Upload, Zap } from "lucide-react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Dialog } from "@base-ui/react/dialog";
+import { FileArchive, Link2, Loader2, MonitorUp, Trash2, Upload, X, Zap } from "lucide-react";
 import { ToggleSwitch, SegmentedControl } from "../components/settings/Controls.jsx";
+import { ProviderIcon } from "../ui/dashboard/components/ProviderIcon.jsx";
 import { usePetSettings } from "../hooks/use-pet-settings.js";
 import { usePetCatalog } from "../hooks/use-pet-catalog.js";
 import { useNativeSettings } from "../hooks/use-native-settings.js";
-import { importPetPackage, installPetFromUrl, removePet } from "../lib/pets-api.js";
+import {
+  importCodexPets,
+  importPetPackage,
+  installPetFromUrl,
+  listCodexImportable,
+  removePet,
+} from "../lib/pets-api.js";
 import { copy } from "../lib/copy";
 import { cn } from "../lib/cn";
 import { ClawdAnimated } from "../ui/foundation/ClawdAnimated.jsx";
@@ -181,12 +189,101 @@ function PetStage({ pet, state, onStateChange }) {
   );
 }
 
+// Modal picker showing Codex pets as sprite-preview cards (same visual language as
+// "Choose your companion"), with multi-select import.
+function CodexImportModal({ pets: importable, busy, error, onImport, onClose }) {
+  const [picked, setPicked] = useState(() => new Set());
+
+  const togglePick = (id) => setPicked((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const allPicked = importable.length !== 0 && picked.size === importable.length;
+
+  return (
+    <Dialog.Root
+      open
+      onOpenChange={(open) => {
+        if (!open && !busy) onClose();
+      }}
+    >
+      <Dialog.Portal>
+        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/15 backdrop-blur-md dark:bg-black/40 animate-tt-fade-in" />
+        <Dialog.Viewport className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-6">
+          <Dialog.Popup className="relative flex max-h-[86vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-oai-gray-200/50 bg-white/95 shadow-2xl backdrop-blur-2xl dark:border-white/10 dark:bg-oai-gray-900/95 animate-tt-modal">
+        <div className="flex items-start justify-between gap-3 border-b border-oai-gray-200/70 px-5 py-4 dark:border-oai-gray-800">
+          <div className="min-w-0">
+            <Dialog.Title className="text-base font-semibold">{copy("pet.codex.title")}</Dialog.Title>
+            <Dialog.Description className="mt-0.5 text-xs leading-relaxed text-oai-gray-500 dark:text-oai-gray-400">
+              {copy("pet.codex.subtitle")}
+            </Dialog.Description>
+          </div>
+          <Dialog.Close
+            type="button"
+            disabled={busy}
+            aria-label={copy("pet.codex.close")}
+            className="shrink-0 rounded-full border border-oai-gray-200/60 p-1.5 text-oai-gray-500 transition-colors hover:text-oai-black disabled:opacity-40 dark:border-oai-gray-800/60 dark:text-oai-gray-400 dark:hover:text-white"
+          >
+            <X size={16} />
+          </Dialog.Close>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          {importable.length === 0 ? (
+            <p className="py-8 text-center text-sm text-oai-gray-400 dark:text-oai-gray-500">{copy("pet.codex.empty")}</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+              {importable.map((pet) => (
+                <CharacterCard
+                  key={pet.id}
+                  character={pet}
+                  selected={picked.has(pet.id)}
+                  onSelect={() => togglePick(pet.id)}
+                />
+              ))}
+            </div>
+          )}
+          {error ? <p role="alert" className="mt-3 text-xs text-red-600 dark:text-red-400">{error}</p> : null}
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-t border-oai-gray-200/70 px-5 py-3 dark:border-oai-gray-800">
+          <button
+            type="button"
+            disabled={busy || importable.length === 0}
+            onClick={() => setPicked(allPicked ? new Set() : new Set(importable.map((pet) => pet.id)))}
+            className="text-xs font-medium text-oai-gray-500 underline-offset-2 hover:underline disabled:opacity-40 dark:text-oai-gray-400"
+          >
+            {copy("pet.codex.select_all")}
+          </button>
+          <button
+            type="button"
+            disabled={busy || picked.size === 0}
+            onClick={() => onImport([...picked])}
+            className="flex h-9 items-center gap-1.5 rounded-lg bg-oai-black px-4 text-xs font-semibold text-white transition-colors disabled:bg-oai-gray-200 disabled:text-oai-gray-400 dark:bg-white dark:text-black dark:disabled:bg-oai-gray-800 dark:disabled:text-oai-gray-500"
+          >
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+            {picked.size > 0 ? `${copy("pet.codex.import")} · ${picked.size}` : copy("pet.codex.import")}
+          </button>
+        </div>
+          </Dialog.Popup>
+        </Dialog.Viewport>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 export function PetPage() {
   const { available, settings, setSetting } = usePetSettings();
   const { pets, loading: catalogLoading, available: catalogAvailable, refresh } = usePetCatalog();
   const [importUrl, setImportUrl] = useState("");
   const [importError, setImportError] = useState("");
   const [importBusy, setImportBusy] = useState(false);
+  // Codex pets available to reverse-import (read-only from the Codex app).
+  const [codexImportable, setCodexImportable] = useState([]);
+  const [codexModalOpen, setCodexModalOpen] = useState(false);
+  const [codexBusy, setCodexBusy] = useState(false);
+  const [codexError, setCodexError] = useState("");
   const [previewState, setPreviewState] = useState("idle-living");
   // Auto-cycle the preview until the user picks a state themselves — a manual
   // choice must stick, so the first click stops the rotation for this visit.
@@ -200,6 +297,7 @@ export function PetPage() {
   const importLine = importBusy
     ? { kind: "busy", text: copy("pet.import.busy") }
     : (importError ? { kind: "error", text: importError } : null);
+  const hasCodexImportable = codexImportable.length !== 0;
 
   useEffect(() => {
     if (!catalogLoading && pets.length > 0 && !pets.some((pet) => pet.id === selectedCharacter)) {
@@ -220,6 +318,35 @@ export function PetPage() {
       setImportError(error?.message || copy("pet.import.failed"));
     } finally {
       setImportBusy(false);
+    }
+  }
+
+  const refreshCodexImportable = useCallback(async () => {
+    if (!catalogAvailable) { setCodexImportable([]); return; }
+    try {
+      const data = await listCodexImportable();
+      setCodexImportable(data.importable);
+    } catch {
+      setCodexImportable([]);
+    }
+  }, [catalogAvailable]);
+
+  useEffect(() => { refreshCodexImportable(); }, [refreshCodexImportable]);
+
+  async function importFromCodex(ids) {
+    setCodexBusy(true);
+    setCodexError("");
+    try {
+      await importCodexPets(ids);
+      await refresh();
+      await refreshCodexImportable();
+      showToast({ title: copy("pet.codex.imported"), timeout: 4000 });
+      return true;
+    } catch (error) {
+      setCodexError(error?.message || copy("pet.import.failed"));
+      return false;
+    } finally {
+      setCodexBusy(false);
     }
   }
 
@@ -274,7 +401,7 @@ export function PetPage() {
                       {copy("pet.characters.subtitle")}
                     </p>
                   </div>
-                  <div className="mt-4 grid grid-cols-2 gap-2">
+                  <div className="mt-4 grid max-h-72 grid-cols-2 gap-2 overflow-y-auto pr-1 -mr-1">
                     {pets.map((character) => (
                       <CharacterCard
                         key={character.id}
@@ -314,7 +441,7 @@ export function PetPage() {
                 {catalogAvailable ? (
                   <section className="mt-6 border-t border-oai-gray-200/70 pt-5 dark:border-oai-gray-800" aria-labelledby="pet-import-title">
                     <div className="flex items-center gap-2">
-                      <Upload className="h-4 w-4 text-oai-gray-500" aria-hidden />
+                      <Upload className="h-4 w-4 shrink-0 text-oai-gray-500" aria-hidden />
                       <h2 id="pet-import-title" className="text-sm font-semibold">{copy("pet.import.title")}</h2>
                     </div>
                     <p className="mt-1 text-xs leading-relaxed text-oai-gray-500 dark:text-oai-gray-400">
@@ -346,33 +473,49 @@ export function PetPage() {
                         {copy("pet.import.add")}
                       </button>
                     </form>
-                    <label
-                      onDragOver={(event) => event.preventDefault()}
-                      onDrop={(event) => {
-                        event.preventDefault();
-                        if (importBusy) return;
-                        const file = event.dataTransfer?.files?.[0];
-                        if (file) runImport(() => importPetPackage(file));
-                      }}
-                      className={cn(
-                        "mt-2 flex h-9 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed border-oai-gray-300 text-xs font-medium text-oai-gray-500 transition-colors hover:border-oai-gray-500 hover:text-oai-black dark:border-oai-gray-600 dark:text-oai-gray-400 dark:hover:border-oai-gray-400 dark:hover:text-white",
-                        importBusy && "pointer-events-none opacity-40",
-                      )}
-                    >
-                      <FileArchive className="h-3.5 w-3.5" aria-hidden />
-                      {copy("pet.import.zip")}
-                      <input
-                        type="file"
-                        accept=".zip,.codex-pet.zip,application/zip"
-                        className="sr-only"
-                        disabled={importBusy}
-                        onChange={(event) => {
-                          const file = event.target.files?.[0];
+                    <div className={cn("mt-2 grid gap-2", hasCodexImportable ? "grid-cols-2" : "grid-cols-1")}>
+                      {hasCodexImportable ? (
+                        <button
+                          type="button"
+                          disabled={importBusy || codexBusy}
+                          onClick={() => { setCodexError(""); setCodexModalOpen(true); }}
+                          className={cn(
+                            "flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed border-oai-gray-300 text-xs font-medium text-oai-gray-500 transition-colors hover:border-oai-gray-500 hover:text-oai-black dark:border-oai-gray-600 dark:text-oai-gray-400 dark:hover:border-oai-gray-400 dark:hover:text-white",
+                            (importBusy || codexBusy) && "pointer-events-none opacity-40",
+                          )}
+                        >
+                          <ProviderIcon provider="codex" size={14} className="fill-current" />
+                          {copy("pet.codex.browse")}
+                        </button>
+                      ) : null}
+                      <label
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          if (importBusy) return;
+                          const file = event.dataTransfer?.files?.[0];
                           if (file) runImport(() => importPetPackage(file));
-                          event.target.value = "";
                         }}
-                      />
-                    </label>
+                        className={cn(
+                          "flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed border-oai-gray-300 text-xs font-medium text-oai-gray-500 transition-colors hover:border-oai-gray-500 hover:text-oai-black dark:border-oai-gray-600 dark:text-oai-gray-400 dark:hover:border-oai-gray-400 dark:hover:text-white",
+                          importBusy && "pointer-events-none opacity-40",
+                        )}
+                      >
+                        <FileArchive className="h-3.5 w-3.5" aria-hidden />
+                        {copy("pet.import.zip")}
+                        <input
+                          type="file"
+                          accept=".zip,.codex-pet.zip,application/zip"
+                          className="sr-only"
+                          disabled={importBusy}
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            if (file) runImport(() => importPetPackage(file));
+                            event.target.value = "";
+                          }}
+                        />
+                      </label>
+                    </div>
                     {importLine ? (
                       <p
                         role={importLine.kind === "error" ? "alert" : "status"}
@@ -385,6 +528,18 @@ export function PetPage() {
                       >
                         {importLine.text}
                       </p>
+                    ) : null}
+                    {codexModalOpen ? (
+                      <CodexImportModal
+                        pets={codexImportable}
+                        busy={codexBusy}
+                        error={codexError}
+                        onClose={() => { if (!codexBusy) setCodexModalOpen(false); }}
+                        onImport={async (ids) => {
+                          const ok = await importFromCodex(ids);
+                          if (ok) setCodexModalOpen(false);
+                        }}
+                      />
                     ) : null}
                   </section>
                 ) : null}

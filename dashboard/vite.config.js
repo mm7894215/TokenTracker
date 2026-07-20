@@ -960,12 +960,16 @@ function localDataApiPlugin() {
   // Vite config reloads reuse the same node process, so the CJS require
   // cache would otherwise keep serving the local-api module loaded at the
   // first startup — evict it so a config reload picks up edits to
-  // local-api.js ITSELF. Its dependencies (rollout.js, pricing, …) stay
-  // cached; editing those still requires a full dev-server restart.
-  try {
-    delete esmRequire.cache[esmRequire.resolve("../src/lib/local-api")];
-  } catch {
-    // fresh process — nothing cached yet
+  // local-api.js ITSELF. Session insights is loaded lazily by that module,
+  // so evict its derived-metrics scanner too; otherwise a dashboard refresh
+  // can keep serving stale edit-turn, provider/model, retry, and incremental
+  // scan behavior until Vite restarts.
+  for (const modulePath of ["../src/lib/local-api", "../src/lib/session-analytics"]) {
+    try {
+      delete esmRequire.cache[esmRequire.resolve(modulePath)];
+    } catch {
+      // fresh process — nothing cached yet
+    }
   }
   const { createLocalApiHandler, resolveQueuePath } = esmRequire("../src/lib/local-api");
   const handleRepoLocalApi = createLocalApiHandler({ queuePath: resolveQueuePath() });
@@ -983,7 +987,8 @@ function localDataApiPlugin() {
         const isRepoPetApi = url.pathname === "/api/local-auth"
           || url.pathname === "/functions/tokentracker-pets"
           || url.pathname === "/api/pets/import"
-          || url.pathname.startsWith("/api/pets/local/");
+          || url.pathname.startsWith("/api/pets/local/")
+          || url.pathname.startsWith("/api/pets/codex/");
         // Project usage also runs against the current checkout (not :7680):
         // the endpoints evolve with the dashboard UI, and a stale packaged
         // app on :7680 would 404 the drill-down modal.
@@ -993,7 +998,15 @@ function localDataApiPlugin() {
           // Achievements ship with this checkout too — a stale packaged app
           // on :7680 would 404 the local badges.
           || url.pathname === "/functions/tokentracker-achievements";
-        if (isRepoPetApi || isRepoProjectUsageApi) {
+        // Session efficiency, context health, and automatic Git outcomes are
+        // implemented together in this checkout. Keep them on the same code
+        // version as the dashboard; an older app listening on :7680 does not
+        // know these routes and would otherwise make their cards disappear.
+        const isRepoSessionAnalyticsApi =
+          url.pathname === "/functions/tokentracker-session-insights"
+          || url.pathname === "/functions/tokentracker-context-health"
+          || url.pathname === "/functions/tokentracker-outcomes";
+        if (isRepoPetApi || isRepoProjectUsageApi || isRepoSessionAnalyticsApi) {
           Promise.resolve(handleRepoLocalApi(req, res, url))
             .then((handled) => { if (!handled) next(); })
             .catch(next);

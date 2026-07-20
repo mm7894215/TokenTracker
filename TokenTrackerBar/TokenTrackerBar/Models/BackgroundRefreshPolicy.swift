@@ -6,6 +6,11 @@ enum BackgroundRefreshPolicy {
     static let defaultCatchUpStaleInterval: TimeInterval = 300
     static let defaultPopoverOpenSyncInterval: TimeInterval = 300
     static let defaultPopoverOpenLoadInterval: TimeInterval = 30
+    // Account edge functions cache grouped rows for 30 seconds. A successful
+    // ingest can also precede read-model visibility, so publish after the cache
+    // window plus a small guard instead of preserving a stale total for five
+    // more minutes.
+    static let defaultAccountUploadVisibilityDelay: TimeInterval = 35
 
     static func shouldRunSync(
         now: Date,

@@ -3,6 +3,7 @@ const KEY_DEVICE = "tokentracker_cloud_device_session_v1";
 const KEY_LAST_SYNC = "tokentracker_cloud_last_sync_ts";
 const KEY_USAGE_READY = "tokentracker_cloud_usage_ready_v1";
 export const CLOUD_USAGE_SYNCED_EVENT = "tt.cloudUsageSynced";
+export const CLOUD_LEADERBOARD_REFRESHED_EVENT = "tt.cloudLeaderboardRefreshed";
 let memoryDeviceSession: CloudDeviceSession | null = null;
 
 export type CloudDeviceSession = {
@@ -121,6 +122,16 @@ export function emitCloudUsageSynced(): void {
     setCloudUsageReady(true);
     if (typeof window !== "undefined") {
       window.dispatchEvent(new Event(CLOUD_USAGE_SYNCED_EVENT));
+    }
+  } catch {
+    /* best-effort invalidation for the active dashboard */
+  }
+}
+
+export function emitCloudLeaderboardRefreshed(): void {
+  try {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event(CLOUD_LEADERBOARD_REFRESHED_EVENT));
     }
   } catch {
     /* best-effort invalidation for the active dashboard */

@@ -91,6 +91,33 @@ final class MenuBarDisplayPreferencesTests: XCTestCase {
         }
     }
 
+    func testDefaultMetricsNeedOnlyTodaySummary() {
+        XCTAssertEqual(
+            MenuBarDisplayPreferences.summarySelection(for: MenuBarDisplayPreferences.defaultIDs),
+            [.today]
+        )
+    }
+
+    func testSummarySelectionCoalescesMetricsByEndpoint() {
+        let selection = MenuBarDisplayPreferences.summarySelection(for: [
+            MenuBarDisplayMetric.todayTokens.rawValue,
+            MenuBarDisplayMetric.todayCost.rawValue,
+            MenuBarDisplayMetric.last7dTokens.rawValue,
+            MenuBarDisplayMetric.totalCost.rawValue,
+        ])
+
+        XCTAssertEqual(selection, [.today, .rolling, .total])
+    }
+
+    func testLimitOnlyMetricsNeedNoUsageSummary() {
+        XCTAssertTrue(
+            MenuBarDisplayPreferences.summarySelection(for: [
+                MenuBarDisplayMetric.codex5h.rawValue,
+                MenuBarDisplayMetric.codex7d.rawValue,
+            ]).isEmpty
+        )
+    }
+
     private func decodeResponse(overrides: [String: Any] = [:]) throws -> UsageLimitsResponse {
         var payload: [String: Any] = [
             "fetched_at": "2026-07-01T00:00:00Z",

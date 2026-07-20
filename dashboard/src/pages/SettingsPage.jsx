@@ -2,6 +2,7 @@ import React from "react";
 import { LimitsSettingsPanel } from "../components/LimitsSettingsPanel.jsx";
 import { AccountSection } from "../components/settings/AccountSection.jsx";
 import { AppearanceSection } from "../components/settings/AppearanceSection.jsx";
+import { LabsSection } from "../components/settings/LabsSection.jsx";
 import { SectionCard, SegmentedControl } from "../components/settings/Controls.jsx";
 import { MenuBarSection, NativeAppFooter } from "../components/settings/MenuBarSection.jsx";
 import { LIMIT_DISPLAY_MODES, useLimitsDisplayPrefs } from "../hooks/use-limits-display-prefs.js";
@@ -40,6 +41,7 @@ export function SettingsPage() {
             <AppearanceSection />
             <MenuBarSection />
             <AccountSection />
+            <LabsSection />
             <SectionCard
               title={copy("settings.section.limits")}
               action={<LimitsDisplayModeControl prefs={limitsPrefs} />}

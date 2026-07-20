@@ -141,6 +141,7 @@ function normalizeWorkbuddyModel(model) {
 const SOURCE_MODEL_NORMALIZERS = {
   antigravity: normalizeAntigravityModel,
   claude: normalizeClaudeModel,
+  "pi-anthropic": normalizeClaudeModel,
   zed: normalizeZedModel,
   workbuddy: normalizeWorkbuddyModel,
 };

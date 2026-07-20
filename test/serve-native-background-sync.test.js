@@ -13,7 +13,7 @@ test("native serve schedules a lightweight all-source fallback sync", async () =
   const timer = { unrefCalled: false, unref() { this.unrefCalled = true; } };
   const runSync = test.mock.fn(async () => {});
   const controller = startNativeBackgroundSync({
-    appShell: "macos",
+    appShell: "windows",
     runSync,
     setIntervalFn(callback, delay) {
       intervalCallback = callback;
@@ -63,9 +63,9 @@ test("native background sync coalesces overlapping ticks", async () => {
   controller.stop();
 });
 
-test("non-native serve does not start the fallback timer", () => {
+test("macOS and non-native serve do not start a duplicate fallback timer", () => {
   const setIntervalFn = test.mock.fn();
-  const controller = startNativeBackgroundSync({ appShell: "", setIntervalFn });
-  assert.equal(controller, null);
+  assert.equal(startNativeBackgroundSync({ appShell: "macos", setIntervalFn }), null);
+  assert.equal(startNativeBackgroundSync({ appShell: "", setIntervalFn }), null);
   assert.equal(setIntervalFn.mock.callCount(), 0);
 });

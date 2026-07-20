@@ -27,6 +27,10 @@ function resolveOutcomesPath() {
   return path.join(os.homedir(), ".tokentracker", "tracker", "outcomes.jsonl");
 }
 
+function resolveAutoOutcomesPath() {
+  return path.join(os.homedir(), ".tokentracker", "tracker", "auto-outcomes.jsonl");
+}
+
 // The ONLY fields ever lifted off an outcome record. Anything not on this list
 // — bodies, diffs, messages, arbitrary blobs — is dropped at read time. This is
 // the enforcement point for the metadata-only privacy invariant.
@@ -54,6 +58,10 @@ function sanitizeOutcome(raw) {
   if (typeof raw.task_type === "string" && raw.task_type.trim()) {
     out.task_type = raw.task_type.trim();
   }
+  for (const key of ["status", "session_hash", "commit_hash", "confidence", "methodology"]) {
+    if (typeof raw[key] === "string" && raw[key].trim()) out[key] = raw[key].trim();
+  }
+  if (Number.isFinite(Number(raw.parent_count))) out.parent_count = Number(raw.parent_count);
   return out;
 }
 
@@ -89,6 +97,19 @@ function readOutcomesData(outcomesPath) {
     console.error(`[outcomes] skipped ${malformed} malformed/invalid line(s) in ${outcomesPath}`);
   }
   return out;
+}
+
+function readAllOutcomesData(paths = [resolveOutcomesPath(), resolveAutoOutcomesPath()]) {
+  const dedup = new Map();
+  for (const outcomePath of paths) {
+    for (const row of readOutcomesData(outcomePath)) {
+      const key = row.commit_hash
+        ? `commit:${row.commit_hash}`
+        : `${row.timestamp}|${row.model}|${row.tool}|${row.task_type || ""}`;
+      dedup.set(key, row);
+    }
+  }
+  return [...dedup.values()];
 }
 
 function dayOf(value) {
@@ -224,7 +245,9 @@ function computeQualityPerDollar(queueRows, outcomes, { from = "", to = "" } = {
 
 module.exports = {
   resolveOutcomesPath,
+  resolveAutoOutcomesPath,
   sanitizeOutcome,
   readOutcomesData,
+  readAllOutcomesData,
   computeQualityPerDollar,
 };

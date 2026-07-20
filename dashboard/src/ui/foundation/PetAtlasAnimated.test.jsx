@@ -47,4 +47,18 @@ describe("PetAtlasAnimated", () => {
       backgroundPosition: "0% 40%",
     });
   });
+
+  it("uses the directional running row while a desktop drag is active", () => {
+    const { container } = render(
+      <PetAtlasAnimated
+        character="byte"
+        state="idle-living"
+        dragState="running-left"
+        size={208}
+      />,
+    );
+    expect(container.firstElementChild).toHaveStyle({
+      backgroundPosition: "0% 25%",
+    });
+  });
 });

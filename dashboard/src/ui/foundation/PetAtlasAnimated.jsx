@@ -61,12 +61,15 @@ export function PetAtlasAnimated({
   character,
   pet = null,
   state = "idle-living",
+  dragState = null,
   size = 48,
   className = "",
   lookDirectionIndex = null,
 }) {
   const id = normalizePetCharacter(character);
-  const rowId = petAtlasRowForState(state);
+  const rowId = dragState === "running-left" || dragState === "running-right"
+    ? dragState
+    : petAtlasRowForState(state);
   const row = ROWS[rowId];
   const spriteVersionNumber = pet?.spriteVersionNumber === 2 ? 2 : 1;
   const atlasRows = spriteVersionNumber === 2 ? 11 : 9;

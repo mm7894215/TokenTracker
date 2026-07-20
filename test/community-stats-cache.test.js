@@ -16,6 +16,17 @@ test("community stats endpoint reads a precomputed snapshot instead of scanning 
   assert.doesNotMatch(source, /leaderboard_usage_grouped/);
   assert.match(source, /max-age=300/);
   assert.match(source, /stale-while-revalidate=86400/);
+  for (const field of [
+    "provider_breakdown",
+    "daily_growth",
+    "token_mix",
+    "user_distribution",
+    "platform_distribution",
+    "active_developers_30d",
+    "tokens_30d",
+  ]) {
+    assert.match(source, new RegExp(field));
+  }
 });
 
 test("community stats refresh aggregates the daily rollup plus a live tail", () => {
@@ -37,4 +48,42 @@ test("community stats cache table is server-only and singleton keyed", () => {
   assert.match(migration, /CHECK\s*\(id = 'total'\)/i);
   assert.match(migration, /ENABLE ROW LEVEL SECURITY/i);
   assert.match(migration, /REVOKE ALL ON TABLE public\.tokentracker_community_stats FROM anon, authenticated, PUBLIC/i);
+});
+
+test("community insights refresh exposes useful aggregates without adding location tracking", () => {
+  const migration = read("migrations/20260718075000_expand-community-insights.sql");
+
+  assert.match(migration, /provider_breakdown jsonb/i);
+  assert.match(migration, /daily_growth jsonb/i);
+  assert.match(migration, /token_mix jsonb/i);
+  assert.match(migration, /user_distribution jsonb/i);
+  assert.match(migration, /platform_distribution jsonb/i);
+  assert.match(migration, /tokentracker_leaderboard_rollup_daily/);
+  assert.match(migration, /leaderboard_hourly_dedup\(v_through, v_to\)/);
+  assert.match(migration, /DISTINCT ON \(td\.machine_hash\)/);
+  assert.match(migration, /REVOKE ALL ON FUNCTION public\.refresh_tokentracker_community_stats\(\)/i);
+  assert.doesNotMatch(migration, /\bcountry\b|ip_address|geo_/i);
+});
+
+test("community insights frontend reuses the dashboard trend chart and caps rankings at ten", () => {
+  const source = read("dashboard/src/components/leaderboard/CommunityStatsModal.jsx");
+
+  // The overview chart is the shared TrendMonitor (tooltip included), not a
+  // bespoke SVG chart local to this modal.
+  assert.match(source, /from "\.\.\/\.\.\/ui\/dashboard\/components\/TrendMonitor"/);
+  assert.doesNotMatch(source, /tokens_7d_avg/);
+  assert.match(source, /const TOP_ROWS_LIMIT = 10/);
+  assert.match(source, /\.slice\(0, TOP_ROWS_LIMIT\)/);
+  assert.match(source, /community-metrics-tab-underline/);
+  assert.match(source, /"data-provider-rank": index \+ 1/);
+  assert.doesNotMatch(source, /md:grid-cols-2[\s\S]{0,1200}providers\.map/);
+});
+
+test("community growth compares complete UTC weeks instead of a partial current day", () => {
+  const migration = read("migrations/20260718082000_use-completed-days-for-community-growth.sql");
+
+  assert.match(migration, /BETWEEN v_today - 7 AND v_today - 1/);
+  assert.match(migration, /BETWEEN v_today - 14 AND v_today - 8/);
+  assert.match(migration, /BEFORE INSERT OR UPDATE OF daily_growth/);
+  assert.match(migration, /normalize_tokentracker_community_growth/);
 });

@@ -9,6 +9,8 @@ struct PetAtlasSpriteView: View {
     let state: ClawdCompanionView.ClawdState
     let isVisible: Bool
     let lookDirectionIndex: Int?
+    let isDragging: Bool
+    let dragDirection: PetWindowState.DragDirection
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -18,6 +20,12 @@ struct PetAtlasSpriteView: View {
     }
 
     private var spec: AnimationSpec {
+        if isDragging {
+            return AnimationSpec(
+                row: dragDirection == .left ? 2 : 1,
+                durations: [120, 120, 120, 120, 120, 120, 120, 220]
+            )
+        }
         switch state {
         case .error, .disconnected, .workingOverheated:
             return AnimationSpec(row: 5, durations: [140, 140, 140, 140, 140, 140, 140, 240])

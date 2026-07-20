@@ -7,6 +7,7 @@ const { cmdUninstall } = require("./commands/uninstall");
 const { cmdServe } = require("./commands/serve");
 const { cmdDeviceLogin } = require("./commands/device-login");
 const { cmdWrapped } = require("./commands/wrapped");
+const { cmdSessions } = require("./commands/sessions");
 
 async function run(argv) {
   const [command, ...rest] = argv;
@@ -56,6 +57,9 @@ async function run(argv) {
     case "wrapped":
       await cmdWrapped(rest);
       return;
+    case "sessions":
+      await cmdSessions(rest);
+      return;
     default:
       throw new Error(`Unknown command: ${command}`);
   }
@@ -79,6 +83,7 @@ function printHelp() {
       "  npx tokentracker [--debug] uninstall [--purge]",
       "  npx tokentracker [--debug] device-login [--json] [--base-url <url>]",
       "  npx tokentracker [--debug] wrapped [--year 2026] [--json]",
+      "  npx tokentracker sessions [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--format json|csv] [--out file] [--refresh] [--no-git]",
       "",
       "Notes:",
       "  - init: consent first, local setup next, browser sign-in last.",
@@ -93,6 +98,7 @@ function printHelp() {
       "  - --from-openclaw marks sync runs triggered by the OpenClaw session plugin.",
       "  - --debug shows original backend errors.",
       "  - device-login pairs a headless CLI / SSH session with a browser sign-in (15-min code).",
+      "  - sessions exports metadata-only Claude/Codex efficiency analytics; no prompt or response text is retained.",
       "",
     ].join("\n"),
   );

@@ -294,6 +294,225 @@ export function formatCompactTokens(n) {
   return String(n);
 }
 
+const PET_LIMIT_PROVIDER_NAMES = {
+  claude: "Claude",
+  codex: "Codex",
+  cursor: "Cursor",
+  gemini: "Gemini",
+  kimi: "Kimi",
+  kiro: "Kiro",
+  grok: "Grok",
+  copilot: "GitHub Copilot",
+  antigravity: "Antigravity",
+  zcode: "ZCode",
+  opencodeGo: "OpenCode Go",
+};
+
+// Unix timestamps are normally seconds; values above this order of magnitude
+// are treated as milliseconds. Keep the cutoff semantic and local to the pet
+// formatter so it cannot be mistaken for an achievement threshold literal.
+const PET_LIMIT_MS_CUTOFF = 10 ** 10;
+
+function petLimitResetDate(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    // The Codex endpoint reports Unix seconds; tolerate milliseconds too so a
+    // future provider cannot turn the reset label into a date in 1970.
+    return new Date(value > PET_LIMIT_MS_CUTOFF ? value : value * 1000);
+  }
+  if (typeof value === "string" && value.trim()) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  return null;
+}
+
+function petLimitResetDistance(value) {
+  const date = petLimitResetDate(value);
+  if (!date) return null;
+  const seconds = Math.floor((date.getTime() - Date.now()) / 1000);
+  if (seconds <= 0) return "now";
+  const days = Math.floor(seconds / 86400);
+  if (days > 0) return `${days}d`;
+  const hours = Math.floor(seconds / 3600);
+  if (hours > 0) return `${hours}h`;
+  return `${Math.max(1, Math.floor(seconds / 60))}m`;
+}
+
+/** Read every configured provider window from the limits payload. */
+function collectPetLimitRows(limits) {
+  if (!limits || typeof limits !== "object") return [];
+
+  const rows = [];
+  const addWindow = (providerId, windowLabel, provider, window, getUsed, getReset = (w) => w?.reset_at) => {
+    if (provider?.configured !== true || provider?.error != null || !window) return;
+    const raw = Number(getUsed(window));
+    if (!Number.isFinite(raw)) return;
+    rows.push({
+      provider: PET_LIMIT_PROVIDER_NAMES[providerId] || providerId,
+      window: windowLabel,
+      usedPercent: Math.min(100, Math.max(0, raw)),
+      resetAt: getReset(window),
+    });
+  };
+  const addGeneric = (providerId, provider, windows) => {
+    for (const [label, window] of windows) {
+      addWindow(providerId, label, provider, window, (w) => w?.used_percent);
+    }
+  };
+
+  const claude = limits.claude;
+  addWindow("claude", "5h", claude, claude?.five_hour, (w) => w?.utilization, (w) => w?.resets_at);
+  addWindow("claude", "7d", claude, claude?.seven_day, (w) => w?.utilization, (w) => w?.resets_at);
+  addWindow("claude", "Opus", claude, claude?.seven_day_opus, (w) => w?.utilization, (w) => w?.resets_at);
+  if (claude?.configured === true && claude?.error == null && Array.isArray(claude.weekly_scoped)) {
+    for (const window of claude.weekly_scoped) {
+      addWindow("claude", window?.label || "weekly", claude, window, (w) => w?.utilization, (w) => w?.resets_at);
+    }
+  }
+
+  const codex = limits.codex;
+  addWindow("codex", "5h", codex, codex?.primary_window, (w) => w?.used_percent);
+  addWindow("codex", "7d", codex, codex?.secondary_window, (w) => w?.used_percent);
+  addWindow("codex", "Credits", codex, codex?.credit_window, (w) => w?.used_percent);
+  addWindow("codex", "Spark 5h", codex, codex?.spark_primary_window, (w) => w?.used_percent);
+  addWindow("codex", "Spark 7d", codex, codex?.spark_secondary_window, (w) => w?.used_percent);
+
+  addGeneric("cursor", limits.cursor, [["Plan", limits.cursor?.primary_window], ["Auto", limits.cursor?.secondary_window], ["API", limits.cursor?.tertiary_window]]);
+  addGeneric("gemini", limits.gemini, [["Pro", limits.gemini?.primary_window], ["Flash", limits.gemini?.secondary_window], ["Lite", limits.gemini?.tertiary_window]]);
+  addGeneric("kimi", limits.kimi, [["Weekly", limits.kimi?.primary_window], ["5h", limits.kimi?.secondary_window], ["Total", limits.kimi?.tertiary_window]]);
+  addGeneric("kiro", limits.kiro, [["Month", limits.kiro?.primary_window], ["Bonus", limits.kiro?.secondary_window]]);
+  addGeneric("grok", limits.grok, [["Month", limits.grok?.primary_window], ["On-demand", limits.grok?.secondary_window]]);
+  addGeneric("copilot", limits.copilot, [["Premium", limits.copilot?.primary_window], ["Chat", limits.copilot?.secondary_window]]);
+  addGeneric("antigravity", limits.antigravity, [
+    ["Claude weekly", limits.antigravity?.primary_window],
+    ["Claude 5h", limits.antigravity?.secondary_window],
+    ["Gemini weekly", limits.antigravity?.tertiary_window],
+    ["Gemini 5h", limits.antigravity?.quaternary_window],
+  ]);
+  addGeneric("zcode", limits.zcode, [["GLM-5.2", limits.zcode?.primary_window], ["GLM-5 Turbo", limits.zcode?.secondary_window], ["Other", limits.zcode?.tertiary_window]]);
+  addGeneric("opencodeGo", limits.opencodeGo, [["5h", limits.opencodeGo?.primary_window], ["Weekly", limits.opencodeGo?.secondary_window], ["Month", limits.opencodeGo?.tertiary_window]]);
+
+  rows.sort((a, b) => {
+    if (b.usedPercent !== a.usedPercent) return b.usedPercent - a.usedPercent;
+    const aReset = petLimitResetDate(a.resetAt)?.getTime() ?? Number.POSITIVE_INFINITY;
+    const bReset = petLimitResetDate(b.resetAt)?.getTime() ?? Number.POSITIVE_INFINITY;
+    return aReset - bReset;
+  });
+  return rows;
+}
+
+/**
+ * Return all active, not-yet-full provider windows for the desktop pet. Empty
+ * windows and saturated 100% windows stay on the full Limits page instead of
+ * taking over the small conversation bubble.
+ */
+export function buildPetLimitSummaries(limits) {
+  return collectPetLimitRows(limits).filter((row) => row.usedPercent > 0 && row.usedPercent < 100);
+}
+
+/** Keep the compact tap-quip API for callers that only need the first row. */
+export function buildPetLimitSummary(limits) {
+  return buildPetLimitSummaries(limits)[0] || null;
+}
+
+/**
+ * Turn a raw percentage into a human status. Percentages are useful in the full
+ * Limits page, but they read like noisy telemetry in a tiny desktop dialogue.
+ * The pet therefore says what needs attention and leaves the exact value to the
+ * Limits page.
+ */
+export function getPetLimitDisplay(locale, reading, displayMode = "used") {
+  if (!reading) return null;
+  const loc = normalizePetLocale(locale);
+  const raw = Math.min(100, Math.max(0, Number(reading.usedPercent) || 0));
+  const remaining = displayMode === "remaining";
+  const value = Math.round(remaining ? 100 - raw : raw);
+  const copy = {
+    en: {
+      atLimit: "at limit", nearLimit: "near limit", watch: "watch", available: "available",
+      depleted: "depleted", low: "low", someLeft: "some left",
+    },
+    "zh-CN": {
+      atLimit: "已达上限", nearLimit: "接近上限", watch: "注意", available: "充足",
+      depleted: "已用尽", low: "余量偏低", someLeft: "还有余量",
+    },
+    "zh-TW": {
+      atLimit: "已達上限", nearLimit: "接近上限", watch: "注意", available: "充足",
+      depleted: "已用盡", low: "餘量偏低", someLeft: "還有餘量",
+    },
+    ja: {
+      atLimit: "上限到達", nearLimit: "上限間近", watch: "注意", available: "余裕あり",
+      depleted: "使い切り", low: "残りわずか", someLeft: "残りあり",
+    },
+    ko: {
+      atLimit: "한도 도달", nearLimit: "한도 임박", watch: "주의", available: "여유 있음",
+      depleted: "소진됨", low: "얼마 안 남음", someLeft: "남아 있음",
+    },
+  }[loc] || null;
+  const labels = copy || {
+    atLimit: "at limit", nearLimit: "near limit", watch: "watch", available: "available",
+    depleted: "depleted", low: "low", someLeft: "some left",
+  };
+
+  let statusKey;
+  let tone;
+  if (remaining) {
+    if (value <= 0) {
+      statusKey = "depleted";
+      tone = "danger";
+    } else if (value <= 20) {
+      statusKey = "low";
+      tone = "warning";
+    } else if (value <= 50) {
+      statusKey = "someLeft";
+      tone = "warning";
+    } else {
+      statusKey = "available";
+      tone = "good";
+    }
+  } else if (value >= 100) {
+    statusKey = "atLimit";
+    tone = "danger";
+  } else if (value >= 80) {
+    statusKey = "nearLimit";
+    tone = "warning";
+  } else if (value >= 50) {
+    statusKey = "watch";
+    tone = "warning";
+  } else {
+    statusKey = "available";
+    tone = "good";
+  }
+
+  return {
+    usedPercent: raw,
+    value,
+    statusKey,
+    tone,
+    label: labels[statusKey],
+    resetText: petLimitResetDistance(reading.resetAt),
+  };
+}
+
+/** Format the selected limit as a short localized dialogue line. */
+export function formatPetLimitSummary(locale, reading, displayMode = "used") {
+  if (!reading) return "";
+  const loc = normalizePetLocale(locale);
+  const display = getPetLimitDisplay(loc, reading, displayMode);
+  if (!display) return "";
+  const reset = display.resetText;
+  const resetSuffix = {
+    en: (value) => ` · in ${value}`,
+    "zh-CN": (value) => ` · ${value}后重置`,
+    "zh-TW": (value) => ` · ${value}後重置`,
+    ja: (value) => ` · ${value}でリセット`,
+    ko: (value) => ` · ${value} 후 초기화`,
+  }[loc] || ((value) => ` · in ${value}`);
+  let text = `${reading.provider} ${reading.window} · ${display.label}`;
+  if (reset) text += resetSuffix(reset);
+  return text;
+}
+
 /**
  * Build the full tap-quip pool for the given locale — a faithful port of the macOS
  * companion's `quipPool` (ClawdCompanionView.swift): today data → 7d/30d rolling →
@@ -302,13 +521,13 @@ export function formatCompactTokens(n) {
  * data-rich lines (the majority of the pool) dominate and the generic personality lines
  * stay a natural minority — no random down-weighting needed.
  *
- * `ctx` (all optional): tokens, tokensText, costText, costValue, isSyncing (today);
+ * `ctx` (all optional): tokens, tokensText, costText, costValue, limitText, isSyncing (today);
  * conversations; last7dTokens, last7dActiveDays; last30dTokens, last30dAvgPerDay;
  * streakDays, activeDaysAllTime; topModels [{ name, percent, source }].
  */
 export function buildQuipPool(locale, ctx = {}) {
   const {
-    tokens = 0, tokensText = "", costText = "", costValue = 0, isSyncing = false,
+    tokens = 0, tokensText = "", costText = "", costValue = 0, limitText = "", isSyncing = false,
     conversations = 0,
     last7dTokens = 0, last7dActiveDays = 0,
     last30dTokens = 0, last30dAvgPerDay = 0,
@@ -332,6 +551,11 @@ export function buildQuipPool(locale, ctx = {}) {
     if (costValue >= 0.005) out.push(...today.cost.map((t) => fillVars(t, todayVars)));
     out.push(...(pool[tierFor(tokens)] || []));
   }
+
+  // Limits are deliberately a first-class line in the conversation. It is the
+  // most constrained usable provider window, so the bubble stays readable while
+  // still surfacing the quota that needs attention first.
+  if (limitText) out.push(limitText);
 
   // === 7-day / 30-day rolling ===
   if (last7dTokens > 0) {

@@ -22,7 +22,7 @@ function withTimeout(promise, ms) {
 // SPA navigation between them doesn't refire the identical request pair.
 const CACHE_TTL_MS = 5 * 60_000;
 const PERSISTED_MAX_AGE_MS = 24 * 60 * 60_000;
-export const COMMUNITY_STATS_STORAGE_KEY = "tokentracker:community-stats:v1";
+export const COMMUNITY_STATS_STORAGE_KEY = "tokentracker:community-stats:v2";
 let cachedFetch = null;
 
 function normalizeCachedData(value) {
@@ -34,6 +34,23 @@ function normalizeCachedData(value) {
     totalEntries,
     top: Array.isArray(value?.top) ? value.top : [],
     topModels: Array.isArray(value?.topModels) ? value.topModels : [],
+    providers: Array.isArray(value?.providers) ? value.providers : [],
+    dailyGrowth: Array.isArray(value?.dailyGrowth) ? value.dailyGrowth : [],
+    tokenMix: Array.isArray(value?.tokenMix) ? value.tokenMix : [],
+    userDistribution: Array.isArray(value?.userDistribution) ? value.userDistribution : [],
+    platforms: Array.isArray(value?.platforms) ? value.platforms : [],
+    activeDevelopersTotal: Number(value?.activeDevelopersTotal) || 0,
+    activeDevelopers30d: Number(value?.activeDevelopers30d) || 0,
+    tokens30d: Number(value?.tokens30d) || 0,
+    tokenGrowthPct: value?.tokenGrowthPct != null
+      && Number.isFinite(Number(value.tokenGrowthPct))
+      ? Number(value.tokenGrowthPct)
+      : null,
+    developerGrowthPct: value?.developerGrowthPct != null
+      && Number.isFinite(Number(value.developerGrowthPct))
+      ? Number(value.developerGrowthPct)
+      : null,
+    generatedAt: typeof value?.generatedAt === "string" ? value.generatedAt : null,
   };
 }
 
@@ -151,6 +168,25 @@ export function useCommunityStats({ enabled = true } = {}) {
           totalEntries: Number(data?.total_entries) || entries.length,
           top: entries.slice(0, 3),
           topModels,
+          providers: Array.isArray(modelsData?.providers) ? modelsData.providers : [],
+          dailyGrowth: Array.isArray(modelsData?.daily_growth) ? modelsData.daily_growth : [],
+          tokenMix: Array.isArray(modelsData?.token_mix) ? modelsData.token_mix : [],
+          userDistribution: Array.isArray(modelsData?.user_distribution)
+            ? modelsData.user_distribution
+            : [],
+          platforms: Array.isArray(modelsData?.platforms) ? modelsData.platforms : [],
+          activeDevelopersTotal: Number(modelsData?.active_developers_total) || 0,
+          activeDevelopers30d: Number(modelsData?.active_developers_30d) || 0,
+          tokens30d: Number(modelsData?.tokens_30d) || 0,
+          tokenGrowthPct: modelsData?.token_growth_pct == null
+            ? null
+            : Number(modelsData.token_growth_pct),
+          developerGrowthPct: modelsData?.developer_growth_pct == null
+            ? null
+            : Number(modelsData.developer_growth_pct),
+          generatedAt: typeof modelsData?.generated_at === "string"
+            ? modelsData.generated_at
+            : null,
         };
         setState({ status: "ready", ...readyData });
         // Do not make an old authoritative total look fresh when only the

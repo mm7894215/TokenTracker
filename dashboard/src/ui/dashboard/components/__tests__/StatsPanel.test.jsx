@@ -6,7 +6,7 @@ import { StatsPanel } from "../StatsPanel.jsx";
 function renderPanel(props = {}) {
   return render(
     <StatsPanel
-      rankLabel="2026-03-01"
+      startDate="2026-03-01"
       streakDays={12}
       rolling={{
         last_7d: { totals: { billable_total_tokens: 12345 } },
@@ -48,7 +48,7 @@ it("keeps rolling card values compact when the global token format is full", () 
       }}
     >
       <StatsPanel
-        rankLabel="2026-03-01"
+        startDate="2026-03-01"
         streakDays={12}
         periodConversations={30_500}
         rolling={{
@@ -67,6 +67,18 @@ it("keeps rolling card values compact when the global token format is full", () 
   expect(screen.getByText("303.5M")).toBeInTheDocument();
   expect(screen.getByText("30.5K")).toBeInTheDocument();
   expect(screen.queryByText("2,800,000,000")).not.toBeInTheDocument();
+});
+
+it("keeps the rolling stats readable in a narrow desktop sidebar", () => {
+  const { container } = renderPanel({ periodConversations: 42 });
+  const grid = container.querySelector(".grid.grid-cols-2");
+
+  expect(grid).toHaveClass("lg:grid-cols-2");
+  expect(grid).toHaveClass("xl:grid-cols-4");
+  expect(grid?.children).toHaveLength(4);
+  for (const tile of Array.from(grid?.children || [])) {
+    expect(tile).toHaveClass("min-w-0");
+  }
 });
 
 it("localizes compact rolling stats labels", () => {

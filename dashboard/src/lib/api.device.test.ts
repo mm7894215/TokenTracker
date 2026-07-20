@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fetchCloudUsageSummary,
   fetchAccountDevices,
+  getLeaderboard,
   invalidateAccountResponseCache,
+  renameAccountDevice,
 } from "./api";
 
 vi.mock("./insforge-config", () => ({
@@ -48,6 +50,12 @@ describe("api device filter", () => {
     expect(lastFetchUrl().pathname).toContain("tokentracker-account-devices");
   });
 
+  it("forces leaderboard reads to bypass browser and CDN caches", async () => {
+    await getLeaderboard({ period: "week", limit: 20, offset: 0, userId: "user-1" });
+    const init = (globalThis.fetch as any).mock.calls.at(-1)?.[1];
+    expect(init?.cache).toBe("no-store");
+  });
+
   it("reuses a fresh account response and supports explicit invalidation", async () => {
     const args = { from: "2026-06-01", to: "2026-06-30", accessToken: JWT };
     await fetchCloudUsageSummary(args);
@@ -57,5 +65,35 @@ describe("api device filter", () => {
     invalidateAccountResponseCache();
     await fetchCloudUsageSummary(args);
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("invalidates cached device data after a successful rename", async () => {
+    let deviceName = "Old name";
+    globalThis.fetch = vi.fn(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.includes("tokentracker-device-rename")) {
+        deviceName = "M4";
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({
+        devices: [{ id: "dev-1", device_name: deviceName }],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as any;
+
+    const args = { from: "2026-06-01", to: "2026-06-30", accessToken: JWT };
+    const before = await fetchAccountDevices(args);
+    expect(before.devices[0].device_name).toBe("Old name");
+
+    await renameAccountDevice({ deviceId: "dev-1", name: "M4", accessToken: JWT });
+    const after = await fetchAccountDevices(args);
+
+    expect(after.devices[0].device_name).toBe("M4");
+    expect(globalThis.fetch).toHaveBeenCalledTimes(3);
   });
 });

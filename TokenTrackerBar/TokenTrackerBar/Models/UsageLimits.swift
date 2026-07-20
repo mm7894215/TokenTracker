@@ -303,12 +303,15 @@ struct GrokLimits: Codable, Equatable {
     let configured: Bool
     let error: String?
     let planLabel: String?
+    /// "weekly" | "monthly" | "daily" from the billing API period type (null if unknown).
+    let periodType: String?
     let primaryWindow: GenericLimitWindow?
     let secondaryWindow: GenericLimitWindow?
 
     enum CodingKeys: String, CodingKey {
         case configured, error
         case planLabel = "plan_label"
+        case periodType = "period_type"
         case primaryWindow = "primary_window"
         case secondaryWindow = "secondary_window"
     }

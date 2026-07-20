@@ -25,6 +25,9 @@ const inFlightJsonGets = new Map<string, Promise<any>>();
 const accountResponseCache = new Map<string, { fetchedAt: number; value: any }>();
 const ACCOUNT_RESPONSE_TTL_MS = 30_000;
 const ACCOUNT_RESPONSE_STALE_IF_ERROR_MS = 5 * 60_000;
+const sessionInsightsResponseCache = new Map<string, { fetchedAt: number; value: any }>();
+const SESSION_INSIGHTS_RESPONSE_TTL_MS = 5 * 60_000;
+const SESSION_INSIGHTS_RESPONSE_STALE_IF_ERROR_MS = 15 * 60_000;
 
 function coalesceJsonGet(key: string, request: () => Promise<any>) {
   const existing = inFlightJsonGets.get(key);
@@ -76,6 +79,10 @@ export function invalidateAccountResponseCache() {
   accountResponseCache.clear();
 }
 
+export function invalidateSessionInsightsCache() {
+  sessionInsightsResponseCache.clear();
+}
+
 const PATHS = {
   usageSummary: "tokentracker-usage-summary",
   usageDaily: "tokentracker-usage-daily",
@@ -91,6 +98,8 @@ const PATHS = {
   localSync: "tokentracker-local-sync",
   usageLimits: "tokentracker-usage-limits",
   outcomes: "tokentracker-outcomes",
+  sessionInsights: "tokentracker-session-insights",
+  contextHealth: "tokentracker-context-health",
 };
 
 /**
@@ -265,6 +274,7 @@ async function fetchInsforgeFunction(slug: string, options: {
   accessToken?: string;
   params?: AnyRecord;
   body?: unknown;
+  cache?: RequestCache;
 } = {}) {
   const baseUrl = getInsforgeRemoteUrl();
   if (!baseUrl) throw new Error("InsForge base URL not configured");
@@ -293,6 +303,7 @@ async function fetchInsforgeFunction(slug: string, options: {
   const res = await fetch(url.toString(), {
     method: options.method || "GET",
     headers,
+    cache: options.cache,
     ...(options.body != null ? { body: JSON.stringify(options.body) } : {}),
   });
   if (!res.ok) {
@@ -320,15 +331,15 @@ export async function getLeaderboard({
   // param lets the server compute `is_me` without ever touching the
   // Authorization header.
   return fetchInsforgeFunction("tokentracker-leaderboard", {
+    cache: "no-store",
     params: { period, limit, offset, user_id: userId },
   });
 }
 
 /**
- * Public, unauthenticated endpoint that returns per-model token aggregates
- * across the entire community for the current week. Used by the Community
- * Stats modal to show real model names (e.g. "claude-sonnet-4-6") instead
- * of provider-level buckets.
+ * Public, unauthenticated snapshot of privacy-safe community aggregates.
+ * Includes models, providers, 30-day growth, token mix, usage bands, and
+ * anonymous platform adoption without exposing user-level rows.
  */
 export async function getCommunityModels() {
   if (isMockEnabled()) return { top_models: [] };
@@ -596,6 +607,42 @@ export async function getOutcomes({
   }
   const filterParams = buildFilterParams({ source, device });
   return fetchLocalJson(PATHS.outcomes, { from, to, ...filterParams }, { accessToken });
+}
+
+export async function getSessionInsights({ from, to, refresh = false }: AnyRecord = {}) {
+  if (isMockEnabled()) return { available: false, sessions: [], by_model: [], subagents: [] };
+  const cacheKey = `${from || ""}\0${to || ""}`;
+  const cached = sessionInsightsResponseCache.get(cacheKey);
+  if (!refresh && cached && Date.now() - cached.fetchedAt < SESSION_INSIGHTS_RESPONSE_TTL_MS) {
+    return cached.value;
+  }
+
+  return coalesceJsonGet(`session-insights:${cacheKey}:${refresh ? "refresh" : "normal"}`, async () => {
+    try {
+      const value = await fetchLocalJson(PATHS.sessionInsights, { from, to, refresh: refresh ? "1" : "" });
+      sessionInsightsResponseCache.set(cacheKey, { fetchedAt: Date.now(), value });
+      if (sessionInsightsResponseCache.size > 32) {
+        const oldest = sessionInsightsResponseCache.keys().next().value;
+        if (oldest) sessionInsightsResponseCache.delete(oldest);
+      }
+      return value;
+    } catch (error) {
+      const stale = sessionInsightsResponseCache.get(cacheKey);
+      if (
+        stale &&
+        Date.now() - stale.fetchedAt < SESSION_INSIGHTS_RESPONSE_STALE_IF_ERROR_MS &&
+        !refresh
+      ) {
+        return stale.value;
+      }
+      throw error;
+    }
+  });
+}
+
+export async function getContextHealth() {
+  if (isMockEnabled()) return { estimated_fixed_tokens: 0, severity: "low", breakdown: {}, largest_items: [] };
+  return fetchLocalJson(PATHS.contextHealth);
 }
 
 export async function getUsageCategoryBreakdown({
@@ -912,9 +959,14 @@ export async function renameAccountDevice({ deviceId, name, accessToken }: AnyRe
     err.status = 401;
     throw err;
   }
-  return fetchInsforgeFunction("tokentracker-device-rename", {
+  const result = await fetchInsforgeFunction("tokentracker-device-rename", {
     accessToken,
     method: "POST",
     body: { device_id: deviceId, device_name: name },
   });
+  // Account GETs are cached briefly to collapse dashboard fan-out. A rename
+  // changes the device list immediately, so the caller's follow-up refresh
+  // must not be satisfied by the pre-mutation snapshot.
+  invalidateAccountResponseCache();
+  return result;
 }

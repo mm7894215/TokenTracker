@@ -242,6 +242,70 @@ test("local-api background sync skips relayed cloud device-token issuance", asyn
   }
 });
 
+test("explicit account publication mints a cached token for bounded background sync", async () => {
+  const fixture = createCloudSyncHome("tokentracker-local-api-background-publish-");
+  const savedBaseUrl = process.env.TOKENTRACKER_INSFORGE_BASE_URL;
+  const savedFetch = global.fetch;
+  const fetchCalls = [];
+  process.env.TOKENTRACKER_INSFORGE_BASE_URL = "https://cloud.example";
+  installDeviceTokenFetch(fetchCalls);
+
+  try {
+    const call = await runLocalSync(
+      { auto: true, background: true, publishAccount: true },
+      {
+        tmpHome: fixture.tmpHome,
+        queuePath: path.join(fixture.trackerDir, "queue.jsonl"),
+        includeDeviceToken: false,
+      },
+    );
+
+    assert.deepEqual(call.args.slice(-5), [
+      path.join(process.cwd(), "bin/tracker.js"),
+      "sync",
+      "--auto",
+      "--background",
+      "--publish-account",
+    ]);
+    assert.equal(call.options.env.TOKENTRACKER_DEVICE_TOKEN, "issued-device-token");
+    assert.equal(fetchCalls.filter((c) => c.url.endsWith("/api/auth/refresh?client_type=mobile")).length, 1);
+    assert.equal(fetchCalls.filter((c) => c.url.endsWith("/functions/tokentracker-device-token-issue")).length, 1);
+  } finally {
+    if (savedBaseUrl === undefined) delete process.env.TOKENTRACKER_INSFORGE_BASE_URL;
+    else process.env.TOKENTRACKER_INSFORGE_BASE_URL = savedBaseUrl;
+    global.fetch = savedFetch;
+    fs.rmSync(fixture.tmpHome, { recursive: true, force: true });
+  }
+});
+
+test("disabled cloud sync suppresses background account publication even with a device token", async () => {
+  const fixture = createCloudSyncHome("tokentracker-local-api-background-disabled-");
+  fs.writeFileSync(
+    path.join(fixture.trackerDir, "cloud-sync-pref.json"),
+    JSON.stringify({ enabled: false }),
+  );
+
+  try {
+    const call = await runLocalSync(
+      { auto: true, background: true, publishAccount: true },
+      {
+        tmpHome: fixture.tmpHome,
+        queuePath: path.join(fixture.trackerDir, "queue.jsonl"),
+      },
+    );
+
+    assert.deepEqual(call.args.slice(-4), [
+      path.join(process.cwd(), "bin/tracker.js"),
+      "sync",
+      "--auto",
+      "--background",
+    ]);
+    assert.equal(call.options.env.TOKENTRACKER_DEVICE_TOKEN, "device-token");
+  } finally {
+    fs.rmSync(fixture.tmpHome, { recursive: true, force: true });
+  }
+});
+
 test("local-api lightweight sync skips relayed cloud device-token issuance", async () => {
   const fixture = createCloudSyncHome("tokentracker-local-api-lightweight-cloud-");
   const savedBaseUrl = process.env.TOKENTRACKER_INSFORGE_BASE_URL;

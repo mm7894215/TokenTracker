@@ -22,4 +22,14 @@ describe("ProviderIcon", () => {
     expect(placeholder).toHaveClass("text-oai-gray-400", "dark:text-oai-gray-500");
     expect(placeholder?.querySelector("circle")).not.toBeNull();
   });
+
+  it("renders the MiniMax brand mark instead of the unknown-provider placeholder", () => {
+    const { container } = render(<ProviderIcon provider="MINIMAX" size={18} />);
+    const icon = container.querySelector("svg");
+
+    expect(icon).toHaveAttribute("width", "18");
+    expect(icon).toHaveAttribute("height", "18");
+    expect(icon?.querySelector("path")).not.toBeNull();
+    expect(icon?.querySelector("circle")).toBeNull();
+  });
 });

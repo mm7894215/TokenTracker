@@ -1,6 +1,17 @@
 import XCTest
 
 final class BackgroundRefreshPolicyTests: XCTestCase {
+    func testAccountUploadVisibilityDelayCoversCloudReadModelLag() {
+        XCTAssertEqual(
+            BackgroundRefreshPolicy.defaultAccountUploadVisibilityDelay,
+            35
+        )
+        XCTAssertGreaterThan(
+            BackgroundRefreshPolicy.defaultAccountUploadVisibilityDelay,
+            30
+        )
+    }
+
     func testRunsSyncWhenNoPreviousSyncExists() {
         XCTAssertEqual(
             BackgroundRefreshPolicy.shouldRunSync(

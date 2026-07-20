@@ -12,6 +12,11 @@ const {
   filterColdCodexRolloutFiles,
   parseRolloutIncremental,
 } = require("../src/lib/rollout");
+const {
+  STORE_DIRNAME,
+  openCursorStore,
+  readCursorStateSummary,
+} = require("../src/lib/cursor-store");
 const { withHome } = require("./helpers/with-home");
 
 const LARGE_HASH_COUNT = 379_000;
@@ -22,6 +27,53 @@ function buildProductionScaleHashes() {
     { length: LARGE_HASH_COUNT },
     (_, index) => `${index.toString(36).padStart(6, "0")}:${suffix}`,
   );
+}
+
+function codexUsage(totalTokens) {
+  return {
+    input_tokens: totalTokens,
+    cached_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+    output_tokens: 0,
+    reasoning_output_tokens: 0,
+    total_tokens: totalTokens,
+  };
+}
+
+function codexTokenEvent(timestamp, totalTokens) {
+  return {
+    timestamp,
+    type: "event_msg",
+    payload: {
+      type: "token_count",
+      info: { total_token_usage: codexUsage(totalTokens) },
+    },
+  };
+}
+
+async function readJsonlRows(filePath) {
+  const raw = await fs.readFile(filePath, "utf8").catch(() => "");
+  return raw.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+}
+
+async function withIsolatedCodexHome(prefix, fn) {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  const restoreHome = withHome(home);
+  const previousCodexHome = process.env.CODEX_HOME;
+  const codexHome = path.join(home, ".codex");
+  process.env.CODEX_HOME = codexHome;
+  try {
+    await fn({
+      home,
+      codexHome,
+      trackerDir: path.join(home, ".tokentracker", "tracker"),
+    });
+  } finally {
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousCodexHome;
+    restoreHome();
+    await fs.rm(home, { recursive: true, force: true });
+  }
 }
 
 function observeWholeArrayReads(values) {
@@ -150,6 +202,82 @@ test("cold filtering distinguishes discovered rollouts, cursor keys, parse candi
   assert.equal(diagnostics.parse_candidates, 1);
   assert.equal(diagnostics.cold_skipped, 1);
   assert.ok(diagnostics.cold_skipped <= diagnostics.discovered_rollouts);
+});
+
+test("v2 cold filtering batches shard decisions and loads by day directory", async () => {
+  const oldDir = path.join("/tmp", ".codex", "sessions", "2029", "01", "01");
+  const activeDir = path.join("/tmp", ".codex", "sessions", "2030", "06", "02");
+  const rolloutFiles = [
+    { path: path.join(oldDir, "rollout-2029-01-01T00-00-00-a.jsonl"), source: "codex" },
+    { path: path.join(oldDir, "rollout-2029-01-01T01-00-00-b.jsonl"), source: "codex" },
+    { path: path.join(activeDir, "rollout-2030-06-02T00-00-00-c.jsonl"), source: "codex" },
+    { path: path.join(activeDir, "rollout-2030-06-02T01-00-00-d.jsonl"), source: "codex" },
+  ];
+  const calls = { skip: 0, load: 0 };
+  const codexCursorStore = {
+    fileCount: rolloutFiles.length,
+    async canSkipCodexDay() {
+      calls.skip += 1;
+      return true;
+    },
+    async loadCodexFilesForPaths() {
+      calls.load += 1;
+    },
+  };
+
+  const filtered = await filterColdCodexRolloutFiles({
+    rolloutFiles,
+    cursors: { version: 1, files: {}, codexDayInventoryCache: { version: 1, days: {} } },
+    codexCursorStore,
+    nowMs: Date.UTC(2030, 5, 2, 12, 0, 0),
+    recentDays: 2,
+  });
+
+  assert.deepEqual(filtered.rolloutFiles, rolloutFiles.slice(2));
+  assert.equal(filtered.skipped, 2);
+  assert.deepEqual(calls, { skip: 1, load: 1 });
+});
+
+test("v2 cold filtering discards partial skip decisions after generation fallback", async () => {
+  const oldPath = path.join(
+    "/tmp", ".codex", "sessions", "2029", "01", "01", "rollout-old.jsonl",
+  );
+  const activePath = path.join(
+    "/tmp", ".codex", "sessions", "2030", "06", "02", "rollout-active.jsonl",
+  );
+  const rolloutFiles = [
+    { path: oldPath, source: "codex" },
+    { path: activePath, source: "codex" },
+  ];
+  const calls = [];
+  const codexCursorStore = {
+    fileCount: rolloutFiles.length,
+    async canSkipCodexDay() {
+      return true;
+    },
+    async loadCodexFilesForPaths(files) {
+      calls.push(files);
+      return { restarted: calls.length === 1 };
+    },
+  };
+  const diagnostics = {};
+
+  const filtered = await filterColdCodexRolloutFiles({
+    rolloutFiles,
+    cursors: { version: 1, files: {}, codexDayInventoryCache: { version: 1, days: {} } },
+    codexCursorStore,
+    diagnostics,
+    nowMs: Date.UTC(2030, 5, 2, 12, 0, 0),
+    recentDays: 2,
+  });
+
+  assert.strictEqual(filtered.rolloutFiles, rolloutFiles);
+  assert.equal(filtered.skipped, 0);
+  assert.equal(filtered.restarted, true);
+  assert.equal(calls.length, 2);
+  assert.strictEqual(calls[1], rolloutFiles);
+  assert.equal(diagnostics.cold_skipped, 0);
+  assert.equal(diagnostics.parse_candidates, 2);
 });
 
 test("Codex sync diagnostics keep candidate counts source-scoped after mixed-source parsing", async () => {
@@ -538,11 +666,17 @@ test("source-scoped sync preserves audit state and reports the actual cursor com
 
     const auditState = {
       version: 1,
-      lastFullScanAtMs: Date.UTC(2030, 5, 1),
-      lastFullScanAt: "2030-06-01T00:00:00.000Z",
+      lastFullScanAtMs: fixedNowMs - 60 * 60 * 1000,
+      lastFullScanAt: "2030-06-02T11:34:56.789Z",
       syncsSinceFullScan: 7,
       lastSkippedFiles: 123,
-      updatedAt: "2030-06-01T00:00:00.000Z",
+      updatedAt: "2030-06-02T11:34:56.789Z",
+    };
+    const expectedAuditState = {
+      ...auditState,
+      syncsSinceFullScan: 8,
+      lastSkippedFiles: 0,
+      updatedAt: fixedNow,
     };
     const hashes = buildProductionScaleHashes();
     const initial = {
@@ -551,7 +685,8 @@ test("source-scoped sync preserves audit state and reports the actual cursor com
       codexHashes: hashes,
       codexColdScanAudit: auditState,
     };
-    await fs.writeFile(cursorsPath, `${JSON.stringify(initial)}\n`, "utf8");
+    const initialRaw = `${JSON.stringify(initial)}\n`;
+    await fs.writeFile(cursorsPath, initialRaw, "utf8");
 
     const diagnostics = {};
     await cmdSync(
@@ -559,10 +694,17 @@ test("source-scoped sync preserves audit state and reports the actual cursor com
       { diagnostics },
     );
 
-    const raw = await fs.readFile(cursorsPath, "utf8");
+    assert.equal(
+      await fs.readFile(cursorsPath, "utf8"),
+      initialRaw,
+      "v2 migration must keep the downgrade-compatible legacy snapshot frozen",
+    );
+    const raw = await fs.readFile(diagnostics.cursor_path, "utf8");
     const persisted = JSON.parse(raw);
     assert.deepEqual(persisted, {
-      ...initial,
+      version: 1,
+      files: {},
+      codexColdScanAudit: expectedAuditState,
       codexDayInventoryCache: { version: 1, days: {} },
       hourly: {
         version: 3,
@@ -591,13 +733,421 @@ test("source-scoped sync preserves audit state and reports the actual cursor com
       codex_hash_count: LARGE_HASH_COUNT,
       cursor_commits: 1,
       cursor_bytes: Buffer.byteLength(raw),
-      cursor_path: cursorsPath,
+      cursor_path: diagnostics.cursor_path,
     });
+    assert.notEqual(diagnostics.cursor_path, cursorsPath);
+    assert.ok(
+      diagnostics.cursor_path.includes(`${path.sep}${STORE_DIRNAME}${path.sep}generations${path.sep}`),
+    );
+    const summary = await readCursorStateSummary({ trackerDir, cursorsPath });
+    assert.equal(summary.mode, "v2");
+    assert.equal(summary.codexEventCount, LARGE_HASH_COUNT);
   } finally {
     global.Date = RealDate;
     if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = previousCodexHome;
     restoreHome();
     await fs.rm(home, { recursive: true, force: true });
+  }
+});
+
+test("v2 source-scoped sync commits a same-inode append without loading historical hashes", async () => {
+  await withIsolatedCodexHome("tt-codex-v2-append-", async ({ codexHome, trackerDir }) => {
+    const sessionId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const dayDir = path.join(codexHome, "sessions", "2030", "06", "02");
+    const rolloutPath = path.join(
+      dayDir,
+      `rollout-2030-06-02T00-00-00-${sessionId}.jsonl`,
+    );
+    const cursorsPath = path.join(trackerDir, "cursors.json");
+    const queuePath = path.join(trackerDir, "queue.jsonl");
+    await fs.mkdir(dayDir, { recursive: true });
+    await fs.mkdir(trackerDir, { recursive: true });
+
+    const baselineTimestamp = "2030-06-02T00:30:00.000Z";
+    const appendedTimestamp = "2030-06-02T00:35:00.000Z";
+    const baselineLine = `${JSON.stringify(codexTokenEvent(baselineTimestamp, 10))}\n`;
+    const appendedLine = `${JSON.stringify(codexTokenEvent(appendedTimestamp, 25))}\n`;
+    const baselineBytes = Buffer.byteLength(baselineLine);
+    await fs.writeFile(rolloutPath, `${baselineLine}${appendedLine}`, "utf8");
+    const rolloutStat = await fs.stat(rolloutPath);
+    await fs.writeFile(cursorsPath, `${JSON.stringify({
+      version: 1,
+      files: {
+        [rolloutPath]: {
+          inode: rolloutStat.ino,
+          offset: baselineBytes,
+          projectOffset: baselineBytes,
+          projectFileContext: { absent: true, checkedAtMs: Date.now() },
+          lastTotal: codexUsage(10),
+        },
+      },
+      codexHashes: [`${sessionId}:${baselineTimestamp}`],
+    })}\n`, "utf8");
+
+    const diagnostics = {};
+    await cmdSync(
+      ["--auto", "--from-retry", "--source=codex"],
+      { diagnostics, cursorStoreOptions: { forceV2: true } },
+    );
+
+    assert.equal(diagnostics.content_files_read, 1);
+    assert.equal(diagnostics.hash_set_constructions, 0);
+    assert.equal(diagnostics.hash_array_materializations, 0);
+    assert.equal(diagnostics.codex_hash_count, 2);
+    const rows = await readJsonlRows(queuePath);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].source, "codex");
+    assert.equal(rows[0].total_tokens, 15);
+
+    const store = await openCursorStore({ trackerDir, cursorsPath });
+    await store.loadCodexFilesForPaths([rolloutPath]);
+    assert.equal(store.cursors.files[rolloutPath].offset, (await fs.stat(rolloutPath)).size);
+    assert.equal(store.codexEventStore.has(`${sessionId}:${baselineTimestamp}`), true);
+    assert.equal(store.codexEventStore.has(`${sessionId}:${appendedTimestamp}`), true);
+
+    const queueBeforeIdle = await fs.readFile(queuePath, "utf8");
+    const idleDiagnostics = {};
+    await cmdSync(
+      ["--auto", "--from-retry", "--source=codex"],
+      { diagnostics: idleDiagnostics },
+    );
+    assert.equal(await fs.readFile(queuePath, "utf8"), queueBeforeIdle);
+    assert.equal(idleDiagnostics.content_files_read, 0);
+    assert.equal(idleDiagnostics.hash_set_constructions, 0);
+  });
+});
+
+test("v2 source-scoped sync shards a custom CODEX_HOME outside the default path", async () => {
+  await withIsolatedCodexHome("tt-codex-v2-custom-home-", async ({ home, trackerDir }) => {
+    const customCodexHome = path.join(home, "custom-codex-data");
+    process.env.CODEX_HOME = customCodexHome;
+    const dayDir = path.join(customCodexHome, "sessions", "2030", "06", "02");
+    const rolloutPath = path.join(
+      dayDir,
+      "rollout-2030-06-02T00-00-00-custom-home.jsonl",
+    );
+    const cursorsPath = path.join(trackerDir, "cursors.json");
+    await fs.mkdir(dayDir, { recursive: true });
+    await fs.mkdir(trackerDir, { recursive: true });
+    await fs.writeFile(
+      rolloutPath,
+      `${JSON.stringify(codexTokenEvent("2030-06-02T00:00:00.000Z", 10))}\n`,
+      "utf8",
+    );
+    await fs.writeFile(
+      cursorsPath,
+      `${JSON.stringify({ version: 1, files: {}, codexHashes: [] })}\n`,
+      "utf8",
+    );
+
+    await cmdSync(
+      ["--auto", "--from-retry", "--source=codex"],
+      { cursorStoreOptions: { forceV2: true } },
+    );
+
+    const summary = await readCursorStateSummary({ trackerDir, cursorsPath });
+    assert.equal(summary.codexFileCount, 1);
+    const store = await openCursorStore({
+      trackerDir,
+      cursorsPath,
+      codexRoots: [customCodexHome],
+    });
+    assert.equal(store.cursors.files[rolloutPath], undefined);
+    await store.loadCodexFilesForPaths([rolloutPath]);
+    assert.ok(store.cursors.files[rolloutPath]);
+  });
+});
+
+test("v2 source-scoped sync deduplicates an inode rewrite from its day event shard", async () => {
+  await withIsolatedCodexHome("tt-codex-v2-rewrite-", async ({ codexHome, trackerDir }) => {
+    const sessionId = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
+    const timestamp = "2030-06-02T01:00:00.000Z";
+    const dayDir = path.join(codexHome, "sessions", "2030", "06", "02");
+    const rolloutPath = path.join(
+      dayDir,
+      `rollout-2030-06-02T01-00-00-${sessionId}.jsonl`,
+    );
+    const cursorsPath = path.join(trackerDir, "cursors.json");
+    const queuePath = path.join(trackerDir, "queue.jsonl");
+    const line = `${JSON.stringify(codexTokenEvent(timestamp, 20))}\n`;
+    await fs.mkdir(dayDir, { recursive: true });
+    await fs.mkdir(trackerDir, { recursive: true });
+    await fs.writeFile(rolloutPath, line, "utf8");
+    await fs.writeFile(
+      cursorsPath,
+      `${JSON.stringify({ version: 1, files: {}, codexHashes: [] })}\n`,
+      "utf8",
+    );
+
+    await cmdSync(
+      ["--auto", "--from-retry", "--source=codex"],
+      { cursorStoreOptions: { forceV2: true } },
+    );
+    const queueBeforeRewrite = await fs.readFile(queuePath, "utf8");
+    const firstStat = await fs.stat(rolloutPath);
+    const replacement = `${rolloutPath}.replacement`;
+    await fs.writeFile(replacement, line, "utf8");
+    await fs.rename(replacement, rolloutPath);
+    const replacementStat = await fs.stat(rolloutPath);
+    assert.notEqual(replacementStat.ino, firstStat.ino);
+
+    const diagnostics = {};
+    await cmdSync(
+      ["--auto", "--from-retry", "--source=codex"],
+      { diagnostics },
+    );
+
+    assert.equal(await fs.readFile(queuePath, "utf8"), queueBeforeRewrite);
+    assert.equal(diagnostics.content_files_read, 1);
+    assert.equal(diagnostics.hash_set_constructions, 0);
+    assert.equal(diagnostics.hash_array_materializations, 0);
+    assert.equal(diagnostics.codex_hash_count, 1);
+    const summary = await readCursorStateSummary({ trackerDir, cursorsPath });
+    assert.equal(summary.codexEventCount, 1);
+    const store = await openCursorStore({ trackerDir, cursorsPath });
+    await store.loadCodexFilesForPaths([rolloutPath]);
+    assert.equal(store.cursors.files[rolloutPath].inode, replacementStat.ino);
+  });
+});
+
+test("v2 sync restarts the full Codex parse after an event-shard fallback", async () => {
+  await withIsolatedCodexHome("tt-codex-v2-event-fallback-", async ({ codexHome, trackerDir }) => {
+    const appendSessionId = "aaaaaaaa-bbbb-4ccc-8ddd-111111111111";
+    const rewriteSessionId = "eeeeeeee-ffff-4000-8111-222222222222";
+    const appendBaselineTimestamp = "2030-06-02T01:00:00.000Z";
+    const appendTimestamp = "2030-06-02T01:05:00.000Z";
+    const rewriteBaselineTimestamp = "2030-06-02T01:10:00.000Z";
+    const rewriteTimestamp = "2030-06-02T01:15:00.000Z";
+    const dayDir = path.join(codexHome, "sessions", "2030", "06", "02");
+    const appendRolloutPath = path.join(
+      dayDir,
+      `rollout-2030-06-02T01-00-00-${appendSessionId}.jsonl`,
+    );
+    const rewriteRolloutPath = path.join(
+      dayDir,
+      `rollout-2030-06-02T01-10-00-${rewriteSessionId}.jsonl`,
+    );
+    const cursorsPath = path.join(trackerDir, "cursors.json");
+    const queuePath = path.join(trackerDir, "queue.jsonl");
+    const appendBaselineLine = `${JSON.stringify(codexTokenEvent(appendBaselineTimestamp, 5))}\n`;
+    const appendLine = `${JSON.stringify(codexTokenEvent(appendTimestamp, 15))}\n`;
+    const rewriteBaselineLine = `${JSON.stringify(codexTokenEvent(rewriteBaselineTimestamp, 10))}\n`;
+    const rewriteLine = `${JSON.stringify(codexTokenEvent(rewriteTimestamp, 20))}\n`;
+    await fs.mkdir(dayDir, { recursive: true });
+    await fs.mkdir(trackerDir, { recursive: true });
+    await fs.writeFile(appendRolloutPath, appendBaselineLine, "utf8");
+    await fs.writeFile(rewriteRolloutPath, rewriteBaselineLine, "utf8");
+    await fs.writeFile(
+      cursorsPath,
+      `${JSON.stringify({ version: 1, files: {}, codexHashes: [] })}\n`,
+      "utf8",
+    );
+
+    await cmdSync(
+      ["--auto", "--from-retry", "--source=codex"],
+      { cursorStoreOptions: { forceV2: true } },
+    );
+    const baselineRows = await readJsonlRows(queuePath);
+    assert.equal(baselineRows.length, 1);
+    assert.equal(baselineRows[0].total_tokens, 15);
+
+    const stableStore = await openCursorStore({ trackerDir, cursorsPath });
+    await stableStore.materializeAllCodexState();
+    const appendInode = stableStore.cursors.files[appendRolloutPath].inode;
+    await stableStore.commit();
+
+    const storeRoot = path.join(trackerDir, STORE_DIRNAME);
+    const manifest = JSON.parse(
+      await fs.readFile(path.join(storeRoot, "manifest.json"), "utf8"),
+    );
+    const generationDir = path.join(storeRoot, "generations", manifest.current);
+    const metadata = JSON.parse(
+      await fs.readFile(path.join(generationDir, "generation.json"), "utf8"),
+    );
+    const eventShardPath = path.join(
+      generationDir,
+      metadata.codexEvents["2030-06-02"].file,
+    );
+    await fs.appendFile(eventShardPath, "corrupt", "utf8");
+
+    await fs.appendFile(appendRolloutPath, appendLine, "utf8");
+
+    const rewriteStat = await fs.stat(rewriteRolloutPath);
+    const replacement = `${rewriteRolloutPath}.replacement`;
+    await fs.writeFile(replacement, `${rewriteBaselineLine}${rewriteLine}`, "utf8");
+    await fs.rename(replacement, rewriteRolloutPath);
+    assert.notEqual((await fs.stat(rewriteRolloutPath)).ino, rewriteStat.ino);
+
+    await cmdSync(["--auto", "--from-retry", "--source=codex"]);
+
+    const rows = await readJsonlRows(queuePath);
+    assert.equal(rows.length, 2);
+    assert.equal(rows[1].source, "codex");
+    assert.equal(rows[1].total_tokens, 35);
+
+    const reopened = await openCursorStore({ trackerDir, cursorsPath });
+    await reopened.loadCodexFilesForPaths([appendRolloutPath, rewriteRolloutPath]);
+    assert.equal(
+      reopened.cursors.files[appendRolloutPath].offset,
+      (await fs.stat(appendRolloutPath)).size,
+    );
+    assert.equal(reopened.cursors.files[appendRolloutPath].inode, appendInode);
+    assert.equal(
+      reopened.cursors.files[rewriteRolloutPath].offset,
+      (await fs.stat(rewriteRolloutPath)).size,
+    );
+    assert.equal(
+      reopened.codexEventStore.has(`${appendSessionId}:${appendBaselineTimestamp}`),
+      true,
+    );
+    assert.equal(reopened.codexEventStore.has(`${appendSessionId}:${appendTimestamp}`), true);
+    assert.equal(
+      reopened.codexEventStore.has(`${rewriteSessionId}:${rewriteBaselineTimestamp}`),
+      true,
+    );
+    assert.equal(reopened.codexEventStore.has(`${rewriteSessionId}:${rewriteTimestamp}`), true);
+
+    const queueBeforeIdle = await fs.readFile(queuePath, "utf8");
+    await cmdSync(["--auto", "--from-retry", "--source=codex"]);
+    assert.equal(await fs.readFile(queuePath, "utf8"), queueBeforeIdle);
+  });
+});
+
+test("v2 replays a sync after a failed manifest swap without inflating totals", async () => {
+  await withIsolatedCodexHome("tt-codex-v2-replay-", async ({ codexHome, trackerDir }) => {
+    const sessionId = "cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa";
+    const timestamp = "2030-06-02T01:30:00.000Z";
+    const dayDir = path.join(codexHome, "sessions", "2030", "06", "02");
+    const rolloutPath = path.join(
+      dayDir,
+      `rollout-2030-06-02T01-30-00-${sessionId}.jsonl`,
+    );
+    const cursorsPath = path.join(trackerDir, "cursors.json");
+    const queuePath = path.join(trackerDir, "queue.jsonl");
+    await fs.mkdir(dayDir, { recursive: true });
+    await fs.mkdir(trackerDir, { recursive: true });
+    await fs.writeFile(
+      rolloutPath,
+      `${JSON.stringify(codexTokenEvent(timestamp, 20))}\n`,
+      "utf8",
+    );
+    await fs.writeFile(
+      cursorsPath,
+      `${JSON.stringify({ version: 1, files: {}, codexHashes: [] })}\n`,
+      "utf8",
+    );
+
+    await assert.rejects(
+      cmdSync(
+        ["--auto", "--from-retry", "--source=codex"],
+        {
+          cursorStoreOptions: {
+            forceV2: true,
+            failureInjector(stage) {
+              if (stage === "beforeManifestSwap") throw new Error("simulated manifest failure");
+            },
+          },
+        },
+      ),
+      /simulated manifest failure/,
+    );
+    assert.equal((await readJsonlRows(queuePath)).length, 1);
+    const beforeReplay = await readCursorStateSummary({ trackerDir, cursorsPath });
+    assert.equal(beforeReplay.codexEventCount, 0);
+
+    await cmdSync(["--auto", "--from-retry", "--source=codex"]);
+
+    const rows = await readJsonlRows(queuePath);
+    assert.equal(rows.length, 2);
+    assert.deepEqual(rows[1], rows[0]);
+    const store = await openCursorStore({ trackerDir, cursorsPath });
+    await store.materializeAllCodexState();
+    assert.deepEqual(store.cursors.codexHashes, [`${sessionId}:${timestamp}`]);
+    const total = Object.entries(store.cursors.hourly.buckets)
+      .filter(([key]) => key.startsWith("codex|"))
+      .reduce((sum, [, bucket]) => sum + Number(bucket.totals.total_tokens || 0), 0);
+    assert.equal(total, 20);
+  });
+});
+
+test("v2 cursor shards preserve legacy parser output and event hashes", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "tt-codex-v2-equivalence-"));
+  const RealDate = Date;
+  const fixedNowMs = RealDate.parse("2030-06-02T12:34:56.789Z");
+  global.Date = class FixedDate extends RealDate {
+    constructor(...args) {
+      super(...(args.length > 0 ? args : [fixedNowMs]));
+    }
+
+    static now() {
+      return fixedNowMs;
+    }
+  };
+  try {
+    const sessionId = "dddddddd-eeee-4fff-8aaa-bbbbbbbbbbbb";
+    const rolloutPath = path.join(
+      root,
+      ".codex",
+      "sessions",
+      "2030",
+      "06",
+      "02",
+      `rollout-2030-06-02T02-00-00-${sessionId}.jsonl`,
+    );
+    const events = [
+      codexTokenEvent("2030-06-02T02:00:00.000Z", 10),
+      codexTokenEvent("2030-06-02T02:05:00.000Z", 25),
+    ];
+    await fs.mkdir(path.dirname(rolloutPath), { recursive: true });
+    await fs.writeFile(
+      rolloutPath,
+      events.map((event) => JSON.stringify(event)).join("\n") + "\n",
+      "utf8",
+    );
+
+    const legacyTrackerDir = path.join(root, "legacy");
+    const v2TrackerDir = path.join(root, "v2");
+    await fs.mkdir(legacyTrackerDir, { recursive: true });
+    await fs.mkdir(v2TrackerDir, { recursive: true });
+    for (const trackerDir of [legacyTrackerDir, v2TrackerDir]) {
+      await fs.writeFile(
+        path.join(trackerDir, "cursors.json"),
+        `${JSON.stringify({ version: 1, files: {}, codexHashes: [] })}\n`,
+        "utf8",
+      );
+    }
+
+    const legacyStore = await openCursorStore({
+      trackerDir: legacyTrackerDir,
+      activationBytes: Number.MAX_SAFE_INTEGER,
+    });
+    const v2Store = await openCursorStore({ trackerDir: v2TrackerDir, forceV2: true });
+    const parseInto = async (store, trackerDir) => {
+      await parseRolloutIncremental({
+        rolloutFiles: [{ path: rolloutPath, source: "codex" }],
+        cursors: store.cursors,
+        codexEventStore: store.codexEventStore,
+        queuePath: path.join(trackerDir, "queue.jsonl"),
+      });
+      await store.commit();
+    };
+    await parseInto(legacyStore, legacyTrackerDir);
+    await parseInto(v2Store, v2TrackerDir);
+
+    assert.equal(
+      await fs.readFile(path.join(v2TrackerDir, "queue.jsonl"), "utf8"),
+      await fs.readFile(path.join(legacyTrackerDir, "queue.jsonl"), "utf8"),
+    );
+    const reopenedLegacy = await openCursorStore({
+      trackerDir: legacyTrackerDir,
+      activationBytes: Number.MAX_SAFE_INTEGER,
+    });
+    const reopenedV2 = await openCursorStore({ trackerDir: v2TrackerDir });
+    await reopenedV2.materializeAllCodexState();
+    assert.deepEqual(reopenedV2.cursors, reopenedLegacy.cursors);
+  } finally {
+    global.Date = RealDate;
+    await fs.rm(root, { recursive: true, force: true });
   }
 });

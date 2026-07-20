@@ -23,6 +23,7 @@ import { FadeIn } from "../../foundation/FadeIn.jsx";
 import { MacAppBanner } from "../components/MacAppBanner.jsx";
 import { WidgetOnboardingCard } from "../components/WidgetOnboardingCard.jsx";
 import { QualityPerDollarCard } from "../components/QualityPerDollarCard.jsx";
+import { SessionInsightsCard } from "../components/SessionInsightsCard.jsx";
 import { LoginCard } from "../../../components/LoginCard.jsx";
 import { DashboardSkeleton } from "../../../components/DashboardSkeleton.jsx";
 import { cn } from "../../../lib/cn";
@@ -163,6 +164,7 @@ export function DashboardView(props) {
     allowBreakdownToggle,
     refreshAll,
     usageLoadingState,
+    announceUsageLoading,
     initialDashboardLoading,
     fleetData,
     hasDetailsActual,
@@ -225,6 +227,7 @@ export function DashboardView(props) {
     deviceUsage: Boolean(deviceUsageBlock),
     trendMonitor: !screenshotMode,
     qualityPerDollar: !screenshotMode,
+    sessionInsights: isLocalMode && !screenshotMode,
   };
   const visibleLeftOrder = (leftCardOrder || []).filter(
     (id) => leftVisible[id] && !emptyCardIds.has(id),
@@ -256,7 +259,7 @@ export function DashboardView(props) {
               title={copy("dashboard.identity.title")}
               subtitle={copy("dashboard.identity.subtitle")}
               period={period}
-              rankLabel={identityStartDate ?? copy("identity_card.rank_placeholder")}
+              startDate={identityStartDate ?? copy("identity_card.rank_placeholder")}
               streakDays={activeDays}
               subscriptions={identitySubscriptions}
               periodConversations={summaryConversationsValue}
@@ -324,6 +327,9 @@ export function DashboardView(props) {
           />
         );
       }
+      case "sessionInsights": {
+        return <SessionInsightsCard from={usageFrom} to={usageTo} />;
+      }
       default: {
         return null;
       }
@@ -351,6 +357,7 @@ export function DashboardView(props) {
               fleetData={fleetData}
               onRefresh={screenshotMode ? null : refreshAll}
               loading={usageLoadingState}
+              announceLoading={announceUsageLoading}
               onOpenShare={screenshotMode ? null : onOpenShare}
               customFrom={customFrom}
               customTo={customTo}

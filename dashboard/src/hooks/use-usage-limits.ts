@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { getUsageLimits } from "../lib/api";
 import { publishUsageLimitsPreloadState } from "../lib/dashboard-preload.js";
+import { LIMIT_ALERTS_PREF_KEY } from "./use-limit-alert-prefs";
+import { sendPredictiveLimitAlerts } from "../lib/limit-alerts.js";
 
 type CodexLimitWindow = {
   readonly used_percent: number;
@@ -45,7 +47,7 @@ type CodexUsageLimits = {
 
 interface UsageLimitsData {
   fetched_at: string;
-  claude: { configured: boolean; error?: string | null; plan_label?: string | null; five_hour?: { utilization: number; resets_at?: string }; seven_day?: { utilization: number; resets_at?: string }; seven_day_opus?: { utilization: number; resets_at?: string } | null; extra_usage?: { is_enabled: boolean; monthly_limit?: number | null; used_credits?: number | null; currency?: string | null } | null };
+  claude: { configured: boolean; error?: string | null; plan_label?: string | null; auth_action_required?: string | null; five_hour?: { utilization: number; resets_at?: string }; seven_day?: { utilization: number; resets_at?: string }; seven_day_opus?: { utilization: number; resets_at?: string } | null; extra_usage?: { is_enabled: boolean; monthly_limit?: number | null; used_credits?: number | null; currency?: string | null } | null };
   codex: CodexUsageLimits;
   cursor: { configured: boolean; error?: string | null; plan_label?: string | null; membership_type?: string | null; primary_window?: { used_percent: number; reset_at?: string | null } | null; secondary_window?: { used_percent: number; reset_at?: string | null } | null; tertiary_window?: { used_percent: number; reset_at?: string | null } | null };
   gemini: { configured: boolean; error?: string | null; plan_label?: string | null; account_email?: string | null; account_plan?: string | null; primary_window?: { used_percent: number; reset_at?: string | null } | null; secondary_window?: { used_percent: number; reset_at?: string | null } | null; tertiary_window?: { used_percent: number; reset_at?: string | null } | null };
@@ -80,6 +82,15 @@ export function useUsageLimits(options?: UseUsageLimitsOptions) {
   const [isLoading, setIsLoading] = useState(!hasInitialState);
   const initialRefresh = Boolean(options?.initialRefresh);
   const publishToPreloadCache = Boolean(options?.publishToPreloadCache);
+
+  useEffect(() => {
+    if (!data || typeof window === "undefined") return;
+    try {
+      if (window.localStorage.getItem(LIMIT_ALERTS_PREF_KEY) === "1") {
+        sendPredictiveLimitAlerts(data);
+      }
+    } catch { /* restricted webview */ }
+  }, [data]);
 
   const publishSuccessfulState = useCallback(
     (value: UsageLimitsData | null, source: "page-load" | "manual-refresh") => {

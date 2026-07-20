@@ -39,6 +39,77 @@ describe("UsageOverview", () => {
     expect(screen.getByTestId("usage-summary-skeleton").closest('[aria-busy="true"]')).toBeTruthy();
   });
 
+  it("announces user-initiated updates while keeping existing data visible", () => {
+    render(
+      <UsageOverview
+        period="day"
+        periods={["day", "week"]}
+        summaryLabel="Total"
+        summaryValue="6.7M"
+        hasSummary
+        loading
+        announceLoading
+        fleetData={[
+          {
+            source: "codex",
+            label: "CODEX",
+            totalPercent: "100.0",
+            usage: 6_700_000,
+            usd: 3.68,
+            models: [{ id: "gpt-5.6", name: "gpt-5.6", share: 100, usage: 6_700_000, cost: 3.68 }],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(copy("qpd.card.updating"));
+    expect(screen.getByText("6.7M").closest('[aria-busy="true"]')).toBeTruthy();
+    expect(screen.getByText("CODEX")).toBeVisible();
+  });
+
+  it("keeps background updates busy without repeatedly announcing them", () => {
+    render(
+      <UsageOverview
+        period="day"
+        periods={["day", "week"]}
+        summaryLabel="Total"
+        summaryValue="6.7M"
+        hasSummary
+        loading
+        fleetData={[]}
+      />,
+    );
+
+    expect(screen.getByText("6.7M").closest('[aria-busy="true"]')).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("supports roving keyboard navigation across period tabs", async () => {
+    const user = userEvent.setup();
+    const onPeriodChange = vi.fn();
+    render(
+      <UsageOverview
+        period="day"
+        periods={["day", "week", "month"]}
+        onPeriodChange={onPeriodChange}
+        summaryLabel="Total"
+        summaryValue="123"
+        fleetData={[]}
+      />,
+    );
+
+    const dayTab = screen.getByRole("tab", { name: "Day" });
+    const weekTab = screen.getByRole("tab", { name: "Week" });
+    expect(dayTab).toHaveAttribute("tabindex", "0");
+    expect(weekTab).toHaveAttribute("tabindex", "-1");
+
+    dayTab.focus();
+    await user.keyboard("{ArrowRight}");
+
+    expect(weekTab).toHaveFocus();
+    expect(onPeriodChange).toHaveBeenCalledWith("week");
+  });
+
   it("renders AnythingLLM with its official name, icon, and stable accent", () => {
     const { container } = render(
       <UsageOverview

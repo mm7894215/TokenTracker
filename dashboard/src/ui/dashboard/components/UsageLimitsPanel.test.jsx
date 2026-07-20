@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { copy, setCopyLocale } from "../../../lib/copy";
-import { EN_LOCALE, ZH_CN_LOCALE } from "../../../lib/locale";
+import { DE_LOCALE, EN_LOCALE, JA_LOCALE, KO_LOCALE, ZH_CN_LOCALE, ZH_TW_LOCALE } from "../../../lib/locale";
 import { UsageLimitsPanel } from "./UsageLimitsPanel.jsx";
 
 function formatExpiry(iso) {
@@ -208,6 +208,73 @@ describe("UsageLimitsPanel", () => {
     );
 
     expect(screen.getByText("Cursor")).toBeInTheDocument();
+  });
+
+  it("does not duplicate Antigravity cached status with the generic provenance badge", () => {
+    render(
+      <UsageLimitsPanel
+        antigravity={{
+          configured: true,
+          error: null,
+          cached: true,
+          cached_at: "2026-07-17T12:00:00.000Z",
+          provenance: {
+            source: "disk-cache",
+            confidence: "observed",
+            stale: true,
+            captured_at: "2026-07-17T12:00:00.000Z",
+          },
+          primary_window: { used_percent: 24, reset_at: "2026-07-24T12:00:00.000Z" },
+        }}
+        order={["antigravity"]}
+      />,
+    );
+
+    const group = screen.getByText("Antigravity").closest("[role='button']");
+    expect(group).not.toBeNull();
+    expect(within(group).getByText(/cached\s*·/i)).toBeInTheDocument();
+    expect(group.querySelector("span.bg-amber-500")).not.toBeNull();
+    expect(within(group).queryByText(/^Stale/i)).not.toBeInTheDocument();
+  });
+
+  it("flags an expired Claude sign-in on cached bars instead of the generic stale badge", () => {
+    render(
+      <UsageLimitsPanel
+        claude={{
+          configured: true,
+          error: null,
+          five_hour: { utilization: 41, resets_at: "2026-07-24T12:00:00.000Z" },
+          stale: true,
+          cached_at: "2026-07-17T12:00:00.000Z",
+          auth_action_required: "reauth",
+          provenance: {
+            source: "disk-cache",
+            confidence: "observed",
+            stale: true,
+            captured_at: "2026-07-17T12:00:00.000Z",
+          },
+        }}
+        order={["claude"]}
+      />,
+    );
+
+    const group = screen.getByText("Claude").closest("[role='button']");
+    expect(group).not.toBeNull();
+    expect(within(group).getByText(new RegExp(copy("limits.reauth.badge")))).toBeInTheDocument();
+    expect(within(group).queryByText(/^Stale/i)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [ZH_CN_LOCALE, "实时", "过期"],
+    [ZH_TW_LOCALE, "即時", "過期"],
+    [JA_LOCALE, "最新", "古い"],
+    [KO_LOCALE, "실시간", "오래됨"],
+    [DE_LOCALE, "Live", "Veraltet"],
+  ])("localizes live and stale status labels for %s", (locale, liveLabel, staleLabel) => {
+    setCopyLocale(locale);
+
+    expect(copy("limits.provenance.fresh")).toBe(liveLabel);
+    expect(copy("limits.provenance.stale")).toBe(staleLabel);
   });
 
   it("renders Codex Spark quota windows through compact copy labels", () => {

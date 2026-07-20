@@ -105,7 +105,7 @@ async function fetchGroupedRows(
 
   const pending = (async () => {
     try {
-      const { data, error } = await client.database.rpc("account_usage_grouped_v2", {
+      const { data, error } = await client.database.rpc("account_usage_grouped_cached", {
         p_user_id: userId,
         p_device_id: requestedDeviceId,
         p_from: fromIso,

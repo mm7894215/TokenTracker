@@ -157,6 +157,23 @@ test("DashboardView does not prune async quality-per-dollar while loading", () =
   );
 });
 
+test("DashboardPage only uses the full skeleton before dashboard content is first shown", () => {
+  const src = readFile(containerPath);
+  assert.ok(
+    src.includes("const [dashboardContentShown, setDashboardContentShown] = useState(false)"),
+    "expected a one-way latch for the first dashboard render",
+  );
+  assert.match(
+    src,
+    /const initialDashboardLoading\s*=\s*!dashboardContentShown\s*&&/,
+    "later period refreshes must not restore the full-page skeleton",
+  );
+  assert.ok(
+    src.includes("setDashboardContentShown(true)"),
+    "expected the latch to be set after dashboard content is visible",
+  );
+});
+
 test("DashboardPage removes heatmap range label", () => {
   const src = readFile(viewPath);
   assert.ok(!src.includes("dashboard.activity.range"), "expected heatmap range label removed");

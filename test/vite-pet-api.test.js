@@ -18,6 +18,8 @@ async function request(middleware, pathname, { method = "GET" } = {}) {
   let nextCalled = false;
   const result = await new Promise((resolve, reject) => {
     const res = {
+      get statusCode() { return statusCode; },
+      set statusCode(value) { statusCode = value; },
       setHeader(name, value) { headers[String(name).toLowerCase()] = value; },
       writeHead(code, values = {}) {
         statusCode = code;
@@ -39,6 +41,8 @@ async function request(middleware, pathname, { method = "GET" } = {}) {
 test("Vite dev server handles the current repo pet API instead of an installed CLI", async () => {
   const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-vite-pet-api-"));
   process.env.TOKENTRACKER_PETS_DIR = path.join(sandbox, "pets");
+  process.env.TOKENTRACKER_CODEX_PETS_DIR = path.join(sandbox, "codex-pets");
+  process.env.TOKENTRACKER_CODEX_ASAR = path.join(sandbox, "no-such-app.asar");
   try {
     const configUrl = `${pathToFileURL(path.join(repoRoot, "dashboard/vite.config.js")).href}?pet-api-test=${Date.now()}`;
     const { default: createConfig } = await import(configUrl);
@@ -63,6 +67,42 @@ test("Vite dev server handles the current repo pet API instead of an installed C
     assert.equal(JSON.parse(upload.body).error, "Unauthorized");
   } finally {
     delete process.env.TOKENTRACKER_PETS_DIR;
+    delete process.env.TOKENTRACKER_CODEX_PETS_DIR;
+    delete process.env.TOKENTRACKER_CODEX_ASAR;
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
+});
+
+test("Vite dev server handles current repo session analytics instead of an installed CLI", async () => {
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-vite-session-api-"));
+  const previousHome = process.env.HOME;
+  const previousFetch = global.fetch;
+  process.env.HOME = sandbox;
+  global.fetch = async () => new Response(JSON.stringify({ error: "stale local CLI" }), {
+    status: 404,
+    headers: { "content-type": "application/json" },
+  });
+  try {
+    const configUrl = `${pathToFileURL(path.join(repoRoot, "dashboard/vite.config.js")).href}?session-api-test=${Date.now()}`;
+    const { default: createConfig } = await import(configUrl);
+    const config = createConfig({ mode: "development" });
+    const plugin = config.plugins.find((item) => item?.name === "tokentracker-local-data-api");
+    let middleware;
+    plugin.configureServer({ middlewares: { use(value) { middleware = value; } } });
+
+    const context = await request(middleware, "/functions/tokentracker-context-health");
+    assert.equal(context.nextCalled, false);
+    assert.equal(context.statusCode, 200);
+    assert.equal(typeof JSON.parse(context.body).estimated_fixed_tokens, "number");
+
+    const sessions = await request(middleware, "/functions/tokentracker-session-insights");
+    assert.equal(sessions.nextCalled, false);
+    assert.equal(sessions.statusCode, 200);
+    assert.equal(typeof JSON.parse(sessions.body).available, "boolean");
+  } finally {
+    global.fetch = previousFetch;
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
 });

@@ -16,10 +16,22 @@ const BUILTIN_IDS = new Set(["clawd", "sprout", "byte", "ember"]);
 const KIND_RE = /^[a-z][a-z0-9-]{0,39}$/;
 const PET_ID_RE = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 const petDirectoryCache = new Map();
+let codexAsarCache = null;
+
+// TokenTracker keeps its own pets under ~/.tokentracker/pets and never writes to the
+// Codex app: URL/zip imports stay here, and Codex is only ever read from (reverse
+// import). `~/.codex/pets` is reachable purely as an import source.
+const MIGRATION_MARKER = ".migrated-v1";
 
 function resolvePetsDir() {
   return path.resolve(
-    process.env.TOKENTRACKER_PETS_DIR || path.join(os.homedir(), ".codex", "pets"),
+    process.env.TOKENTRACKER_PETS_DIR || path.join(os.homedir(), ".tokentracker", "pets"),
+  );
+}
+
+function resolveCodexPetsDir() {
+  return path.resolve(
+    process.env.TOKENTRACKER_CODEX_PETS_DIR || path.join(os.homedir(), ".codex", "pets"),
   );
 }
 
@@ -218,6 +230,12 @@ function loadPetDirectory(directory, expectedId = null) {
   if (!manifestStat.isFile() || manifestStat.isSymbolicLink() || !spriteStat.isFile() || spriteStat.isSymbolicLink()) {
     throw new Error("Pet assets must be regular files");
   }
+  if (manifestStat.size <= 0 || manifestStat.size > MAX_MANIFEST_BYTES) {
+    throw new Error("pet.json is missing or too large");
+  }
+  if (spriteStat.size <= 0 || spriteStat.size > MAX_SPRITESHEET_BYTES) {
+    throw new Error("spritesheet.webp is missing or too large");
+  }
   const cacheKey = [
     manifestStat.mtimeMs,
     manifestStat.size,
@@ -240,6 +258,7 @@ function loadPetDirectory(directory, expectedId = null) {
 }
 
 function listInstalledPets() {
+  migrateLegacyCodexPets();
   const root = resolvePetsDir();
   let names = [];
   try { names = fs.readdirSync(root); } catch (error) {
@@ -259,9 +278,9 @@ function listInstalledPets() {
   return pets.sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
 
-function installValidatedPackage(manifestBuffer, spritesheetBuffer) {
-  const { manifest } = validatePackageFiles(manifestBuffer, spritesheetBuffer);
-  const root = resolvePetsDir();
+// Atomically writes one validated pet into `root` (staged dir → rename), optionally
+// dropping `markerName` inside the pet directory. Returns the loaded asset info.
+function writePetIntoDir(root, manifest, spritesheetBuffer, markerName = null) {
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });
   const stage = path.join(root, `.tokentracker-pet-${process.pid}-${crypto.randomBytes(6).toString("hex")}`);
   const destination = path.join(root, manifest.id);
@@ -277,6 +296,7 @@ function installValidatedPackage(manifestBuffer, spritesheetBuffer) {
       kind: manifest.kind,
     }, null, 2)}\n`, { mode: 0o600 });
     fs.writeFileSync(path.join(stage, PET_SPRITESHEET), spritesheetBuffer, { mode: 0o600 });
+    if (markerName) fs.writeFileSync(path.join(stage, markerName), "", { mode: 0o600 });
     loadPetDirectory(stage, manifest.id);
     petDirectoryCache.delete(destination);
     if (fs.existsSync(destination)) fs.renameSync(destination, backup);
@@ -289,7 +309,12 @@ function installValidatedPackage(manifestBuffer, spritesheetBuffer) {
     throw error;
   }
   try { fs.rmSync(backup, { recursive: true, force: true }); } catch {}
-  const installed = loadPetDirectory(destination, manifest.id);
+  return loadPetDirectory(destination, manifest.id);
+}
+
+function installValidatedPackage(manifestBuffer, spritesheetBuffer) {
+  const { manifest } = validatePackageFiles(manifestBuffer, spritesheetBuffer);
+  const installed = writePetIntoDir(resolvePetsDir(), manifest, spritesheetBuffer);
   return publicPet(manifest, { assetVersion: installed.assetVersion });
 }
 
@@ -353,20 +378,258 @@ function removeInstalledPet(id) {
 }
 
 function resolvePetAsset(id) {
+  // Native hosts can ask for the persisted custom pet before the dashboard has
+  // listed the catalog. Migrate first so an upgrade does not turn that first
+  // request into a 404 and reset the user's selection.
+  migrateLegacyCodexPets();
   const normalized = String(id || "").trim().toLowerCase();
   if (!PET_ID_RE.test(normalized) || BUILTIN_IDS.has(normalized)) return null;
   try { return loadPetDirectory(path.join(resolvePetsDir(), normalized), normalized); } catch { return null; }
 }
 
+// --- One-time migration: copy legacy pets out of the shared Codex dir into our own ---
+
+function migrateLegacyCodexPets() {
+  const root = resolvePetsDir();
+  const marker = path.join(root, MIGRATION_MARKER);
+  try { if (fs.existsSync(marker)) return { migrated: 0 }; } catch { return { migrated: 0 }; }
+  try { fs.mkdirSync(root, { recursive: true, mode: 0o700 }); } catch { return { migrated: 0 }; }
+  let migrated = 0;
+  let names = [];
+  let scanComplete = false;
+  try {
+    names = fs.readdirSync(resolveCodexPetsDir());
+    scanComplete = true;
+  } catch (error) {
+    // A missing legacy directory is a completed no-op. Permission and I/O
+    // failures are not: leave the marker absent so the next launch can retry.
+    if (error?.code === "ENOENT") scanComplete = true;
+  }
+  let copyFailed = false;
+  for (const name of names) {
+    if (!PET_ID_RE.test(name) || BUILTIN_IDS.has(name)) continue;
+    if (fs.existsSync(path.join(root, name))) continue; // never clobber an existing local pet
+    let loaded;
+    try {
+      loaded = loadPetDirectory(path.join(resolveCodexPetsDir(), name), name);
+    } catch {
+      // Invalid legacy packages are ignored just as they were by the old catalog.
+      continue;
+    }
+    try {
+      writePetIntoDir(root, loaded.manifest, fs.readFileSync(loaded.spritesheetPath));
+      migrated += 1;
+    } catch {
+      copyFailed = true;
+    }
+  }
+  if (scanComplete && !copyFailed) {
+    try { fs.writeFileSync(marker, `${new Date().toISOString()}\n`, { mode: 0o600 }); } catch {}
+  }
+  return { migrated };
+}
+
+// --- Reverse import: pull Codex's own pets into TokenTracker ---
+
+// Resolved per call (not frozen at load) so an env override applies at runtime.
+function resolveCodexAsarPath() {
+  return process.env.TOKENTRACKER_CODEX_ASAR
+    || "/Applications/Codex.app/Contents/Resources/app.asar";
+}
+// Codex ships these native companions bundled inside its app; the display names are
+// stable brand labels. Anything not listed falls back to a capitalized id.
+const CODEX_BUILTIN_NAMES = {
+  rocky: "Rocky", seedy: "Seedy", hoots: "Hoots", dewey: "Dewey", fireball: "Fireball",
+  stacky: "Stacky", codex: "Codex", bsod: "BSOD", "null-signal": "Null Signal",
+};
+
+// Parses the asar header (Chromium Pickle) and returns the file tree plus the byte
+// offset where file contents begin. Pure Node, no dependency — asar's layout is stable.
+function readAsarHeader(fd) {
+  const head = Buffer.alloc(16);
+  if (fs.readSync(fd, head, 0, 16, 0) < 16) throw new Error("asar too small");
+  const headerPayloadSize = head.readUInt32LE(4);
+  const jsonStrLen = head.readUInt32LE(12);
+  if (jsonStrLen <= 0 || jsonStrLen > 64 * 1024 * 1024) throw new Error("asar header size out of range");
+  const jsonBuf = Buffer.alloc(jsonStrLen);
+  fs.readSync(fd, jsonBuf, 0, jsonStrLen, 16);
+  const header = JSON.parse(jsonBuf.toString("utf8"));
+  const base = 8 + headerPayloadSize;
+  return { header, baseOffset: base % 4 ? base + 4 - (base % 4) : base };
+}
+
+// Reads Codex's bundled companion spritesheets out of the app's asar. Returns
+// [{ id, displayName, description, spriteVersionNumber, buffer }]. Degrades to [] if
+// Codex isn't installed or the bundle can't be read.
+function readCodexBuiltinPets(asarPath = resolveCodexAsarPath()) {
+  const resolvedAsarPath = path.resolve(asarPath);
+  let asarStat;
+  try { asarStat = fs.statSync(resolvedAsarPath); } catch { return []; }
+  const cacheKey = `${resolvedAsarPath}:${asarStat.mtimeMs}:${asarStat.size}`;
+  if (codexAsarCache?.key === cacheKey) return codexAsarCache.pets;
+
+  let fd;
+  try { fd = fs.openSync(resolvedAsarPath, "r"); } catch { return []; }
+  try {
+    const { header, baseOffset } = readAsarHeader(fd);
+    const entries = [];
+    (function walk(node) {
+      for (const [name, value] of Object.entries(node?.files || {})) {
+        if (value?.files) walk(value);
+        else if (/-spritesheet-.*\.webp$/i.test(name) && value?.offset != null) entries.push([name, value]);
+      }
+    })(header);
+    const byId = new Map();
+    for (const [name, entry] of entries) {
+      const id = name.replace(/-spritesheet-.*$/i, "").toLowerCase();
+      if (!PET_ID_RE.test(id) || BUILTIN_IDS.has(id) || byId.has(id)) continue;
+      const size = Number(entry.size);
+      if (!(size > 0) || size > MAX_SPRITESHEET_BYTES) continue;
+      const buffer = Buffer.alloc(size);
+      fs.readSync(fd, buffer, 0, size, baseOffset + Number(entry.offset));
+      let dimensions;
+      try { dimensions = readWebpDimensions(buffer); } catch { continue; }
+      const spriteVersionNumber = dimensions.width === 1536 && dimensions.height === 2288 ? 2
+        : dimensions.width === 1536 && dimensions.height === 1872 ? 1 : 0;
+      if (!spriteVersionNumber) continue;
+      byId.set(id, {
+        id,
+        displayName: CODEX_BUILTIN_NAMES[id] || (id.charAt(0).toUpperCase() + id.slice(1)),
+        description: "Built-in Codex companion.",
+        spriteVersionNumber,
+        buffer,
+      });
+    }
+    const pets = [...byId.values()];
+    codexAsarCache = { key: cacheKey, pets };
+    return pets;
+  } catch {
+    codexAsarCache = { key: cacheKey, pets: [] };
+    return [];
+  }
+  finally { try { fs.closeSync(fd); } catch {} }
+}
+
+// Preview URL for an importable Codex pet (served before it lands in our own dir).
+function codexAssetUrl(id, version) {
+  return `/api/pets/codex/${encodeURIComponent(id)}/${PET_SPRITESHEET}${version ? `?v=${encodeURIComponent(version)}` : ""}`;
+}
+
+// Lists Codex pets that could be imported but aren't in TokenTracker yet: valid
+// packages in ~/.codex/pets plus Codex's app-bundled companions. Each carries an
+// assetUrl so the picker can preview sprites.
+function listCodexImportablePets() {
+  const alreadyHere = new Set(listInstalledPets().map((pet) => pet.id));
+  const result = new Map();
+  const codexRoot = resolveCodexPetsDir();
+  let names = [];
+  try { names = fs.readdirSync(codexRoot); } catch { names = []; }
+  for (const name of names) {
+    if (!PET_ID_RE.test(name) || BUILTIN_IDS.has(name) || alreadyHere.has(name)) continue;
+    try {
+      const loaded = loadPetDirectory(path.join(codexRoot, name), name);
+      result.set(name, {
+        ...loaded.manifest,
+        custom: true,
+        assetUrl: codexAssetUrl(name, loaded.assetVersion),
+        assetVersion: loaded.assetVersion,
+        source: "codex-dir",
+      });
+    } catch {}
+  }
+  for (const pet of readCodexBuiltinPets()) {
+    if (alreadyHere.has(pet.id) || result.has(pet.id)) continue;
+    result.set(pet.id, {
+      id: pet.id,
+      displayName: pet.displayName,
+      description: pet.description,
+      spritesheetPath: PET_SPRITESHEET,
+      spriteVersionNumber: pet.spriteVersionNumber,
+      custom: true,
+      assetUrl: codexAssetUrl(pet.id, `app${pet.spriteVersionNumber}`),
+      source: "codex-app",
+    });
+  }
+  return [...result.values()].sort((a, b) => a.displayName.localeCompare(b.displayName));
+}
+
+// Returns { buffer, contentLength } for an importable Codex pet's spritesheet — from
+// ~/.codex/pets first, then the app bundle. Powers the picker preview route.
+function readCodexImportableAsset(id) {
+  const normalized = String(id || "").trim().toLowerCase();
+  if (!PET_ID_RE.test(normalized) || BUILTIN_IDS.has(normalized)) return null;
+  const codexDir = path.join(resolveCodexPetsDir(), normalized);
+  try {
+    const loaded = loadPetDirectory(codexDir, normalized);
+    return { buffer: fs.readFileSync(loaded.spritesheetPath) };
+  } catch {}
+  for (const pet of readCodexBuiltinPets()) {
+    if (pet.id === normalized) return { buffer: pet.buffer };
+  }
+  return null;
+}
+
+function importFromCodex(ids) {
+  const requested = new Set(
+    (Array.isArray(ids) ? ids : [])
+      .map((id) => String(id || "").trim().toLowerCase())
+      .filter((id) => PET_ID_RE.test(id) && !BUILTIN_IDS.has(id)),
+  );
+  if (requested.size === 0) throw new Error("No valid Codex pet ids to import");
+  const root = resolvePetsDir();
+  // The listing excludes already-installed ids, but enforce the same rule at
+  // the write boundary so a handcrafted local API request cannot overwrite a
+  // TokenTracker-owned pet with Codex's copy.
+  for (const id of [...requested]) {
+    if (fs.existsSync(path.join(root, id))) requested.delete(id);
+  }
+  if (requested.size === 0) throw new Error("Requested Codex pets are already installed");
+  const codexRoot = resolveCodexPetsDir();
+  const imported = [];
+  for (const id of [...requested]) {
+    try {
+      const loaded = loadPetDirectory(path.join(codexRoot, id), id);
+      const installed = writePetIntoDir(root, loaded.manifest, fs.readFileSync(loaded.spritesheetPath));
+      imported.push(publicPet(loaded.manifest, { assetVersion: installed.assetVersion }));
+      requested.delete(id);
+    } catch {}
+  }
+  if (requested.size > 0) {
+    for (const pet of readCodexBuiltinPets()) {
+      if (!requested.has(pet.id)) continue;
+      const manifest = normalizeManifest({
+        id: pet.id,
+        displayName: pet.displayName,
+        description: pet.description,
+        spritesheetPath: PET_SPRITESHEET,
+        ...(pet.spriteVersionNumber === 2 ? { spriteVersionNumber: 2 } : {}),
+      });
+      try {
+        const installed = writePetIntoDir(root, manifest, pet.buffer);
+        imported.push(publicPet(manifest, { assetVersion: installed.assetVersion }));
+        requested.delete(pet.id);
+      } catch {}
+    }
+  }
+  if (imported.length === 0) throw new Error("None of the requested Codex pets could be imported");
+  return { imported };
+}
+
 module.exports = {
   MAX_PACKAGE_BYTES,
+  importFromCodex,
   importPetZip,
   installFromCodexPets,
+  listCodexImportablePets,
   listInstalledPets,
+  migrateLegacyCodexPets,
   normalizeManifest,
   petIdFromCodexPetsUrl,
+  readCodexBuiltinPets,
+  readCodexImportableAsset,
   readWebpDimensions,
   removeInstalledPet,
+  resolveCodexPetsDir,
   resolvePetAsset,
   resolvePetsDir,
   validatePackageFiles,

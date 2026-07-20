@@ -61,8 +61,18 @@ internal sealed class UsagePoller : IDisposable
     /// </summary>
     public volatile bool AccountViewActive;
 
+    /// <summary>
+    /// Fetch the provider quota snapshot while the desktop pet is visible. Keeping
+    /// this behind the same visibility gate as rich stats avoids waking provider
+    /// credential readers when the pet is hidden.
+    /// </summary>
+    public volatile bool IncludeLimits;
+
     /// <summary>Raised on the thread-pool with fresh stats. UI must marshal to the UI thread.</summary>
     public event Action<UsageStats>? StatsUpdated;
+
+    /// <summary>Raised with the raw local usage-limits JSON so each pet client can select its own display line.</summary>
+    public event Action<string>? LimitsUpdated;
 
     public UsagePoller(Func<string> baseUrl) => _baseUrl = baseUrl;
 
@@ -77,6 +87,11 @@ internal sealed class UsagePoller : IDisposable
             {
                 var stats = await FetchAsync();
                 if (stats is { } s && !token.IsCancellationRequested) StatsUpdated?.Invoke(s);
+                if (IncludeLimits)
+                {
+                    var limits = await FetchLimitsAsync();
+                    if (limits is not null && !token.IsCancellationRequested) LimitsUpdated?.Invoke(limits);
+                }
                 try { await Task.Delay(TimeSpan.FromSeconds(60), token); }
                 catch (TaskCanceledException) { break; }
             }
@@ -90,7 +105,26 @@ internal sealed class UsagePoller : IDisposable
         {
             var stats = await FetchAsync();
             if (stats is { } s && !token.IsCancellationRequested) StatsUpdated?.Invoke(s);
+            if (IncludeLimits)
+            {
+                var limits = await FetchLimitsAsync();
+                if (limits is not null && !token.IsCancellationRequested) LimitsUpdated?.Invoke(limits);
+            }
         }, token);
+    }
+
+    private async Task<string?> FetchLimitsAsync()
+    {
+        try
+        {
+            using var resp = await Http.GetAsync(_baseUrl() + "/functions/tokentracker-usage-limits");
+            if (!resp.IsSuccessStatusCode) return null;
+            return await resp.Content.ReadAsStringAsync();
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private async Task<UsageStats?> FetchAsync()

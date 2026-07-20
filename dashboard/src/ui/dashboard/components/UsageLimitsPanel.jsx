@@ -253,6 +253,57 @@ function ago(iso) {
   return copy("shared.time.d_ago", { n: d });
 }
 
+const STATUS_BADGE_TONES = {
+  live: {
+    surface: "bg-oai-gray-50 dark:bg-oai-gray-800 border-oai-gray-200/60 dark:border-oai-gray-700/60 text-oai-gray-500 dark:text-oai-gray-400",
+    dot: "bg-emerald-500",
+    pulse: "bg-emerald-400",
+  },
+  stale: {
+    surface: "bg-oai-gray-50 dark:bg-oai-gray-800 border-oai-gray-200/60 dark:border-oai-gray-700/60 text-oai-gray-500 dark:text-oai-gray-400",
+    dot: "bg-amber-500",
+    pulse: "bg-amber-400",
+  },
+  cached: {
+    surface: "bg-oai-gray-50 dark:bg-oai-gray-800 border-oai-gray-200/60 dark:border-oai-gray-700/60 text-oai-gray-500 dark:text-oai-gray-400",
+    dot: "bg-amber-500",
+    pulse: "bg-amber-400",
+  },
+};
+
+// CLI to run when a provider's stored OAuth token has expired
+// (`auth_action_required: "reauth"` on the provider payload).
+const REAUTH_CLI_COMMANDS = {
+  claude: "claude",
+  codex: "codex",
+};
+
+function StatusBadge({ label, age = null, tone = "live", tooltip = null }) {
+  const colors = STATUS_BADGE_TONES[tone] || STATUS_BADGE_TONES.live;
+  const shouldPulse = tone === "live";
+  return (
+    <div className="relative inline-flex items-center group cursor-help ml-1" onClick={(e) => e.stopPropagation()}>
+      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wider border leading-normal ${colors.surface}`}>
+        {shouldPulse ? (
+          <span className="relative flex h-1.5 w-1.5">
+            <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${colors.pulse} opacity-75`} />
+            <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${colors.dot}`} />
+          </span>
+        ) : (
+          <span className={`h-1.5 w-1.5 rounded-full ${colors.dot}`} />
+        )}
+        {label}{age ? <>&nbsp;·&nbsp;{age}</> : null}
+      </span>
+      {tooltip ? (
+        <span className="pointer-events-none absolute left-1/2 bottom-full z-20 mb-2 -translate-x-1/2 w-48 rounded-md bg-oai-gray-900 dark:bg-oai-gray-800 px-2.5 py-1.5 text-[10px] font-normal text-white text-center opacity-0 scale-95 translate-y-1 group-hover:opacity-100 group-hover:scale-100 group-hover:translate-y-0 transition-all duration-200 cubic-bezier(0.16, 1, 0.3, 1) leading-normal shadow-lg origin-bottom border border-oai-gray-800 dark:border-oai-gray-700">
+          {tooltip}
+          <span className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-oai-gray-900 dark:border-t-oai-gray-800" />
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 function ToolGroup({ name, providerId, children, expandable = false, expanded = false, onToggle, badge = null }) {
   const providerKey = limitProviderIconKey(providerId);
   const header = (
@@ -436,35 +487,38 @@ function renderProviderGroup(id, data, mode, expanded, onToggle) {
   if (id === "antigravity") {
     if (data.cached) {
       const suffix = ago(data.cached_at);
-      badge = (
-        <div className="relative inline-flex items-center group cursor-help ml-1" onClick={(e) => e.stopPropagation()}>
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wider bg-oai-gray-100 dark:bg-oai-gray-800 border border-oai-gray-200/50 dark:border-oai-gray-700/50 text-oai-gray-500 dark:text-oai-gray-400 leading-normal">
-            <span className="h-1 w-1 rounded-full bg-oai-gray-400 dark:bg-oai-gray-500" />
-            {copy("limits.label.antigravity_cached")}{suffix ? <>&nbsp;·&nbsp;{suffix}</> : null}
-          </span>
-          <span className="pointer-events-none absolute left-1/2 bottom-full z-20 mb-2 -translate-x-1/2 w-48 rounded-md bg-oai-gray-900 dark:bg-oai-gray-800 px-2.5 py-1.5 text-[10px] font-normal text-white text-center opacity-0 scale-95 translate-y-1 group-hover:opacity-100 group-hover:scale-100 group-hover:translate-y-0 transition-all duration-200 cubic-bezier(0.16, 1, 0.3, 1) leading-normal shadow-lg origin-bottom border border-oai-gray-800 dark:border-oai-gray-700">
-            {copy("limits.tooltip.antigravity_cached")}
-            <span className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-oai-gray-900 dark:border-t-oai-gray-800" />
-          </span>
-        </div>
-      );
+      badge = <StatusBadge label={copy("limits.label.antigravity_cached")} age={suffix} tone="cached" tooltip={copy("limits.tooltip.antigravity_cached")} />;
     } else {
-      badge = (
-        <div className="relative inline-flex items-center group cursor-help ml-1" onClick={(e) => e.stopPropagation()}>
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wider bg-emerald-500/10 dark:bg-emerald-500/15 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 leading-normal">
-            <span className="relative flex h-1 w-1">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-1 w-1 bg-emerald-500" />
-            </span>
-            {copy("limits.label.antigravity_live")}
-          </span>
-          <span className="pointer-events-none absolute left-1/2 bottom-full z-20 mb-2 -translate-x-1/2 w-48 rounded-md bg-oai-gray-900 dark:bg-oai-gray-800 px-2.5 py-1.5 text-[10px] font-normal text-white text-center opacity-0 scale-95 translate-y-1 group-hover:opacity-100 group-hover:scale-100 group-hover:translate-y-0 transition-all duration-200 cubic-bezier(0.16, 1, 0.3, 1) leading-normal shadow-lg origin-bottom border border-oai-gray-800 dark:border-oai-gray-700">
-            {copy("limits.tooltip.antigravity_live")}
-            <span className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-oai-gray-900 dark:border-t-oai-gray-800" />
-          </span>
-        </div>
-      );
+      badge = <StatusBadge label={copy("limits.label.antigravity_live")} tone="live" tooltip={copy("limits.tooltip.antigravity_live")} />;
     }
+  }
+  // An expired sign-in means every live fetch fails the same way and the bars
+  // silently freeze on the cached snapshot (issue 330) — more actionable than
+  // the generic stale badge below, so it takes precedence.
+  if (!badge && data.auth_action_required === "reauth") {
+    const command = REAUTH_CLI_COMMANDS[id];
+    badge = (
+      <StatusBadge
+        label={copy("limits.reauth.badge")}
+        age={ago(data.cached_at)}
+        tone="stale"
+        tooltip={command ? copy("limits.reauth.tooltip", { command }) : null}
+      />
+    );
+  }
+  const provenance = data.provenance;
+  // Fresh data is the norm — flagging it on every provider would fill the
+  // panel with a dozen permanently pulsing "Live" badges. Surface provenance
+  // only on the exception: data served from a cache that has gone stale.
+  // Provider-specific badges (currently Antigravity's cached/live state)
+  // already communicate freshness; don't render the same state twice.
+  if (provenance?.stale && !badge) {
+    badge = <StatusBadge
+      label={copy("limits.provenance.stale")}
+      age={ago(provenance.captured_at)}
+      tone="stale"
+      tooltip={copy("limits.provenance.tooltip", { source: provenance.source, confidence: provenance.confidence })}
+    />;
   }
   return renderConfiguredProvider(id, data, title, mode, expanded, onToggle, badge);
 }

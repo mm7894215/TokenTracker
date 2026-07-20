@@ -70,10 +70,18 @@ test("native macOS strings are wired through the Swift localization helpers", ()
   assert.ok(!dateHelpers.includes('NativeLocalization.usesChinese ? "日" : "Day"'));
 
   assert.ok(usageLimitsView.includes("Strings.kiroBonusLabel"));
-  assert.ok(usageLimitsView.includes("Strings.grokMonthLabel"));
+  assert.ok(usageLimitsView.includes("Strings.grokPrimaryLabel"));
   assert.ok(usageLimitsView.includes('case "grok"'));
   assert.ok(usageLimitsView.includes("Strings.limitResetNow"));
   assert.ok(!usageLimitsView.includes('NativeLocalization.usesChinese ? "奖励" : "Bonus"'));
+
+  assert.ok(strings.includes("static var grokWeekLabel"));
+  assert.ok(strings.includes("static func grokPrimaryLabel"));
+  assert.ok(strings.includes('case "weekly": return grokWeekLabel'));
+
+  const grokLimitsModel = read("TokenTrackerBar/TokenTrackerBar/Models/UsageLimits.swift");
+  assert.ok(grokLimitsModel.includes("periodType"));
+  assert.ok(grokLimitsModel.includes('case periodType = "period_type"'));
 
   const limitsSettingsStore = read("TokenTrackerBar/TokenTrackerBar/Models/LimitsSettingsStore.swift");
   assert.ok(limitsSettingsStore.includes('"grok"'));
@@ -193,11 +201,26 @@ test("locale PR stays scoped away from silent auto update flags", () => {
   assert.doesNotMatch(project, /TokenTrackerEnableSilentAutoUpdate/);
 });
 
+test("profile footer labels the start date instead of a leaderboard rank", () => {
+  const expectedLabels = {
+    zh: "开始使用",
+    "zh-TW": "開始使用",
+    ja: "開始日",
+    ko: "시작일",
+    de: "Beginn",
+  };
+
+  for (const [locale, expectedLabel] of Object.entries(expectedLabels)) {
+    const core = JSON.parse(read(`dashboard/src/content/i18n/${locale}/core.json`));
+    assert.equal(core["identity_card.rank_label"], expectedLabel);
+  }
+});
+
 test("zh locale uses reviewed natural copy for settings and dashboard", () => {
   const core = read("dashboard/src/content/i18n/zh/core.json");
   const dashboard = read("dashboard/src/content/i18n/zh/dashboard.json");
 
-  assert.match(core, /"identity_card\.rank_label":\s*"排名"/);
+  assert.match(core, /"identity_card\.rank_label":\s*"开始使用"/);
   assert.match(core, /"widgets\.heatmap\.description":\s*"像 GitHub 一样，一眼看清活跃和空闲的日子。"/);
   assert.match(core, /"widgets\.topModels\.name":\s*"热门模型"/);
   assert.match(core, /"daily\.sort\.conversations\.label":\s*"对话数"/);

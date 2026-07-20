@@ -106,6 +106,11 @@ const {
   parseCursorCsv,
 } = require("../lib/cursor-config");
 const { purgeProjectUsage } = require("../lib/project-usage-purge");
+const {
+  isCodexSessionCursorPath,
+  isCursorStoreRetry,
+  openCursorStore,
+} = require("../lib/cursor-store");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
 const { resolveRuntimeConfig } = require("../lib/runtime-config");
 
@@ -186,6 +191,8 @@ const CODEX_RESCAN_DEDUP_REPAIR_KEY = "codexRescanDedupRepair_2026_06";
 const CODEX_FORK_REPLAY_REPAIR_KEY = "codexForkReplayRepair_2026_07";
 const DROID_DUP_SESSION_REPAIR_KEY = "droidDupSessionInflationRepair_2026_06";
 const CODEX_COLD_SCAN_AUDIT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const NOTIFY_LOCK_WAIT_MS = 130_000;
+const NOTIFY_LOCK_POLL_MS = 5_000;
 const CODEX_COLD_SCAN_AUDIT_MAX_SYNCS = 288;
 // 0.57.0 mis-attributed mimocode's mirrored Claude/claude-mem history to
 // source=mimo (read the whole DB instead of only providerID=mimo rows). This
@@ -285,9 +292,51 @@ function mergeCopilotAppDbStates(primary = {}, alias = {}) {
   return { ...primary, ...newer, sessionTotals };
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function acquireSyncLock(
+  lockPath,
+  opts,
+  {
+    notifyWaitMs = NOTIFY_LOCK_WAIT_MS,
+    notifyPollMs = NOTIFY_LOCK_POLL_MS,
+  } = {},
+) {
+  let lock = await openLock(lockPath, { quietIfLocked: opts.auto });
+  if (lock || !opts.fromNotify || notifyWaitMs <= 0) return lock;
+
+  // One low-frequency waiter coalesces every notify that lands behind an
+  // active native/background sync. This avoids both losing the final Codex
+  // turn and spawning a fleet of idle retry processes during a long scan.
+  const waiter = await openLock(`${lockPath}.notify-wait`, {
+    quietIfLocked: true,
+  });
+  if (!waiter) return null;
+
+  try {
+    const deadline = Date.now() + notifyWaitMs;
+    while (!lock && Date.now() < deadline) {
+      const remaining = deadline - Date.now();
+      await sleep(Math.min(Math.max(1, notifyPollMs), remaining));
+      lock = await openLock(lockPath, { quietIfLocked: true });
+    }
+    return lock;
+  } finally {
+    await waiter.release();
+  }
+}
+
 async function cmdSync(argv, context = {}) {
   const opts = parseArgs(argv);
   const diagnostics = context && typeof context === "object" ? context.diagnostics : null;
+  const cursorStoreOptions = context && typeof context === "object"
+    ? context.cursorStoreOptions
+    : null;
+  const lockWaitOptions = context && typeof context === "object"
+    ? context.lockWaitOptions
+    : undefined;
   const syncDiagnostics = diagnostics && typeof diagnostics === "object" ? diagnostics : null;
   const home = os.homedir();
   const { trackerDir } = await resolveTrackerPaths({ home });
@@ -298,7 +347,7 @@ async function cmdSync(argv, context = {}) {
   }
 
   const lockPath = path.join(trackerDir, "sync.lock");
-  const lock = await openLock(lockPath, { quietIfLocked: opts.auto });
+  const lock = await acquireSyncLock(lockPath, opts, lockWaitOptions);
   if (!lock) return;
 
   let progress = null;
@@ -314,8 +363,24 @@ async function cmdSync(argv, context = {}) {
     const grokSignalPath = path.join(trackerDir, "grok-last-session.json");
     const legacyGrokSignalPath = path.join(trackerDir, "tracker", "grok-last-session.json");
 
+    // Native publication owns backlog and failure-backoff retries on its next
+    // five-minute tick. Remove any legacy detached retry marker immediately so
+    // an already-sleeping retry process observes the missing marker and exits.
+    if (opts.publishAccount) {
+      await clearAutoRetry(trackerDir);
+    }
+
     const config = await readJson(configPath);
-    const cursors = (await readJson(cursorsPath)) || { version: 1, files: {}, updatedAt: null };
+    const codexCursorRoots = [process.env.CODEX_HOME || path.join(home, ".codex")];
+    const cursorStore = await openCursorStore({
+      trackerDir,
+      cursorsPath,
+      codexRoots: codexCursorRoots,
+      ...(cursorStoreOptions && typeof cursorStoreOptions === "object"
+        ? cursorStoreOptions
+        : {}),
+    });
+    const cursors = cursorStore.cursors;
     const uploadThrottle = normalizeUploadState(await readJson(uploadThrottlePath));
     let uploadThrottleState = uploadThrottle;
     let grokHookSignal = null;
@@ -418,6 +483,7 @@ async function cmdSync(argv, context = {}) {
     }
 
     if (isFullSourceScan) {
+      await cursorStore.materializeAllCodexState(cursors);
       await migrateRolloutCumulativeDeltaBuckets({ cursors, queuePath, rolloutFiles });
       const codexRescanRepairRan = await repairCodexRescanInflation({
         cursors,
@@ -446,20 +512,29 @@ async function cmdSync(argv, context = {}) {
       });
     }
 
-    const codexColdSkipEnabled = opts.auto && (isFullSourceScan || isBackgroundLightweightSync) && sourceAllowed("codex");
+    const codexColdSkipEnabled = opts.auto && sourceAllowed("codex");
     const codexColdAuditDue = codexColdSkipEnabled
       ? isCodexColdScanAuditDue(cursors)
       : false;
-    const codexColdFilter = codexColdSkipEnabled
+    let codexColdFilter = codexColdSkipEnabled
       ? await filterColdCodexRolloutFiles({
           rolloutFiles,
           cursors,
+          codexCursorStore: cursorStore,
           projectEnabled: true,
           auditDue: codexColdAuditDue,
           diagnostics: syncDiagnostics,
         })
       : { rolloutFiles, skipped: 0 };
     const rolloutFilesForParse = codexColdFilter.rolloutFiles;
+    let codexCursorLoadRestarted = false;
+    if (!codexColdSkipEnabled && sourceAllowed("codex")) {
+      const loadResult = await cursorStore.loadCodexFilesForPaths(
+        rolloutFilesForParse,
+        cursors,
+      );
+      codexCursorLoadRestarted = Boolean(loadResult?.restarted);
+    }
 
     const openclawFiles = openclawSignal?.sessionFile
       ? [{ path: openclawSignal.sessionFile, source: "openclaw" }]
@@ -473,30 +548,58 @@ async function cmdSync(argv, context = {}) {
 
     let parseResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     let codexParseSucceeded = false;
+    let codexFallbackRetryRan = Boolean(
+      codexColdFilter.restarted || codexCursorLoadRestarted,
+    );
+    const runCodexParse = (files) => parseRolloutIncremental({
+      rolloutFiles: files,
+      cursors,
+      codexEventStore: Array.isArray(cursors.codexHashes)
+        ? null
+        : cursorStore.codexEventStore,
+      queuePath,
+      projectQueuePath,
+      diagnostics: syncDiagnostics,
+      onProgress: (p) => {
+        if (!progress?.enabled) return;
+        const pct = p.total > 0 ? p.index / p.total : 1;
+        progress.update(
+          `Parsing ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} files | buckets ${formatNumber(
+            p.bucketsQueued,
+          )}`,
+        );
+      },
+    });
     try {
-      parseResult = await parseRolloutIncremental({
-        rolloutFiles: rolloutFilesForParse,
-        cursors,
-        queuePath,
-        projectQueuePath,
-        diagnostics: syncDiagnostics,
-        onProgress: (p) => {
-          if (!progress?.enabled) return;
-          const pct = p.total > 0 ? p.index / p.total : 1;
-          progress.update(
-            `Parsing ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} files | buckets ${formatNumber(
-              p.bucketsQueued,
-            )}`,
-          );
-        },
-      });
+      parseResult = await runCodexParse(rolloutFilesForParse);
       codexParseSucceeded = true;
     } catch (err) {
-      warnProviderParseFailure("Codex", err, opts);
+      if (isCursorStoreRetry(err)) {
+        await cursorStore.loadCodexFilesForPaths(rolloutFiles, cursors);
+        codexColdFilter = { rolloutFiles, skipped: 0, restarted: true };
+        codexFallbackRetryRan = true;
+        if (syncDiagnostics) {
+          syncDiagnostics.cold_skipped = 0;
+          syncDiagnostics.parse_candidates = rolloutFiles.reduce(
+            (count, entry) => count + (
+              typeof entry === "string" || !entry?.source || entry.source === "codex"
+                ? 1
+                : 0
+            ),
+            0,
+          );
+        }
+        parseResult = await runCodexParse(rolloutFiles);
+        codexParseSucceeded = true;
+      } else if (err?.code === "TOKENTRACKER_CURSOR_STORE_CORRUPT") {
+        throw err;
+      } else {
+        warnProviderParseFailure("Codex", err, opts);
+      }
     }
     if (codexColdSkipEnabled && codexParseSucceeded) {
       recordCodexColdScanAudit(cursors, {
-        fullAudit: codexColdAuditDue,
+        fullAudit: codexColdAuditDue || codexFallbackRetryRan,
         skipped: codexColdFilter.skipped,
       });
     }
@@ -1851,12 +1954,12 @@ async function cmdSync(argv, context = {}) {
     }
 
     cursors.updatedAt = new Date().toISOString();
-    await writeJson(cursorsPath, cursors);
+    await cursorStore.commit(cursors);
     if (syncDiagnostics) {
-      const cursorStat = await fs.stat(cursorsPath);
+      const cursorStat = await fs.stat(cursorStore.currentCorePath);
       syncDiagnostics.cursor_commits = Number(syncDiagnostics.cursor_commits || 0) + 1;
       syncDiagnostics.cursor_bytes = Number(syncDiagnostics.cursor_bytes || 0) + cursorStat.size;
-      syncDiagnostics.cursor_path = cursorsPath;
+      syncDiagnostics.cursor_path = cursorStore.currentCorePath;
     }
     if (grokHookSignalConsumed && grokHookSignalPath) {
       await fs.unlink(grokHookSignalPath).catch(() => {});
@@ -1868,8 +1971,37 @@ async function cmdSync(argv, context = {}) {
 
     let uploadResult = { inserted: 0, skipped: 0 };
     let uploadAttempted = false;
+    let backgroundUploadDecision = null;
 
-    if (runtime.deviceToken && runtime.baseUrl && !isBackgroundLightweightSync) {
+    if (opts.publishAccount) {
+      const uploadStateBefore = (await readJson(queueStatePath)) || { offset: 0 };
+      const queueSizeBefore = await safeStatSize(queuePath);
+      const pendingBytesBefore = Math.max(
+        0,
+        queueSizeBefore - Number(uploadStateBefore.offset || 0),
+      );
+      // The native five-minute loop is already the success cadence. Reuse the
+      // shared decision helper for pending/backoff handling, but intentionally
+      // ignore the legacy 30-minute success throttle so account publication
+      // does not become stale again. Failure backoff remains authoritative.
+      backgroundUploadDecision = decideAutoUpload({
+        nowMs: Date.now(),
+        pendingBytes: pendingBytesBefore,
+        state: {
+          ...uploadThrottleState,
+          nextAllowedAtMs: Number(uploadThrottleState.backoffUntilMs || 0),
+        },
+        config: {
+          batchSize: 200,
+          maxBatchesSmall: 5,
+          maxBatchesLarge: 5,
+        },
+      });
+    }
+
+    if (runtime.deviceToken && runtime.baseUrl &&
+        (!isBackgroundLightweightSync || opts.publishAccount) &&
+        (!backgroundUploadDecision || backgroundUploadDecision.allowed)) {
       uploadAttempted = true;
       // Mirror the machine identity into the purge-surviving seed file so a
       // future `uninstall --purge` + reinstall recovers the same cloud device
@@ -1886,8 +2018,8 @@ async function cmdSync(argv, context = {}) {
           deviceToken: runtime.deviceToken,
           queuePath,
           queueStatePath,
-          maxBatches: opts.drain ? 100 : 5,
-          batchSize: 200,
+          maxBatches: opts.drain ? 100 : (backgroundUploadDecision?.maxBatches || 5),
+          batchSize: backgroundUploadDecision?.batchSize || 200,
         });
         // Record success so the exponential backoff step resets — otherwise
         // a single past failure keeps us pessimistically throttled forever.
@@ -1926,7 +2058,7 @@ async function cmdSync(argv, context = {}) {
 
     if (pendingBytes <= 0) {
       await clearAutoRetry(trackerDir);
-    } else if (opts.auto && uploadAttempted) {
+    } else if (opts.auto && uploadAttempted && !opts.publishAccount) {
       const retryAtMs = Number(uploadThrottleState?.nextAllowedAtMs || 0);
       if (retryAtMs > Date.now()) {
         await scheduleAutoRetry({
@@ -2027,7 +2159,6 @@ async function cmdSync(argv, context = {}) {
   } finally {
     progress?.stop();
     await lock.release();
-    await fs.unlink(lockPath).catch(() => {});
   }
 }
 
@@ -2040,6 +2171,7 @@ function parseArgs(argv) {
     source: null,
     drain: false,
     background: false,
+    publishAccount: false,
     allLocalSources: false,
     repairGrok: false,
   };
@@ -2056,6 +2188,7 @@ function parseArgs(argv) {
     else if (a.startsWith("--source=")) out.source = normalizeSyncSource(a.slice("--source=".length));
     else if (a === "--drain") out.drain = true;
     else if (a === "--background" || a === "--lightweight") out.background = true;
+    else if (a === "--publish-account") out.publishAccount = true;
     else if (a === "--all-local-sources") out.allLocalSources = true;
     else if (a === "--repair-grok") out.repairGrok = true;
     else throw new Error(`Unknown option: ${a}`);
@@ -2129,6 +2262,7 @@ function recordCodexColdScanAudit(cursors, { fullAudit = false, skipped = 0 } = 
 
 module.exports = {
   cmdSync,
+  acquireSyncLock,
   migrateCursorUnknownBuckets,
   migrateRolloutCumulativeDeltaBuckets,
   repairCodexRescanInflation,
@@ -3653,12 +3787,6 @@ async function scanForForkedCodexRollout(rolloutFiles) {
     }
   }
   return { forked: false, indeterminate };
-}
-
-function isCodexSessionCursorPath(filePath) {
-  if (typeof filePath !== "string") return false;
-  const normalized = filePath.replace(/\\/g, "/");
-  return /\/\.codex\/(?:archived_)?sessions\//.test(normalized);
 }
 
 async function projectUsageKeysFromQueuePath(queuePath, source) {

@@ -26,12 +26,20 @@ const atlasSwiftSource = fs.readFileSync(
   path.join(repoRoot, "TokenTrackerBar/TokenTrackerBar/Views/PetAtlasSpriteView.swift"),
   "utf8",
 );
+const petPageSource = fs.readFileSync(
+  path.join(repoRoot, "dashboard/src/pet.jsx"),
+  "utf8",
+);
 const windowsPetSource = fs.readFileSync(
   path.join(repoRoot, "TokenTrackerWin/PetWindow.cs"),
   "utf8",
 );
 const macControllerSource = fs.readFileSync(
   path.join(repoRoot, "TokenTrackerBar/TokenTrackerBar/Services/DesktopPetWindowController.swift"),
+  "utf8",
+);
+const windowsTraySource = fs.readFileSync(
+  path.join(repoRoot, "TokenTrackerWin/TrayApplicationContext.cs"),
   "utf8",
 );
 
@@ -162,19 +170,50 @@ test("Windows edge tuck keeps the sprite visible instead of hiding window paddin
   assert.match(windowsPetSource, /private double TuckedLeft\(double workAreaRight\)/);
   assert.match(
     windowsPetSource,
-    /double leftX = _isRevealed \? wa\.Right - Width : TuckedLeft\(wa\.Right\)/,
+    /double targetLeft = _isRevealed \? wa\.Right - Width : TuckedLeft\(wa\.Right\)/,
   );
+  assert.match(windowsPetSource, /double leftX = targetLeft \+ SpriteLeftInset - pad/);
   assert.match(
     windowsPetSource,
     /double targetX = _isRevealed \? wa\.Right - Width : TuckedLeft\(wa\.Right\)/,
   );
 
   const edgePeek = 30;
-  for (const [width, height] of [[150, 138], [180, 162], [210, 194]]) {
-    const spriteSize = Math.max(40, Math.min(width, height - 46) - 8);
+  for (const [width, height] of [[400, 230], [400, 254], [400, 286]]) {
+    const spriteSize = Math.max(40, Math.min(width, height - 138) - 8);
     const spriteLeftInset = (width - spriteSize) / 2;
     const tuckedLeft = 1920 - spriteLeftInset - edgePeek;
     assert.equal(tuckedLeft + spriteLeftInset, 1920 - edgePeek);
+  }
+});
+
+test("Windows edge snap ignores the transparent bubble padding", () => {
+  assert.match(windowsPetSource, /private double SpriteRight\(double windowLeft\)/);
+  assert.match(windowsPetSource, /if \(SpriteRight\(x\) >= wa\.Right - SnapMargin\)/);
+
+  const workAreaRight = 1920;
+  const snapMargin = 28;
+  const width = 400;
+  const height = 254;
+  const bubbleBand = 138;
+  const spriteSize = Math.max(40, Math.min(width, height - bubbleBand) - 8);
+  const spriteLeftInset = (width - spriteSize) / 2;
+  const correctWindowLeft = workAreaRight - snapMargin - spriteLeftInset - spriteSize;
+  const hostBoundsWindowLeft = workAreaRight - snapMargin - width;
+
+  assert.ok(correctWindowLeft > hostBoundsWindowLeft + 100);
+  assert.equal(correctWindowLeft + spriteLeftInset + spriteSize, workAreaRight - snapMargin);
+});
+
+test("Windows bubble growth preserves the selected pet size", () => {
+  const width = 400;
+  for (const baseHeight of [230, 254, 286]) {
+    const expected = Math.max(40, Math.min(width, baseHeight - 138) - 8);
+    for (const bubbleBand of [138, 220, 480]) {
+      const expandedHeight = baseHeight + (bubbleBand - 138);
+      const actual = Math.max(40, Math.min(width, expandedHeight - bubbleBand) - 8);
+      assert.equal(actual, expected);
+    }
   }
 });
 
@@ -194,4 +233,69 @@ test("macOS edge tuck keeps a visible handle and restores every preset", () => {
   for (const spriteWidth of [60, 84, 111]) {
     assert.ok(48 < spriteWidth, `edge handle must fit inside ${spriteWidth}pt sprite`);
   }
+});
+
+test("desktop dragging selects directional running rows for imported pets", () => {
+  assert.match(petPageSource, /const \[dragState, setDragState\] = useState\(null\)/);
+  assert.match(petPageSource, /setDragState\(deltaX < 0 \? "running-left" : "running-right"\)/);
+  assert.match(petPageSource, /addEventListener\("pet:drag-end"/);
+  assert.match(petPageSource, /dragState \|\| state/);
+  assert.match(windowsPetSource, /case "pet:drag-left":/);
+  assert.match(windowsPetSource, /case "pet:drag-right":/);
+  assert.match(windowsPetSource, /pet:drag-end/);
+  assert.match(macControllerSource, /uiState\.isDragging = true/);
+  assert.match(macControllerSource, /uiState\.dragDirection/);
+  assert.match(atlasSwiftSource, /if isDragging/);
+  assert.match(atlasSwiftSource, /row: dragDirection == \.left \? 2 : 1/);
+});
+
+test("native pet catalogs preserve legacy selections until the Node migration runs", () => {
+  assert.match(macControllerSource, /legacyRoot/);
+  assert.match(macControllerSource, /\.migrated-v1/);
+  assert.match(macControllerSource, /migrationComplete[\s\S]*\[root\][\s\S]*\[root, legacyRoot\]/);
+  assert.match(windowsTraySource, /legacyRoot/);
+  assert.match(windowsTraySource, /\.migrated-v1/);
+  assert.match(windowsTraySource, /migrationComplete[\s\S]*new\[\] \{ root \}[\s\S]*new\[\] \{ root, legacyRoot \}/);
+});
+
+test("desktop pet tooltips stay readable and use native macOS glass when available", () => {
+  assert.match(petPageSource, /width: "min\(340px, calc\(100% - 40px\)\)"/);
+  assert.match(petPageSource, /borderRadius: 999/);
+  assert.match(petPageSource, /rgba\(255,255,255,0\.18\)/);
+  assert.match(petPageSource, /rgba\(18,20,24,0\.82\)/);
+  assert.doesNotMatch(petPageSource, /WebkitLineClamp/);
+  assert.doesNotMatch(petPageSource, /textOverflow: "ellipsis"/);
+  assert.match(petPageSource, /getPetLimitDisplay/);
+  assert.match(petPageSource, /hoverUsage/);
+  assert.match(petPageSource, /buildPetLimitSummaries/);
+  assert.match(petPageSource, /limitItems/);
+  assert.match(petPageSource, /MIN_BUBBLE_BAND = 138/);
+  assert.match(petPageSource, /new ResizeObserver\(report\)/);
+  assert.match(petPageSource, /pet:bubble-height:/);
+  assert.match(petPageSource, /pet:bubble-band/);
+  assert.doesNotMatch(petPageSource, /↻ \{limit\.resetText\}/);
+  assert.match(petPageSource, /pet:limits/);
+  assert.match(companionSource, /lineLimit\(layout == \.floating \? 2 : 3\)/);
+  assert.match(companionSource, /PetBubbleGlassBackground/);
+  assert.match(companionSource, /NSGlassEffectView/);
+  assert.match(companionSource, /#available\(macOS 26/);
+  assert.match(companionSource, /activePetLimits/);
+  assert.match(companionSource, /petLimitAtLimit/);
+  assert.match(companionSource, /floatingUsageContent/);
+  assert.match(companionSource, /minHeight: 138/);
+  assert.doesNotMatch(companionSource, /Text\(display\.resetText\.map \{ "↻/);
+  assert.match(companionSource, /joined\(separator: "\\n"\)/);
+  assert.match(windowsPetSource, /ApplyLimits/);
+  assert.match(windowsPetSource, /__ttPetLimits/);
+  assert.match(windowsPetSource, /private const double WindowWidth = 400/);
+  assert.match(windowsPetSource, /private double _bubbleBand = MinBubbleBand/);
+  assert.match(windowsPetSource, /if \(_isAdjustingBubbleLayout\) return/);
+  assert.match(windowsPetSource, /ApplyBubbleBand/);
+  assert.match(windowsPetSource, /PushBubbleBand/);
+  assert.match(windowsPetSource, /pet:bubble-height:/);
+  assert.match(windowsPetSource, /SizeSmall => \(WindowWidth, 230\)/);
+  assert.match(windowsPetSource, /SizeLarge => \(WindowWidth, 286\)/);
+  assert.match(windowsPetSource, /_ => \(WindowWidth, 254\)/);
+  assert.match(windowsPetSource, /PetCenterX/);
+  assert.match(windowsPetSource, /ClampXToVirtualScreen/);
 });

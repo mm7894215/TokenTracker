@@ -2,9 +2,10 @@
 
 // The six account-* edge endpoints must each honor an optional ?device_id=
 // query param. UUID syntax is checked at the edge; ownership and active-device
-// scoping are resolved atomically inside account_usage_grouped_v2. This avoids
-// the old per-request devices SELECT while keeping another user's device from
-// ever narrowing the result.
+// scoping are resolved atomically inside account_usage_grouped_v2. The shared
+// cache RPC delegates every miss to v2, so cache hits cannot bypass that
+// ownership contract. This avoids the old per-request devices SELECT while
+// keeping another user's device from ever narrowing the result.
 
 const fs = require("node:fs");
 const path = require("node:path");
@@ -27,7 +28,7 @@ function readEdge(name) {
   return fs.readFileSync(path.join(ROOT, EDGE_DIR, name), "utf8");
 }
 
-test("every account-* endpoint delegates guarded device scoping to the v2 RPC", () => {
+test("every account-* endpoint delegates guarded device scoping through the shared cache RPC", () => {
   for (const name of ENDPOINTS) {
     const src = readEdge(name);
     assert.ok(
@@ -36,13 +37,22 @@ test("every account-* endpoint delegates guarded device scoping to the v2 RPC", 
     );
     assert.match(src, /const requestedDeviceId\s*=\s*rawDeviceId\s*&&\s*\/\^\[0-9a-f\]/u,
       `${name}: must reject malformed device UUIDs before the RPC`);
-    assert.ok(src.includes('rpc("account_usage_grouped_v2"'),
-      `${name}: must use the atomic device-scoping RPC`);
+    assert.ok(src.includes('rpc("account_usage_grouped_cached"'),
+      `${name}: must use the cached atomic device-scoping RPC`);
     assert.match(src, /p_device_id:\s*requestedDeviceId/u,
       `${name}: must pass the requested device to the RPC`);
     assert.ok(!src.includes('.from("tokentracker_devices")'),
       `${name}: must not restore the extra devices SELECT`);
   }
+});
+
+test("the shared cache delegates misses to the atomic v2 device-scoping RPC", () => {
+  const migration = fs.readFileSync(
+    path.join(ROOT, "migrations/20260718071507_add-shared-account-usage-cache.sql"),
+    "utf8",
+  );
+  assert.match(migration, /public\.account_usage_grouped_v2\(/u);
+  assert.match(migration, /p_user_id,\s*p_device_id,/u);
 });
 
 test("v2 RPC narrows only to an active device owned by the requested user", () => {
