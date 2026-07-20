@@ -29,6 +29,7 @@ test("init can rerun from installed local runtime without self-deleting app sour
   const env = {
     ...process.env,
     HOME: tmp,
+    USERPROFILE: tmp,
     CODEX_HOME: path.join(tmp, ".codex"),
     OPENCODE_CONFIG_DIR: path.join(tmp, ".config", "opencode"),
   };

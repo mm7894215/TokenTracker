@@ -54,6 +54,7 @@ async function setupInitEnv() {
   const env = {
     ...process.env,
     HOME: tmp,
+    USERPROFILE: tmp,
     CODEX_HOME: codexHome,
     OPENCODE_CONFIG_DIR: path.join(tmp, ".config", "opencode"),
   };

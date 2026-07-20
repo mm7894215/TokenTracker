@@ -11,9 +11,14 @@ const DEFAULT_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3OC0xMjM0LTU2NzgtOTBhYi1jZGVmMTIzNDU2NzgiLCJlbWFpbCI6ImFub25AaW5zZm9yZ2UuY29tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExNDU5NDd9.T0auta_IrVIh0uXW1bob5QSnzvsnJmN28r5XkSGEuQY";
 
 function resolveRuntimeConfig({ cli = {}, config = {}, env = process.env, defaults = {} } = {}) {
+  // Older Windows test runs could leak their fixture HOME and persist
+  // https://example.invalid into the user's real config.json. The test
+  // isolation bug is fixed, but existing installs must recover instead of
+  // backing off cloud uploads forever against the reserved placeholder host.
+  const persistedBaseUrl = normalizePersistedBaseUrl(config.baseUrl);
   const baseUrl = pickString(
     cli.baseUrl,
-    config.baseUrl,
+    persistedBaseUrl,
     env?.TOKENTRACKER_INSFORGE_BASE_URL,
     defaults.baseUrl,
     DEFAULT_BASE_URL,
@@ -103,6 +108,19 @@ function normalizeString(value) {
   const trimmed = value.trim();
   if (!trimmed) return undefined;
   return trimmed;
+}
+
+function normalizePersistedBaseUrl(value) {
+  const normalized = normalizeString(value);
+  if (normalized === undefined) return undefined;
+  try {
+    if (new URL(normalized).hostname.toLowerCase() === "example.invalid") {
+      return undefined;
+    }
+  } catch {
+    // Preserve the existing resolver behavior for arbitrary custom values.
+  }
+  return normalized;
 }
 
 function normalizeBoolean(value) {

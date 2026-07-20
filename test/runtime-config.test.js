@@ -29,6 +29,24 @@ test("resolveRuntimeConfig ignores non-TOKENTRACKER env inputs", () => {
   assert.equal(result.sources.deviceToken, "default");
 });
 
+test("resolveRuntimeConfig recovers from the leaked Windows test base URL", () => {
+  const recovered = resolveRuntimeConfig({
+    config: { baseUrl: "https://example.invalid" },
+    env: {},
+  });
+
+  assert.equal(recovered.baseUrl, "https://srctyff5.us-east.insforge.app");
+  assert.equal(recovered.sources.baseUrl, "default");
+
+  const explicit = resolveRuntimeConfig({
+    cli: { baseUrl: "https://example.invalid" },
+    config: { baseUrl: "https://config.example" },
+    env: {},
+  });
+  assert.equal(explicit.baseUrl, "https://example.invalid");
+  assert.equal(explicit.sources.baseUrl, "cli");
+});
+
 test("resolveRuntimeConfig normalizes timeout and flags", () => {
   const result = resolveRuntimeConfig({
     env: {

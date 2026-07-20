@@ -17,11 +17,13 @@ function runSql(dbPath, sql) {
 test("status prints last upload timestamps from upload.throttle.json", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-status-"));
   const prevHome = process.env.HOME;
+  const prevUserProfile = process.env.USERPROFILE;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevWrite = process.stdout.write;
 
   try {
     process.env.HOME = tmp;
+    process.env.USERPROFILE = tmp;
     process.env.CODEX_HOME = path.join(tmp, ".codex");
 
     const trackerDir = path.join(tmp, ".tokentracker", "tracker");
@@ -37,7 +39,7 @@ test("status prints last upload timestamps from upload.throttle.json", async () 
     await fs.writeFile(
       path.join(trackerDir, "config.json"),
       JSON.stringify(
-        { baseUrl: "https://example.invalid", deviceToken: "t", deviceId: "d" },
+        { baseUrl: "https://config.example", deviceToken: "t", deviceId: "d" },
         null,
         2,
       ) + "\n",
@@ -81,7 +83,7 @@ test("status prints last upload timestamps from upload.throttle.json", async () 
 
     await cmdStatus();
 
-    assert.match(out, /- Base URL: https:\/\/example\.invalid/);
+    assert.match(out, /- Base URL: https:\/\/config\.example/);
     assert.match(out, /- Last upload: 2025-12-18T10:19:05\.522Z/);
     assert.match(out, /- Last OpenClaw-triggered sync: 2026-02-12T00:00:00.000Z/);
     assert.match(out, /- Next upload after: 2025-12-18T10:19:06\.522Z/);
@@ -89,6 +91,8 @@ test("status prints last upload timestamps from upload.throttle.json", async () 
     process.stdout.write = prevWrite;
     if (prevHome === undefined) delete process.env.HOME;
     else process.env.HOME = prevHome;
+    if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prevUserProfile;
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     await fs.rm(tmp, { recursive: true, force: true });
@@ -98,11 +102,13 @@ test("status prints last upload timestamps from upload.throttle.json", async () 
 test("status reports Codex notify unset when config points to another command", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-status-notify-"));
   const prevHome = process.env.HOME;
+  const prevUserProfile = process.env.USERPROFILE;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevWrite = process.stdout.write;
 
   try {
     process.env.HOME = tmp;
+    process.env.USERPROFILE = tmp;
     process.env.CODEX_HOME = path.join(tmp, ".codex");
 
     const trackerDir = path.join(tmp, ".tokentracker", "tracker");
@@ -115,7 +121,7 @@ test("status reports Codex notify unset when config points to another command", 
     );
     await fs.writeFile(
       path.join(trackerDir, "config.json"),
-      JSON.stringify({ baseUrl: "https://example.invalid", deviceToken: "t" }) + "\n",
+      JSON.stringify({ baseUrl: "https://config.example", deviceToken: "t" }) + "\n",
       "utf8",
     );
 
@@ -133,6 +139,8 @@ test("status reports Codex notify unset when config points to another command", 
     process.stdout.write = prevWrite;
     if (prevHome === undefined) delete process.env.HOME;
     else process.env.HOME = prevHome;
+    if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prevUserProfile;
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     await fs.rm(tmp, { recursive: true, force: true });
@@ -142,11 +150,13 @@ test("status reports Codex notify unset when config points to another command", 
 test("status JSON reports Copilot canonical store diagnostics", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-status-copilot-"));
   const prevHome = process.env.HOME;
+  const prevUserProfile = process.env.USERPROFILE;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevWrite = process.stdout.write;
 
   try {
     process.env.HOME = tmp;
+    process.env.USERPROFILE = tmp;
     process.env.CODEX_HOME = path.join(tmp, ".codex");
     const trackerDir = path.join(tmp, ".tokentracker", "tracker");
     const copilotHome = path.join(tmp, ".copilot");
@@ -231,6 +241,8 @@ test("status JSON reports Copilot canonical store diagnostics", async () => {
     process.stdout.write = prevWrite;
     if (prevHome === undefined) delete process.env.HOME;
     else process.env.HOME = prevHome;
+    if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prevUserProfile;
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     await fs.rm(tmp, { recursive: true, force: true });
@@ -286,11 +298,13 @@ test("status native-only mode does not probe WSL distros", async (t) => {
 test("status does not migrate legacy tracker directory", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-status-legacy-"));
   const prevHome = process.env.HOME;
+  const prevUserProfile = process.env.USERPROFILE;
   const prevCodexHome = process.env.CODEX_HOME;
   const prevWrite = process.stdout.write;
 
   try {
     process.env.HOME = tmp;
+    process.env.USERPROFILE = tmp;
     process.env.CODEX_HOME = path.join(tmp, ".codex");
 
     const legacyTrackerDir = path.join(tmp, ".legacy-tracker-root", "tracker");
@@ -354,6 +368,8 @@ test("status does not migrate legacy tracker directory", async () => {
     process.stdout.write = prevWrite;
     if (prevHome === undefined) delete process.env.HOME;
     else process.env.HOME = prevHome;
+    if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prevUserProfile;
     if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = prevCodexHome;
     await fs.rm(tmp, { recursive: true, force: true });
