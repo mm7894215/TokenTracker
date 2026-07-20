@@ -152,10 +152,26 @@ describe("UsageOverview", () => {
 
     const allButton = screen.getByRole("button", { name: /All tools:/i });
     const codexButton = screen.getByRole("button", { name: /CODEX:/i });
+
+    // Collapsed by default — drill-down is an explicit user action.
+    expect(allButton).toHaveAttribute("aria-expanded", "false");
+    expect(container.querySelectorAll("[data-model-rank-row]")).toHaveLength(0);
+
+    // Click to expand the combined ranking; click again to collapse it back.
+    await act(async () => {
+      await user.click(allButton);
+    });
     expect(allButton).toHaveAttribute("aria-expanded", "true");
     expect(container.querySelectorAll("[data-model-rank-row]")).toHaveLength(3);
     expect(screen.getByText("66.7%")).toBeVisible();
 
+    await act(async () => {
+      await user.click(allButton);
+    });
+    expect(allButton).toHaveAttribute("aria-expanded", "false");
+    expect(container.querySelectorAll("[data-model-rank-row]")).toHaveLength(0);
+
+    // Provider cards toggle the same way.
     await act(async () => {
       await user.click(codexButton);
     });
@@ -173,8 +189,9 @@ describe("UsageOverview", () => {
         to="2026-07-31"
       />,
     );
-    expect(screen.getByRole("button", { name: /All tools:/i })).toHaveAttribute("aria-expanded", "true");
-    expect(container.querySelectorAll("[data-model-rank-row]")).toHaveLength(3);
+    // A scope change collapses back to the card grid.
+    expect(screen.getByRole("button", { name: /All tools:/i })).toHaveAttribute("aria-expanded", "false");
+    expect(container.querySelectorAll("[data-model-rank-row]")).toHaveLength(0);
   });
 
   it("renders AnythingLLM with its official name, icon, and stable accent", () => {

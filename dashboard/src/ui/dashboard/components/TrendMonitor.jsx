@@ -245,19 +245,11 @@ const TrendBar = React.memo(function TrendBar({
             data-trend-kind={kind}
             className={cn(
               "h-full w-full group-hover:brightness-110 transition-all",
-              kind === "real"
-                ? ""
-                : kind === "predicted"
-                  ? "text-oai-gray-400 dark:text-oai-gray-500"
-                  : "bg-oai-gray-100 dark:bg-oai-gray-800",
+              kind === "real" ? "" : "bg-oai-gray-100 dark:bg-oai-gray-800",
             )}
             style={{
-              opacity: kind === "predicted" ? 0.55 : isPreview ? PREVIEW_OPACITY : 1,
+              opacity: isPreview ? PREVIEW_OPACITY : 1,
               background: kind === "real" ? "#10b981" : undefined,
-              backgroundImage:
-                kind === "predicted"
-                  ? "repeating-linear-gradient(135deg, currentColor 0 2px, transparent 2px 5px)"
-                  : undefined,
             }}
           />
         ) : (
@@ -591,11 +583,7 @@ export function TrendMonitor({
           >
             <span
               aria-hidden="true"
-              className="h-2.5 w-3 rounded-[2px] text-oai-gray-400 dark:text-oai-gray-500 opacity-50"
-              style={{
-                backgroundImage:
-                  "repeating-linear-gradient(135deg, currentColor 0 2px, transparent 2px 5px)",
-              }}
+              className="h-2.5 w-3 rounded-[2px] bg-oai-gray-100 dark:bg-oai-gray-800 opacity-50"
             />
             <span>~ {copy("trend.monitor.predicted")}</span>
           </div>

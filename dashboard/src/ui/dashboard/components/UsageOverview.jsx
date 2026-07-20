@@ -1,6 +1,26 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { motion, useReducedMotion } from "motion/react";
-import { Info, Layers3, Loader2, SquareArrowOutUpRight } from "lucide-react";
+import { Info, Loader2, SquareArrowOutUpRight } from "lucide-react";
+
+// Solid (fill-based) monochrome all-tools mark — matches the fill-based
+// mono provider icons, unlike lucide's stroke-only Layers3. Drawn bold and
+// edge-to-edge so it reads at the same visual weight as the sibling marks.
+function AllToolsIcon({ size = 15, className = "" }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M12 1.6 23 7.4 12 13.2 1 7.4 12 1.6Z" />
+      <path d="m4 10.3-3 1.5 11 5.5 11-5.5-3-1.5-8 4-8-4Z" opacity="0.72" />
+      <path d="m4 14.6-3 1.5 11 5.5 11-5.5-3-1.5-8 4-8-4Z" opacity="0.45" />
+    </svg>
+  );
+}
 import { Popover } from "@base-ui/react/popover";
 import { Card, Button, Counter } from "../../components";
 import { Select } from "../../components/Select.jsx";
@@ -226,7 +246,8 @@ export function UsageOverview({
       el.scrollIntoView({ block: "nearest", inline: "center" });
     }
   }, [period]);
-  const [expandedProvider, setExpandedProvider] = useState(ALL_PROVIDERS_KEY);
+  // Nothing is expanded by default; every card toggles open/closed.
+  const [expandedProvider, setExpandedProvider] = useState(null);
   const { resolvedTheme } = useTheme();
   const { currency, rate } = useCurrency();
   const { formatTokens } = useTokenFormat();
@@ -237,10 +258,10 @@ export function UsageOverview({
   const showSummarySkeleton = summaryLoading && !hasSummary;
   const showProviderSkeleton = providersLoading && !fleetData.some(hasProviderModels);
 
-  // A new time/device scope opens on the combined personal model ranking.
-  // Provider drill-down remains available, but is secondary.
+  // A new time/device scope collapses back to the card grid — drill-down
+  // stays an explicit user action rather than a forced default.
   useEffect(() => {
-    setExpandedProvider(ALL_PROVIDERS_KEY);
+    setExpandedProvider(null);
   }, [period, from, to, selectedDevice]);
 
   const handleTablistKeyDown = (event) => {
@@ -287,11 +308,13 @@ export function UsageOverview({
   const allUsage = allModels.reduce((sum, model) => sum + (Number(model.usage) || 0), 0);
   const allCost = providers.reduce((sum, provider) => sum + (Number(provider.usd) || 0), 0);
   const activeProvider =
-    expandedProvider === ALL_PROVIDERS_KEY || providers.some(function matchesExpandedProvider(provider) {
-      return provider.label === expandedProvider;
-    })
-      ? expandedProvider
-      : ALL_PROVIDERS_KEY;
+    expandedProvider == null
+      ? null
+      : expandedProvider === ALL_PROVIDERS_KEY || providers.some(function matchesExpandedProvider(provider) {
+          return provider.label === expandedProvider;
+        })
+        ? expandedProvider
+        : null;
 
   return (
     <Card className={className}>
@@ -492,7 +515,11 @@ export function UsageOverview({
                   cost: formatCost(allCost, currency, rate) || `${getCurrencySymbol(currency)}0`,
                   count: allModels.length,
                 })}
-                onClick={() => setExpandedProvider(ALL_PROVIDERS_KEY)}
+                onClick={() =>
+                  setExpandedProvider(
+                    activeProvider === ALL_PROVIDERS_KEY ? null : ALL_PROVIDERS_KEY,
+                  )
+                }
                 className={`min-w-0 text-left p-3 rounded-lg border transition-colors duration-200 ${
                   activeProvider === ALL_PROVIDERS_KEY
                     ? "border-oai-gray-300 dark:border-oai-gray-600 bg-oai-gray-50 dark:bg-oai-gray-800"
@@ -500,7 +527,7 @@ export function UsageOverview({
                 }`}
               >
                 <div className="flex items-center gap-1.5 mb-1 min-w-0">
-                  <Layers3 className="size-[15px] shrink-0 text-oai-brand" aria-hidden="true" />
+                  <AllToolsIcon size={15} className="shrink-0 text-oai-brand dark:text-oai-white" />
                   <span className="text-sm font-medium text-oai-black dark:text-oai-white truncate">
                     {copy("usage.overview.all_tools")}
                   </span>
@@ -530,7 +557,7 @@ export function UsageOverview({
                       cost: formatCost(provider.usd, currency, rate) || `${getCurrencySymbol(currency)}0`,
                       action: copy(isExpanded ? "usage.overview.collapse" : "usage.overview.expand"),
                     })}
-                    onClick={() => setExpandedProvider(isExpanded ? ALL_PROVIDERS_KEY : provider.label)}
+                    onClick={() => setExpandedProvider(isExpanded ? null : provider.label)}
                     className={`min-w-0 text-left p-3 rounded-lg border transition-colors duration-200 ${
                       isExpanded
                         ? "border-oai-gray-300 dark:border-oai-gray-600 bg-oai-gray-50 dark:bg-oai-gray-800"
@@ -552,8 +579,10 @@ export function UsageOverview({
               })}
             </div>
 
-            {/* The combined model ranking is the default. */}
-            {activeProvider === ALL_PROVIDERS_KEY ? (
+            {/* A card toggles its details region; collapsed by default. (Two
+                sibling && guards, not a nested ternary — the ui-hardcode
+                scanner reads `) : x ? (` fragments as raw JSX text.) */}
+            {activeProvider === ALL_PROVIDERS_KEY && (
               <div
                 id="provider-details-all"
                 role="region"
@@ -562,7 +591,8 @@ export function UsageOverview({
               >
                 <AllModelsSection models={allModels} />
               </div>
-            ) : (
+            )}
+            {activeProvider != null && activeProvider !== ALL_PROVIDERS_KEY && (
               <div
                 id={`provider-details-${activeProvider}`}
                 role="region"
@@ -668,7 +698,7 @@ function AllModelsSection({ models }) {
   return (
     <div>
       <div className="mb-1.5 flex items-center gap-1.5">
-        <Layers3 className="size-3.5 shrink-0 text-oai-brand" aria-hidden="true" />
+        <AllToolsIcon size={14} className="shrink-0 text-oai-brand dark:text-oai-white" />
         <span className="text-sm font-medium text-oai-black dark:text-oai-white">
           {copy("usage.overview.all_models")}
         </span>
