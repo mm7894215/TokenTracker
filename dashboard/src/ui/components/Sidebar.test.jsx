@@ -1,5 +1,5 @@
 import React from "react";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -121,6 +121,20 @@ describe("AppLayout navigation sidebar", () => {
 
     expect(sidebar).toHaveAttribute("data-sidebar-state", "expanded");
     expect(window.localStorage.getItem("tt.sidebarCollapsed")).toBe("0");
+  });
+
+  it("keeps the star beside the brand and account utilities in one footer row", () => {
+    renderLayout();
+
+    const sidebar = screen.getByRole("complementary", { name: "Main navigation" });
+    const brandRow = sidebar.querySelector('[data-sidebar-brand-row="true"]');
+    const accountRow = sidebar.querySelector('[data-sidebar-account-row="true"]');
+
+    expect(within(brandRow).getByRole("link", { name: "Token Tracker" })).toBeInTheDocument();
+    expect(within(brandRow).getByRole("link", { name: "Star on GitHub" })).toBeInTheDocument();
+    expect(within(accountRow).getByRole("button", { name: "Account control" })).toBeInTheDocument();
+    expect(within(accountRow).getByRole("button", { name: "Theme" })).toBeInTheDocument();
+    expect(within(accountRow).getByRole("button", { name: "Collapse sidebar" })).toBeInTheDocument();
   });
 
   it("shows an available native update at the lower left and launches the updater", async () => {

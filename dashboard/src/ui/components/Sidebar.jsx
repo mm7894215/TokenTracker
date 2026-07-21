@@ -237,7 +237,7 @@ function StarPill({ repo = "mm7894215/TokenTracker", glassChrome = false }) {
       rel="noopener noreferrer"
       aria-label={stars !== null ? `Star on GitHub (${stars})` : "Star on GitHub"}
       className={cn(
-        "inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500",
+        "inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-[11px] font-medium transition-colors no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500",
         glassChrome
           ? "border border-gray-500/20 dark:border-gray-500/30 bg-gray-500/[0.04] dark:bg-gray-500/[0.06] backdrop-blur-[2px] text-oai-gray-700 dark:text-oai-gray-300 hover:bg-gray-500/10 dark:hover:bg-gray-500/12 hover:border-gray-500/30 dark:hover:border-gray-500/40 hover:text-oai-black dark:hover:text-white"
           : "border border-oai-gray-200 dark:border-oai-gray-700 text-oai-gray-600 dark:text-oai-gray-400 hover:bg-oai-gray-200/60 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white hover:border-oai-gray-300 dark:hover:border-oai-gray-600",
@@ -306,7 +306,7 @@ function ThemePill({ theme, resolvedTheme, onSetTheme, glassChrome = false }) {
       {open && (
         <div
           role="menu"
-          className="absolute bottom-full left-0 mb-2 z-50 min-w-[140px] py-1 rounded-lg border border-oai-gray-200 dark:border-oai-gray-800 bg-white dark:bg-oai-gray-900 shadow-lg"
+          className="absolute bottom-full right-0 mb-2 z-50 min-w-[140px] py-1 rounded-lg border border-oai-gray-200 dark:border-oai-gray-800 bg-white dark:bg-oai-gray-900 shadow-lg"
         >
           {THEME_OPTIONS.map(({ value, label, Icon }) => {
             const active = theme === value;
@@ -365,7 +365,10 @@ function SidebarBody({
     <>
       {/* Brand and drawer controls stay separate from account state. This keeps
           the close target stable even while authentication UI is changing. */}
-      <div className={cn("flex h-14 shrink-0 items-center px-3", collapsed && "justify-center px-2")}>
+      <div
+        data-sidebar-brand-row="true"
+        className={cn("flex h-14 shrink-0 items-center gap-2 px-3", collapsed && "justify-center px-2")}
+      >
         <Link
           to="/landing"
           onClick={onItemClick}
@@ -383,6 +386,7 @@ function SidebarBody({
             </span>
           )}
         </Link>
+        {!collapsed && <StarPill glassChrome={glassChrome} />}
         {showCloseButton && (
           <button
             ref={closeButtonRef}
@@ -425,25 +429,36 @@ function SidebarBody({
       </nav>
 
       {/* Account and utilities remain pinned at the bottom, independently of
-          the scrollable navigation list. */}
+          the scrollable navigation list. The expanded footer is deliberately
+          one row: identity on the left, appearance and collapse controls on
+          the right. A collapsed rail only keeps its expand affordance. */}
       <div className="shrink-0 border-t border-oai-gray-200/70 px-2 pb-3 pt-2 dark:border-oai-gray-800/70">
         <AppUpdateButton collapsed={collapsed} update={appUpdate} />
-        <div className={cn("mb-2 min-w-0", collapsed && "flex justify-center")}>
-          <InsforgeUserHeaderControls
-            variant="sidebar"
-            collapsed={collapsed}
-            onAfterAction={onItemClick}
-          />
-        </div>
         <div
+          data-sidebar-account-row="true"
           className={cn(
-            "flex items-center",
-            collapsed ? "flex-col justify-center gap-2" : "justify-between gap-2",
+            "flex min-w-0 items-center",
+            collapsed ? "justify-center" : "gap-1.5",
           )}
         >
-          <ThemePill theme={theme} resolvedTheme={resolvedTheme} onSetTheme={setTheme} glassChrome={glassChrome} />
-          <div className={cn("flex items-center gap-1.5", collapsed && "flex-col")}>
-            {!collapsed && <StarPill glassChrome={glassChrome} />}
+          {!collapsed && (
+            <div className="min-w-0 flex-1">
+              <InsforgeUserHeaderControls
+                variant="sidebar"
+                collapsed={false}
+                onAfterAction={onItemClick}
+              />
+            </div>
+          )}
+          <div className={cn("flex shrink-0 items-center gap-1", !collapsed && "ml-auto")}>
+            {!collapsed && (
+              <ThemePill
+                theme={theme}
+                resolvedTheme={resolvedTheme}
+                onSetTheme={setTheme}
+                glassChrome={glassChrome}
+              />
+            )}
             {!showCloseButton && (
               <button
                 type="button"
@@ -486,7 +501,7 @@ function Sidebar({ collapsed, onToggleCollapsed, appUpdate }) {
       aria-label={copy("nav.aside_label")}
       className={cn(
         "hidden h-full min-h-0 shrink-0 flex-col transition-[width] duration-200 ease-out lg:flex",
-        collapsed ? "w-[72px]" : "w-[232px]",
+        collapsed ? "w-[72px]" : "w-[248px]",
       )}
     >
       <SidebarBody
