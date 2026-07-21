@@ -33,6 +33,8 @@ const appUpdateMock = vi.hoisted(() => ({
   requestUpdate: vi.fn(),
 }));
 
+const sidebarBrandingMock = vi.hoisted(() => ({ visible: true }));
+
 vi.mock("../../lib/copy", () => ({
   copy: (key, params) => Object.entries(params || {}).reduce(
     (text, [name, value]) => text.replaceAll(`{{${name}}}`, String(value)),
@@ -50,6 +52,10 @@ vi.mock("../../hooks/useLocale.js", () => ({
 
 vi.mock("../../hooks/use-app-update.js", () => ({
   useAppUpdate: () => ({ ...appUpdateMock.state, requestUpdate: appUpdateMock.requestUpdate }),
+}));
+
+vi.mock("../../hooks/use-sidebar-branding.js", () => ({
+  useSidebarBranding: () => ({ visible: sidebarBrandingMock.visible }),
 }));
 
 vi.mock("../../lib/native-bridge.js", () => ({
@@ -86,6 +92,7 @@ describe("AppLayout navigation sidebar", () => {
     window.localStorage.clear();
     appUpdateMock.state = { available: false, latestVersion: "", busy: false };
     appUpdateMock.requestUpdate.mockClear();
+    sidebarBrandingMock.visible = true;
     desktopMatches = false;
     mediaListeners = new Set();
     window.matchMedia = vi.fn((query) => ({
@@ -135,6 +142,16 @@ describe("AppLayout navigation sidebar", () => {
     expect(within(accountRow).getByRole("button", { name: "Account control" })).toBeInTheDocument();
     expect(within(accountRow).getByRole("button", { name: "Theme" })).toBeInTheDocument();
     expect(within(accountRow).getByRole("button", { name: "Collapse sidebar" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Achievements" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
+  });
+
+  it("hides the optional brand row when the appearance preference is off", () => {
+    sidebarBrandingMock.visible = false;
+    renderLayout();
+
+    const sidebar = screen.getByRole("complementary", { name: "Main navigation" });
+    expect(sidebar.querySelector('[data-sidebar-brand-row="true"]')).toBeNull();
   });
 
   it("shows an available native update at the lower left and launches the updater", async () => {

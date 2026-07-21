@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { Award, ChevronUp, LogIn, LogOut, Settings as SettingsIcon } from "lucide-react";
 import { useInsforgeAuth } from "../contexts/InsforgeAuthContext.jsx";
 import { useLoginModal } from "../contexts/LoginModalContext.jsx";
 import { useLocale } from "../hooks/useLocale.js";
@@ -34,24 +35,97 @@ function initialsFromName(name) {
   return s.slice(0, 2).toUpperCase();
 }
 
+function SidebarAccountMenu({ signedIn, onNavigate, onSignIn, onSignOut }) {
+  const itemClass = "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[13px] text-oai-gray-700 transition-colors hover:bg-oai-gray-100 hover:text-oai-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-oai-brand-500 dark:text-oai-gray-300 dark:hover:bg-oai-gray-800 dark:hover:text-white";
+  return (
+    <div
+      role="menu"
+      className="absolute bottom-full left-0 z-50 mb-2 w-[208px] rounded-xl border border-oai-gray-200 bg-white p-1.5 shadow-lg dark:border-oai-gray-800 dark:bg-oai-gray-900"
+    >
+      <button type="button" role="menuitem" onClick={() => onNavigate("/settings")} className={itemClass}>
+        <SettingsIcon className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+        <span>{copy("nav.settings")}</span>
+      </button>
+      <button type="button" role="menuitem" onClick={() => onNavigate("/achievements")} className={itemClass}>
+        <Award className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+        <span>{copy("nav.achievements")}</span>
+      </button>
+      <div className="my-1 h-px bg-oai-gray-200/80 dark:bg-oai-gray-800" aria-hidden />
+      {signedIn ? (
+        <button
+          type="button"
+          role="menuitem"
+          onClick={onSignOut}
+          className={cn(itemClass, "text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/30 dark:hover:text-red-300")}
+        >
+          <LogOut className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+          <span>{copy("settings.account.signOut")}</span>
+        </button>
+      ) : (
+        <button type="button" role="menuitem" onClick={onSignIn} className={itemClass}>
+          <LogIn className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+          <span>{copy("header.auth.sign_in_aria")}</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
 /**
- * Compact identity control. Avatar click navigates to /settings — all account
- * preferences live there now. Sign-in shows the login modal as before.
+ * Compact identity control. The header variant opens Settings directly; the
+ * sidebar variant owns the account menu for Settings, Achievements, and the
+ * current authentication action.
  */
 export function InsforgeUserHeaderControls({ className, variant = "header", collapsed = false, onAfterAction }) {
   // Subscribe to locale so labels re-render on language switch.
   useLocale();
   const isSidebar = variant === "sidebar";
-  const { enabled, loading, signedIn, user, displayName } = useInsforgeAuth();
+  const { enabled, loading, signedIn, user, displayName, signOut } = useInsforgeAuth();
   const { openLoginModal } = useLoginModal();
   const navigate = useNavigate();
   const avatarUrl = useMemo(() => pickAvatarUrl(user), [user]);
   const avatarSrc = useMemo(() => resolveAvatarSrc(avatarUrl), [avatarUrl]);
   const [avatarFailed, setAvatarFailed] = React.useState(false);
+  const [sidebarMenuOpen, setSidebarMenuOpen] = React.useState(false);
+  const sidebarMenuRef = React.useRef(null);
 
   React.useEffect(() => {
     setAvatarFailed(false);
   }, [avatarSrc]);
+
+  React.useEffect(() => {
+    if (!isSidebar || !sidebarMenuOpen) return undefined;
+    const onPointerDown = (event) => {
+      if (sidebarMenuRef.current && !sidebarMenuRef.current.contains(event.target)) {
+        setSidebarMenuOpen(false);
+      }
+    };
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") setSidebarMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isSidebar, sidebarMenuOpen]);
+
+  const handleSidebarNavigate = (path) => {
+    setSidebarMenuOpen(false);
+    navigate(path);
+    onAfterAction?.();
+  };
+  const handleSidebarSignIn = () => {
+    setSidebarMenuOpen(false);
+    openLoginModal();
+    onAfterAction?.();
+  };
+  const handleSidebarSignOut = async () => {
+    setSidebarMenuOpen(false);
+    await signOut();
+    onAfterAction?.();
+  };
 
   if (!enabled) return null;
 
@@ -67,28 +141,44 @@ export function InsforgeUserHeaderControls({ className, variant = "header", coll
   if (!signedIn) {
     if (isSidebar) {
       return (
-        <button
-          type="button"
-          onClick={() => { openLoginModal(); onAfterAction?.(); }}
-          className={cn(
-            "flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] font-medium text-oai-gray-700 dark:text-oai-gray-300 hover:bg-oai-gray-200/60 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 min-w-0",
-            collapsed ? "h-8 w-8 justify-center px-0" : "w-full",
-            className,
-          )}
-          aria-label={copy("header.auth.sign_in_aria")}
-          title={collapsed ? copy("header.auth.sign_in_aria") : undefined}
-        >
-          <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-            <img
-              src="/app-icon.png"
-              alt=""
-              width={18}
-              height={18}
-              className="h-[18px] w-[18px] rounded"
+        <div ref={sidebarMenuRef} className={cn("relative w-full", className)}>
+          <button
+            type="button"
+            onClick={() => setSidebarMenuOpen((open) => !open)}
+            className={cn(
+              "flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] font-medium text-oai-gray-700 dark:text-oai-gray-300 hover:bg-oai-gray-200/60 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 min-w-0",
+              collapsed ? "h-8 w-8 justify-center px-0" : "w-full",
+            )}
+            aria-label={copy("header.auth.open_account_menu")}
+            aria-expanded={sidebarMenuOpen}
+            aria-haspopup="menu"
+            title={collapsed ? copy("header.auth.open_account_menu") : undefined}
+          >
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+              <img
+                src="/app-icon.png"
+                alt=""
+                width={18}
+                height={18}
+                className="h-[18px] w-[18px] rounded"
+              />
+            </span>
+            {!collapsed && (
+              <>
+                <span className="truncate flex-1 text-left">{copy("header.auth.sign_in_aria")}</span>
+                <ChevronUp className={cn("h-3.5 w-3.5 shrink-0 transition-transform", sidebarMenuOpen && "rotate-180")} aria-hidden />
+              </>
+            )}
+          </button>
+          {sidebarMenuOpen && (
+            <SidebarAccountMenu
+              signedIn={false}
+              onNavigate={handleSidebarNavigate}
+              onSignIn={handleSidebarSignIn}
+              onSignOut={handleSidebarSignOut}
             />
-          </span>
-          {!collapsed && <span className="truncate flex-1 text-left">{copy("header.auth.sign_in_aria")}</span>}
-        </button>
+          )}
+        </div>
       );
     }
     return (
@@ -107,12 +197,17 @@ export function InsforgeUserHeaderControls({ className, variant = "header", coll
   }
 
   const handleClick = () => {
+    if (isSidebar) {
+      setSidebarMenuOpen((open) => !open);
+      return;
+    }
     navigate("/settings");
     onAfterAction?.();
   };
 
   return (
     <div
+      ref={isSidebar ? sidebarMenuRef : undefined}
       className={cn(
         isSidebar ? "relative flex w-full shrink-0 items-center" : "relative flex shrink-0 items-center",
         className,
@@ -129,7 +224,9 @@ export function InsforgeUserHeaderControls({ className, variant = "header", coll
               )
             : "flex items-center gap-2 rounded-md pl-1 pr-2 py-1 border border-transparent hover:bg-oai-gray-100 dark:hover:bg-oai-gray-900/80 hover:border-oai-gray-200 dark:hover:border-oai-gray-800 transition-colors",
         )}
-        aria-label={copy("header.auth.open_settings")}
+        aria-label={isSidebar ? copy("header.auth.open_account_menu") : copy("header.auth.open_settings")}
+        aria-expanded={isSidebar ? sidebarMenuOpen : undefined}
+        aria-haspopup={isSidebar ? "menu" : undefined}
         title={isSidebar && collapsed ? (displayName) : undefined}
       >
         {isSidebar ? (
@@ -179,9 +276,12 @@ export function InsforgeUserHeaderControls({ className, variant = "header", coll
         )}
         {isSidebar ? (
           !collapsed && (
-            <span className="truncate text-[13px] font-medium text-oai-gray-900 dark:text-oai-gray-200 flex-1 text-left min-w-0">
-              {displayName}
-            </span>
+            <>
+              <span className="truncate text-[13px] font-medium text-oai-gray-900 dark:text-oai-gray-200 flex-1 text-left min-w-0">
+                {displayName}
+              </span>
+              <ChevronUp className={cn("h-3.5 w-3.5 shrink-0 text-oai-gray-400 transition-transform", sidebarMenuOpen && "rotate-180")} aria-hidden />
+            </>
           )
         ) : (
           <span className="hidden sm:inline truncate text-sm font-medium text-oai-gray-900 dark:text-oai-gray-200 max-w-[120px]">
@@ -189,6 +289,14 @@ export function InsforgeUserHeaderControls({ className, variant = "header", coll
           </span>
         )}
       </button>
+      {isSidebar && sidebarMenuOpen && (
+        <SidebarAccountMenu
+          signedIn
+          onNavigate={handleSidebarNavigate}
+          onSignIn={handleSidebarSignIn}
+          onSignOut={handleSidebarSignOut}
+        />
+      )}
     </div>
   );
 }

@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
-  Award,
   BarChart3,
   Gauge,
   Trophy,
@@ -9,7 +8,6 @@ import {
   PawPrint,
   Globe,
   Puzzle,
-  Settings as SettingsIcon,
   ChevronLeft,
   ChevronRight,
   Menu,
@@ -25,6 +23,7 @@ import { cn } from "../../lib/cn";
 import { useTheme } from "../../hooks/useTheme.js";
 import { useLocale } from "../../hooks/useLocale.js";
 import { useAppUpdate } from "../../hooks/use-app-update.js";
+import { useSidebarBranding } from "../../hooks/use-sidebar-branding.js";
 import { shouldFetchGithubStars } from "../dashboard/util/should-fetch-github-stars.js";
 import { InsforgeUserHeaderControls } from "../../components/InsforgeUserHeaderControls.jsx";
 import { isNativeApp, isNativeEmbed, isNativeWindowsApp } from "../../lib/native-bridge.js";
@@ -43,7 +42,6 @@ export function getNavGroups() {
         { id: "usage", to: "/dashboard", icon: BarChart3, label: copy("nav.usage") },
         { id: "limits", to: "/limits", icon: Gauge, label: copy("nav.limits") },
         { id: "leaderboard", to: "/leaderboard", icon: Trophy, label: copy("nav.leaderboard") },
-        { id: "achievements", to: "/achievements", icon: Award, label: copy("nav.achievements") },
       ],
     },
     {
@@ -54,13 +52,6 @@ export function getNavGroups() {
         { id: "pet", to: "/pet-settings", icon: PawPrint, label: copy("nav.pet") },
         { id: "skills", to: "/skills", icon: Puzzle, label: copy("nav.skills") },
         { id: "ip-check", to: "/ip-check", icon: Globe, label: copy("nav.ip_check") },
-      ],
-    },
-    {
-      id: "account",
-      label: copy("nav.group.account"),
-      items: [
-        { id: "settings", to: "/settings", icon: SettingsIcon, label: copy("nav.settings") },
       ],
     },
   ];
@@ -352,6 +343,7 @@ function SidebarBody({
   closeButtonRef,
   glassChrome = false,
   appUpdate,
+  showBranding = true,
 }) {
   const location = useLocation();
   const pathname = location?.pathname || "/";
@@ -365,41 +357,47 @@ function SidebarBody({
     <>
       {/* Brand and drawer controls stay separate from account state. This keeps
           the close target stable even while authentication UI is changing. */}
-      <div
-        data-sidebar-brand-row="true"
-        className={cn("flex h-14 shrink-0 items-center gap-2 px-3", collapsed && "justify-center px-2")}
-      >
-        <Link
-          to="/landing"
-          onClick={onItemClick}
-          aria-label={PRODUCT_NAME}
-          title={collapsed ? PRODUCT_NAME : undefined}
-          className={cn(
-            "flex min-w-0 items-center gap-2 rounded-lg no-underline transition-opacity hover:opacity-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500",
-            collapsed && "justify-center",
-          )}
+      {(showBranding || showCloseButton) && (
+        <div
+          data-sidebar-brand-row="true"
+          className={cn("flex h-14 shrink-0 items-center gap-2 px-3", collapsed && "justify-center px-2")}
         >
-          <img src="/app-icon.png" alt="" width={26} height={26} className="h-[26px] w-[26px] shrink-0 rounded-md" />
-          {!collapsed && (
-            <span className="truncate text-sm font-semibold tracking-tight text-oai-black dark:text-white">
-              {PRODUCT_NAME}
-            </span>
+          {showBranding && (
+            <>
+              <Link
+                to="/landing"
+                onClick={onItemClick}
+                aria-label={PRODUCT_NAME}
+                title={collapsed ? PRODUCT_NAME : undefined}
+                className={cn(
+                  "flex min-w-0 items-center gap-2 rounded-lg no-underline transition-opacity hover:opacity-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500",
+                  collapsed && "justify-center",
+                )}
+              >
+                <img src="/app-icon.png" alt="" width={26} height={26} className="h-[26px] w-[26px] shrink-0 rounded-md" />
+                {!collapsed && (
+                  <span className="truncate text-sm font-semibold tracking-tight text-oai-black dark:text-white">
+                    {PRODUCT_NAME}
+                  </span>
+                )}
+              </Link>
+              {!collapsed && <StarPill glassChrome={glassChrome} />}
+            </>
           )}
-        </Link>
-        {!collapsed && <StarPill glassChrome={glassChrome} />}
-        {showCloseButton && (
-          <button
-            ref={closeButtonRef}
-            type="button"
-            onClick={onClose}
-            aria-label={copy("nav.close_menu")}
-            title={copy("nav.close_menu")}
-            className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-oai-gray-500 transition-colors hover:bg-oai-gray-200/70 hover:text-oai-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:text-oai-gray-400 dark:hover:bg-oai-gray-800 dark:hover:text-white"
-          >
-            <X className="h-5 w-5" strokeWidth={1.75} aria-hidden />
-          </button>
-        )}
-      </div>
+          {showCloseButton && (
+            <button
+              ref={closeButtonRef}
+              type="button"
+              onClick={onClose}
+              aria-label={copy("nav.close_menu")}
+              title={copy("nav.close_menu")}
+              className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-oai-gray-500 transition-colors hover:bg-oai-gray-200/70 hover:text-oai-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:text-oai-gray-400 dark:hover:bg-oai-gray-800 dark:hover:text-white"
+            >
+              <X className="h-5 w-5" strokeWidth={1.75} aria-hidden />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Nav */}
       <nav
@@ -487,7 +485,7 @@ function SidebarBody({
  * Desktop Sidebar — visible only on lg+. Fills its parent's height (which is
  * already bounded by AppLayout's fixed-viewport flex container).
  */
-function Sidebar({ collapsed, onToggleCollapsed, appUpdate }) {
+function Sidebar({ collapsed, onToggleCollapsed, appUpdate, showBranding }) {
   const nativeGlass = useMemo(() => {
     if (typeof window === "undefined") return false;
     return isNativeEmbed() || isNativeApp();
@@ -509,6 +507,7 @@ function Sidebar({ collapsed, onToggleCollapsed, appUpdate }) {
         onToggleCollapsed={onToggleCollapsed}
         glassChrome={nativeGlass}
         appUpdate={appUpdate}
+        showBranding={showBranding}
       />
     </aside>
   );
@@ -517,7 +516,7 @@ function Sidebar({ collapsed, onToggleCollapsed, appUpdate }) {
 /**
  * Mobile drawer — slides in from the left, full-height overlay.
  */
-function MobileDrawer({ open, onClose, appUpdate }) {
+function MobileDrawer({ open, onClose, appUpdate, showBranding }) {
   const closeButtonRef = useRef(null);
 
   // Move focus into the drawer so keyboard users immediately reach the
@@ -587,6 +586,7 @@ function MobileDrawer({ open, onClose, appUpdate }) {
           closeButtonRef={closeButtonRef}
           onItemClick={onClose}
           appUpdate={appUpdate}
+          showBranding={showBranding}
         />
       </aside>
     </div>
@@ -633,6 +633,7 @@ function MobileTopBar({ open, onOpenDrawer, menuButtonRef }) {
 export function AppLayout({ children }) {
   const { collapsed, toggle } = useSidebarCollapsed();
   const appUpdate = useAppUpdate();
+  const { visible: showBranding } = useSidebarBranding();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const menuButtonRef = useRef(null);
   const openDrawer = useCallback(() => setDrawerOpen(true), []);
@@ -667,8 +668,18 @@ export function AppLayout({ children }) {
         />
       )}
       <div className="flex-1 min-h-0 flex">
-        <Sidebar collapsed={collapsed} onToggleCollapsed={toggle} appUpdate={appUpdate} />
-        <MobileDrawer open={drawerOpen} onClose={closeDrawer} appUpdate={appUpdate} />
+        <Sidebar
+          collapsed={collapsed}
+          onToggleCollapsed={toggle}
+          appUpdate={appUpdate}
+          showBranding={showBranding}
+        />
+        <MobileDrawer
+          open={drawerOpen}
+          onClose={closeDrawer}
+          appUpdate={appUpdate}
+          showBranding={showBranding}
+        />
         {/* lg：与侧栏内容区对齐 — 侧栏底部按钮区为 px-2 py-3；主卡右侧/底侧用 pr-3 pb-3 与 py-3 视觉一致，避免仅靠 p-2 显得贴边 */}
         {/* Mac App：`lg:pr-3 lg:pb-3` (12pt) 须与 Swift `DashboardChromeMetrics.mainGutterPoints` 一致，主卡圆角由 `--tt-main-card-radius` 注入 */}
         <div className="flex-1 min-w-0 min-h-0 p-2 lg:pl-0 lg:pr-3 lg:pb-3 flex flex-col">

@@ -4,11 +4,12 @@ import { useTheme } from "../../hooks/useTheme.js";
 import { useLocale } from "../../hooks/useLocale.js";
 import { useCurrency } from "../../hooks/useCurrency.js";
 import { useTokenFormat } from "../../hooks/useTokenFormat.js";
+import { useSidebarBranding } from "../../hooks/use-sidebar-branding.js";
 import { DE_LOCALE, EN_LOCALE, JA_LOCALE, KO_LOCALE, SYSTEM_LOCALE, ZH_CN_LOCALE, ZH_TW_LOCALE } from "../../lib/locale";
 import { CURRENCY_USD, getSupportedCurrencies } from "../../lib/currency";
 import { copy } from "../../lib/copy";
 import { Select } from "../../ui/components";
-import { SectionCard, SegmentedControl, SettingsRow } from "./Controls.jsx";
+import { SectionCard, SegmentedControl, SettingsRow, ToggleSwitch } from "./Controls.jsx";
 import { TOKEN_FORMAT_MODES } from "../../lib/token-format.js";
 
 function buildThemeOptions() {
@@ -111,6 +112,7 @@ export function AppearanceSection() {
   const { locale, setLocale } = useLocale();
   const { currency, rate, rateSource, rateFetchedAt, setCurrency } = useCurrency();
   const { mode: tokenFormatMode, setMode: setTokenFormatMode } = useTokenFormat();
+  const { visible: sidebarBrandingVisible, toggle: toggleSidebarBranding } = useSidebarBranding();
 
   return (
     <SectionCard title={copy("settings.section.appearance")}>
@@ -153,6 +155,17 @@ export function AppearanceSection() {
             ]}
             value={tokenFormatMode}
             onChange={setTokenFormatMode}
+          />
+        }
+      />
+      <SettingsRow
+        label={copy("settings.appearance.sidebar_brand.label")}
+        hint={copy("settings.appearance.sidebar_brand.hint")}
+        control={
+          <ToggleSwitch
+            checked={sidebarBrandingVisible}
+            onChange={toggleSidebarBranding}
+            ariaLabel={copy("settings.appearance.sidebar_brand.label")}
           />
         }
       />

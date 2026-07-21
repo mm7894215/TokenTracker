@@ -1,5 +1,6 @@
 key,module,page,component,slot,text,notes,status
 header.auth.sign_in_aria,shared,*,InsforgeUserHeaderControls,sign_in_aria,"Sign in",,active
+header.auth.open_account_menu,shared,*,InsforgeUserHeaderControls,open_account_menu,"Open account menu",,active
 login.back_home,shared,LoginPage,LoginPage,back_home,"Back to home",,active
 login.cloud_only,shared,LoginPage,LoginPage,cloud_only,"Cloud sign-in is not configured. Use the local dashboard on localhost.",,active
 login.title,shared,LoginPage,LoginPage,title,"Sign in",,active
@@ -489,6 +490,8 @@ settings.appearance.theme.hint,ui,SettingsPage,SettingsPage,theme_hint,"Choose h
 settings.appearance.theme.light,ui,SettingsPage,SettingsPage,theme_light,"Light",,active
 settings.appearance.theme.dark,ui,SettingsPage,SettingsPage,theme_dark,"Dark",,active
 settings.appearance.theme.system,ui,SettingsPage,SettingsPage,theme_system,"System",,active
+settings.appearance.sidebar_brand.label,ui,SettingsPage,AppearanceSection,sidebar_brand_label,"Sidebar branding",,active
+settings.appearance.sidebar_brand.hint,ui,SettingsPage,AppearanceSection,sidebar_brand_hint,"Show the Token Tracker logo, product name, and GitHub Star link at the top of the sidebar.",,active
 settings.appearance.currency.label,ui,SettingsPage,SettingsPage,currency_label,"Currency",,active
 settings.appearance.currency.hint,ui,SettingsPage,SettingsPage,currency_hint,"Select the display currency for usage costs.",,active
 settings.appearance.token_format.label,ui,SettingsPage,SettingsPage,token_format_label,"Token numbers",,active
