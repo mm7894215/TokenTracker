@@ -1,12 +1,17 @@
 import React from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { Maximize2 } from "lucide-react";
-import { copy } from "../../../lib/copy";
+import { copy, getCopyLocale } from "../../../lib/copy";
 import { cn } from "../../../lib/cn";
 import { useCurrency } from "../../../hooks/useCurrency.js";
 import { useTokenFormat } from "../../../hooks/useTokenFormat.js";
 import { formatUsdCurrency } from "../../../lib/format";
-import { formatBucketRange, formatTickLabel, granularityFromPeriod } from "../../../lib/trend-stats";
+import {
+  formatBucketRange,
+  formatTickLabel,
+  formatTrendRange,
+  granularityFromPeriod,
+} from "../../../lib/trend-stats";
 import { TrendMonitorZoomModal } from "./TrendMonitorZoomModal";
 
 function interpolateQuantile(sortedValues, ratio) {
@@ -413,6 +418,11 @@ export function TrendMonitor({
   const { currency, rate } = useCurrency();
   const { formatTokens, formatTokensTooltip } = useTokenFormat();
   const granularity = granularityFromPeriod(period);
+  const locale = getCopyLocale();
+  const rangeLabels = React.useMemo(
+    () => formatTrendRange(from, to, granularity, locale),
+    [from, granularity, locale, to],
+  );
 
   const [hoveredBar, setHoveredBar] = React.useState(null);
   const [tooltipPos, setTooltipPos] = React.useState({ x: 0, y: 0, shiftX: 0, flipDown: false });
@@ -426,9 +436,7 @@ export function TrendMonitor({
       hideTimeoutRef.current = null;
     }
 
-    const timeLabel = isZoom
-      ? formatBucketRange(row, granularity)
-      : row?.day || row?.hour || row?.month || "";
+    const timeLabel = formatBucketRange(row, granularity, locale);
     setHoveredBar({
       row,
       value,
@@ -468,7 +476,7 @@ export function TrendMonitor({
     const flipDown = y < estTooltipHeight + 12;
 
     setTooltipPos({ x, y, shiftX, flipDown });
-  }, [isZoom, granularity]);
+  }, [isZoom, granularity, locale]);
 
   const handleBarMouseLeave = React.useCallback(() => {
     if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
@@ -567,7 +575,7 @@ export function TrendMonitor({
                 <div key={index} className={cn("flex-1 min-w-0 flex", justify)}>
                   {isTick && (
                     <span className="text-[9px] text-oai-gray-400 dark:text-oai-gray-500 whitespace-nowrap font-mono">
-                      {formatTickLabel(row, granularity)}
+                      {formatTickLabel(row, granularity, locale)}
                     </span>
                   )}
                 </div>
@@ -589,10 +597,10 @@ export function TrendMonitor({
           </div>
         )}
 
-        {from && to && (
+        {rangeLabels && (
           <div className="flex justify-between text-xs text-oai-gray-500 dark:text-oai-gray-300 font-medium pt-2 border-t border-oai-gray-100 dark:border-oai-gray-800">
-            <span>{from === to ? `${from} 00:00` : from}</span>
-            <span>{from === to ? `${to} 24:00` : to}</span>
+            <span>{rangeLabels.start}</span>
+            <span>{rangeLabels.end}</span>
           </div>
         )}
       </div>

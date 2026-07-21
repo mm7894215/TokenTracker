@@ -3,6 +3,7 @@ import {
   computeZoomStats,
   formatBucketRange,
   formatTickLabel,
+  formatTrendRange,
   getTrendInsightKey,
   granularityFromPeriod,
 } from "./trend-stats";
@@ -59,22 +60,42 @@ describe("computeZoomStats", () => {
 
 describe("formatBucketRange", () => {
   it("hourly -> 30-min range with end = start + 30min", () => {
-    expect(formatBucketRange({ hour: "2026-05-29T14:00:00" }, "hourly")).toBe("2026-05-29 14:00–14:30");
-    expect(formatBucketRange({ hour: "2026-05-29T14:30:00" }, "hourly")).toBe("2026-05-29 14:30–15:00");
+    expect(formatBucketRange({ hour: "2026-05-29T14:00:00" }, "hourly", "en-US")).toBe("May 29, 2026 14:00–14:30");
+    expect(formatBucketRange({ hour: "2026-05-29T14:30:00" }, "hourly", "zh-CN")).toBe("2026年5月29日 14:30–15:00");
   });
 
-  it("hourly wraps 23:30 end to 00:00", () => {
-    expect(formatBucketRange({ hour: "2026-05-29T23:30:00" }, "hourly")).toBe("2026-05-29 23:30–00:00");
+  it("hourly makes a midnight rollover explicit", () => {
+    expect(formatBucketRange({ hour: "2026-05-29T23:30:00" }, "hourly", "en-US")).toBe("May 29, 2026 23:30–May 30, 2026 00:00");
   });
 
-  it("daily and monthly pass through the bucket key", () => {
-    expect(formatBucketRange({ day: "2026-05-29" }, "daily")).toBe("2026-05-29");
-    expect(formatBucketRange({ month: "2026-05" }, "monthly")).toBe("2026-05");
+  it("localizes daily and monthly bucket keys", () => {
+    expect(formatBucketRange({ day: "2026-05-29" }, "daily", "en-US")).toBe("May 29, 2026");
+    expect(formatBucketRange({ month: "2026-05" }, "monthly", "zh-CN")).toBe("2026年5月");
   });
 
   it("falls back to raw label for unparseable / missing input", () => {
     expect(formatBucketRange({ hour: "garbage" }, "hourly")).toBe("garbage");
     expect(formatBucketRange(null, "hourly")).toBe("");
+  });
+});
+
+describe("formatTrendRange", () => {
+  it("shows an hourly day once with readable endpoints", () => {
+    expect(formatTrendRange("2026-05-29", "2026-05-29", "hourly", "zh-CN")).toEqual({
+      start: "2026年5月29日 · 00:00",
+      end: "24:00",
+    });
+  });
+
+  it("localizes daily and monthly range endpoints", () => {
+    expect(formatTrendRange("2026-05-01", "2026-05-29", "daily", "en-US")).toEqual({
+      start: "May 1, 2026",
+      end: "May 29, 2026",
+    });
+    expect(formatTrendRange("2026-01", "2026-05", "monthly", "zh-CN")).toEqual({
+      start: "2026年1月",
+      end: "2026年5月",
+    });
   });
 });
 
@@ -93,10 +114,10 @@ describe("getTrendInsightKey", () => {
 });
 
 describe("formatTickLabel", () => {
-  it("emits short labels per granularity", () => {
-    expect(formatTickLabel({ hour: "2026-05-29T14:30:00" }, "hourly")).toBe("14:30");
-    expect(formatTickLabel({ day: "2026-05-29" }, "daily")).toBe("05-29");
-    expect(formatTickLabel({ month: "2026-05" }, "monthly")).toBe("2026-05");
+  it("emits short localized labels per granularity", () => {
+    expect(formatTickLabel({ hour: "2026-05-29T14:30:00" }, "hourly", "zh-CN")).toBe("14:30");
+    expect(formatTickLabel({ day: "2026-05-29" }, "daily", "zh-CN")).toBe("5月29日");
+    expect(formatTickLabel({ month: "2026-05" }, "monthly", "en-US")).toBe("May 2026");
   });
 
   it("returns empty string for null row", () => {

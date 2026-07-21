@@ -83,12 +83,73 @@ function pad2(n) {
   return String(n).padStart(2, "0");
 }
 
+function resolveDateLocale(locale) {
+  return typeof locale === "string" && locale.trim() ? locale : "en-US";
+}
+
+function parseDayKey(value) {
+  const raw = String(value || "");
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (!match) return null;
+  const [, year, month, day] = match;
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  if (
+    date.getUTCFullYear() !== Number(year)
+    || date.getUTCMonth() + 1 !== Number(month)
+    || date.getUTCDate() !== Number(day)
+  ) {
+    return null;
+  }
+  return date;
+}
+
+function formatDayKey(value, locale, includeYear = true) {
+  const date = parseDayKey(value);
+  if (!date || typeof Intl === "undefined" || !Intl.DateTimeFormat) return String(value || "");
+  try {
+    return new Intl.DateTimeFormat(resolveDateLocale(locale), {
+      ...(includeYear ? { year: "numeric" } : {}),
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    }).format(date);
+  } catch {
+    return String(value || "");
+  }
+}
+
+function formatMonthKey(value, locale) {
+  const raw = String(value || "");
+  const match = /^(\d{4})-(\d{2})(?:-\d{2})?$/.exec(raw);
+  if (!match) return raw;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1));
+  if (date.getUTCFullYear() !== Number(match[1]) || date.getUTCMonth() + 1 !== Number(match[2])) {
+    return raw;
+  }
+  try {
+    return new Intl.DateTimeFormat(resolveDateLocale(locale), {
+      year: "numeric",
+      month: "short",
+      timeZone: "UTC",
+    }).format(date);
+  } catch {
+    return raw;
+  }
+}
+
+function addUtcDays(dayKey, amount) {
+  const date = parseDayKey(dayKey);
+  if (!date) return dayKey;
+  date.setUTCDate(date.getUTCDate() + amount);
+  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
+}
+
 // Precise time RANGE label for a hovered bucket, by granularity:
-//   hourly  "YYYY-MM-DDTHH:MM:00" -> "YYYY-MM-DD HH:MM–HH:MM" (end = start + 30min)
-//   daily   "YYYY-MM-DD"          -> "YYYY-MM-DD"
-//   monthly "YYYY-MM"             -> "YYYY-MM"
+//   hourly  "YYYY-MM-DDTHH:MM:00" -> localized date + "HH:MM–HH:MM"
+//   daily   "YYYY-MM-DD"          -> localized full date
+//   monthly "YYYY-MM"             -> localized month + year
 // Falls back to the raw label (or "") for anything unparseable.
-export function formatBucketRange(row, granularity) {
+export function formatBucketRange(row, granularity, locale) {
   if (!row) return "";
 
   if (granularity === "hourly") {
@@ -100,15 +161,49 @@ export function formatBucketRange(row, granularity) {
     const endMinutes = startMinutes + 30;
     const endH = Math.floor(endMinutes / 60) % 24;
     const endM = endMinutes % 60;
-    return `${date} ${hh}:${mm}–${pad2(endH)}:${pad2(endM)}`;
+    const startDate = formatDayKey(date, locale);
+    if (endMinutes >= 24 * 60) {
+      const endDate = formatDayKey(addUtcDays(date, 1), locale);
+      return `${startDate} ${hh}:${mm}–${endDate} ${pad2(endH)}:${pad2(endM)}`;
+    }
+    return `${startDate} ${hh}:${mm}–${pad2(endH)}:${pad2(endM)}`;
   }
 
   if (granularity === "monthly") {
-    return String(row.month || row.label || "");
+    const raw = String(row.month || row.label || "");
+    return formatMonthKey(raw, locale);
   }
 
   // daily
-  return String(row.day || row.label || "");
+  const raw = String(row.day || row.label || "");
+  return formatDayKey(raw, locale);
+}
+
+// Localized endpoint labels beneath the compact chart. Hourly ranges show the
+// selected date only once so the two endpoints stay legible in narrow cards.
+export function formatTrendRange(from, to, granularity, locale) {
+  if (!from || !to) return null;
+  const rawFrom = String(from);
+  const rawTo = String(to);
+
+  if (granularity === "hourly" && rawFrom === rawTo) {
+    return {
+      start: `${formatDayKey(rawFrom, locale)} · 00:00`,
+      end: "24:00",
+    };
+  }
+
+  if (granularity === "monthly") {
+    return {
+      start: formatMonthKey(rawFrom, locale),
+      end: formatMonthKey(rawTo, locale),
+    };
+  }
+
+  return {
+    start: formatDayKey(rawFrom, locale),
+    end: formatDayKey(rawTo, locale),
+  };
 }
 
 // One-line insight copy key for the zoom stats panel, tiered by total volume so
@@ -123,18 +218,16 @@ export function getTrendInsightKey(stats) {
   return "trend.zoom.insight.massive";
 }
 
-// Short axis-tick label for a bucket (no date noise):
-//   hourly  -> "HH:MM"   daily -> "MM-DD"   monthly -> "YYYY-MM"
-export function formatTickLabel(row, granularity) {
+// Short localized axis-tick label for a bucket (no unnecessary date noise).
+export function formatTickLabel(row, granularity, locale) {
   if (!row) return "";
   if (granularity === "hourly") {
     const m = /T(\d{2}:\d{2})/.exec(String(row.hour || row.label || ""));
     return m ? m[1] : "";
   }
   if (granularity === "monthly") {
-    return String(row.month || row.label || "");
+    return formatMonthKey(String(row.month || row.label || ""), locale);
   }
   const day = String(row.day || row.label || "");
-  const m = /^\d{4}-(\d{2}-\d{2})$/.exec(day);
-  return m ? m[1] : day;
+  return formatDayKey(day, locale, false);
 }
