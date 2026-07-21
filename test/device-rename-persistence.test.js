@@ -138,8 +138,27 @@ function createEdgeDatabaseMock() {
         return { data: inserted, error: null };
       }
       if (operation === "update") {
-        for (const row of rows.filter(matches)) Object.assign(row, values);
-        return { data: rows.filter(matches), error: null };
+        const targetRows = rows.filter(matches);
+        if (table === "tokentracker_devices") {
+          // Model the active-name unique index: renaming an active row onto a
+          // name another active row of the same (user, platform) owns fails.
+          for (const row of targetRows) {
+            const nextName = Object.prototype.hasOwnProperty.call(values, "device_name")
+              ? values.device_name
+              : row.device_name;
+            const conflict = devices.some((other) =>
+              other !== row
+                && other.revoked_at == null
+                && other.user_id === row.user_id
+                && other.platform === row.platform
+                && other.device_name === nextName);
+            if (conflict) {
+              return { data: null, error: { message: 'duplicate key value violates unique constraint "tokentracker_devices_active_name_key"' } };
+            }
+          }
+        }
+        for (const row of targetRows) Object.assign(row, values);
+        return { data: targetRows, error: null };
       }
       if (operation === "insert") {
         const inserted = values.map((value) => ({ revoked_at: null, ...value }));
@@ -439,6 +458,116 @@ test("legacy CLI client info without a hostname keeps the generated label", asyn
   );
 
   assert.equal(devices[0].device_name, "TokenTracker CLI (darwin-arm64) #cccccccc");
+});
+
+test("CLI adoption keeps the legacy label when another machine owns the hostname", async () => {
+  const { testIssueDeviceToken } = await loadDeviceFlowIssuer();
+  const { client, devices } = createEdgeDatabaseMock();
+  const hostname = "MacBook-Pro.local";
+  const machineA = "a".repeat(64);
+  const machineB = "b".repeat(64);
+  devices.push(
+    {
+      id: "machine-a-device",
+      user_id: "same-user",
+      device_name: hostname,
+      platform: "cli-device-flow",
+      machine_id: machineA,
+      revoked_at: null,
+      name_customized: false,
+      created_at: "2026-01-01T00:00:00.000Z",
+    },
+    {
+      id: "orphan-b",
+      user_id: "same-user",
+      device_name: `TokenTracker CLI (darwin-arm64 ${hostname}) #bbbbbbbb`,
+      default_device_name: `TokenTracker CLI (darwin-arm64 ${hostname}) #bbbbbbbb`,
+      platform: "cli-device-flow",
+      machine_id: null,
+      revoked_at: null,
+      name_customized: false,
+      created_at: "2026-01-02T00:00:00.000Z",
+    },
+  );
+
+  const result = await testIssueDeviceToken(
+    client,
+    "same-user",
+    `darwin-arm64 ${hostname}`,
+    machineB,
+  );
+
+  // Renaming the orphan onto the taken hostname collides with the active-name
+  // unique index; adoption must fall back to machine_id-only so the historical
+  // row is claimed instead of orphaned.
+  assert.equal(result.deviceId, "orphan-b");
+  const adopted = devices.find((device) => device.id === "orphan-b");
+  assert.equal(adopted.machine_id, machineB);
+  assert.equal(adopted.device_name, `TokenTracker CLI (darwin-arm64 ${hostname}) #bbbbbbbb`);
+});
+
+test("dashboard token issue keeps the legacy label when another machine owns the hostname", async () => {
+  const { default: issueDashboardToken } = await loadDashboardTokenIssueHandler();
+  const dashboardDb = createEdgeDatabaseMock();
+  const hostname = "office-win";
+  const machineA = "a".repeat(64);
+  const machineB = "b".repeat(64);
+  dashboardDb.devices.push(
+    {
+      id: "machine-a-device",
+      user_id: "same-user",
+      device_name: hostname,
+      platform: "desktop",
+      machine_id: machineA,
+      revoked_at: null,
+      name_customized: false,
+    },
+    {
+      id: "orphan-b",
+      user_id: "same-user",
+      device_name: "Token Tracker (dashboard) #bbbbbbbb",
+      platform: "desktop",
+      machine_id: null,
+      revoked_at: null,
+      name_customized: false,
+    },
+  );
+  const previousDeno = globalThis.Deno;
+  const previousEdgeTestClient = globalThis.__edgeTestClient;
+  globalThis.__edgeTestClient = dashboardDb.client;
+  globalThis.Deno = {
+    env: {
+      get(name) {
+        return {
+          INSFORGE_BASE_URL: "https://cloud.example",
+          INSFORGE_SERVICE_ROLE_KEY: "test-service-role",
+          INSFORGE_ANON_KEY: "test-anon-key",
+        }[name];
+      },
+    },
+  };
+  try {
+    const response = await issueDashboardToken(new Request("https://cloud.example/functions/device-token", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer test-service-role",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        user_id: "same-user",
+        device_name: hostname,
+        platform: "desktop",
+        machine_id: machineB,
+      }),
+    }));
+    assert.equal(response.status, 200, await response.text());
+  } finally {
+    globalThis.Deno = previousDeno;
+    globalThis.__edgeTestClient = previousEdgeTestClient;
+  }
+  const adopted = dashboardDb.devices.find((device) => device.id === "orphan-b");
+  assert.equal(adopted.machine_id, machineB);
+  assert.equal(adopted.device_name, "Token Tracker (dashboard) #bbbbbbbb");
 });
 
 test("current-device labels react to the first completed cloud sync", () => {

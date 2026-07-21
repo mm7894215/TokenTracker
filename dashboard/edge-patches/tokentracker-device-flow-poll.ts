@@ -149,6 +149,21 @@ async function issueDeviceToken(client: any, userId: string, clientInfo: string 
           deviceId = candidate.id;
           break;
         }
+        if (!candidate.name_customized) {
+          // The rename to the readable hostname can collide with the
+          // active-name unique index when another machine already owns it.
+          // Adopt under the old label so the historical row is not orphaned;
+          // the identity RPC can converge the name on a later cycle.
+          const { error: retryErr } = await client.database
+            .from("tokentracker_devices")
+            .update({ machine_id: machineId })
+            .eq("id", candidate.id)
+            .is("machine_id", null);
+          if (!retryErr) {
+            deviceId = candidate.id;
+            break;
+          }
+        }
       }
     }
 

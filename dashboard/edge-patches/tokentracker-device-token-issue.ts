@@ -262,8 +262,23 @@ export default async function (req: Request): Promise<Response> {
             : { machine_id: machineId, device_name: deviceName })
           .eq("id", legacyId)
           .is("machine_id", null);
-        if (!adoptErr) deviceId = legacyId;
-        // adoptErr → lost a race against another adopter/inserter; fall through.
+        if (!adoptErr) {
+          deviceId = legacyId;
+        } else if (!legacyNameCustomized) {
+          // The rename to the readable hostname can collide with the
+          // active-name unique index when another machine already owns it.
+          // Adopt under the old label so the historical row is not orphaned;
+          // the identity RPC can converge the name on a later cycle.
+          const { error: retryErr } = await dbClient.database
+            .from("tokentracker_devices")
+            .update({ machine_id: machineId })
+            .eq("id", legacyId)
+            .is("machine_id", null);
+          if (!retryErr) deviceId = legacyId;
+          // retryErr → lost a race against another adopter; fall through.
+        }
+        // adoptErr on a customized row → lost a race against another
+        // adopter/inserter; fall through.
       }
     }
 
