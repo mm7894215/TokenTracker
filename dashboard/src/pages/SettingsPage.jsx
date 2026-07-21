@@ -93,9 +93,6 @@ export function SettingsPage() {
             <h1 className="text-3xl font-semibold tracking-tight text-oai-black dark:text-white sm:text-4xl">
               {copy("settings.page.title")}
             </h1>
-            <p className="mt-2 text-sm text-oai-gray-500 dark:text-oai-gray-400">
-              {copy("settings.page.subtitle")}
-            </p>
           </div>
 
           <div className="grid min-w-0 gap-6 md:grid-cols-[12rem_minmax(0,1fr)] md:gap-8 lg:grid-cols-[13.5rem_minmax(0,1fr)]">
@@ -124,7 +121,7 @@ export function SettingsPage() {
                       <Icon
                         className={cn(
                           "h-4 w-4 shrink-0",
-                          active ? "text-oai-brand-500" : "text-oai-gray-400 dark:text-oai-gray-500",
+                          active ? "text-oai-black dark:text-white" : "text-oai-gray-400 dark:text-oai-gray-500",
                         )}
                         aria-hidden
                       />

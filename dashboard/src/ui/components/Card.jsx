@@ -1,4 +1,5 @@
 import React from "react";
+import { cn } from "../../lib/cn";
 
 /**
  * Card - 简化版卡片组件
@@ -11,7 +12,7 @@ export function Card({
   bodyClassName = "",
 }) {
   return (
-    <div className={`rounded-xl border border-oai-gray-200 dark:border-oai-gray-800 bg-white dark:bg-oai-gray-900 transition-colors duration-200 ${className}`}>
+    <div className={cn("rounded-xl border border-oai-gray-200 dark:border-oai-gray-800 bg-white dark:bg-oai-gray-900 transition-colors duration-200", className)}>
       {(title || subtitle) && (
         <div className="px-5 py-4 border-b border-oai-gray-200 dark:border-oai-gray-800 transition-colors duration-200">
           {title && (
