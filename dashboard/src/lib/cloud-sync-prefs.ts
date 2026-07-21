@@ -1,5 +1,6 @@
 const KEY_ENABLED = "tokentracker_cloud_sync_enabled";
 const KEY_DEVICE = "tokentracker_cloud_device_session_v1";
+const KEY_DEVICE_ID = "tokentracker_cloud_device_id_v1";
 const KEY_LAST_SYNC = "tokentracker_cloud_last_sync_ts";
 const KEY_USAGE_READY = "tokentracker_cloud_usage_ready_v1";
 export const CLOUD_USAGE_SYNCED_EVENT = "tt.cloudUsageSynced";
@@ -102,8 +103,22 @@ export function getStoredDeviceSession(): CloudDeviceSession | null {
   return memoryDeviceSession;
 }
 
+export function getCurrentDeviceId(): string {
+  if (memoryDeviceSession?.deviceId) return memoryDeviceSession.deviceId;
+  try {
+    return String(localStorage.getItem(KEY_DEVICE_ID) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
 export function setStoredDeviceSession(session: CloudDeviceSession): void {
   memoryDeviceSession = session;
+  try {
+    if (session.deviceId) localStorage.setItem(KEY_DEVICE_ID, session.deviceId);
+  } catch {
+    /* non-secret marker remains memory-only when storage is unavailable */
+  }
   clearLegacyStoredDeviceSession();
 }
 
@@ -111,6 +126,7 @@ export function clearCloudDeviceSession(): void {
   memoryDeviceSession = null;
   try {
     localStorage.removeItem(KEY_LAST_SYNC);
+    localStorage.removeItem(KEY_DEVICE_ID);
   } catch {
     /* ignore */
   }

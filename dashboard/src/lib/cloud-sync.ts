@@ -61,8 +61,9 @@ async function triggerLeaderboardRefresh(
 }
 
 /**
- * Resolve the stable per-MACHINE id served by the local CLI
- * (/functions/tokentracker-machine-id, persisted in ~/.tokentracker/.../config.json).
+ * Resolve the stable per-MACHINE id and human-readable system name served by
+ * the local CLI (/functions/tokentracker-machine-id, persisted in
+ * ~/.tokentracker/.../config.json).
  *
  * Returns null when the local server is unreachable. There is deliberately NO
  * per-browser fallback id anymore: a fallback identity minted a brand-new
@@ -72,16 +73,19 @@ async function triggerLeaderboardRefresh(
  * (postLocalUsageSync), so when the machine id is unavailable we skip token
  * issuance for this cycle and retry on the next one.
  */
-async function resolveMachineId(): Promise<string | null> {
+async function resolveMachineIdentity(): Promise<{ machineId: string; deviceName: string | null } | null> {
   try {
     const res = await fetch("/functions/tokentracker-machine-id", {
       headers: { Accept: "application/json" },
       cache: "no-store",
     });
     if (res.ok) {
-      const data = (await res.json().catch(() => null)) as { machineId?: string } | null;
+      const data = (await res.json().catch(() => null)) as { machineId?: string; deviceName?: string | null } | null;
       const machineId = typeof data?.machineId === "string" ? data.machineId.trim() : null;
-      if (machineId && machineId.length >= 8) return machineId;
+      const deviceName = typeof data?.deviceName === "string" && data.deviceName.trim()
+        ? data.deviceName.trim().slice(0, 128)
+        : null;
+      if (machineId && machineId.length >= 8) return { machineId, deviceName };
     }
   } catch {
     /* local server unreachable */
@@ -107,9 +111,10 @@ async function issueDeviceTokenForCloud(accessToken: string): Promise<CloudDevic
     typeof navigator !== "undefined" && typeof navigator.platform === "string"
       ? navigator.platform
       : "web";
-  const machineId = await resolveMachineId();
-  if (!machineId) return null;
-  const deviceName = `Token Tracker (dashboard) #${machineId.slice(0, 8)}`;
+  const identity = await resolveMachineIdentity();
+  if (!identity) return null;
+  const { machineId } = identity;
+  const deviceName = identity.deviceName || `Token Tracker (dashboard) #${machineId.slice(0, 8)}`;
   // 云端 slug 为 tokentracker-device-token-issue（历史文档里的 vibeusage-* 在本项目未部署）
   const res = await fetch(`${root}/functions/tokentracker-device-token-issue`, {
     method: "POST",

@@ -346,6 +346,7 @@
   "dashboard.device_filter.all": "모든 기기",
   "dashboard.device_filter.aria": "기기별 필터",
   "dashboard.device_card.title": "기기별",
+  "dashboard.device_card.current": "현재 기기",
   "dashboard.device_card.unnamed": "이름 없는 기기",
   "nav.pet": "데스크톱 펫",
   "pet.page.eyebrow": "데스크톱 동반자",

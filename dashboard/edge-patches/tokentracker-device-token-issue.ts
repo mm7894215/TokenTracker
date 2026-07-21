@@ -82,6 +82,13 @@ async function sha256Hex(input: string): Promise<string> {
     .join("");
 }
 
+function disambiguateDeviceName(deviceName: string, machineId: string): string {
+  const suffix = ` #${machineId.slice(0, 8)}`;
+  if (deviceName.endsWith(suffix)) return deviceName;
+  const baseName = deviceName.slice(0, 128 - suffix.length).trimEnd() || "Token Tracker";
+  return `${baseName}${suffix}`;
+}
+
 export default async function (req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -198,19 +205,21 @@ export default async function (req: Request): Promise<Response> {
     }
 
     if (!deviceId) {
-      // Adopt an orphan under either the current suffixed name or the pre-suffix
-      // base name. machineId.slice(0,8) is the 8-hex suffix; strip " #<hex8>" to
-      // recover the base. A machine first seen under the old no-suffix scheme has
-      // a base-named orphan the exact-suffixed match would skip, splitting it off
-      // as a new device (issue #187). Adopting it backfills machine_id so the
-      // machine resolves to one row thereafter.
-      const legacyBaseName = deviceName.replace(/ #[0-9a-fA-F]{8}$/, "");
-      const legacyNames =
-        legacyBaseName === deviceName ? [deviceName] : [deviceName, legacyBaseName];
+      // Adopt an orphan under the current system name or one of the generated
+      // names used before hostname labels were introduced. A machine first
+      // seen under an older name must be adopted in place; otherwise the next
+      // upload would split its history into a second device.
+      const legacyNames = Array.from(new Set([
+        deviceName,
+        `Token Tracker (dashboard) #${machineId.slice(0, 8)}`,
+        "Token Tracker (dashboard)",
+        "Token Tracker",
+      ]));
       let legacyId: string | null = null;
+      let legacyNameCustomized = false;
       const { data: legacy } = await dbClient.database
         .from("tokentracker_devices")
-        .select("id")
+        .select("id, name_customized")
         .eq("user_id", userId)
         .eq("platform", platform)
         .in("device_name", legacyNames)
@@ -221,6 +230,7 @@ export default async function (req: Request): Promise<Response> {
         .maybeSingle();
       if (legacy && (legacy as { id: string }).id) {
         legacyId = (legacy as { id: string }).id;
+        legacyNameCustomized = Boolean((legacy as { name_customized?: boolean }).name_customized);
       }
       if (!legacyId) {
         // A renamed legacy row matches no client default by device_name; the
@@ -230,7 +240,7 @@ export default async function (req: Request): Promise<Response> {
         // doesn't leave the row un-adoptable and split off a fresh device.
         const { data: renamed } = await dbClient.database
           .from("tokentracker_devices")
-          .select("id")
+          .select("id, name_customized")
           .eq("user_id", userId)
           .eq("platform", platform)
           .in("default_device_name", legacyNames)
@@ -241,16 +251,34 @@ export default async function (req: Request): Promise<Response> {
           .maybeSingle();
         if (renamed && (renamed as { id: string }).id) {
           legacyId = (renamed as { id: string }).id;
+          legacyNameCustomized = Boolean((renamed as { name_customized?: boolean }).name_customized);
         }
       }
       if (legacyId) {
         const { error: adoptErr } = await dbClient.database
           .from("tokentracker_devices")
-          .update({ machine_id: machineId })
+          .update(legacyNameCustomized
+            ? { machine_id: machineId }
+            : { machine_id: machineId, device_name: deviceName })
           .eq("id", legacyId)
           .is("machine_id", null);
-        if (!adoptErr) deviceId = legacyId;
-        // adoptErr → lost a race against another adopter/inserter; fall through.
+        if (!adoptErr) {
+          deviceId = legacyId;
+        } else if (!legacyNameCustomized) {
+          // The rename to the readable hostname can collide with the
+          // active-name unique index when another machine already owns it.
+          // Adopt under the old label so the historical row is not orphaned;
+          // the identity RPC can converge the name on a later cycle.
+          const { error: retryErr } = await dbClient.database
+            .from("tokentracker_devices")
+            .update({ machine_id: machineId })
+            .eq("id", legacyId)
+            .is("machine_id", null);
+          if (!retryErr) deviceId = legacyId;
+          // retryErr → lost a race against another adopter; fall through.
+        }
+        // adoptErr on a customized row → lost a race against another
+        // adopter/inserter; fall through.
       }
     }
 
@@ -278,10 +306,48 @@ export default async function (req: Request): Promise<Response> {
         if (winner && (winner as { id: string }).id) {
           deviceId = (winner as { id: string }).id;
         } else {
-          return json(
-            { error: "Failed to issue device token", detail: insErr?.message || "device resolution failed" },
-            500,
-          );
+          // The active-name unique index also covers machine-anchored rows.
+          // Retry with a stable suffix when another machine owns this hostname.
+          const fallbackDeviceName = disambiguateDeviceName(deviceName, machineId);
+          const fallbackDeviceId = crypto.randomUUID();
+          const { data: fallbackInserted, error: fallbackErr } = await dbClient.database
+            .from("tokentracker_devices")
+            .upsert(
+              [{
+                id: fallbackDeviceId,
+                user_id: userId,
+                device_name: fallbackDeviceName,
+                platform,
+                machine_id: machineId,
+              }],
+              { ignoreDuplicates: true },
+            )
+            .select("id");
+          if (!fallbackErr && Array.isArray(fallbackInserted) && fallbackInserted.length > 0) {
+            deviceId = (fallbackInserted[0] as { id: string }).id;
+          } else {
+            // A concurrent request for this same machine may have won the
+            // fallback insert, so resolve its canonical row before failing.
+            const { data: fallbackWinner } = await dbClient.database
+              .from("tokentracker_devices")
+              .select("id")
+              .eq("user_id", userId)
+              .eq("machine_id", machineId)
+              .is("revoked_at", null)
+              .limit(1)
+              .maybeSingle();
+            if (fallbackWinner && (fallbackWinner as { id: string }).id) {
+              deviceId = (fallbackWinner as { id: string }).id;
+            } else {
+              return json(
+                {
+                  error: "Failed to issue device token",
+                  detail: fallbackErr?.message || insErr?.message || "device resolution failed",
+                },
+                500,
+              );
+            }
+          }
         }
       }
     }

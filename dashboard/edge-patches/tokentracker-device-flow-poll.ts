@@ -34,14 +34,24 @@ async function sha256Hex(input: string): Promise<string> {
     .join("");
 }
 
+function disambiguateDeviceName(deviceName: string, machineId: string): string {
+  const suffix = ` #${machineId.slice(0, 8)}`;
+  if (deviceName.endsWith(suffix)) return deviceName;
+  const baseName = deviceName.slice(0, 128 - suffix.length).trimEnd() || "Token Tracker";
+  return `${baseName}${suffix}`;
+}
+
 // deno-lint-ignore no-explicit-any
 async function issueDeviceToken(client: any, userId: string, clientInfo: string | null, machineId: string | null) {
   const platform = "cli-device-flow";
-  // The machine-id suffix keeps display names unique per machine: two Macs on
-  // the default "MacBook-Pro.local" hostname used to collapse into ONE device
-  // (the name-keyed unique index), overwriting each other's hourly rows and
-  // revoking each other's tokens on every login.
-  const deviceName = `TokenTracker CLI${clientInfo ? ` (${clientInfo})` : ""}${machineId ? ` #${machineId.slice(0, 8)}` : ""}`.slice(0, 128);
+  // New CLIs send `<platform>-<arch> <hostname>` as client_info. Identity is
+  // anchored by machine_id, so the human-facing name can be the actual system
+  // hostname instead of an opaque generated label.
+  const hostnameMatch = clientInfo?.match(/^\S+\s+(.+)$/);
+  const hostname = hostnameMatch?.[1]?.trim() || null;
+  const generatedLegacyName = `TokenTracker CLI${clientInfo ? ` (${clientInfo})` : ""}${machineId ? ` #${machineId.slice(0, 8)}` : ""}`.slice(0, 128);
+  const generatedLegacyBareName = `TokenTracker CLI${clientInfo ? ` (${clientInfo})` : ""}`.slice(0, 128);
+  const deviceName = (hostname || generatedLegacyName).slice(0, 128);
 
   // Device identity resolution — same machine-anchored scheme as
   // tokentracker-device-token-issue.ts: (1) reuse by (user, machine_id),
@@ -83,22 +93,20 @@ async function issueDeviceToken(client: any, userId: string, clientInfo: string 
     }
 
     if (!deviceId) {
-      // Adoption tries the new suffixed name first, then the PRE-UPGRADE
-      // suffix-less name (`TokenTracker CLI (darwin-arm64 host)`) — every
-      // CLI device minted before the machine-id rollout has the latter, and
-      // without this fallback an upgrade re-login would orphan the old row
-      // and mint a second device (hot buckets re-emitted across the switch
-      // would then mirror). If two same-hostname machines shared one legacy
-      // row, the first to upgrade claims it; the second falls through to a
-      // fresh anchored device — counting stays correct either way because
-      // rows never move or duplicate.
-      const legacyBareName = `TokenTracker CLI${clientInfo ? ` (${clientInfo})` : ""}`.slice(0, 128);
+      // Adoption tries the hostname first, then both generated names used by
+      // older CLIs. This keeps an upgrade from orphaning the historical row;
+      // machine_id remains the authoritative identity after adoption.
+      const legacyNames = Array.from(new Set([
+        deviceName,
+        generatedLegacyName,
+        generatedLegacyBareName,
+      ]));
       const { data: legacyRows } = await client.database
         .from("tokentracker_devices")
         .select("id, device_name, name_customized")
         .eq("user_id", userId)
         .eq("platform", platform)
-        .in("device_name", [deviceName, legacyBareName])
+        .in("device_name", legacyNames)
         .is("revoked_at", null)
         .is("machine_id", null)
         .order("created_at", { ascending: true });
@@ -116,7 +124,7 @@ async function issueDeviceToken(client: any, userId: string, clientInfo: string 
           .select("id, device_name, name_customized")
           .eq("user_id", userId)
           .eq("platform", platform)
-          .in("default_device_name", [deviceName, legacyBareName])
+          .in("default_device_name", legacyNames)
           .is("revoked_at", null)
           .is("machine_id", null)
           .order("created_at", { ascending: true });
@@ -141,6 +149,21 @@ async function issueDeviceToken(client: any, userId: string, clientInfo: string 
           deviceId = candidate.id;
           break;
         }
+        if (!candidate.name_customized) {
+          // The rename to the readable hostname can collide with the
+          // active-name unique index when another machine already owns it.
+          // Adopt under the old label so the historical row is not orphaned;
+          // the identity RPC can converge the name on a later cycle.
+          const { error: retryErr } = await client.database
+            .from("tokentracker_devices")
+            .update({ machine_id: machineId })
+            .eq("id", candidate.id)
+            .is("machine_id", null);
+          if (!retryErr) {
+            deviceId = candidate.id;
+            break;
+          }
+        }
       }
     }
 
@@ -164,10 +187,44 @@ async function issueDeviceToken(client: any, userId: string, clientInfo: string 
           .is("revoked_at", null)
           .limit(1)
           .maybeSingle();
-        if (!winner || !(winner as { id: string }).id) {
-          throw new Error(insErr?.message || "device resolution failed");
+        if (winner && (winner as { id: string }).id) {
+          deviceId = (winner as { id: string }).id;
+        } else {
+          // A different machine may already own the readable hostname under
+          // the active-name unique index. Keep this machine registerable with
+          // the stable suffix previously used by CLI device names.
+          const fallbackDeviceName = disambiguateDeviceName(deviceName, machineId);
+          const fallbackDeviceId = crypto.randomUUID();
+          const { data: fallbackInserted, error: fallbackErr } = await client.database
+            .from("tokentracker_devices")
+            .upsert(
+              [{
+                id: fallbackDeviceId,
+                user_id: userId,
+                device_name: fallbackDeviceName,
+                platform,
+                machine_id: machineId,
+              }],
+              { ignoreDuplicates: true },
+            )
+            .select("id");
+          if (!fallbackErr && Array.isArray(fallbackInserted) && fallbackInserted.length > 0) {
+            deviceId = (fallbackInserted[0] as { id: string }).id;
+          } else {
+            const { data: fallbackWinner } = await client.database
+              .from("tokentracker_devices")
+              .select("id")
+              .eq("user_id", userId)
+              .eq("machine_id", machineId)
+              .is("revoked_at", null)
+              .limit(1)
+              .maybeSingle();
+            if (!fallbackWinner || !(fallbackWinner as { id: string }).id) {
+              throw new Error(fallbackErr?.message || insErr?.message || "device resolution failed");
+            }
+            deviceId = (fallbackWinner as { id: string }).id;
+          }
         }
-        deviceId = (winner as { id: string }).id;
       }
     }
   } else {
