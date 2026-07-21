@@ -213,6 +213,8 @@
   "nav.leaderboard": "排行榜",
   "nav.collapse": "折叠侧边栏",
   "nav.expand": "展开侧边栏",
+  "nav.update.download": "下载更新 {{version}}",
+  "nav.update.in_progress": "正在更新…",
   "nav.menu": "打开导航菜单",
   "nav.close_menu": "关闭导航菜单",
   "nav.aside_label": "主导航",

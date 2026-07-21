@@ -8,6 +8,7 @@ import { showToast } from "../../ui/components/Toast.jsx";
 import { STATUSPAGE_URL } from "../../lib/config";
 import { copy } from "../../lib/copy";
 import { cn } from "../../lib/cn";
+import { isNewerVersion } from "../../lib/app-update.js";
 import { SectionCard, SettingsRow, ToggleSwitch } from "./Controls.jsx";
 
 export function MenuBarSection() {
@@ -85,21 +86,6 @@ export function MenuBarSection() {
   );
 }
 
-function hasUpdate(current, latest) {
-  function parseParts(v) {
-    return v.replace(/^v/, "").split(".").map(Number);
-  }
-  const currParts = parseParts(current);
-  const lateParts = parseParts(latest);
-  for (let i = 0; i < Math.max(currParts.length, lateParts.length); i++) {
-    const curr = currParts[i] || 0;
-    const late = lateParts[i] || 0;
-    if (curr < late) return true;
-    if (curr > late) return false;
-  }
-  return false;
-}
-
 export function NativeAppFooter() {
   const { available, settings, runAction } = useNativeSettings();
   const showNativeInfo = available && settings?.version;
@@ -120,7 +106,7 @@ export function NativeAppFooter() {
       const data = await res.json();
       const latestVersion = data.tag_name;
 
-      if (hasUpdate(currentVersion, latestVersion)) {
+      if (isNewerVersion(currentVersion, latestVersion)) {
         setUpdateModal({
           open: true,
           latestVersion,

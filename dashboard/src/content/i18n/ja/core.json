@@ -198,6 +198,8 @@
   "nav.leaderboard": "リーダーボード",
   "nav.collapse": "サイドバーを折りたたむ",
   "nav.expand": "サイドバーを展開",
+  "nav.update.download": "アップデート {{version}} をダウンロード",
+  "nav.update.in_progress": "アップデート中…",
   "nav.menu": "ナビゲーションメニューを開く",
   "nav.close_menu": "ナビゲーションメニューを閉じる",
   "nav.aside_label": "メインナビゲーション",

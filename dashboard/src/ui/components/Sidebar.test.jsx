@@ -20,14 +20,24 @@ const LABELS = {
   "nav.settings": "Settings",
   "nav.expand": "Expand sidebar",
   "nav.collapse": "Collapse sidebar",
+  "nav.update.download": "Download update {{version}}",
+  "nav.update.in_progress": "Updating…",
   "nav.menu": "Open navigation menu",
   "nav.close_menu": "Close navigation menu",
   "nav.aside_label": "Main navigation",
   "nav.nav_label": "Primary navigation",
 };
 
+const appUpdateMock = vi.hoisted(() => ({
+  state: { available: false, latestVersion: "", busy: false },
+  requestUpdate: vi.fn(),
+}));
+
 vi.mock("../../lib/copy", () => ({
-  copy: (key) => LABELS[key] || key,
+  copy: (key, params) => Object.entries(params || {}).reduce(
+    (text, [name, value]) => text.replaceAll(`{{${name}}}`, String(value)),
+    LABELS[key] || key,
+  ),
 }));
 
 vi.mock("../../hooks/useTheme.js", () => ({
@@ -36,6 +46,10 @@ vi.mock("../../hooks/useTheme.js", () => ({
 
 vi.mock("../../hooks/useLocale.js", () => ({
   useLocale: () => ({ resolvedLocale: "en" }),
+}));
+
+vi.mock("../../hooks/use-app-update.js", () => ({
+  useAppUpdate: () => ({ ...appUpdateMock.state, requestUpdate: appUpdateMock.requestUpdate }),
 }));
 
 vi.mock("../../lib/native-bridge.js", () => ({
@@ -70,6 +84,8 @@ function renderLayout() {
 describe("AppLayout navigation sidebar", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    appUpdateMock.state = { available: false, latestVersion: "", busy: false };
+    appUpdateMock.requestUpdate.mockClear();
     desktopMatches = false;
     mediaListeners = new Set();
     window.matchMedia = vi.fn((query) => ({
@@ -105,6 +121,21 @@ describe("AppLayout navigation sidebar", () => {
 
     expect(sidebar).toHaveAttribute("data-sidebar-state", "expanded");
     expect(window.localStorage.getItem("tt.sidebarCollapsed")).toBe("0");
+  });
+
+  it("shows an available native update at the lower left and launches the updater", async () => {
+    appUpdateMock.state = { available: true, latestVersion: "v0.84.0", busy: false };
+    const user = userEvent.setup();
+    renderLayout();
+
+    const updateButton = screen.getByRole("button", { name: "Download update v0.84.0" });
+    expect(updateButton).toHaveAttribute("data-app-update-button", "true");
+
+    await act(async () => {
+      await user.click(updateButton);
+    });
+
+    expect(appUpdateMock.requestUpdate).toHaveBeenCalledTimes(1);
   });
 
   it("closes the narrow-window drawer from its dedicated close button", async () => {

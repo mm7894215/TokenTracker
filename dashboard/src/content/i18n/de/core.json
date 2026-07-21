@@ -122,6 +122,8 @@
   "nav.leaderboard": "Leaderboard",
   "nav.collapse": "Seitenleiste einklappen",
   "nav.expand": "Seitenleiste ausklappen",
+  "nav.update.download": "Update {{version}} herunterladen",
+  "nav.update.in_progress": "Update läuft…",
   "nav.menu": "Navigationsmenü öffnen",
   "nav.close_menu": "Navigationsmenü schließen",
   "nav.aside_label": "Hauptnavigation",

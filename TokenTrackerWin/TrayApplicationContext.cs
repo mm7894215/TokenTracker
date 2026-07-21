@@ -598,6 +598,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _dashboard.ThemeChanged += () => PostToUi(RefreshThemeFromDashboard);
         _dashboard.PetSettingsRequested += () => PostToUi(PushDashboardPetSettings);
         _dashboard.PetSettingChanged += (key, value) => PostToUi(() => ApplyDashboardPetSetting(key, value));
+        _dashboard.UpdateRequested += () => PostToUi(OnCheckUpdatesClicked);
         _dashboard.NotificationRequested += (title, body) => PostToUi(() =>
             _trayIcon.ShowBalloonTip(7000, title, body, ToolTipIcon.Warning));
     }

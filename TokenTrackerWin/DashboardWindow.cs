@@ -62,6 +62,7 @@ internal sealed class DashboardWindow : Window
     public event Action? PetSettingsRequested;
     public event Action<string, string?>? PetSettingChanged;
     public event Action<string, string>? NotificationRequested;
+    public event Action? UpdateRequested;
 
     public DashboardWindow(ServerManager server)
     {
@@ -331,6 +332,12 @@ internal sealed class DashboardWindow : Window
                     else if (t.GetString() == "getPetSettings")
                     {
                         PetSettingsRequested?.Invoke();
+                    }
+                    else if (t.GetString() == "action"
+                             && doc.RootElement.TryGetProperty("name", out var actionName)
+                             && actionName.GetString() == "checkForUpdates")
+                    {
+                        UpdateRequested?.Invoke();
                     }
                     else if (t.GetString() == "setPetSetting"
                              && doc.RootElement.TryGetProperty("key", out var petKey)

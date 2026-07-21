@@ -372,6 +372,8 @@ nav.widgets,shared,*,Sidebar,nav_widgets,"Menu Bar & Widgets",,active
 nav.leaderboard,shared,*,Sidebar,nav_leaderboard,"Leaderboard",,active
 nav.collapse,shared,*,Sidebar,nav_collapse,"Collapse sidebar",,active
 nav.expand,shared,*,Sidebar,nav_expand,"Expand sidebar",,active
+nav.update.download,shared,*,Sidebar,update_download,"Download update {{version}}",,active
+nav.update.in_progress,shared,*,Sidebar,update_in_progress,"Updating…",,active
 nav.menu,shared,*,Sidebar,nav_menu,"Open navigation menu",,active
 nav.close_menu,shared,*,Sidebar,nav_close_menu,"Close navigation menu",,active
 nav.aside_label,shared,*,Sidebar,aside_label,"Main navigation",,active

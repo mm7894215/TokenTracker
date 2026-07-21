@@ -17,11 +17,14 @@ import {
   Sun,
   Moon,
   Monitor,
+  Download,
+  RefreshCw,
 } from "lucide-react";
 import { copy } from "../../lib/copy";
 import { cn } from "../../lib/cn";
 import { useTheme } from "../../hooks/useTheme.js";
 import { useLocale } from "../../hooks/useLocale.js";
+import { useAppUpdate } from "../../hooks/use-app-update.js";
 import { shouldFetchGithubStars } from "../dashboard/util/should-fetch-github-stars.js";
 import { InsforgeUserHeaderControls } from "../../components/InsforgeUserHeaderControls.jsx";
 import { isNativeApp, isNativeEmbed, isNativeWindowsApp } from "../../lib/native-bridge.js";
@@ -152,6 +155,36 @@ function NavItem({ item, collapsed, active, onClick }) {
       </span>
       {!collapsed && <span className="truncate">{item.label}</span>}
     </Link>
+  );
+}
+
+function AppUpdateButton({ collapsed, update }) {
+  const { available, latestVersion, busy, requestUpdate } = update;
+  if (!available) return null;
+
+  const label = busy
+    ? copy("nav.update.in_progress")
+    : copy("nav.update.download", { version: latestVersion });
+  const Icon = busy ? RefreshCw : Download;
+
+  return (
+    <button
+      type="button"
+      data-app-update-button="true"
+      onClick={requestUpdate}
+      disabled={busy}
+      aria-label={label}
+      title={collapsed ? label : undefined}
+      className={cn(
+        "mb-2 flex min-h-10 w-full items-center gap-2 rounded-lg border border-oai-brand-500/25 bg-oai-brand-500/10 px-2 py-2 text-left text-oai-brand-700 transition-colors hover:border-oai-brand-500/40 hover:bg-oai-brand-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 disabled:cursor-wait disabled:opacity-70 dark:border-oai-brand-400/25 dark:bg-oai-brand-400/10 dark:text-oai-brand-300 dark:hover:border-oai-brand-400/40 dark:hover:bg-oai-brand-400/15",
+        collapsed && "mx-auto h-10 w-10 justify-center px-0",
+      )}
+    >
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+        <Icon className={cn("h-4 w-4", busy && "animate-spin")} strokeWidth={1.9} aria-hidden />
+      </span>
+      {!collapsed && <span className="truncate text-xs font-semibold">{label}</span>}
+    </button>
   );
 }
 
@@ -318,6 +351,7 @@ function SidebarBody({
   onClose,
   closeButtonRef,
   glassChrome = false,
+  appUpdate,
 }) {
   const location = useLocation();
   const pathname = location?.pathname || "/";
@@ -393,6 +427,7 @@ function SidebarBody({
       {/* Account and utilities remain pinned at the bottom, independently of
           the scrollable navigation list. */}
       <div className="shrink-0 border-t border-oai-gray-200/70 px-2 pb-3 pt-2 dark:border-oai-gray-800/70">
+        <AppUpdateButton collapsed={collapsed} update={appUpdate} />
         <div className={cn("mb-2 min-w-0", collapsed && "flex justify-center")}>
           <InsforgeUserHeaderControls
             variant="sidebar"
@@ -437,7 +472,7 @@ function SidebarBody({
  * Desktop Sidebar — visible only on lg+. Fills its parent's height (which is
  * already bounded by AppLayout's fixed-viewport flex container).
  */
-function Sidebar({ collapsed, onToggleCollapsed }) {
+function Sidebar({ collapsed, onToggleCollapsed, appUpdate }) {
   const nativeGlass = useMemo(() => {
     if (typeof window === "undefined") return false;
     return isNativeEmbed() || isNativeApp();
@@ -445,16 +480,21 @@ function Sidebar({ collapsed, onToggleCollapsed }) {
 
   return (
     <aside
+      data-native-sidebar
       id="app-sidebar"
       data-sidebar-state={collapsed ? "collapsed" : "expanded"}
-      data-native-sidebar
       aria-label={copy("nav.aside_label")}
       className={cn(
         "hidden h-full min-h-0 shrink-0 flex-col transition-[width] duration-200 ease-out lg:flex",
         collapsed ? "w-[72px]" : "w-[232px]",
       )}
     >
-      <SidebarBody collapsed={collapsed} onToggleCollapsed={onToggleCollapsed} glassChrome={nativeGlass} />
+      <SidebarBody
+        collapsed={collapsed}
+        onToggleCollapsed={onToggleCollapsed}
+        glassChrome={nativeGlass}
+        appUpdate={appUpdate}
+      />
     </aside>
   );
 }
@@ -462,7 +502,7 @@ function Sidebar({ collapsed, onToggleCollapsed }) {
 /**
  * Mobile drawer — slides in from the left, full-height overlay.
  */
-function MobileDrawer({ open, onClose }) {
+function MobileDrawer({ open, onClose, appUpdate }) {
   const closeButtonRef = useRef(null);
 
   // Move focus into the drawer so keyboard users immediately reach the
@@ -531,6 +571,7 @@ function MobileDrawer({ open, onClose }) {
           onClose={onClose}
           closeButtonRef={closeButtonRef}
           onItemClick={onClose}
+          appUpdate={appUpdate}
         />
       </aside>
     </div>
@@ -576,6 +617,7 @@ function MobileTopBar({ open, onOpenDrawer, menuButtonRef }) {
  */
 export function AppLayout({ children }) {
   const { collapsed, toggle } = useSidebarCollapsed();
+  const appUpdate = useAppUpdate();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const menuButtonRef = useRef(null);
   const openDrawer = useCallback(() => setDrawerOpen(true), []);
@@ -610,8 +652,8 @@ export function AppLayout({ children }) {
         />
       )}
       <div className="flex-1 min-h-0 flex">
-        <Sidebar collapsed={collapsed} onToggleCollapsed={toggle} />
-        <MobileDrawer open={drawerOpen} onClose={closeDrawer} />
+        <Sidebar collapsed={collapsed} onToggleCollapsed={toggle} appUpdate={appUpdate} />
+        <MobileDrawer open={drawerOpen} onClose={closeDrawer} appUpdate={appUpdate} />
         {/* lg：与侧栏内容区对齐 — 侧栏底部按钮区为 px-2 py-3；主卡右侧/底侧用 pr-3 pb-3 与 py-3 视觉一致，避免仅靠 p-2 显得贴边 */}
         {/* Mac App：`lg:pr-3 lg:pb-3` (12pt) 须与 Swift `DashboardChromeMetrics.mainGutterPoints` 一致，主卡圆角由 `--tt-main-card-radius` 注入 */}
         <div className="flex-1 min-w-0 min-h-0 p-2 lg:pl-0 lg:pr-3 lg:pb-3 flex flex-col">

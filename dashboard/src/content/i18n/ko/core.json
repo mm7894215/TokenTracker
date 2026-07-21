@@ -198,6 +198,8 @@
   "nav.leaderboard": "리더보드",
   "nav.collapse": "사이드바 접기",
   "nav.expand": "사이드바 펼치기",
+  "nav.update.download": "업데이트 {{version}} 다운로드",
+  "nav.update.in_progress": "업데이트 중…",
   "nav.menu": "내비게이션 메뉴 열기",
   "nav.close_menu": "내비게이션 메뉴 닫기",
   "nav.aside_label": "주 내비게이션",
