@@ -1919,7 +1919,9 @@ function createLocalApiHandler({ queuePath }) {
         }
         const extraEnv = {};
         const drain = body.drain === true;
-        const auto = body.auto === true && !drain;
+        // Native Sync Now combines an incremental background scan with a full
+        // cloud drain. A plain {drain:true} request remains an exhaustive sync.
+        const auto = body.auto === true;
         const background =
           auto && (body.background === true || body.lightweight === true);
         // The local server is the trust boundary for cloud-sync preferences.

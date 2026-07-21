@@ -158,6 +158,25 @@ test("background auto sync skips deep Codex archives", async () => {
   });
 });
 
+test("background drain skips deep Codex archives while retaining drain semantics", async () => {
+  await withTempSyncEnv(async (home) => {
+    const codexHome = process.env.CODEX_HOME;
+    await writeCodexRollout(codexHome, "2026-06-30", "019f16bd-1002-7000-8000-aaaaaaaaaaaa", 53);
+    await writeArchivedCodexRollout(codexHome, "2026-06-30", "019f16bd-1003-7000-8000-aaaaaaaaaaaa", 59);
+
+    const archiveRoot = path.join(codexHome, "archived_sessions");
+    const archiveReads = await countReaddir(
+      () => cmdSync(["--auto", "--background", "--drain"]),
+      (target) => target === archiveRoot || target.startsWith(`${archiveRoot}${path.sep}`),
+    );
+
+    assert.equal(archiveReads, 0);
+    const queue = await readQueue(home);
+    assert.match(queue, /"total_tokens":53/);
+    assert.doesNotMatch(queue, /"total_tokens":59/);
+  });
+});
+
 test("Codex notify sync catches up after an overlapping background sync releases the lock", async () => {
   await withTempSyncEnv(async (home) => {
     const codexHome = process.env.CODEX_HOME;

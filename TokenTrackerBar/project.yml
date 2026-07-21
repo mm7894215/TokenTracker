@@ -122,6 +122,7 @@ targets:
       - path: TokenTrackerBar/Models/LimitPace.swift
       - path: TokenTrackerBar/Models/WeeklyLimitResetDetector.swift
       - path: TokenTrackerBar/Models/BackgroundRefreshPolicy.swift
+      - path: TokenTrackerBar/Models/SyncRequestPolicy.swift
       - path: TokenTrackerBar/Models/UsagePublicationPolicy.swift
       - path: TokenTrackerBar/Services/ResumableDownloader.swift
       - path: TokenTrackerBar/Services/QueueActivityMonitor.swift

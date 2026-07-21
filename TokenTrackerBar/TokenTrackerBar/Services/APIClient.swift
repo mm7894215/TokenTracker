@@ -122,7 +122,11 @@ actor APIClient {
     func triggerSync(drain: Bool = false, auto: Bool = false) async throws -> SyncResponse {
         let body: Data
         if drain {
-            body = Data(#"{"drain":true}"#.utf8)
+            // Sync Now keeps the bounded background scan, while --drain still
+            // flushes the complete cloud backlog and gives the request lock priority.
+            body = Data(
+                #"{"auto":true,"background":true,"allLocalSources":true,"publishAccount":true,"drain":true}"#.utf8
+            )
         } else if auto {
             body = Data(
                 #"{"auto":true,"background":true,"allLocalSources":true,"publishAccount":true}"#.utf8

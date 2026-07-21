@@ -69,6 +69,7 @@ class DashboardViewModel: ObservableObject {
     /// `isSyncing` (which only drives the sync animation), this is also set
     /// during silent syncs so concurrent sync requests are still coalesced.
     private var syncInFlight = false
+    private var pendingManualSync = false
     private var lastBackgroundSyncAt: Date?
     private var lastPopoverOpenSyncAttemptAt: Date?
     private var shouldReloadAfterCurrentLoad = false
@@ -519,6 +520,11 @@ class DashboardViewModel: ObservableObject {
         }
         await loadAll()
         syncInFlight = false
+        if pendingManualSync {
+            pendingManualSync = false
+            await performManualSync()
+            return
+        }
         if !silent { isSyncing = false }
         await runPendingQueueRefreshIfNeeded()
     }
@@ -657,7 +663,21 @@ class DashboardViewModel: ObservableObject {
     }
 
     func triggerSync() async {
-        guard !syncInFlight else { return }
+        switch SyncRequestPolicy.manualRequestDisposition(
+            syncInFlight: syncInFlight,
+            isSyncing: isSyncing
+        ) {
+        case .start:
+            await performManualSync()
+        case .queueAfterSilentSync:
+            pendingManualSync = true
+            isSyncing = true
+        case .coalesceWithVisibleSync:
+            return
+        }
+    }
+
+    private func performManualSync() async {
         syncInFlight = true
         isSyncing = true
         do {

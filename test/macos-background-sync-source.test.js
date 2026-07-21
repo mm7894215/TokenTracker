@@ -22,7 +22,7 @@ test("macOS background sync sends auto background while Sync Now drains", () => 
   );
   assert.match(
     apiClient,
-    /if drain \{[\s\S]*Data\(#"\{"drain":true\}"#\.utf8\)[\s\S]*\} else if auto \{[\s\S]*"auto":true,"background":true,"allLocalSources":true,"publishAccount":true/,
+    /if drain \{[\s\S]*"auto":true,"background":true,"allLocalSources":true,"publishAccount":true,"drain":true[\s\S]*\} else if auto \{[\s\S]*"auto":true,"background":true,"allLocalSources":true,"publishAccount":true/,
   );
   assert.match(
     viewModel,
@@ -55,7 +55,7 @@ test("macOS background sync sends auto background while Sync Now drains", () => 
   );
   assert.match(
     viewModel,
-    /func triggerSync\(\)[\s\S]*APIClient\.shared\.triggerSync\(drain: true\)/,
+    /private func performManualSync\(\)[\s\S]*APIClient\.shared\.triggerSync\(drain: true\)/,
   );
   assert.match(refreshPolicy, /static let defaultSyncInterval: TimeInterval = 300/);
   assert.match(

@@ -436,7 +436,9 @@ async function cmdSync(argv, context = {}) {
       : null;
 
     const autoSourceScope = resolveAutoSourceScope(opts);
-    const isBackgroundLightweightSync = opts.auto && opts.background && !opts.drain;
+    // --background controls local scan breadth; --drain only controls upload
+    // depth and lock priority. Plain `sync --drain` remains a full source scan.
+    const isBackgroundLightweightSync = opts.auto && opts.background;
     const isBackgroundAllLocalSync = isBackgroundLightweightSync && opts.allLocalSources;
     const isFullSourceScan = !autoSourceScope && !isBackgroundLightweightSync;
     const sourceAllowed = (...sources) => {
