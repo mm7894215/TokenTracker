@@ -21,6 +21,7 @@ const DEFAULT_RESOURCE_LOADERS = Object.freeze({
 });
 
 const LEADERBOARD_DEFAULT_PERIOD = "total";
+const LEADERBOARD_DEFAULT_DIMENSION = "users";
 const LEADERBOARD_DEFAULT_OFFSET = 0;
 const LEADERBOARD_DEFAULT_PAGE_SIZE = 20;
 const LEADERBOARD_PAGE_SIZE_OPTIONS = Object.freeze([10, 20, 50, 100]);
@@ -360,6 +361,7 @@ export function getLeaderboardPreloadContextKey(options = {}) {
   return buildDashboardPreloadContextKey("leaderboard", {
     accessMode: getLeaderboardPreloadAccessMode({ ...options, baseUrl, mockEnabled }),
     baseUrl,
+    dimension: options.dimension === "models" ? "models" : LEADERBOARD_DEFAULT_DIMENSION,
     mockEnabled,
     offset: options.offset ?? LEADERBOARD_DEFAULT_OFFSET,
     pageSize: options.pageSize ?? getLeaderboardPreloadPageSize(),
@@ -386,12 +388,14 @@ export function preloadLeaderboardDefaultState(options = {}) {
   const baseUrl = options.baseUrl ?? "";
   const accessMode = getLeaderboardPreloadAccessMode({ ...options, baseUrl, mockEnabled });
   const period = options.period || LEADERBOARD_DEFAULT_PERIOD;
+  const dimension = options.dimension === "models" ? "models" : LEADERBOARD_DEFAULT_DIMENSION;
   const pageSize = options.pageSize ?? getLeaderboardPreloadPageSize();
   const offset = options.offset ?? LEADERBOARD_DEFAULT_OFFSET;
   const userId = getLeaderboardPreloadUserId(options);
   const contextKey = getLeaderboardPreloadContextKey({
     accessMode,
     baseUrl,
+    dimension,
     mockEnabled,
     offset,
     pageSize,
@@ -433,6 +437,7 @@ export function preloadLeaderboardDefaultState(options = {}) {
     .then(() =>
       getLeaderboard({
         baseUrl,
+        dimension,
         userId,
         period,
         limit: pageSize,

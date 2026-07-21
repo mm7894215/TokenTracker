@@ -292,6 +292,11 @@ leaderboard.profile.nav.back,dashboard,LeaderboardProfilePage,Header,nav_back,"L
 leaderboard.profile.nav.download,dashboard,LeaderboardProfilePage,Header,nav_download,"Download",Shown only to browser visitors without the app,active
 leaderboard.profile.hero.rank_label,dashboard,LeaderboardProfilePage,Hero,rank_label,"Rank",,active
 leaderboard.title,dashboard,LeaderboardPage,LeaderboardPage,title,"Leaderboard",,active
+leaderboard.dimension.aria,dashboard,LeaderboardPage,DimensionTabs,aria,"Leaderboard dimension",,active
+leaderboard.dimension.users,dashboard,LeaderboardPage,DimensionTabs,users,"Developers",,active
+leaderboard.dimension.models,dashboard,LeaderboardPage,DimensionTabs,models,"Models",,active
+leaderboard.models.privacy_note,dashboard,LeaderboardPage,ModelLeaderboardList,privacy_note,"Only models used by at least 3 developers are shown.",,active
+leaderboard.models.empty,dashboard,LeaderboardPage,ModelLeaderboardList,empty,"No models meet the privacy threshold for this period.",,active
 leaderboard.range,dashboard,LeaderboardPage,LeaderboardPage,range,"UTC {{period}} · {{from}} – {{to}}",,active
 leaderboard.range_loading,dashboard,LeaderboardPage,LeaderboardPage,range_loading,"UTC {{period}} · …",,active
 leaderboard.range.total,dashboard,LeaderboardPage,LeaderboardPage,range_total,"All time",,active
@@ -311,6 +316,8 @@ leaderboard.empty,dashboard,LeaderboardPage,LeaderboardPage,state_empty,"No data
 
 leaderboard.column.rank,dashboard,LeaderboardPage,LeaderboardPage,column_rank,"Rank",,active
 leaderboard.column.user,dashboard,LeaderboardPage,LeaderboardPage,column_user,"User",,active
+leaderboard.column.model,dashboard,LeaderboardPage,ModelLeaderboardList,column_model,"Model",,active
+leaderboard.column.developers,dashboard,LeaderboardPage,ModelLeaderboardList,column_developers,"Developers",,active
 leaderboard.column.total,dashboard,LeaderboardPage,LeaderboardPage,column_total,"Total",,active
 leaderboard.column.codex,dashboard,LeaderboardPage,LeaderboardPage,column_codex,"Codex",,active
 leaderboard.column.claude,dashboard,LeaderboardPage,LeaderboardPage,column_claude,"Claude",,active

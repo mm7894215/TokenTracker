@@ -79,8 +79,9 @@ export default async function (req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
   const url = new URL(req.url);
   const period = url.searchParams.get("period") || "week";
-  const limit = Math.min(parseInt(url.searchParams.get("limit") || "20") || 20, 100);
-  const offset = parseInt(url.searchParams.get("offset") || "0") || 0;
+  const dimension = url.searchParams.get("dimension") === "models" ? "models" : "users";
+  const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") || "20") || 20, 1), 100);
+  const offset = Math.max(parseInt(url.searchParams.get("offset") || "0") || 0, 0);
   // Preferred path: client passes user_id as a query param (v0.5.51+).
   // Fallback: v0.5.46 clients still send a Bearer token — decode its sub
   // claim (WITHOUT signature verification) so they keep seeing is_me
@@ -131,7 +132,9 @@ export default async function (req: Request): Promise<Response> {
     // by the refresh job. Hardcoding (2024-01-01, today) used to 404 whenever
     // today's snapshot hadn't been generated yet, so the UI saw "no data".
     const { data: latest } = await client.database
-      .from("tokentracker_leaderboard_snapshots")
+      .from(dimension === "models"
+        ? "tokentracker_model_leaderboard_snapshots"
+        : "tokentracker_leaderboard_snapshots")
       .select("from_day, to_day")
       .eq("period", "total")
       .order("to_day", { ascending: false })
@@ -140,6 +143,42 @@ export default async function (req: Request): Promise<Response> {
     const row = latest as { from_day?: string; to_day?: string } | null;
     from_day = (row?.from_day ?? "2024-01-01").slice(0, 10);
     to_day = (row?.to_day ?? now.toISOString()).slice(0, 10);
+  }
+
+  if (dimension === "models") {
+    const { data, error } = await client.database
+      .from("tokentracker_model_leaderboard_snapshots")
+      .select("entries, total_models, generated_at")
+      .eq("period", period)
+      .eq("from_day", from_day)
+      .eq("to_day", to_day)
+      .limit(1);
+    if (error) return json({ error: error.message }, 500);
+    const snapshot = Array.isArray(data) ? data[0] as {
+      entries?: unknown;
+      total_models?: number | string;
+      generated_at?: string | null;
+    } | undefined : undefined;
+    const allEntries = Array.isArray(snapshot?.entries) ? snapshot.entries : [];
+    const totalEntries = Math.min(
+      Math.max(Number(snapshot?.total_models) || allEntries.length, 0),
+      allEntries.length,
+    );
+    return json({
+      dimension,
+      period,
+      page: Math.floor(offset / limit) + 1,
+      limit,
+      offset,
+      entries: allEntries.slice(offset, offset + limit),
+      me: null,
+      total_entries: totalEntries,
+      total_pages: totalEntries > 0 ? Math.ceil(totalEntries / limit) : 0,
+      from: from_day,
+      to: to_day,
+      generated_at: snapshot?.generated_at ?? null,
+      privacy: { minimum_developers: 3 },
+    });
   }
 
   const {
@@ -227,6 +266,11 @@ export default async function (req: Request): Promise<Response> {
     .find((value): value is string => Boolean(value)) ?? null;
 
   return json({
+    dimension,
+    period,
+    page: Math.floor(offset / limit) + 1,
+    limit,
+    offset,
     entries: visibleEntries.map((e: { user_id?: string }) => ({
       ...e,
       ...badgesFor(e),

@@ -65,6 +65,7 @@ const CommunityStatsModal = lazy(() =>
   })),
 );
 import { LeaderboardSkeleton } from "../components/LeaderboardSkeleton.jsx";
+import { ModelLeaderboardList } from "../components/ModelLeaderboardList.jsx";
 import { SortableColumnHeader } from "../components/SortableColumnHeader.jsx";
 import { useColumnOrder } from "../hooks/use-column-order.js";
 import { LeaderboardMeChip } from "../components/LeaderboardSummaryCard.jsx";
@@ -414,6 +415,10 @@ function normalizePeriod(value) {
   return null;
 }
 
+function normalizeDimension(value) {
+  return value === "models" ? "models" : "users";
+}
+
 function normalizeLeaderboardError(err) {
   if (!err) return copy("shared.error.prefix", { error: copy("leaderboard.error.unknown") });
   const msg = err?.message || String(err);
@@ -565,6 +570,21 @@ export function LeaderboardPage({
     return normalizePeriod(params.get("period")) || "total";
   }, [location?.search]);
 
+  const dimension = useMemo(() => {
+    const params = new URLSearchParams(location?.search || "");
+    return normalizeDimension(params.get("dimension"));
+  }, [location?.search]);
+
+  const handleDimensionChange = (nextDimension) => {
+    const normalized = normalizeDimension(nextDimension);
+    if (normalized === dimension) return;
+    const params = new URLSearchParams(location?.search || "");
+    if (normalized === "models") params.set("dimension", "models");
+    else params.delete("dimension");
+    setListPage(1);
+    navigate(`${location?.pathname || "/leaderboard"}?${params.toString()}`, { replace: true });
+  };
+
   const handlePeriodChange = (nextPeriod) => {
     const normalized = normalizePeriod(nextPeriod);
     if (!normalized) return;
@@ -585,7 +605,7 @@ export function LeaderboardPage({
 
   useEffect(() => {
     setListPage(1);
-  }, [period]);
+  }, [dimension, period]);
 
   const listOffset = useMemo(() => {
     const safePage = clampInt(listPage, { min: 1, max: 1_000_000, fallback: 1 });
@@ -607,11 +627,12 @@ export function LeaderboardPage({
         baseUrl: leaderboardBaseUrl,
         mockEnabled,
         userId: cloudUser?.id || null,
+        dimension,
         period,
         pageSize,
         offset: listOffset,
       }),
-    [cloudUser?.id, leaderboardAccessMode, leaderboardBaseUrl, listOffset, mockEnabled, pageSize, period],
+    [cloudUser?.id, dimension, leaderboardAccessMode, leaderboardBaseUrl, listOffset, mockEnabled, pageSize, period],
   );
 
   const [listState, setListState] = useState(() => {
@@ -658,6 +679,7 @@ export function LeaderboardPage({
       const data = await getLeaderboard({
         baseUrl: leaderboardBaseUrl,
         userId: cloudUser?.id || null,
+        dimension,
         period,
         limit: pageSize,
         offset: listOffset,
@@ -691,6 +713,7 @@ export function LeaderboardPage({
     leaderboardBaseUrl,
     leaderboardAccessMode,
     cloudUser?.id,
+    dimension,
     leaderboardPreloadContextKey,
     listOffset,
     listReloadToken,
@@ -742,7 +765,7 @@ export function LeaderboardPage({
   const generatedAtTime = formatLeaderboardUpdatedAt(generatedAt);
 
   const communityStats = useCommunityStats();
-  const me = listData?.me || null;
+  const me = dimension === "users" ? listData?.me || null : null;
   const meLabel = copy("leaderboard.me_label");
   const anonLabel = copy("leaderboard.anon_label");
   const weekLabel = copy("leaderboard.period.week");
@@ -752,8 +775,9 @@ export function LeaderboardPage({
 
   const displayEntries = useMemo(() => {
     const rows = Array.isArray(listData?.entries) ? listData.entries : [];
+    if (dimension === "models") return rows;
     return prependMeRowToPage({ entries: rows, me, meLabel });
-  }, [listData?.entries, me, meLabel]);
+  }, [dimension, listData?.entries, me, meLabel]);
 
   const myPage = useMemo(
     () => pageContainingRank(me?.rank, pageSize),
@@ -788,6 +812,16 @@ export function LeaderboardPage({
       <div className="px-6 py-12 text-center">
         <p className="text-sm text-red-500 dark:text-red-400">{currentListState.error}</p>
       </div>
+    );
+  } else if (hasEntries && dimension === "models") {
+    listBody = (
+      <ModelLeaderboardList
+        entries={displayEntries}
+        orderedColumns={orderedColumns}
+        currency={currency}
+        rate={rate}
+        formatCost={formatCost}
+      />
     );
   } else if (hasEntries) {
     listBody = (
@@ -1002,7 +1036,9 @@ export function LeaderboardPage({
   } else {
     listBody = (
       <div className="px-6 py-12 text-center">
-        <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400">{copy("leaderboard.empty")}</p>
+        <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400">
+          {copy(dimension === "models" ? "leaderboard.models.empty" : "leaderboard.empty")}
+        </p>
       </div>
     );
   }
@@ -1115,7 +1151,7 @@ export function LeaderboardPage({
             </div>
           </div>
 
-          {!signedIn && (
+          {dimension === "users" && !signedIn && (
             <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm">
               <p className="text-oai-gray-500 dark:text-oai-gray-400">{copy("leaderboard.signin_prompt")}</p>
               <button
@@ -1127,7 +1163,7 @@ export function LeaderboardPage({
             </div>
           )}
 
-          {authTokenAllowed && authTokenReady && !cloudSyncOn && (
+          {dimension === "users" && authTokenAllowed && authTokenReady && !cloudSyncOn && (
             <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm">
               <p className="text-oai-gray-500 dark:text-oai-gray-400">{copy("leaderboard.sync_prompt")}</p>
               <button
@@ -1139,6 +1175,48 @@ export function LeaderboardPage({
               </button>
             </div>
           )}
+
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div
+              role="tablist"
+              aria-label={copy("leaderboard.dimension.aria")}
+              className="inline-flex h-9 self-start rounded-full border border-oai-gray-200 p-1 dark:border-oai-gray-800"
+            >
+              {["users", "models"].map((value) => {
+                const active = dimension === value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => handleDimensionChange(value)}
+                    disabled={currentListState.loading}
+                    className={cn(
+                      "relative flex h-7 items-center justify-center rounded-full px-3.5 text-sm font-medium transition-colors",
+                      active
+                        ? "text-oai-black dark:text-white"
+                        : "text-oai-gray-500 hover:text-oai-gray-800 dark:text-oai-gray-400 dark:hover:text-oai-gray-200",
+                    )}
+                  >
+                    <span className="relative z-10">{copy(`leaderboard.dimension.${value}`)}</span>
+                    {active ? (
+                      <motion.span
+                        layoutId="leaderboard-dimension-active-bg"
+                        className="absolute inset-0 rounded-full bg-oai-gray-200 dark:bg-oai-gray-800"
+                        transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                      />
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+            {dimension === "models" ? (
+              <p className="text-xs leading-5 text-oai-gray-400 dark:text-oai-gray-500">
+                {copy("leaderboard.models.privacy_note")}
+              </p>
+            ) : null}
+          </div>
 
           <div className="sm:rounded-xl sm:border sm:border-oai-gray-200 sm:dark:border-oai-gray-800 sm:overflow-hidden border-none bg-transparent">
             {currentListState.error && hasEntries ? (

@@ -12,6 +12,7 @@ import {
 import { getLeaderboard } from "../lib/api";
 import { runCloudUsageSyncNow } from "../lib/cloud-sync";
 import { CLOUD_LEADERBOARD_REFRESHED_EVENT } from "../lib/cloud-sync-prefs";
+import { copy } from "../lib/copy";
 import { LeaderboardPage } from "./LeaderboardPage.jsx";
 
 const openLoginModalMock = vi.hoisted(() => vi.fn());
@@ -120,6 +121,55 @@ describe("LeaderboardPage window-session cache reuse", () => {
     expect(getLeaderboard).toHaveBeenCalledWith({
       baseUrl: "https://edge.example",
       userId: "user-1",
+      dimension: "users",
+      period: "total",
+      limit: 20,
+      offset: 0,
+    });
+  });
+
+  it("switches the main leaderboard to a period-aware model ranking", async () => {
+    getLeaderboard.mockResolvedValue({
+      dimension: "models",
+      entries: [{
+        rank: 1,
+        model: "gpt-5.6-terra",
+        developer_count: 12,
+        total_tokens: "987654321",
+        estimated_cost_usd: 432.1,
+        gpt_tokens: "800000000",
+        claude_tokens: "0",
+        gemini_tokens: "0",
+        cursor_tokens: "0",
+        opencode_tokens: "0",
+        openclaw_tokens: "0",
+        hermes_tokens: "0",
+        kiro_tokens: "0",
+        copilot_tokens: "0",
+        kimi_tokens: "0",
+        other_tokens: "187654321",
+      }],
+      me: null,
+      page: 1,
+      total_pages: 1,
+      total_entries: 1,
+      from: "1970-01-01",
+      to: "2026-07-21",
+      generated_at: "2026-07-21T12:00:00Z",
+    });
+
+    const { container } = renderLeaderboard("/leaderboard?dimension=models");
+
+    const modelTab = screen.getByRole("tab", { name: copy("leaderboard.dimension.models") });
+    expect(modelTab).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findAllByText("gpt-5.6-terra")).toHaveLength(2);
+    expect(container.querySelectorAll("[data-model-leaderboard-row]")).toHaveLength(2);
+    expect(screen.getByText(copy("leaderboard.models.privacy_note"))).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: copy("leaderboard.column.codex") })).toBeInTheDocument();
+    expect(getLeaderboard).toHaveBeenCalledWith({
+      baseUrl: "https://edge.example",
+      userId: "user-1",
+      dimension: "models",
       period: "total",
       limit: 20,
       offset: 0,
@@ -335,6 +385,7 @@ describe("LeaderboardPage window-session cache reuse", () => {
     expect(getLeaderboard).toHaveBeenCalledWith({
       baseUrl: "https://edge.example",
       userId: "user-1",
+      dimension: "users",
       period: "total",
       limit: 20,
       offset: 0,
@@ -398,6 +449,7 @@ describe("LeaderboardPage window-session cache reuse", () => {
       expect(getLeaderboard).toHaveBeenCalledWith({
         baseUrl: "https://edge.example",
         userId: null,
+        dimension: "users",
         period: "total",
         limit: 20,
         offset: 0,
@@ -455,6 +507,7 @@ describe("LeaderboardPage window-session cache reuse", () => {
     expect(getLeaderboard).toHaveBeenCalledWith({
       baseUrl: "https://edge.example",
       userId: "user-1",
+      dimension: "users",
       period: "total",
       limit: 50,
       offset: 0,

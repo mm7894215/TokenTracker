@@ -48,6 +48,39 @@ const MOCK_LEADERBOARD_NAMES = [
   "BLADE",
 ];
 
+const MOCK_LEADERBOARD_MODELS = [
+  "gpt-5.6-terra",
+  "claude-sonnet-4-6",
+  "gemini-3.1-pro-preview",
+  "gpt-5.4",
+  "claude-opus-4-6",
+  "glm-5.2",
+  "kimi-k2.7-code",
+  "deepseek-v4-pro",
+  "grok-4-1-fast-non-reasoning",
+  "composer-2-fast",
+  "MiniMax-M2.7",
+  "mimo-v2.5-pro",
+  "gemini-3-flash-preview",
+  "gpt-5.3-codex",
+  "claude-haiku-4-5-20251001",
+  "kiro-cli-agent",
+  "sakana/fugu-ultra",
+  "longcat-2.0",
+  "step-3.7-flash",
+  "hy3-preview-agent",
+  "gpt-5.2-codex",
+  "claude-sonnet-4-5-20250514",
+  "glm-4.7",
+  "kimi-k2.6",
+  "deepseek-chat",
+  "grok-4-fast",
+  "composer-1.5",
+  "gemini-2.5-pro",
+  "minimax-m3",
+  "mimo-v2-flash",
+];
+
 export function isMockEnabled() {
   if (typeof window !== "undefined") {
     const params = new URLSearchParams(window.location.search);
@@ -695,6 +728,7 @@ export function getMockAchievements() {
 export function getMockLeaderboard({
   seed,
   period: rawPeriod,
+  dimension: rawDimension,
   metric,
   limit = 20,
   offset = 0,
@@ -713,6 +747,70 @@ export function getMockLeaderboard({
   const period =
     safePeriod === "month" || safePeriod === "total" || safePeriod === "week" ? safePeriod : "week";
   const { from, to } = computeLeaderboardWindow(period);
+  const dimension = String(rawDimension || "users").toLowerCase() === "models" ? "models" : "users";
+
+  if (dimension === "models") {
+    const providerKeys = [
+      "gpt_tokens",
+      "claude_tokens",
+      "gemini_tokens",
+      "cursor_tokens",
+      "opencode_tokens",
+      "openclaw_tokens",
+      "hermes_tokens",
+      "kiro_tokens",
+      "copilot_tokens",
+      "kimi_tokens",
+      "other_tokens",
+    ];
+    const primaryColumn = (name: string) => {
+      const normalized = name.toLowerCase();
+      if (/claude|opus|sonnet|haiku|fable/.test(normalized)) return "claude_tokens";
+      if (/gemini/.test(normalized)) return "gemini_tokens";
+      if (/composer|cursor/.test(normalized)) return "cursor_tokens";
+      if (/kimi/.test(normalized)) return "kimi_tokens";
+      if (/kiro/.test(normalized)) return "kiro_tokens";
+      if (/gpt|codex/.test(normalized)) return "gpt_tokens";
+      return "other_tokens";
+    };
+    const periodFactor = period === "total" ? 32 : period === "month" ? 4.5 : 1;
+    const sortedModels = MOCK_LEADERBOARD_MODELS.map((model, index) => {
+      const hash = hashString(`${seedValue}:${period}:${model}`);
+      const total = Math.round((22_000_000 + (hash % 180_000_000)) * periodFactor);
+      const primary = primaryColumn(model);
+      const secondary = providerKeys[(index + 3) % providerKeys.length];
+      const values = Object.fromEntries(providerKeys.map((key) => [key, 0])) as Record<string, number>;
+      values[primary] += Math.round(total * 0.78);
+      values[secondary] += total - values[primary];
+      return {
+        rank: 0,
+        model,
+        developer_count: 3 + (hash % 480),
+        ...Object.fromEntries(providerKeys.map((key) => [key, String(values[key])])),
+        total_tokens: String(total),
+        estimated_cost_usd: Math.round((total / 1_000_000) * (1.5 + (index % 6)) * 100) / 100,
+      };
+    })
+      .sort((a, b) => Number(b.total_tokens) - Number(a.total_tokens) || a.model.localeCompare(b.model))
+      .map((entry, index) => ({ ...entry, rank: index + 1 }));
+    const totalEntries = sortedModels.length;
+    return {
+      dimension,
+      period,
+      from,
+      to,
+      generated_at: new Date().toISOString(),
+      page: Math.floor(safeOffset / safeLimit) + 1,
+      limit: safeLimit,
+      offset: safeOffset,
+      total_entries: totalEntries,
+      total_pages: Math.ceil(totalEntries / safeLimit),
+      entries: sortedModels.slice(safeOffset, safeOffset + safeLimit),
+      me: null,
+      privacy: { minimum_developers: 3 },
+    };
+  }
+
   const totalEntries = 250;
   const totalPages = totalEntries > 0 ? Math.ceil(totalEntries / safeLimit) : 0;
   const page = Math.floor(safeOffset / safeLimit) + 1;
@@ -846,6 +944,7 @@ export function getMockLeaderboard({
   const entries = sorted.slice(safeOffset, safeOffset + safeLimit);
 
   return {
+    dimension,
     period,
     metric: safeMetric,
     from,

@@ -49,7 +49,7 @@ describe("leaderboard default state preload", () => {
 
     expect(getLeaderboardPreloadPageSize()).toBe(50);
     expect(contextKey).toBe(
-      "leaderboard:accessMode=cloud|baseUrl=https://edge.example|mockEnabled=false|offset=0|pageSize=50|period=total|userId=user-1",
+      "leaderboard:accessMode=cloud|baseUrl=https://edge.example|dimension=users|mockEnabled=false|offset=0|pageSize=50|period=total|userId=user-1",
     );
 
     await expect(
@@ -69,6 +69,7 @@ describe("leaderboard default state preload", () => {
     expect(getLeaderboard).toHaveBeenCalledWith({
       baseUrl: "https://edge.example",
       userId: "user-1",
+      dimension: "users",
       period: "total",
       limit: 50,
       offset: 0,
@@ -152,6 +153,7 @@ describe("leaderboard default state preload", () => {
     expect(getLeaderboard).toHaveBeenCalledWith({
       baseUrl: "",
       userId: null,
+      dimension: "users",
       period: "total",
       limit: 20,
       offset: 0,
@@ -186,6 +188,7 @@ describe("leaderboard default state preload", () => {
     expect(getLeaderboard).toHaveBeenCalledWith({
       baseUrl: "https://edge.example",
       userId: null,
+      dimension: "users",
       period: "total",
       limit: 20,
       offset: 0,

@@ -103,6 +103,9 @@ async function authorizeRefresh(req: Request): Promise<RefreshAuthorization | nu
 
 type Period = "week" | "month" | "total";
 const ALL_PERIODS: Period[] = ["week", "month", "total"];
+const MODEL_LEADERBOARD_MIN_DEVELOPERS = 3;
+const MODEL_LEADERBOARD_MAX_ROWS = 500;
+const EXCLUDED_MODEL_NAMES = new Set(["auto", "unknown"]);
 const BLOCKED_LEADERBOARD_USER_IDS = new Set(
   (Deno.env.get("LEADERBOARD_BLOCKED_USER_IDS") ?? "")
     .split(",")
@@ -473,6 +476,12 @@ interface UserAgg {
   estimated_cost_usd: number;
 }
 
+interface ModelAgg extends UserAgg {
+  name: string;
+  name_weight: number;
+  developer_ids: Set<string>;
+}
+
 function newUserAgg(): UserAgg {
   return {
     gpt_tokens: 0,
@@ -488,6 +497,22 @@ function newUserAgg(): UserAgg {
     other_tokens: 0,
     total_tokens: 0,
     estimated_cost_usd: 0,
+  };
+}
+
+function cleanLeaderboardModelName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const name = value.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 160);
+  if (!name || EXCLUDED_MODEL_NAMES.has(name.toLowerCase())) return null;
+  return name;
+}
+
+function newModelAgg(name: string): ModelAgg {
+  return {
+    ...newUserAgg(),
+    name,
+    name_weight: 0,
+    developer_ids: new Set<string>(),
   };
 }
 
@@ -529,7 +554,7 @@ export default async function (req: Request): Promise<Response> {
     periods = [...ALL_PERIODS];
   }
 
-  const results: Record<string, { upserted: number; skipped?: boolean }> = {};
+  const results: Record<string, { upserted: number; models?: number; skipped?: boolean }> = {};
   const requestId = crypto.randomUUID();
 
   for (const period of periods) {
@@ -610,7 +635,9 @@ export default async function (req: Request): Promise<Response> {
     const pageCount = 1; // single RPC round-trip
 
     const aggMap = new Map<string, UserAgg>();
+    const modelAggMap = new Map<string, ModelAgg>();
     for (const row of grouped) {
+      if (BLOCKED_LEADERBOARD_USER_IDS.has(row.user_id)) continue;
       let agg = aggMap.get(row.user_id);
       if (!agg) {
         agg = newUserAgg();
@@ -618,16 +645,75 @@ export default async function (req: Request): Promise<Response> {
       }
       const tokens = Number(row.total_tokens) || 0;
       const col = SOURCE_COLUMN_MAP[row.source] ?? "other_tokens";
+      const rowCost = computeRowCost(row);
       (agg as unknown as Record<string, number>)[col] += tokens;
       agg.total_tokens += tokens;
-      agg.estimated_cost_usd += computeRowCost(row);
-    }
-    for (const blockedUserId of BLOCKED_LEADERBOARD_USER_IDS) {
-      aggMap.delete(blockedUserId);
+      agg.estimated_cost_usd += rowCost;
+
+      const modelName = cleanLeaderboardModelName(row.model);
+      if (modelName && tokens > 0) {
+        const modelKey = modelName.toLowerCase();
+        let modelAgg = modelAggMap.get(modelKey);
+        if (!modelAgg) {
+          modelAgg = newModelAgg(modelName);
+          modelAggMap.set(modelKey, modelAgg);
+        }
+        (modelAgg as unknown as Record<string, number>)[col] += tokens;
+        modelAgg.total_tokens += tokens;
+        modelAgg.estimated_cost_usd += rowCost;
+        modelAgg.developer_ids.add(row.user_id);
+        if (tokens >= modelAgg.name_weight) {
+          modelAgg.name = modelName;
+          modelAgg.name_weight = tokens;
+        }
+      }
     }
 
+    const modelRows = Array.from(modelAggMap.values())
+      .filter((model) =>
+        model.total_tokens > 0 &&
+        model.developer_ids.size >= MODEL_LEADERBOARD_MIN_DEVELOPERS
+      )
+      .sort((a, b) => b.total_tokens - a.total_tokens || a.name.localeCompare(b.name))
+      .slice(0, MODEL_LEADERBOARD_MAX_ROWS)
+      .map((model, index) => ({
+        rank: index + 1,
+        model: model.name,
+        developer_count: model.developer_ids.size,
+        gpt_tokens: model.gpt_tokens,
+        claude_tokens: model.claude_tokens,
+        gemini_tokens: model.gemini_tokens,
+        cursor_tokens: model.cursor_tokens,
+        opencode_tokens: model.opencode_tokens,
+        openclaw_tokens: model.openclaw_tokens,
+        hermes_tokens: model.hermes_tokens,
+        kiro_tokens: model.kiro_tokens,
+        copilot_tokens: model.copilot_tokens,
+        kimi_tokens: model.kimi_tokens,
+        other_tokens: model.other_tokens,
+        total_tokens: model.total_tokens,
+        estimated_cost_usd: Math.round(model.estimated_cost_usd * 100) / 100,
+      }));
+    const generatedAt = new Date().toISOString();
+
     if (aggMap.size === 0) {
-      results[period] = { upserted: 0 };
+      const { error: modelSnapshotError } = await client.database
+        .from("tokentracker_model_leaderboard_snapshots")
+        .upsert([{
+          period,
+          from_day,
+          to_day,
+          entries: modelRows,
+          total_models: modelRows.length,
+          generated_at: generatedAt,
+        }], { onConflict: "period,from_day,to_day" });
+      if (modelSnapshotError) return json({ error: modelSnapshotError.message }, 500);
+      await client.database
+        .from("tokentracker_model_leaderboard_snapshots")
+        .delete()
+        .eq("period", period)
+        .lt("to_day", to_day);
+      results[period] = { upserted: 0, models: modelRows.length };
       logRefreshEvent({
         event: "period_completed",
         request_id: requestId,
@@ -639,6 +725,7 @@ export default async function (req: Request): Promise<Response> {
         pages_fetched: pageCount,
         deduped_buckets: grouped.length,
         aggregated_users: 0,
+        aggregated_models: modelRows.length,
         upserted: 0,
         skipped: false,
         duration_ms: Date.now() - periodStartedAt,
@@ -680,7 +767,6 @@ export default async function (req: Request): Promise<Response> {
     // --- Rank users by total_tokens DESC ---
     const sorted = Array.from(aggMap.entries()).sort((a, b) => b[1].total_tokens - a[1].total_tokens);
 
-    const generatedAt = new Date().toISOString();
     const upsertRows = sorted.map(([userId, agg], idx) => {
       const metadata = metadataMap.get(userId);
       const isPublic = metadata?.leaderboard_public ?? false;
@@ -748,7 +834,42 @@ export default async function (req: Request): Promise<Response> {
       }
     }
 
-    results[period] = { upserted: upsertRows.length };
+    // Store the complete eligible model ranking as one atomic JSON value. A
+    // reader therefore sees either the previous snapshot or the complete new
+    // one, never a half-written set of ranks between batches.
+    const { error: modelSnapshotError } = await client.database
+      .from("tokentracker_model_leaderboard_snapshots")
+      .upsert([{
+        period,
+        from_day,
+        to_day,
+        entries: modelRows,
+        total_models: modelRows.length,
+        generated_at: generatedAt,
+      }], { onConflict: "period,from_day,to_day" });
+    if (modelSnapshotError) {
+      logRefreshEvent({
+        event: "period_error",
+        request_id: requestId,
+        source: requestSource,
+        period,
+        from_day,
+        to_day,
+        stage: "upsert_model_snapshot",
+        error: modelSnapshotError.message,
+        duration_ms: Date.now() - periodStartedAt,
+      });
+      return json({ error: modelSnapshotError.message }, 500);
+    }
+    // Keep one current row per period. Lifetime snapshots advance their
+    // to_day daily, so without this cleanup the JSON snapshots grow forever.
+    await client.database
+      .from("tokentracker_model_leaderboard_snapshots")
+      .delete()
+      .eq("period", period)
+      .lt("to_day", to_day);
+
+    results[period] = { upserted: upsertRows.length, models: modelRows.length };
     logRefreshEvent({
       event: "period_completed",
       request_id: requestId,
@@ -760,6 +881,7 @@ export default async function (req: Request): Promise<Response> {
       pages_fetched: pageCount,
       deduped_buckets: grouped.length,
       aggregated_users: aggMap.size,
+      aggregated_models: modelRows.length,
       upserted: upsertRows.length,
       skipped: false,
       // Stage timing — the 'total' period runs the whole-history RPC, whose
