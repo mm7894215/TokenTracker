@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export const SIDEBAR_BRANDING_STORAGE_KEY = "tt.sidebarBranding.visible";
 const SIDEBAR_BRANDING_CHANGE_EVENT = "tokentracker:sidebar-branding-change";
@@ -14,10 +14,15 @@ export function readSidebarBrandingVisible() {
 
 export function useSidebarBranding() {
   const [visible, setVisibleState] = useState(readSidebarBrandingVisible);
+  const visibleRef = useRef(visible);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
-    const refresh = () => setVisibleState(readSidebarBrandingVisible());
+    const refresh = () => {
+      const next = readSidebarBrandingVisible();
+      visibleRef.current = next;
+      setVisibleState(next);
+    };
     const onStorage = (event) => {
       if (event.key === null || event.key === SIDEBAR_BRANDING_STORAGE_KEY) refresh();
     };
@@ -30,7 +35,10 @@ export function useSidebarBranding() {
   }, []);
 
   const setVisible = useCallback((next) => {
-    const value = Boolean(next);
+    const value = typeof next === "function"
+      ? Boolean(next(visibleRef.current))
+      : Boolean(next);
+    visibleRef.current = value;
     setVisibleState(value);
     try {
       window.localStorage.setItem(SIDEBAR_BRANDING_STORAGE_KEY, value ? "1" : "0");
@@ -40,6 +48,6 @@ export function useSidebarBranding() {
     }
   }, []);
 
-  const toggle = useCallback(() => setVisible(!readSidebarBrandingVisible()), [setVisible]);
+  const toggle = useCallback(() => setVisible((current) => !current), [setVisible]);
   return { visible, setVisible, toggle };
 }

@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   SIDEBAR_BRANDING_STORAGE_KEY,
   useSidebarBranding,
@@ -7,6 +7,7 @@ import {
 
 describe("useSidebarBranding", () => {
   beforeEach(() => window.localStorage.clear());
+  afterEach(() => vi.restoreAllMocks());
 
   it("shows the sidebar brand by default and persists an opt-out", () => {
     const { result } = renderHook(() => useSidebarBranding());
@@ -28,5 +29,21 @@ describe("useSidebarBranding", () => {
 
     expect(result.current.first.visible).toBe(false);
     expect(result.current.second.visible).toBe(false);
+  });
+
+  it("can toggle back on when localStorage is unavailable", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("storage disabled");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("storage disabled");
+    });
+    const { result } = renderHook(() => useSidebarBranding());
+
+    act(() => result.current.toggle());
+    expect(result.current.visible).toBe(false);
+
+    act(() => result.current.toggle());
+    expect(result.current.visible).toBe(true);
   });
 });

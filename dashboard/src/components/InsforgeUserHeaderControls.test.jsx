@@ -1,5 +1,5 @@
 import React from "react";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -100,5 +100,19 @@ describe("InsforgeUserHeaderControls sidebar account menu", () => {
     expect(screen.getByRole("menuitem", { name: "Achievements" })).toBeInTheDocument();
     await act(async () => user.click(screen.getByRole("menuitem", { name: "Sign in" })));
     expect(loginMock.openLoginModal).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes the menu for outside pointers and Escape", async () => {
+    const user = userEvent.setup();
+    renderSidebarAccount();
+    const trigger = screen.getByRole("button", { name: "Open account menu" });
+
+    await act(async () => user.click(trigger));
+    fireEvent.pointerDown(document.body);
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    await act(async () => user.click(trigger));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
   });
 });
