@@ -2790,7 +2790,7 @@ function createLocalApiHandler({ queuePath }) {
             });
             // Installed skills with zero invocations = dead-weight candidates.
             const unusedInstalled = installed
-              .filter((s) => !usedSkillIds.has(s.id))
+              .filter((s) => !s.readOnly && !usedSkillIds.has(s.id))
               .map((s) => ({ skillId: s.id, directory: s.directory, name: s.name }));
             json(res, {
               generatedAt: usage.generatedAt,

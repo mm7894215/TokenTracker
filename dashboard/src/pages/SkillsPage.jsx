@@ -16,6 +16,7 @@ import {
   ExternalLink,
   Flame,
   Loader2,
+  MonitorSmartphone,
   Plus,
   RefreshCw,
   Search,
@@ -33,18 +34,23 @@ import {
   checkSkillUpdates,
   deleteLocalSkill,
   discoverSkills,
+  getAccountSkillInventories,
   getInstalledSkills,
   getPopularSkills,
   getSkillRepos,
   getSkillUsage,
   importLocalSkill,
   installSkill,
+  publishSkillInventory,
   removeSkillRepo,
   restoreSkill,
   searchSkills,
   setSkillTargets,
   uninstallSkill,
 } from "../lib/skills-api";
+import { mergeSkillInventories } from "../lib/skills-inventory";
+import { useInsforgeAuth } from "../contexts/InsforgeAuthContext.jsx";
+import { getCloudSyncEnabled, getCurrentDeviceId } from "../lib/cloud-sync-prefs";
 
 const DEFAULT_TARGETS = ["claude", "codex"];
 const SOURCE_POPULAR = "popular";
@@ -107,14 +113,20 @@ function targetBusyKey(skillId, targetId) {
   return `target:${skillId}:${targetId}`;
 }
 
+function isManageableTarget(target) {
+  return target.manageable !== false;
+}
+
 // Tri-state agent dot: synced (colored, ringed), off (muted), orphan (amber —
 // the registry says it's synced here but the on-disk copy vanished). Click
 // toggles; clicking an orphan re-syncs. Stops propagation so it never opens the
 // row's detail panel.
-function AgentDot({ target, state, busy, onToggle }) {
+function AgentDot({ target, state, busy, disabled, disabledLabel, onToggle }) {
   const synced = state === "synced";
   const orphan = state === "orphan";
-  const label = orphan
+  const label = disabled && disabledLabel
+    ? disabledLabel
+    : orphan
     ? copy("skills.dot.orphan_aria", { agent: target.label })
     : synced
       ? copy("skills.dot.synced_aria", { agent: target.label })
@@ -125,7 +137,7 @@ function AgentDot({ target, state, busy, onToggle }) {
       title={label}
       aria-label={label}
       aria-pressed={synced}
-      disabled={busy}
+      disabled={busy || disabled}
       onClick={(event) => {
         event.stopPropagation();
         onToggle?.(target.id, !synced);
@@ -158,14 +170,26 @@ function AgentDot({ target, state, busy, onToggle }) {
 }
 
 function AgentDots({ skill, targets, onToggleTarget, busyKey }) {
+  const activeTargetIds = new Set(skill.targets || []);
+  const readOnly = Boolean(skill.readOnly || skill.remote);
+  const visibleTargets = [];
+  for (const target of targets) {
+    if (readOnly ? activeTargetIds.has(target.id) : isManageableTarget(target)) {
+      visibleTargets.push(target);
+    }
+  }
   return (
     <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
-      {targets.map((target) => (
+      {visibleTargets.map((target) => (
         <AgentDot
           key={target.id}
           target={target}
           state={skill.targetStates?.[target.id] || "off"}
           busy={busyKey === targetBusyKey(skill.id, target.id)}
+          disabled={readOnly || target.manageable === false}
+          disabledLabel={copy(
+            skill.remote ? "skills.inventory.read_only_remote" : "skills.inventory.read_only_managed",
+          )}
           onToggle={(targetId, enabled) => onToggleTarget?.(skill, targetId, enabled)}
         />
       ))}
@@ -176,7 +200,13 @@ function AgentDots({ skill, targets, onToggleTarget, busyKey }) {
 function SkillRow({ skill, targets, selected, onSelect, selectable, checked, onToggleSelect, onToggleTarget, hasUpdate, busyKey }) {
   const sourceLabel =
     skill.repoOwner && skill.repoName ? `${skill.repoOwner}/${skill.repoName}` : null;
-  const titleAttr = sourceLabel ? `${skill.directory} · ${sourceLabel}` : skill.directory;
+  const titleAttr = [skill.directory, sourceLabel, skill.sourceName].filter(Boolean).join(" · ");
+  const deviceSources = Array.isArray(skill.deviceSources) ? skill.deviceSources : [];
+  const inventoryBadges = [
+    skill.remote ? copy("skills.inventory.remote") : null,
+    skill.scope === "system" ? copy("skills.inventory.system") : null,
+    skill.scope === "plugin" ? copy("skills.inventory.plugin") : null,
+  ].filter(Boolean);
 
   const handleKeyDown = (event) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -224,6 +254,14 @@ function SkillRow({ skill, targets, selected, onSelect, selectable, checked, onT
         >
           {skill.name || skill.directory}
         </h2>
+        {inventoryBadges.map((badge) => (
+          <span
+            key={badge}
+            className="inline-flex shrink-0 rounded-full bg-oai-gray-100 px-1.5 py-0.5 text-[10px] font-semibold text-oai-gray-600 ring-1 ring-oai-gray-200 dark:bg-oai-gray-800 dark:text-oai-gray-300 dark:ring-oai-gray-700"
+          >
+            {badge}
+          </span>
+        ))}
         {hasUpdate ? (
           <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 ring-1 ring-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:ring-sky-800/60">
             <ArrowUpCircle className="h-2.5 w-2.5" aria-hidden />
@@ -243,6 +281,29 @@ function SkillRow({ skill, targets, selected, onSelect, selectable, checked, onT
         <p className={cn("mt-1 line-clamp-2 text-xs text-oai-gray-500 dark:text-oai-gray-400", selectable && "pl-7")}>
           {skill.description}
         </p>
+      ) : null}
+      {skill.sourceName || deviceSources.length ? (
+        <div
+          className={cn(
+            "mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-oai-gray-400 dark:text-oai-gray-500",
+            selectable && "pl-7",
+          )}
+        >
+          {skill.sourceName ? <span className="truncate">{skill.sourceName}</span> : null}
+          {deviceSources.length ? (
+            <span
+              className="inline-flex min-w-0 items-center gap-1"
+              title={deviceSources.map((device) => device.name).join(", ")}
+            >
+              <MonitorSmartphone className="h-3 w-3 shrink-0" aria-hidden />
+              <span className="truncate">
+                {copy("skills.inventory.on_devices", {
+                  devices: deviceSources.map((device) => device.name).join(", "),
+                })}
+              </span>
+            </span>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
@@ -370,6 +431,7 @@ function FilterToolbar({
 // Batch toolbar — appears only when a selection exists. Capability-gated: the
 // bulk-sync popover and remove button act on every selected skill at once.
 function BatchToolbar({ count, targets, busy, onBulkSync, onBulkRemove, onClear }) {
+  const manageableTargets = targets.filter(isManageableTarget);
   return (
     <div
       role="toolbar"
@@ -395,7 +457,7 @@ function BatchToolbar({ count, targets, busy, onBulkSync, onBulkRemove, onClear 
                 <div className="px-2 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wide text-oai-gray-500 dark:text-oai-gray-400">
                   {copy("skills.select.bulk_sync_hint")}
                 </div>
-                {targets.map((target) => (
+                {manageableTargets.map((target) => (
                   <button
                     key={target.id}
                     type="button"
@@ -492,7 +554,7 @@ function MySkillsView({
               targets={targets}
               selected={selectedId === (skill.id || skill.directory)}
               onSelect={onSelect}
-              selectable
+              selectable={!skill.readOnly && !skill.remote}
               checked={selectedIds.has(skill.id)}
               onToggleSelect={onToggleSelect}
               onToggleTarget={onToggleTarget}
@@ -732,6 +794,9 @@ function readTabFromUrl() {
 }
 
 export function SkillsPage() {
+  const auth = useInsforgeAuth() || {};
+  const signedIn = Boolean(auth.signedIn);
+  const getAccessToken = auth.getAccessToken;
   const [tab, setTab] = useState(readTabFromUrl);
   const [installedData, setInstalledData] = useState({ skills: [], targets: [] });
   const [discoverData, setDiscoverData] = useState([]);
@@ -758,6 +823,7 @@ export function SkillsPage() {
   const [popularData, setPopularData] = useState([]);
   const [popularLoading, setPopularLoading] = useState(false);
   const appliedSkillParam = useRef(false);
+  const cloudInventoryRequest = useRef(0);
 
   const installedKeys = useMemo(() => {
     const keys = new Set();
@@ -769,8 +835,32 @@ export function SkillsPage() {
 
   const loadInstalled = useCallback(async () => {
     const data = await getInstalledSkills();
-    setInstalledData({ skills: data.skills || [], targets: data.targets || [] });
-  }, []);
+    const localData = { skills: data.skills || [], targets: data.targets || [] };
+    setInstalledData(localData);
+
+    const deviceId = getCurrentDeviceId();
+    if (!signedIn || !getCloudSyncEnabled() || !deviceId || typeof getAccessToken !== "function") return;
+    const requestId = ++cloudInventoryRequest.current;
+    // Cloud inventory is a best-effort enrichment. Local Skills render
+    // immediately and remain usable if auth/network/backend sync is unavailable.
+    void (async () => {
+      try {
+        const accessToken = await getAccessToken();
+        if (!accessToken) return;
+        const [cloud] = await Promise.all([
+          getAccountSkillInventories(accessToken),
+          publishSkillInventory({ accessToken, deviceId, skills: localData.skills }),
+        ]);
+        if (cloudInventoryRequest.current !== requestId) return;
+        setInstalledData({
+          targets: localData.targets,
+          skills: mergeSkillInventories(localData.skills, cloud, deviceId),
+        });
+      } catch (_e) {
+        // Deliberately silent: a cloud outage must not break local management.
+      }
+    })();
+  }, [getAccessToken, signedIn]);
 
   const loadRepos = useCallback(async () => {
     const data = await getSkillRepos();
@@ -979,6 +1069,7 @@ export function SkillsPage() {
   };
 
   const handleRemove = (skill) => {
+    if (skill?.readOnly || skill?.remote) return;
     setPendingRemove(skill);
   };
 
@@ -1013,8 +1104,9 @@ export function SkillsPage() {
     });
   };
 
-  const handleToggleTarget = (skill, targetId, enabled) =>
-    runMutation(targetBusyKey(skill.id, targetId), async () => {
+  const handleToggleTarget = (skill, targetId, enabled) => {
+    if (skill?.readOnly || skill?.remote) return Promise.resolve();
+    return runMutation(targetBusyKey(skill.id, targetId), async () => {
       const next = new Set(skill.targets || []);
       if (enabled) next.add(targetId);
       else next.delete(targetId);
@@ -1033,10 +1125,12 @@ export function SkillsPage() {
         timeout: 3000,
       });
     });
+  };
 
   const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
 
   const handleToggleSelect = useCallback((skill, checked) => {
+    if (skill?.readOnly || skill?.remote) return;
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (checked) next.add(skill.id);
@@ -1049,7 +1143,9 @@ export function SkillsPage() {
     (installedData.targets || []).find((t) => t.id === targetId)?.label || targetId;
 
   const handleBulkSync = (targetId) => {
-    const list = (installedData.skills || []).filter((s) => selectedIds.has(s.id));
+    const list = (installedData.skills || []).filter(
+      (s) => selectedIds.has(s.id) && !s.readOnly && !s.remote,
+    );
     if (!list.length) return;
     runMutation("batch", async () => {
       for (const skill of list) {
@@ -1069,7 +1165,9 @@ export function SkillsPage() {
   };
 
   const handleBulkRemove = () => {
-    const list = (installedData.skills || []).filter((s) => selectedIds.has(s.id));
+    const list = (installedData.skills || []).filter(
+      (s) => selectedIds.has(s.id) && !s.readOnly && !s.remote,
+    );
     if (list.length) setPendingBulkRemove(list);
   };
 
@@ -1155,6 +1253,7 @@ export function SkillsPage() {
   };
 
   const targets = installedData.targets || [];
+  const manageableTargets = targets.filter(isManageableTarget);
   const mySkills = installedData.skills || [];
 
   const filteredMySkills = useMemo(() => {
@@ -1414,7 +1513,7 @@ export function SkillsPage() {
                 skill={skill}
                 installed={Boolean(skill.installed)}
                 installing={busyKey === installBusyKey(skill)}
-                allTargets={targets}
+                allTargets={manageableTargets}
                 defaultTargets={DEFAULT_TARGETS}
                 onInstall={handleInstall}
                 onManage={handleManage}
