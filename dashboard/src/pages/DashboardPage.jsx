@@ -52,7 +52,7 @@ import { DashboardView } from "../ui/dashboard/views/DashboardView.jsx";
 import { useAccountDevices } from "../hooks/use-account-devices.js";
 import { DeviceUsageCard } from "../ui/dashboard/components/DeviceUsageCard.jsx";
 import { formatDeviceLabel } from "../lib/device-label.js";
-import { getCurrentDeviceId } from "../lib/cloud-sync-prefs";
+import { CLOUD_USAGE_SYNCED_EVENT, getCurrentDeviceId } from "../lib/cloud-sync-prefs";
 import { ShareModal } from "../ui/share/ShareModal";
 import { useShareCardData } from "../ui/share/use-share-card-data";
 
@@ -361,6 +361,16 @@ export function DashboardPage({
   const to = range.to;
 
   const [selectedDevice, setSelectedDevice] = useState(null);
+  const [currentDeviceId, setCurrentDeviceId] = useState(() => getCurrentDeviceId());
+  useEffect(() => {
+    const refreshCurrentDevice = () => setCurrentDeviceId(getCurrentDeviceId());
+    window.addEventListener(CLOUD_USAGE_SYNCED_EVENT, refreshCurrentDevice);
+    window.addEventListener("storage", refreshCurrentDevice);
+    return () => {
+      window.removeEventListener(CLOUD_USAGE_SYNCED_EVENT, refreshCurrentDevice);
+      window.removeEventListener("storage", refreshCurrentDevice);
+    };
+  }, []);
   const { devices: accountDevices, accountSources: accountDeviceSources, refresh: refreshAccountDevices } = useAccountDevices({
     from,
     to,
@@ -373,7 +383,6 @@ export function DashboardPage({
   // Only devices with usage in the selected range are shown anywhere — a
   // zero-usage registration (typically a stale fingerprint-drift duplicate) is
   // noise in both the filter dropdown and the breakdown card.
-  const currentDeviceId = getCurrentDeviceId();
   const activeDevices = useMemo(
     () => accountDevices
       .filter((d) => (Number(d.total_tokens) || 0) > 0)
@@ -404,10 +413,11 @@ export function DashboardPage({
     if (!showDeviceFilter) return [];
     return [
       { value: "", label: copy("dashboard.device_filter.all") },
-      ...activeDevices.map((d) => ({
-        value: d.id,
-        label: `${formatDeviceLabel(d) || copy("dashboard.device_card.unnamed")}${d.isCurrent ? ` (${copy("dashboard.device_card.current")})` : ""}`,
-      })),
+      ...activeDevices.map((d) => {
+        const deviceLabel = formatDeviceLabel(d) || copy("dashboard.device_card.unnamed");
+        const currentSuffix = d.isCurrent ? ` (${copy("dashboard.device_card.current")})` : "";
+        return { value: d.id, label: `${deviceLabel}${currentSuffix}` };
+      }),
     ];
   }, [showDeviceFilter, activeDevices, resolvedLocale]);
 

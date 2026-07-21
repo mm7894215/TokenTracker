@@ -82,6 +82,13 @@ async function sha256Hex(input: string): Promise<string> {
     .join("");
 }
 
+function disambiguateDeviceName(deviceName: string, machineId: string): string {
+  const suffix = ` #${machineId.slice(0, 8)}`;
+  if (deviceName.endsWith(suffix)) return deviceName;
+  const baseName = deviceName.slice(0, 128 - suffix.length).trimEnd() || "Token Tracker";
+  return `${baseName}${suffix}`;
+}
+
 export default async function (req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -284,10 +291,48 @@ export default async function (req: Request): Promise<Response> {
         if (winner && (winner as { id: string }).id) {
           deviceId = (winner as { id: string }).id;
         } else {
-          return json(
-            { error: "Failed to issue device token", detail: insErr?.message || "device resolution failed" },
-            500,
-          );
+          // The active-name unique index also covers machine-anchored rows.
+          // Retry with a stable suffix when another machine owns this hostname.
+          const fallbackDeviceName = disambiguateDeviceName(deviceName, machineId);
+          const fallbackDeviceId = crypto.randomUUID();
+          const { data: fallbackInserted, error: fallbackErr } = await dbClient.database
+            .from("tokentracker_devices")
+            .upsert(
+              [{
+                id: fallbackDeviceId,
+                user_id: userId,
+                device_name: fallbackDeviceName,
+                platform,
+                machine_id: machineId,
+              }],
+              { ignoreDuplicates: true },
+            )
+            .select("id");
+          if (!fallbackErr && Array.isArray(fallbackInserted) && fallbackInserted.length > 0) {
+            deviceId = (fallbackInserted[0] as { id: string }).id;
+          } else {
+            // A concurrent request for this same machine may have won the
+            // fallback insert, so resolve its canonical row before failing.
+            const { data: fallbackWinner } = await dbClient.database
+              .from("tokentracker_devices")
+              .select("id")
+              .eq("user_id", userId)
+              .eq("machine_id", machineId)
+              .is("revoked_at", null)
+              .limit(1)
+              .maybeSingle();
+            if (fallbackWinner && (fallbackWinner as { id: string }).id) {
+              deviceId = (fallbackWinner as { id: string }).id;
+            } else {
+              return json(
+                {
+                  error: "Failed to issue device token",
+                  detail: fallbackErr?.message || insErr?.message || "device resolution failed",
+                },
+                500,
+              );
+            }
+          }
         }
       }
     }
