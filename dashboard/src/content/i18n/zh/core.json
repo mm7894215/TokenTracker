@@ -300,6 +300,7 @@
   "settings.page.subtitle": "管理你的账户、外观和显示偏好。",
   "settings.section.appearance": "外观",
   "settings.section.account": "账户",
+  "settings.section.limits": "限额显示",
   "settings.labs.qpd.label": "PR 研发性价比分析",
   "settings.labs.qpd.hint": "基于已合并 PR 与 AI 归因提交，分析各模型的平均交付成本与有效 Token。",
   "settings.labs.qpd.aria": "切换 PR 性价比分析",

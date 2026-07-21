@@ -28,21 +28,21 @@ export function ToggleSwitch({ checked, onChange, disabled, ariaLabel }) {
 
 export function SettingsRow({ label, hint, control }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-3">
+    <div className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
       <div className="min-w-0 flex-1">
         <div className="text-sm text-oai-gray-900 dark:text-oai-gray-200">{label}</div>
         {hint ? (
           <div className="mt-0.5 text-xs text-oai-gray-500 dark:text-oai-gray-400">{hint}</div>
         ) : null}
       </div>
-      <div className="shrink-0">{control}</div>
+      <div className="self-end sm:shrink-0 sm:self-auto">{control}</div>
     </div>
   );
 }
 
 export function SectionCard({ title, subtitle, action, children }) {
   return (
-    <Card>
+    <Card className="rounded-lg">
       <div className="mb-3 flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <h2 className="text-sm font-medium text-oai-gray-500 dark:text-oai-gray-300 uppercase tracking-wide">
