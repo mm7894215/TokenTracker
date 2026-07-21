@@ -1214,7 +1214,11 @@ function localDataApiPlugin() {
           // build resume commands). Keep it off :7680 so a stale packaged app
           // there does not 404 the Sessions page.
           || url.pathname === "/functions/tokentracker-sessions";
-        if (isRepoPetApi || isRepoProjectUsageApi || isRepoSessionAnalyticsApi) {
+        // Skills inventory evolves with both the dashboard and skills-manager.
+        // Serve the checkout implementation so a stale packaged desktop app (or
+        // Windows DoSvc occupying :7680) cannot hide newly supported tool roots.
+        const isRepoSkillsApi = url.pathname === "/functions/tokentracker-skills";
+        if (isRepoPetApi || isRepoProjectUsageApi || isRepoSessionAnalyticsApi || isRepoSkillsApi) {
           Promise.resolve(handleRepoLocalApi(req, res, url))
             .then((handled) => { if (!handled) next(); })
             .catch(next);

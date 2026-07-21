@@ -1,8 +1,12 @@
 import { getLocalApiAuthHeaders } from "./local-api-auth";
+import { isValidJwtShape } from "./auth-token";
+import { getInsforgeAnonKey, getInsforgeRemoteUrl } from "./insforge-config";
+import { buildSkillInventoryMetadata } from "./skills-inventory";
 
 type AnyRecord = Record<string, any>;
 
 const SLUG = "tokentracker-skills";
+const CLOUD_SLUG = "tokentracker-account-skills";
 
 async function fetchSkillsJson(params?: AnyRecord) {
   const url = new URL(`/functions/${SLUG}`, window.location.origin);
@@ -103,4 +107,57 @@ export function getSkillActivity(limit = 50) {
 
 export function getSkillUsage(options: { force?: boolean } = {}) {
   return fetchSkillsJson({ mode: "skill_usage", ...(options.force ? { force: 1 } : {}) });
+}
+
+async function fetchCloudSkillsJson({
+  accessToken,
+  method = "GET",
+  body,
+}: {
+  accessToken: string;
+  method?: "GET" | "POST";
+  body?: unknown;
+}) {
+  if (!accessToken || !isValidJwtShape(accessToken)) throw new Error("Skills sync requires sign-in");
+  const baseUrl = getInsforgeRemoteUrl();
+  if (!baseUrl) throw new Error("InsForge base URL not configured");
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${accessToken}`,
+  };
+  const anonKey = getInsforgeAnonKey();
+  if (anonKey) headers.apikey = anonKey;
+  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/functions/${CLOUD_SLUG}`, {
+    method,
+    headers,
+    cache: "no-store",
+    ...(body == null ? {} : { body: JSON.stringify(body) }),
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(payload?.error || `Request failed with HTTP ${response.status}`);
+  return payload;
+}
+
+export function getAccountSkillInventories(accessToken: string) {
+  return fetchCloudSkillsJson({ accessToken });
+}
+
+export function publishSkillInventory({
+  accessToken,
+  deviceId,
+  skills,
+}: {
+  accessToken: string;
+  deviceId: string;
+  skills: AnyRecord[];
+}) {
+  return fetchCloudSkillsJson({
+    accessToken,
+    method: "POST",
+    body: {
+      device_id: deviceId,
+      skills: buildSkillInventoryMetadata(skills),
+    },
+  });
 }
