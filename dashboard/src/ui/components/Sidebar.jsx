@@ -27,6 +27,7 @@ import { InsforgeUserHeaderControls } from "../../components/InsforgeUserHeaderC
 import { isNativeApp, isNativeEmbed, isNativeWindowsApp } from "../../lib/native-bridge.js";
 
 const STORAGE_KEY = "tt.sidebarCollapsed";
+const PRODUCT_NAME = "Token Tracker";
 
 export function getNavGroups() {
   // copy() must be called at render time so locale switches apply.
@@ -136,6 +137,7 @@ function NavItem({ item, collapsed, active, onClick }) {
       to={item.to}
       onClick={onClick}
       title={collapsed ? item.label : undefined}
+      aria-label={collapsed ? item.label : undefined}
       aria-current={active ? "page" : undefined}
       className={cn(
         "flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] no-underline transition-colors",
@@ -156,7 +158,7 @@ function NavItem({ item, collapsed, active, onClick }) {
 /**
  * Tertiary icon button — uniform 40×40 (meets WCAG 2.5.5 close enough; AAA prefers 44).
  */
-function IconButton({ as = "button", title, onClick, href, children, className: extraClassName, ...rest }) {
+function IconButton({ as = "button", buttonRef, title, onClick, href, children, className: extraClassName, ...rest }) {
   const className = cn(
     "flex h-10 w-10 items-center justify-center rounded-lg text-oai-gray-600 dark:text-oai-gray-400 hover:bg-oai-gray-200/60 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white transition-colors no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500",
     extraClassName,
@@ -169,7 +171,7 @@ function IconButton({ as = "button", title, onClick, href, children, className: 
     );
   }
   return (
-    <button type="button" title={title} aria-label={title} onClick={onClick} className={className} {...rest}>
+    <button ref={buttonRef} type="button" title={title} aria-label={title} onClick={onClick} className={className} {...rest}>
       {children}
     </button>
   );
@@ -305,10 +307,18 @@ function ThemePill({ theme, resolvedTheme, onSetTheme, glassChrome = false }) {
  * @param {boolean} collapsed - desktop collapsed state (always false in mobile drawer)
  * @param {() => void} onToggleCollapsed - toggle handler (only shown on desktop)
  * @param {() => void} onItemClick - called after a nav item is clicked (used by drawer to close)
- * @param {boolean} showCloseButton - show X close button instead of collapse toggle (mobile)
+ * @param {boolean} showCloseButton - show the drawer close button (mobile)
  * @param {() => void} onClose - close handler for mobile drawer
  */
-function SidebarBody({ collapsed, onToggleCollapsed, onItemClick, showCloseButton = false, onClose, glassChrome = false }) {
+function SidebarBody({
+  collapsed,
+  onToggleCollapsed,
+  onItemClick,
+  showCloseButton = false,
+  onClose,
+  closeButtonRef,
+  glassChrome = false,
+}) {
   const location = useLocation();
   const pathname = location?.pathname || "/";
   const { theme, resolvedTheme, setTheme } = useTheme();
@@ -319,33 +329,37 @@ function SidebarBody({ collapsed, onToggleCollapsed, onItemClick, showCloseButto
 
   return (
     <>
-      {/* Top: identity only — full-width, aligned with nav items (px-2) */}
-      <div className={cn("px-2 pt-2 pb-2", collapsed && "flex justify-center")}>
-        {showCloseButton ? (
-          <div className="flex items-center gap-2">
-            <div className="flex-1 min-w-0">
-              <InsforgeUserHeaderControls
-                variant="sidebar"
-                collapsed={collapsed}
-                onAfterAction={onItemClick}
-              />
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label={copy("nav.close_menu")}
-              title={copy("nav.close_menu")}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-oai-gray-500 dark:text-oai-gray-500 hover:bg-oai-gray-200/60 dark:hover:bg-oai-gray-800 hover:text-oai-gray-900 dark:hover:text-oai-gray-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500"
-            >
-              <X className="h-4 w-4" strokeWidth={1.75} aria-hidden />
-            </button>
-          </div>
-        ) : (
-          <InsforgeUserHeaderControls
-            variant="sidebar"
-            collapsed={collapsed}
-            onAfterAction={onItemClick}
-          />
+      {/* Brand and drawer controls stay separate from account state. This keeps
+          the close target stable even while authentication UI is changing. */}
+      <div className={cn("flex h-14 shrink-0 items-center px-3", collapsed && "justify-center px-2")}>
+        <Link
+          to="/landing"
+          onClick={onItemClick}
+          aria-label={PRODUCT_NAME}
+          title={collapsed ? PRODUCT_NAME : undefined}
+          className={cn(
+            "flex min-w-0 items-center gap-2 rounded-lg no-underline transition-opacity hover:opacity-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500",
+            collapsed && "justify-center",
+          )}
+        >
+          <img src="/app-icon.png" alt="" width={26} height={26} className="h-[26px] w-[26px] shrink-0 rounded-md" />
+          {!collapsed && (
+            <span className="truncate text-sm font-semibold tracking-tight text-oai-black dark:text-white">
+              {PRODUCT_NAME}
+            </span>
+          )}
+        </Link>
+        {showCloseButton && (
+          <button
+            ref={closeButtonRef}
+            type="button"
+            onClick={onClose}
+            aria-label={copy("nav.close_menu")}
+            title={copy("nav.close_menu")}
+            className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-oai-gray-500 transition-colors hover:bg-oai-gray-200/70 hover:text-oai-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:text-oai-gray-400 dark:hover:bg-oai-gray-800 dark:hover:text-white"
+          >
+            <X className="h-5 w-5" strokeWidth={1.75} aria-hidden />
+          </button>
         )}
       </div>
 
@@ -376,33 +390,43 @@ function SidebarBody({ collapsed, onToggleCollapsed, onItemClick, showCloseButto
         ))}
       </nav>
 
-      {/* Bottom: tiny utility row — theme (left) + star & collapse (right), aligned with nav px-2 */}
-      <div
-        className={cn(
-          "flex items-center px-2 py-3",
-          collapsed ? "flex-col justify-center gap-2" : "justify-between gap-2",
-        )}
-      >
-        <ThemePill theme={theme} resolvedTheme={resolvedTheme} onSetTheme={setTheme} glassChrome={glassChrome} />
-        <div className="flex items-center gap-1.5">
-          {!collapsed && <StarPill glassChrome={glassChrome} />}
-          {/* TEMP: collapse button hidden — restore when ready
-          {!showCloseButton && (
-            <button
-              type="button"
-              onClick={onToggleCollapsed}
-              aria-label={collapsed ? copy("nav.expand") : copy("nav.collapse")}
-              title={collapsed ? copy("nav.expand") : copy("nav.collapse")}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-oai-gray-500 dark:text-oai-gray-500 hover:bg-oai-gray-200/60 dark:hover:bg-oai-gray-800 hover:text-oai-gray-900 dark:hover:text-oai-gray-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500"
-            >
-              {collapsed ? (
-                <ChevronRight className="h-4 w-4" strokeWidth={1.75} aria-hidden />
-              ) : (
-                <ChevronLeft className="h-4 w-4" strokeWidth={1.75} aria-hidden />
-              )}
-            </button>
+      {/* Account and utilities remain pinned at the bottom, independently of
+          the scrollable navigation list. */}
+      <div className="shrink-0 border-t border-oai-gray-200/70 px-2 pb-3 pt-2 dark:border-oai-gray-800/70">
+        <div className={cn("mb-2 min-w-0", collapsed && "flex justify-center")}>
+          <InsforgeUserHeaderControls
+            variant="sidebar"
+            collapsed={collapsed}
+            onAfterAction={onItemClick}
+          />
+        </div>
+        <div
+          className={cn(
+            "flex items-center",
+            collapsed ? "flex-col justify-center gap-2" : "justify-between gap-2",
           )}
-          */}
+        >
+          <ThemePill theme={theme} resolvedTheme={resolvedTheme} onSetTheme={setTheme} glassChrome={glassChrome} />
+          <div className={cn("flex items-center gap-1.5", collapsed && "flex-col")}>
+            {!collapsed && <StarPill glassChrome={glassChrome} />}
+            {!showCloseButton && (
+              <button
+                type="button"
+                onClick={onToggleCollapsed}
+                aria-label={collapsed ? copy("nav.expand") : copy("nav.collapse")}
+                title={collapsed ? copy("nav.expand") : copy("nav.collapse")}
+                aria-expanded={!collapsed}
+                aria-controls="app-sidebar"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-oai-gray-500 transition-colors hover:bg-oai-gray-200/70 hover:text-oai-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:text-oai-gray-400 dark:hover:bg-oai-gray-800 dark:hover:text-white"
+              >
+                {collapsed ? (
+                  <ChevronRight className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+                ) : (
+                  <ChevronLeft className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+                )}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </>
@@ -421,11 +445,13 @@ function Sidebar({ collapsed, onToggleCollapsed }) {
 
   return (
     <aside
+      id="app-sidebar"
+      data-sidebar-state={collapsed ? "collapsed" : "expanded"}
       data-native-sidebar
       aria-label={copy("nav.aside_label")}
       className={cn(
-        "hidden lg:flex flex-col shrink-0 h-full min-h-0 transition-[width] duration-200",
-        collapsed ? "w-[72px]" : "w-[220px]",
+        "hidden h-full min-h-0 shrink-0 flex-col transition-[width] duration-200 ease-out lg:flex",
+        collapsed ? "w-[72px]" : "w-[232px]",
       )}
     >
       <SidebarBody collapsed={collapsed} onToggleCollapsed={onToggleCollapsed} glassChrome={nativeGlass} />
@@ -437,6 +463,14 @@ function Sidebar({ collapsed, onToggleCollapsed }) {
  * Mobile drawer — slides in from the left, full-height overlay.
  */
 function MobileDrawer({ open, onClose }) {
+  const closeButtonRef = useRef(null);
+
+  // Move focus into the drawer so keyboard users immediately reach the
+  // prominent close action instead of remaining behind the overlay.
+  useEffect(() => {
+    if (open) closeButtonRef.current?.focus();
+  }, [open]);
+
   // Close on Escape
   useEffect(() => {
     if (!open) return;
@@ -457,22 +491,45 @@ function MobileDrawer({ open, onClose }) {
     };
   }, [open]);
 
+  // A drawer opened at a narrow width must not remain logically open after
+  // the window crosses back to the desktop layout. Without this reset it can
+  // unexpectedly reappear the next time the window is narrowed.
+  useEffect(() => {
+    if (!open || typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const desktopQuery = window.matchMedia("(min-width: 1024px)");
+    const onBreakpointChange = (event) => {
+      if (event.matches) onClose();
+    };
+    if (desktopQuery.matches) {
+      onClose();
+      return;
+    }
+    desktopQuery.addEventListener?.("change", onBreakpointChange);
+    return () => desktopQuery.removeEventListener?.("change", onBreakpointChange);
+  }, [open, onClose]);
+
   if (!open) return null;
   return (
-    <div className="lg:hidden fixed inset-0 z-[80] flex">
-      <div
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+    <div className="fixed inset-0 z-[80] flex lg:hidden">
+      <button
+        type="button"
+        className="absolute inset-0 cursor-default bg-black/40 backdrop-blur-sm"
         onClick={onClose}
-        aria-hidden
+        tabIndex={-1}
+        aria-hidden="true"
       />
       <aside
+        id="mobile-navigation-drawer"
+        role="dialog"
+        aria-modal="true"
         aria-label={copy("nav.aside_label")}
-        className="relative w-[260px] max-w-[80vw] flex flex-col bg-oai-white dark:bg-oai-gray-900 border-r border-oai-gray-200 dark:border-oai-gray-800 shadow-2xl"
+        className="relative z-10 flex h-full w-[280px] max-w-[84vw] flex-col border-r border-oai-gray-200 bg-oai-white shadow-2xl dark:border-oai-gray-800 dark:bg-oai-gray-900"
       >
         <SidebarBody
           collapsed={false}
           showCloseButton
           onClose={onClose}
+          closeButtonRef={closeButtonRef}
           onItemClick={onClose}
         />
       </aside>
@@ -483,20 +540,26 @@ function MobileDrawer({ open, onClose }) {
 /**
  * Mobile top bar — shows hamburger + brand on screens < lg.
  */
-function MobileTopBar({ onOpenDrawer }) {
+function MobileTopBar({ open, onOpenDrawer, menuButtonRef }) {
   return (
     <div className="lg:hidden flex items-center justify-between gap-2 px-3 h-14 border-b border-oai-gray-200 dark:border-oai-gray-800">
-      <IconButton title={copy("nav.menu")} onClick={onOpenDrawer}>
+      <IconButton
+        buttonRef={menuButtonRef}
+        title={copy("nav.menu")}
+        onClick={onOpenDrawer}
+        aria-expanded={open}
+        aria-controls="mobile-navigation-drawer"
+      >
         <Menu className="h-5 w-5" aria-hidden />
       </IconButton>
       <Link
         to="/landing"
         className="flex items-center gap-2 no-underline hover:opacity-80 transition-opacity"
-        aria-label="Token Tracker"
+        aria-label={PRODUCT_NAME}
       >
         <img src="/app-icon.png" alt="" width={24} height={24} className="rounded-md" />
         <span className="text-sm font-semibold text-oai-black dark:text-oai-white">
-          Token Tracker
+          {PRODUCT_NAME}
         </span>
       </Link>
       <div className="w-10 shrink-0" aria-hidden />
@@ -514,8 +577,16 @@ function MobileTopBar({ onOpenDrawer }) {
 export function AppLayout({ children }) {
   const { collapsed, toggle } = useSidebarCollapsed();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const menuButtonRef = useRef(null);
   const openDrawer = useCallback(() => setDrawerOpen(true), []);
-  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
+  const closeDrawer = useCallback(() => {
+    setDrawerOpen(false);
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame?.(() => {
+        if (menuButtonRef.current?.offsetParent !== null) menuButtonRef.current?.focus();
+      });
+    }
+  }, []);
 
   /** macOS WKWebView：底层由 NSVisualEffectView 提供模糊，Web 根布局透明，侧栏浮在背景上；浏览器仍用灰色底。 */
   const nativeEmbed = useMemo(() => {
@@ -551,7 +622,7 @@ export function AppLayout({ children }) {
               !nativeEmbed && "shadow-sm",
             )}
           >
-            <MobileTopBar onOpenDrawer={openDrawer} />
+            <MobileTopBar open={drawerOpen} onOpenDrawer={openDrawer} menuButtonRef={menuButtonRef} />
             <div className="flex-1 min-h-0 overflow-y-auto">
               {children}
             </div>
