@@ -177,15 +177,24 @@ test("local-api treats lightweight true as background alias", async () => {
   ]);
 });
 
-test("local-api drain has priority over auto background", async () => {
+test("local-api combines background scan with drain upload", async () => {
   const call = await runLocalSync({
     drain: true,
     auto: true,
     background: true,
-    lightweight: true,
+    allLocalSources: true,
+    publishAccount: true,
   });
   const args = call.args;
-  assert.deepEqual(args.slice(-3), [path.join(process.cwd(), "bin/tracker.js"), "sync", "--drain"]);
+  assert.deepEqual(args.slice(-7), [
+    path.join(process.cwd(), "bin/tracker.js"),
+    "sync",
+    "--auto",
+    "--background",
+    "--publish-account",
+    "--all-local-sources",
+    "--drain",
+  ]);
 });
 
 test("local-api background and lightweight require boolean true", async () => {

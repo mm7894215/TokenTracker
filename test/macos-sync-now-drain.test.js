@@ -9,7 +9,7 @@ function read(relPath) {
   return fs.readFileSync(path.join(repoRoot, relPath), "utf8");
 }
 
-test("macOS manual Sync now requests drain while launch sync stays lightweight", () => {
+test("macOS Sync Now combines a lightweight scan with cloud drain", () => {
   const apiClient = read("TokenTrackerBar/TokenTrackerBar/Services/APIClient.swift");
   const viewModel = read("TokenTrackerBar/TokenTrackerBar/ViewModels/DashboardViewModel.swift");
   const refreshPolicy = read("TokenTrackerBar/TokenTrackerBar/Models/BackgroundRefreshPolicy.swift");
@@ -21,8 +21,8 @@ test("macOS manual Sync now requests drain while launch sync stays lightweight",
   );
   assert.match(
     apiClient,
-    /if drain \{[\s\S]*Data\(#"\{"drain":true\}"#\.utf8\)[\s\S]*\} else if auto \{[\s\S]*Data\([\s\S]*#"\{"auto":true,"background":true,"allLocalSources":true,"publishAccount":true\}"#\.utf8/,
-    "APIClient should send drain=true for manual sync and publish all local sources for background sync",
+    /if drain \{[\s\S]*"auto":true,"background":true,"allLocalSources":true,"publishAccount":true,"drain":true[\s\S]*\} else if auto \{[\s\S]*"auto":true,"background":true,"allLocalSources":true,"publishAccount":true/,
+    "Sync Now should keep the bounded all-source scan while draining cloud uploads",
   );
   assert.match(
     viewModel,
@@ -31,8 +31,18 @@ test("macOS manual Sync now requests drain while launch sync stays lightweight",
   );
   assert.match(
     viewModel,
-    /func triggerSync\(\)[\s\S]*APIClient\.shared\.triggerSync\(drain: true\)/,
+    /private func performManualSync\(\)[\s\S]*APIClient\.shared\.triggerSync\(drain: true\)/,
     "manual Sync now should request drain",
+  );
+  assert.match(
+    viewModel,
+    /case \.queueAfterSilentSync:[\s\S]*pendingManualSync = true[\s\S]*isSyncing = true/,
+    "a tap during silent popover sync should stay visible and queue one manual refresh",
+  );
+  assert.match(
+    viewModel,
+    /if pendingManualSync \{[\s\S]*pendingManualSync = false[\s\S]*await performManualSync\(\)/,
+    "the queued manual refresh should run after the silent sync releases ownership",
   );
   assert.match(
     refreshPolicy,

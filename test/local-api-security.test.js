@@ -203,7 +203,7 @@ test("local sync preserves the SYNC_BUSY failure code", async () => {
     const req = createRequest({
       method: "POST",
       headers: { "x-tokentracker-local-auth": localAuthToken },
-      body: JSON.stringify({ drain: true }),
+      body: JSON.stringify({ drain: true, deviceToken: "device-token" }),
     });
     const res = createResponse();
 
@@ -414,7 +414,7 @@ test("local sync lightweight alias forwards background mode", async () => {
   }
 });
 
-test("local sync drain priority suppresses auto background mode", async () => {
+test("local sync combines background scan with drain priority", async () => {
   const calls = [];
   const { mod, restore } = loadLocalApiWithSpawn(createSuccessfulSpawn(calls));
 
@@ -443,9 +443,11 @@ test("local sync drain priority suppresses auto background mode", async () => {
     assert.equal(handled, true);
     assert.equal(res.statusCode, 200);
     assert.equal(calls.length, 1);
-    assert.deepEqual(calls[0].args.slice(-3), [
+    assert.deepEqual(calls[0].args.slice(-5), [
       path.join(process.cwd(), "bin/tracker.js"),
       "sync",
+      "--auto",
+      "--background",
       "--drain",
     ]);
   } finally {
