@@ -1,5 +1,7 @@
 {
   "rewrites": [
+    { "source": "/ip-check", "destination": "/ip-check.html" },
+    { "source": "/leaderboard", "destination": "/leaderboard.html" },
     { "source": "/share/(.*)", "destination": "/share.html" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]

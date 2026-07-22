@@ -55,8 +55,8 @@ landing.nav.signup,landing,LandingPage,LandingPage,nav_signup,"SIGN UP",,active
 landing.install.command,landing,LandingPage,LandingPage,install_command,"npx --yes tokentracker-cli",,active
 landing.install.action.copy,landing,LandingPage,LandingPage,install_copy,"COPY COMMAND",,active
 landing.install.action.copied,landing,LandingPage,LandingPage,install_copied,"COPIED",,active
-landing.meta.title,landing,LandingPage,Meta,title,"Token Tracker — Token Usage Tracker for AI Agent CLIs",,active
-landing.meta.description,landing,LandingPage,Meta,description,"Automatically monitor token usage across Claude Code, Cursor, Codex, and more. Local-first, privacy-focused, and zero manual configuration.",,active
+landing.meta.title,landing,LandingPage,Meta,title,"Token Tracker — AI Token Usage & Cost Tracker for Coding CLIs",,active
+landing.meta.description,landing,LandingPage,Meta,description,"Free, open-source, local-first tracker that monitors AI token usage and cost across Claude Code, Codex, Cursor, Gemini and 27 CLIs. One-command install, privacy-first.",,active
 landing.meta.og_site_name,landing,LandingPage,Meta,og_site_name,"Token Tracker",,active
 landing.meta.og_type,landing,LandingPage,Meta,og_type,"website",,active
 landing.meta.og_image,landing,LandingPage,Meta,og_image,"https://www.tokentracker.cc/dashboard-dark.png",,active

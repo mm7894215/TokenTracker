@@ -200,6 +200,205 @@ function richLinkMetaPlugin() {
   };
 }
 
+// Per-route static SEO/AEO pages. The dashboard is a single-page app that serves
+// one index.html for every route, with a canonical hardcoded to the homepage.
+// Google therefore collapses /ip-check and /leaderboard into "/" ("Page with
+// redirect" / "Alternate page with canonical"), so those routes never rank on
+// their own. To fix indexability WITHOUT adding rollup inputs (which reshuffle
+// shared chunks and have historically broken the native OAuth callback — see
+// CLAUDE.md), we clone the built dist/index.html in closeBundle and rewrite the
+// canonical, social meta, <title>, description, JSON-LD, and the crawlable
+// aeo-seed-content block per route. Vercel rewrites map the clean URLs to these
+// files (see vercel.json). Runtime JS still boots the SPA and renders the real
+// route, so users see the interactive page while crawlers get a self-canonical,
+// route-specific document.
+const ROUTE_SEO_PAGES = [
+  {
+    file: "ip-check.html",
+    url: "https://www.tokentracker.cc/ip-check",
+    title: "Claude IP Check — Exit IP Reputation, Geo & Risk Score",
+    description:
+      "Free Claude IP check: see the exit IP used to reach Claude Code plus reputation, geo and cleanliness/risk (纯净度/风险) signals that can trigger sign-in blocks or rate limits.",
+    jsonld: {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Organization",
+          "@id": "https://www.tokentracker.cc/#organization",
+          name: "Token Tracker",
+          url: "https://www.tokentracker.cc/",
+        },
+        {
+          "@type": "WebPage",
+          "@id": "https://www.tokentracker.cc/ip-check#webpage",
+          url: "https://www.tokentracker.cc/ip-check",
+          name: "Claude IP Check — Exit IP Reputation, Geo & Risk Score",
+          isPartOf: { "@id": "https://www.tokentracker.cc/#website" },
+          description:
+            "Check the exit IP used to reach Claude Code, with reputation, geolocation and cleanliness/risk (纯净度/风险) signals.",
+        },
+        {
+          "@type": "BreadcrumbList",
+          itemListElement: [
+            { "@type": "ListItem", position: 1, name: "Home", item: "https://www.tokentracker.cc/" },
+            { "@type": "ListItem", position: 2, name: "Claude IP Check", item: "https://www.tokentracker.cc/ip-check" },
+          ],
+        },
+        {
+          "@type": "FAQPage",
+          mainEntity: [
+            {
+              "@type": "Question",
+              name: "What is a Claude IP check?",
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: "A Claude IP check shows the public exit IP that your network uses to reach Claude Code and Claude.ai, along with its reputation, geolocation and cleanliness/risk score, so you can tell whether the IP is likely to trigger sign-in blocks, verification, or rate limits.",
+              },
+            },
+            {
+              "@type": "Question",
+              name: "Why does my Claude exit IP reputation matter?",
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: "Anthropic and its anti-abuse providers score the reputation of the exit IP. Shared, datacenter, VPN, or previously abused IPs (low 纯净度 / high 风险) are more likely to face extra verification, throttling, or blocked logins, even on a paid plan.",
+              },
+            },
+            {
+              "@type": "Question",
+              name: "How do I check the exit IP used for Claude Code?",
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: "Open the Token Tracker IP check page. It detects your current public exit IP and shows its geolocation, network type, and reputation/risk signals so you can decide whether to switch networks before using Claude Code.",
+              },
+            },
+          ],
+        },
+      ],
+    },
+    seed: `<main class="aeo-seed-content" aria-label="Claude IP Check AI-readable summary">
+      <h1>Claude IP Check: exit IP reputation, geolocation and cleanliness/risk score</h1>
+      <p>
+        This free Claude IP check detects the public exit IP your network uses to reach Claude Code and
+        Claude.ai, then reports its reputation, geolocation, network type, and a cleanliness/risk score.
+        A low-reputation, datacenter, VPN, or previously abused exit IP is more likely to trigger extra
+        sign-in verification, rate limiting, or blocked logins — even on a paid Claude plan.
+      </p>
+      <h2>Claude IP 纯净度与风险检测</h2>
+      <p>
+        本页用于检测你访问 Claude Code / Claude.ai 时使用的出口 IP：展示该 IP 的归属地、网络类型、
+        信誉度与"纯净度 / 风险"评分。共享 IP、机房 IP、VPN 或历史被滥用的 IP 通常纯净度低、风险高，
+        更容易触发 Claude 的登录验证、限速甚至封禁。检测后可据此决定是否更换网络再使用 Claude Code。
+      </p>
+      <h2>What this Claude IP check reports</h2>
+      <ul>
+        <li>Your current public exit IP address (the IP Anthropic actually sees).</li>
+        <li>Geolocation and network type (residential, datacenter, mobile, VPN/proxy).</li>
+        <li>IP reputation and a cleanliness/risk score (纯净度 / 风险).</li>
+        <li>Whether the IP is likely to trigger Claude sign-in verification or rate limits.</li>
+      </ul>
+      <h2>Part of Token Tracker</h2>
+      <p>
+        Token Tracker is a free, open-source, local-first dashboard that monitors AI token usage and cost
+        across 27 AI coding tools including Claude Code. Install with <code>npx tokentracker-cli</code>.
+      </p>
+    </main>`,
+  },
+  {
+    file: "leaderboard.html",
+    url: "https://www.tokentracker.cc/leaderboard",
+    title: "AI Coding Token Usage Leaderboard — Claude, Codex, Cursor",
+    description:
+      "Public Token Tracker leaderboard ranking AI coding token usage across Claude Code, Codex, Cursor, Gemini and 27 tools. Opt-in, privacy-first — token counts only, never prompts.",
+    jsonld: {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Organization",
+          "@id": "https://www.tokentracker.cc/#organization",
+          name: "Token Tracker",
+          url: "https://www.tokentracker.cc/",
+        },
+        {
+          "@type": "WebPage",
+          "@id": "https://www.tokentracker.cc/leaderboard#webpage",
+          url: "https://www.tokentracker.cc/leaderboard",
+          name: "AI Coding Token Usage Leaderboard",
+          isPartOf: { "@id": "https://www.tokentracker.cc/#website" },
+          description:
+            "Public leaderboard ranking opt-in AI coding token usage across Claude Code, Codex, Cursor, Gemini and 27 tools.",
+        },
+        {
+          "@type": "BreadcrumbList",
+          itemListElement: [
+            { "@type": "ListItem", position: 1, name: "Home", item: "https://www.tokentracker.cc/" },
+            { "@type": "ListItem", position: 2, name: "Leaderboard", item: "https://www.tokentracker.cc/leaderboard" },
+          ],
+        },
+      ],
+    },
+    seed: `<main class="aeo-seed-content" aria-label="AI Coding Token Usage Leaderboard AI-readable summary">
+      <h1>AI coding token usage leaderboard</h1>
+      <p>
+        The Token Tracker leaderboard ranks opt-in AI coding token usage across Claude Code, OpenAI Codex,
+        Cursor, Gemini CLI and 27 supported tools. It is privacy-first: entries are opt-in and expose token
+        counts only — never prompts or conversation content. See how your AI coding token consumption
+        compares with other developers by model, tool, and time window.
+      </p>
+      <h2>How the leaderboard works</h2>
+      <ul>
+        <li>Opt-in only — you choose whether to appear, using a public display name.</li>
+        <li>Token counts only — never prompts, code, or conversation content.</li>
+        <li>Ranks usage across Claude Code, Codex, Cursor, Gemini and 27 AI coding tools.</li>
+        <li>Powered by optional Token Tracker cloud sync; local-first by default.</li>
+      </ul>
+      <h2>Part of Token Tracker</h2>
+      <p>
+        Token Tracker is a free, open-source, local-first dashboard that monitors AI token usage and cost
+        across 27 AI coding tools. Install with <code>npx tokentracker-cli</code>.
+      </p>
+    </main>`,
+  },
+];
+
+function routeSeoPagesPlugin() {
+  return {
+    name: "tokentracker-route-seo-pages",
+    apply: "build",
+    closeBundle() {
+      const distDir = path.resolve(ROOT_DIR, "dist");
+      const indexPath = path.join(distDir, "index.html");
+      let base;
+      try {
+        base = fs.readFileSync(indexPath, "utf8");
+      } catch (error) {
+        console.warn("[tokentracker] route SEO: dist/index.html not found, skipping.", error.message);
+        return;
+      }
+      for (const route of ROUTE_SEO_PAGES) {
+        let html = base;
+        const title = escapeHtml(route.title);
+        const description = escapeHtml(route.description);
+        html = html
+          .replace(/(<link rel="canonical" href=")[^"]*(")/, `$1${route.url}$2`)
+          .replace(/(<meta property="og:url" content=")[^"]*(")/, `$1${route.url}$2`)
+          .replace(/<title>[^<]*<\/title>/, `<title>${title}</title>`)
+          .replace(/(<meta property="og:title" content=")[^"]*(")/, `$1${title}$2`)
+          .replace(/(<meta name="twitter:title" content=")[^"]*(")/, `$1${title}$2`)
+          .replace(/(<meta name="description" content=")[^"]*(")/, `$1${description}$2`)
+          .replace(/(<meta property="og:description" content=")[^"]*(")/, `$1${description}$2`)
+          .replace(/(<meta name="twitter:description" content=")[^"]*(")/, `$1${description}$2`)
+          .replace(/<main class="aeo-seed-content"[\s\S]*?<\/main>/, () => route.seed);
+        if (route.jsonld) {
+          const ldMarkup = `<script type="application/ld+json">\n${JSON.stringify(route.jsonld, null, 2)}\n    </script>`;
+          html = html.replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>/, () => ldMarkup);
+        }
+        fs.writeFileSync(path.join(distDir, route.file), html, "utf8");
+        console.log(`[tokentracker] route SEO page emitted: dist/${route.file}`);
+      }
+    },
+  };
+}
+
 // 本地数据 API 插件 - 直接读取 ~/.tokentracker/tracker/queue.jsonl
 // 本地 API 处理函数
 function trimCommandOutput(value, maxLength = 4000) {
@@ -1052,7 +1251,7 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    plugins: [react(), richLinkMetaPlugin(), localDataApiPlugin()],
+    plugins: [react(), richLinkMetaPlugin(), routeSeoPagesPlugin(), localDataApiPlugin()],
     ...(Object.keys(define).length ? { define } : {}),
     build: {
       rollupOptions: {
