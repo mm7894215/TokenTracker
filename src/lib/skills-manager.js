@@ -376,18 +376,6 @@ function inventorySkillFromMarker({
   }
 }
 
-function scanDirectInventoryRoot({ root, targetId, scope }) {
-  const found = [];
-  for (const directory of scanSkillDirectories(root, { maxDepth: 5 })) {
-    const marker = findSkillMarker(path.join(root, directory));
-    if (!marker) continue;
-    const id = `inventory:${targetId}:${scope}:${directory}`;
-    const skill = inventorySkillFromMarker({ marker, directory, id, targetId, scope });
-    if (skill) found.push(skill);
-  }
-  return found;
-}
-
 // Plugin caches use <publisher>/<plugin>/<version>/skills/<skill>/SKILL.md.
 // Walk only far enough to find a directory literally named "skills", then use
 // the bounded skill scanner below it. We never traverse node_modules, hidden
@@ -440,32 +428,21 @@ function scanPluginInventoryRoot({ root, targetId }) {
 function listInventorySkills() {
   const sources = [
     {
-      kind: "direct",
-      root: path.join(resolveCodexHome(), "skills", ".system"),
-      targetId: "codex",
-      scope: "system",
-    },
-    {
-      kind: "plugin",
       root: path.join(resolveCodexHome(), "plugins", "cache"),
       targetId: "codex",
     },
     {
-      kind: "plugin",
       root: path.join(os.homedir(), ".claude", "plugins", "cache"),
       targetId: "claude",
     },
     {
-      kind: "plugin",
       root: path.join(resolveZcodeHome(), "cli", "plugins", "cache"),
       targetId: "zcode",
     },
   ];
   const byId = new Map();
   for (const source of sources) {
-    const skills = source.kind === "plugin"
-      ? scanPluginInventoryRoot(source)
-      : scanDirectInventoryRoot(source);
+    const skills = scanPluginInventoryRoot(source);
     // Later (normally newer, lexically sorted cache version) copies replace an
     // older version with the same stable plugin+skill identity.
     for (const skill of skills) byId.set(skill.id.toLowerCase(), skill);

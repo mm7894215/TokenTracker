@@ -14,7 +14,7 @@ export interface SkillInventoryMetadata {
   targets: string[];
   managed: boolean;
   readOnly: boolean;
-  scope: "managed" | "local" | "system" | "plugin";
+  scope: "managed" | "local" | "plugin";
   sourceName?: string;
 }
 
@@ -48,12 +48,13 @@ export function skillInventoryKey(skill: AnyRecord): string {
 // paths can cross the device boundary through this projection.
 export function buildSkillInventoryMetadata(skills: AnyRecord[]): SkillInventoryMetadata[] {
   return (Array.isArray(skills) ? skills : [])
+    .filter((skill) => skill?.scope !== "system")
     .map((skill): SkillInventoryMetadata | null => {
       const directory = cleanRelativePath(skill?.directory);
       const key = cleanStableKey(skillInventoryKey(skill));
       if (!key || !directory) return null;
-      const scope = skill?.scope === "system" || skill?.scope === "plugin"
-        ? skill.scope
+      const scope = skill?.scope === "plugin"
+        ? "plugin"
         : skill?.managed
           ? "managed"
           : "local";
@@ -101,7 +102,9 @@ export function mergeSkillInventories(
   cloudPayload: AnyRecord,
   currentDeviceId: string,
 ): AnyRecord[] {
-  const merged = (Array.isArray(localSkills) ? localSkills : []).map((skill) => ({ ...skill }));
+  const merged = (Array.isArray(localSkills) ? localSkills : [])
+    .filter((skill) => skill?.scope !== "system")
+    .map((skill) => ({ ...skill }));
   const byKey = new Map<string, number>();
   merged.forEach((skill, index) => byKey.set(skillInventoryKey(skill).toLowerCase(), index));
 
@@ -109,6 +112,7 @@ export function mergeSkillInventories(
     const source = deviceSource(device);
     if (!source.id || source.id === currentDeviceId) continue;
     for (const remote of Array.isArray(device?.skills) ? device.skills : []) {
+      if (remote?.scope === "system") continue;
       const key = skillInventoryKey(remote);
       const directory = cleanString(remote?.directory);
       if (!key || !directory) continue;
@@ -116,8 +120,7 @@ export function mergeSkillInventories(
       const existingIndex = byKey.get(normalizedKey);
       if (existingIndex != null) {
         const existing = merged[existingIndex];
-        const targets = [...new Set([...(existing.targets || []), ...(remote.targets || [])])];
-        merged[existingIndex] = addDeviceSource({ ...existing, targets }, source);
+        merged[existingIndex] = addDeviceSource(existing, source);
         continue;
       }
 

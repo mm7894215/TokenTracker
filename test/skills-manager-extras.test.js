@@ -65,8 +65,8 @@ describe("listInstalledSkills lowercase skill.md regression", () => {
   });
 });
 
-describe("read-only system and plugin skill inventory", () => {
-  it("includes Codex system skills that live below the hidden .system directory", () => {
+describe("read-only plugin skill inventory", () => {
+  it("excludes Codex built-in skills from the inventory", () => {
     resetRegistry();
     writeSkillDir(
       path.join(sandboxHome, ".codex", "skills", ".system", "skill-creator"),
@@ -74,13 +74,8 @@ describe("read-only system and plugin skill inventory", () => {
       "---\nname: Skill Creator\ndescription: Built in\n---\n",
     );
 
-    const entry = skills.listInstalledSkills().find((s) => s.id === "inventory:codex:system:skill-creator");
-    assert.ok(entry, "Codex .system skill should be counted");
-    assert.equal(entry.readOnly, true);
-    assert.equal(entry.inventoryOnly, true);
-    assert.equal(entry.scope, "system");
-    assert.deepEqual(entry.targets, ["codex"]);
-    assert.equal(entry.targetStates.codex, "synced");
+    const entry = skills.listInstalledSkills().find((s) => s.name === "Skill Creator");
+    assert.equal(entry, undefined, "built-in skills should not clutter the user inventory");
   });
 
   it("counts Codex, Claude, and ZCode plugin-cache skills without exposing them as manageable", () => {

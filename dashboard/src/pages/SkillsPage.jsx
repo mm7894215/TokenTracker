@@ -113,6 +113,10 @@ function targetBusyKey(skillId, targetId) {
   return `target:${skillId}:${targetId}`;
 }
 
+function skillIdentity(skill) {
+  return skill.id || skill.directory;
+}
+
 function isManageableTarget(target) {
   return target.manageable !== false;
 }
@@ -185,7 +189,7 @@ function AgentDots({ skill, targets, onToggleTarget, busyKey }) {
           key={target.id}
           target={target}
           state={skill.targetStates?.[target.id] || "off"}
-          busy={busyKey === targetBusyKey(skill.id, target.id)}
+          busy={busyKey === targetBusyKey(skillIdentity(skill), target.id)}
           disabled={readOnly || target.manageable === false}
           disabledLabel={copy(
             skill.remote ? "skills.inventory.read_only_remote" : "skills.inventory.read_only_managed",
@@ -204,7 +208,6 @@ function SkillRow({ skill, targets, selected, onSelect, selectable, checked, onT
   const deviceSources = Array.isArray(skill.deviceSources) ? skill.deviceSources : [];
   const inventoryBadges = [
     skill.remote ? copy("skills.inventory.remote") : null,
-    skill.scope === "system" ? copy("skills.inventory.system") : null,
     skill.scope === "plugin" ? copy("skills.inventory.plugin") : null,
   ].filter(Boolean);
 
@@ -549,13 +552,13 @@ function MySkillsView({
         <div className="divide-y divide-oai-gray-200/70 dark:divide-oai-gray-800/70">
           {items.map((skill) => (
             <SkillRow
-              key={skill.id || skill.key}
+              key={skillIdentity(skill)}
               skill={skill}
               targets={targets}
               selected={selectedId === (skill.id || skill.directory)}
               onSelect={onSelect}
               selectable={!skill.readOnly && !skill.remote}
-              checked={selectedIds.has(skill.id)}
+              checked={selectedIds.has(skillIdentity(skill))}
               onToggleSelect={onToggleSelect}
               onToggleTarget={onToggleTarget}
               hasUpdate={Boolean(skill.id && updates?.[skill.id])}
@@ -834,19 +837,20 @@ export function SkillsPage() {
   }, [installedData.skills]);
 
   const loadInstalled = useCallback(async () => {
+    const requestId = ++cloudInventoryRequest.current;
     const data = await getInstalledSkills();
+    if (cloudInventoryRequest.current !== requestId) return;
     const localData = { skills: data.skills || [], targets: data.targets || [] };
     setInstalledData(localData);
 
     const deviceId = getCurrentDeviceId();
     if (!signedIn || !getCloudSyncEnabled() || !deviceId || typeof getAccessToken !== "function") return;
-    const requestId = ++cloudInventoryRequest.current;
     // Cloud inventory is a best-effort enrichment. Local Skills render
     // immediately and remain usable if auth/network/backend sync is unavailable.
     void (async () => {
       try {
         const accessToken = await getAccessToken();
-        if (!accessToken) return;
+        if (!accessToken || cloudInventoryRequest.current !== requestId) return;
         const [cloud] = await Promise.all([
           getAccountSkillInventories(accessToken),
           publishSkillInventory({ accessToken, deviceId, skills: localData.skills }),
@@ -1106,7 +1110,7 @@ export function SkillsPage() {
 
   const handleToggleTarget = (skill, targetId, enabled) => {
     if (skill?.readOnly || skill?.remote) return Promise.resolve();
-    return runMutation(targetBusyKey(skill.id, targetId), async () => {
+    return runMutation(targetBusyKey(skillIdentity(skill), targetId), async () => {
       const next = new Set(skill.targets || []);
       if (enabled) next.add(targetId);
       else next.delete(targetId);
@@ -1131,10 +1135,11 @@ export function SkillsPage() {
 
   const handleToggleSelect = useCallback((skill, checked) => {
     if (skill?.readOnly || skill?.remote) return;
+    const id = skillIdentity(skill);
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (checked) next.add(skill.id);
-      else next.delete(skill.id);
+      if (checked) next.add(id);
+      else next.delete(id);
       return next;
     });
   }, []);
@@ -1144,7 +1149,7 @@ export function SkillsPage() {
 
   const handleBulkSync = (targetId) => {
     const list = (installedData.skills || []).filter(
-      (s) => selectedIds.has(s.id) && !s.readOnly && !s.remote,
+      (s) => selectedIds.has(skillIdentity(s)) && !s.readOnly && !s.remote,
     );
     if (!list.length) return;
     runMutation("batch", async () => {
@@ -1166,7 +1171,7 @@ export function SkillsPage() {
 
   const handleBulkRemove = () => {
     const list = (installedData.skills || []).filter(
-      (s) => selectedIds.has(s.id) && !s.readOnly && !s.remote,
+      (s) => selectedIds.has(skillIdentity(s)) && !s.readOnly && !s.remote,
     );
     if (list.length) setPendingBulkRemove(list);
   };

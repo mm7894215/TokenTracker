@@ -26,7 +26,7 @@ const ALLOWED_TARGETS = new Set([
   "zcode",
   "agents",
 ]);
-const ALLOWED_SCOPES = new Set(["managed", "local", "system", "plugin"]);
+const ALLOWED_SCOPES = new Set(["managed", "local", "plugin"]);
 const MAX_SKILLS = 2000;
 const MAX_BODY_BYTES = 1_000_000;
 
@@ -127,6 +127,7 @@ function sanitizeSkill(input: SkillInput): StoredSkill | null {
     ? [...new Set(input.targets.map((target) => cleanText(target, 40)).filter((target) => ALLOWED_TARGETS.has(target)))].slice(0, 16)
     : [];
   const scopeInput = cleanText(input?.scope, 24);
+  if (scopeInput === "system") return null;
   const scope = ALLOWED_SCOPES.has(scopeInput)
     ? scopeInput
     : input?.managed === true
@@ -238,7 +239,9 @@ export default async function (req: Request): Promise<Response> {
       const inventory = inventories.get(device.id);
       return {
         ...device,
-        skills: Array.isArray(inventory?.skills) ? inventory.skills : [],
+        skills: Array.isArray(inventory?.skills)
+          ? inventory.skills.filter((skill) => skill?.scope !== "system")
+          : [],
         scanned_at: inventory?.scanned_at || null,
       };
     })
