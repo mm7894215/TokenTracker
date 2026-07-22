@@ -39,14 +39,85 @@ const SOURCE_IDENTICAL_KEY_ALLOWLIST = [
   /^pet[.]character[.](?:clawd|sprout|byte|ember)$/,
 ];
 
-// Generic product vocabulary should not leak through inside an otherwise
-// Chinese sentence. Technical identifiers and brands (CLI, API, GitHub,
-// model names, and skills.sh) are intentionally excluded from this list.
-const UNLOCALIZED_UI_TERM_REGEX = /\b(?:skills?|agents?|providers?|dashboard|prompt|hook|core|app)\b/i;
-const MIXED_TERM_KEY_ALLOWLIST = [
-  /^skills[.]mode[.]skillssh$/,
-  /^skills[.]browse[.](?:placeholder_skillssh|hint_skillssh)$/,
+// Developer-facing product terms stay in English in Chinese UI copy. Scope
+// each rule by copy key so ordinary Chinese words outside that product
+// concept remain valid.
+const PRODUCT_TERMINOLOGY_GLOSSARY = [
+  {
+    term: "Skill",
+    translatedTerm: /技能/u,
+    sourceIdentical: /^Skills?$/i,
+    keyPatterns: [
+      /^nav[.]skills$/,
+      /^skills[.]/,
+      /^sessions[.]card[.]context_tooltip$/,
+      /^dashboard[.]context_breakdown[.](?:system_prefix_tooltip|category[.]skills)$/,
+      /^cmdk[.](?:placeholder|group[.]skills)$/,
+    ],
+  },
+  {
+    term: "Agent",
+    translatedTerm: /智能体|智慧代理/u,
+    sourceIdentical: /^(?:Agent|Agents|Sub-agent)$/i,
+    keyPatterns: [
+      /^skills[.]/,
+      /^sessions[.]card[.]subagents$/,
+      /^dashboard[.]context_breakdown[.]category[.]custom_agents$/,
+      /^landing[.]v3[.](?:tools[.]count|how[.]step1[.]title|how[.]step4[.]body|cap[.]title)$/,
+    ],
+  },
+  {
+    term: "Provider",
+    translatedTerm: /服务商|服務商/u,
+    sourceIdentical: /^Providers?$/i,
+    keyPatterns: [
+      /(?:^|[.])providers?(?:[.]|$)/,
+      /^dashboard[.]device_card[.]account_scope_tip$/,
+      /^landing[.]v3[.]cap[.]limits[.]body$/,
+    ],
+  },
+  {
+    term: "Prompt",
+    translatedTerm: /提示词|提示詞/u,
+    sourceIdentical: /^Prompt$/i,
+    keyPatterns: [
+      /(?:^|[._])prompt(?:[._]|$)/,
+      /^sessions[.]card[.]privacy$/,
+      /^usage[.]overview[.]antigravity_notice_body$/,
+      /^dashboard[.]context_breakdown[.]system_prefix_tooltip$/,
+      /^landing[.]v2[.]distill[.]body$/,
+      /^landing[.]v3[.]privacy[.](?:title|p2)$/,
+    ],
+  },
+  {
+    term: "Hook",
+    translatedTerm: /钩子|鉤子/u,
+    sourceIdentical: /^Hook$/i,
+    keyPatterns: [/^landing[.]v3[.]how[.]step2[.]title$/],
+  },
+  {
+    term: "Core",
+    translatedTerm: /核心/u,
+    sourceIdentical: /^Core$/i,
+    keyPatterns: [/^settings[.]menubar[.]updates[.]footer(?:Core|Combined)$/],
+  },
+  {
+    term: "App",
+    translatedTerm: /应用(?:程序)?|應用(?:程式)?/u,
+    sourceIdentical: /^(?:App|Mac app)$/i,
+    keyPatterns: [
+      /^local_only[.]/,
+      /^limits[.]opencodeGo[.]setupHint[.](?:note_app|step2_cookie)$/,
+      /^pet[.](?:codex[.]subtitle|controls[.]native_only)$/,
+      /^settings[.]section[.]menubar$/,
+      /^widgets[.]cta[.]download$/,
+    ],
+  },
 ];
+
+// Dashboard is ordinary interface vocabulary in this product and should be
+// localized as “仪表板” / “儀表板” rather than preserved in English.
+const UNLOCALIZED_UI_TERM_REGEX = /\bdashboard\b/i;
 
 function parseCsv(raw) {
   const rows = [];
@@ -89,8 +160,8 @@ function parseCsv(raw) {
   return rows;
 }
 
-function readCopyRegistry() {
-  const rows = parseCsv(fs.readFileSync(COPY_PATH, "utf8"));
+function readCopyRegistry(copyPath = COPY_PATH) {
+  const rows = parseCsv(fs.readFileSync(copyPath, "utf8"));
   const header = rows[0]?.map((cell) => String(cell).trim()) || [];
   const missingColumns = REQUIRED_COLUMNS.filter((column) => !header.includes(column));
   if (missingColumns.length) {
@@ -98,7 +169,7 @@ function readCopyRegistry() {
   }
 
   const index = Object.fromEntries(header.map((column, position) => [column, position]));
-  return rows.slice(1).flatMap((cells, rowIndex) => {
+  const records = rows.slice(1).flatMap((cells, rowIndex) => {
     const key = String(cells[index.key] || "").trim();
     if (!key) return [];
     return [{
@@ -109,6 +180,10 @@ function readCopyRegistry() {
       row: rowIndex + 2,
     }];
   });
+  if (!records.length) {
+    throw new Error(`Copy registry has no entries: ${copyPath}`);
+  }
+  return records;
 }
 
 function readLocale(locale) {
@@ -167,15 +242,26 @@ function samePlaceholders(left, right) {
 }
 
 function isAllowedSourceIdentical(record) {
-  return SOURCE_IDENTICAL_KEY_ALLOWLIST.some((pattern) => pattern.test(record.key));
+  if (SOURCE_IDENTICAL_KEY_ALLOWLIST.some((pattern) => pattern.test(record.key))) return true;
+  const sourceText = record.text.trim();
+  return PRODUCT_TERMINOLOGY_GLOSSARY.some((entry) => (
+    entry.keyPatterns.some((pattern) => pattern.test(record.key)) &&
+    entry.sourceIdentical.test(sourceText)
+  ));
 }
 
 function hasUnlocalizedUiTerm(record, localized) {
-  if (MIXED_TERM_KEY_ALLOWLIST.some((pattern) => pattern.test(record.key))) return false;
   const visibleText = String(localized)
     .replace(/\{\{\w+\}\}/g, "")
     .replace(/https?:\/\/\S+/g, "");
   return UNLOCALIZED_UI_TERM_REGEX.test(visibleText);
+}
+
+function findTerminologyViolations(record, localized) {
+  return PRODUCT_TERMINOLOGY_GLOSSARY.filter((entry) => (
+    entry.keyPatterns.some((pattern) => pattern.test(record.key)) &&
+    entry.translatedTerm.test(String(localized))
+  )).map((entry) => entry.term);
 }
 
 function main() {
@@ -213,6 +299,11 @@ function main() {
     const mixedUnlocalizedText = registry.filter((record) => {
       const localized = values.get(record.key)?.value;
       return typeof localized === "string" && hasUnlocalizedUiTerm(record, localized);
+    });
+    const terminologyViolations = registry.flatMap((record) => {
+      const localized = values.get(record.key)?.value;
+      if (typeof localized !== "string") return [];
+      return findTerminologyViolations(record, localized).map((term) => ({ record, term }));
     });
 
     console.log(
@@ -261,10 +352,28 @@ function main() {
         console.error(`- ${record.key} = ${JSON.stringify(values.get(record.key).value)}`);
       });
     }
+    if (terminologyViolations.length) {
+      failed = true;
+      console.error(`${locale} product terminology violations (${terminologyViolations.length}):`);
+      terminologyViolations.forEach(({ record, term }) => {
+        console.error(
+          `- ${record.key}: preserve ${term} in ${JSON.stringify(values.get(record.key).value)}`,
+        );
+      });
+    }
   }
 
   if (failed) process.exit(1);
   console.log("Chinese locale coverage ok.");
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = {
+  PRODUCT_TERMINOLOGY_GLOSSARY,
+  findTerminologyViolations,
+  hasUnlocalizedUiTerm,
+  isAllowedSourceIdentical,
+  parseCsv,
+  readCopyRegistry,
+};
