@@ -40,7 +40,7 @@ jobs:
         with:
           node-version: 20
 
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 8.0.x
 
