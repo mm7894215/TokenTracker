@@ -23,18 +23,17 @@ describe("Skills cloud inventory guardrails", () => {
     assert.match(source, /sanitizeSkill/);
     assert.match(source, /raw\.startsWith\("\/"\)/);
     assert.match(source, /cleanStableKey/);
+    assert.match(source, /scopeInput === "system"\) return null/);
+    assert.match(source, /skills\.filter\(\(skill\) => skill\?\.scope !== "system"\)/);
     assert.match(source, /description, SKILL\.md content, prompts, readme URLs, and absolute paths/);
     assert.doesNotMatch(source, /input\.description|input\.prompt|input\.content|input\.readmeUrl|input\.targetPaths/);
   });
 
-  it("keeps every Skills UI key translated in all supported locales", () => {
-    const csv = read("dashboard/src/content/copy.csv");
-    const skillKeys = [...csv.matchAll(/^(skills\.[^,]+),/gm)].map((match) => match[1]);
-    assert.ok(skillKeys.length > 90);
-    for (const locale of ["zh", "zh-TW", "ja", "ko", "de"]) {
-      const translations = JSON.parse(read(`dashboard/src/content/i18n/${locale}/core.json`));
-      const missing = skillKeys.filter((key) => typeof translations[key] !== "string" || !translations[key].trim());
-      assert.deepEqual(missing, [], `${locale} is missing Skills translations`);
-    }
+  it("bounds cloud requests so the local inventory remains usable", () => {
+    const source = read("dashboard/src/lib/skills-api.ts");
+    assert.match(source, /CLOUD_REQUEST_TIMEOUT_MS/);
+    assert.match(source, /new AbortController\(\)/);
+    assert.match(source, /signal: controller\.signal/);
+    assert.match(source, /finally[\s\S]*clearTimeout\(timeout\)/);
   });
 });

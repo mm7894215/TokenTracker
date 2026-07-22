@@ -58,6 +58,27 @@ describe("Skills inventory cloud metadata", () => {
     }]);
     expect(JSON.stringify(metadata)).not.toMatch(/Users|home\/person/);
   });
+
+  it("does not publish built-in skills", () => {
+    const metadata = buildSkillInventoryMetadata([
+      {
+        key: "inventory:codex:system:skill-creator",
+        name: "Skill Creator",
+        directory: "skill-creator",
+        targets: ["codex"],
+        scope: "system",
+      },
+      {
+        key: "inventory:codex:plugin:browser:control",
+        name: "Browser Control",
+        directory: "control-in-app-browser",
+        targets: ["codex"],
+        scope: "plugin",
+      },
+    ]);
+
+    expect(metadata.map((skill) => skill.name)).toEqual(["Browser Control"]);
+  });
 });
 
 describe("mergeSkillInventories", () => {
@@ -83,7 +104,7 @@ describe("mergeSkillInventories", () => {
     expect(merged).toHaveLength(1);
     expect(merged[0].readOnly).not.toBe(true);
     expect(merged[0].remote).not.toBe(true);
-    expect(merged[0].targets).toEqual(["claude", "codex"]);
+    expect(merged[0].targets).toEqual(["claude"]);
     expect(merged[0].deviceSources).toEqual([{
       id: "other-device",
       name: "Mac mini",
@@ -118,5 +139,20 @@ describe("mergeSkillInventories", () => {
       targets: ["zcode"],
     });
     expect(merged[0].deviceSources.map((source: { name: string }) => source.name)).toEqual(["MacBook", "Work PC"]);
+  });
+
+  it("filters built-in skills from local and stale remote inventories", () => {
+    const builtIn = {
+      key: "inventory:codex:system:skill-creator",
+      name: "Skill Creator",
+      directory: "skill-creator",
+      targets: ["codex"],
+      scope: "system",
+    };
+    const merged = mergeSkillInventories([builtIn], {
+      devices: [{ id: "other", device_name: "Other PC", skills: [builtIn] }],
+    }, "current");
+
+    expect(merged).toEqual([]);
   });
 });

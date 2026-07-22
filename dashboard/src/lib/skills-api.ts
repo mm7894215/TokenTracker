@@ -7,6 +7,7 @@ type AnyRecord = Record<string, any>;
 
 const SLUG = "tokentracker-skills";
 const CLOUD_SLUG = "tokentracker-account-skills";
+const CLOUD_REQUEST_TIMEOUT_MS = 15_000;
 
 async function fetchSkillsJson(params?: AnyRecord) {
   const url = new URL(`/functions/${SLUG}`, window.location.origin);
@@ -128,15 +129,22 @@ async function fetchCloudSkillsJson({
   };
   const anonKey = getInsforgeAnonKey();
   if (anonKey) headers.apikey = anonKey;
-  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/functions/${CLOUD_SLUG}`, {
-    method,
-    headers,
-    cache: "no-store",
-    ...(body == null ? {} : { body: JSON.stringify(body) }),
-  });
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(payload?.error || `Request failed with HTTP ${response.status}`);
-  return payload;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CLOUD_REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${baseUrl.replace(/\/$/, "")}/functions/${CLOUD_SLUG}`, {
+      method,
+      headers,
+      cache: "no-store",
+      signal: controller.signal,
+      ...(body == null ? {} : { body: JSON.stringify(body) }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(payload?.error || `Request failed with HTTP ${response.status}`);
+    return payload;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export function getAccountSkillInventories(accessToken: string) {

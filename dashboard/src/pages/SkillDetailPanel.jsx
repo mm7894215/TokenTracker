@@ -326,7 +326,7 @@ function SkillDetailPanelInner({
             <div>
               {(targets || []).filter((target) => target.manageable !== false).map((target) => {
                 const checked = activeTargetIds.has(target.id);
-                const busy = busyKey === targetBusyKey(skill.id, target.id);
+                const busy = busyKey === targetBusyKey(skill.id || skill.directory, target.id);
                 const rowId = `skill-detail-sync-${skill.id || skill.directory}-${target.id}`;
                 return (
                   <label

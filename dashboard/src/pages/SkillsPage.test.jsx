@@ -173,6 +173,31 @@ describe("SkillsPage", () => {
     expect(screen.queryByRole("button", { name: copy("skills.detail.remove_button") })).not.toBeInTheDocument();
   });
 
+  it("keeps unmanaged skill selection isolated by directory", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getInstalledSkills).mockResolvedValue({
+      targets: [{ id: "claude", label: "Claude" }],
+      skills: [
+        { name: "Local Alpha", directory: "local-alpha", targets: ["claude"], managed: false },
+        { name: "Local Beta", directory: "local-beta", targets: ["claude"], managed: false },
+      ],
+    });
+
+    render(<SkillsPage />);
+
+    const alpha = await screen.findByRole("checkbox", {
+      name: copy("skills.select.row_aria", { name: "Local Alpha" }),
+    });
+    const beta = screen.getByRole("checkbox", {
+      name: copy("skills.select.row_aria", { name: "Local Beta" }),
+    });
+    await user.click(alpha);
+
+    expect(alpha).toBeChecked();
+    expect(beta).not.toBeChecked();
+    expect(screen.getByText(copy("skills.select.count", { count: 1 }))).toBeInTheDocument();
+  });
+
   it("does not mark an unrelated browse skill installed when only the nested local leaf matches", async () => {
     const user = userEvent.setup();
     vi.mocked(getInstalledSkills).mockResolvedValue({
