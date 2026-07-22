@@ -28,22 +28,29 @@ function PanelFrame({ title, children, accent = false }) {
 // The four mini-scenes: CLI run → hook capture → local queue → dashboard.
 // Terminal/JSON fragments are decorative pseudo-code, styled like the CLIs
 // they depict (baselined by validate:ui-hardcode, same as the v2 console).
-function HowScene({ index }) {
+function HowScene({ index, copy }) {
   if (index === 0) {
     return (
-      <PanelFrame title="terminal">
+      <PanelFrame title={copy("landing.v3.how.scene.terminal_title")}>
         <p className="text-oai-gray-200">
-          <span className="text-[color:var(--lv3-accent-soft)]">$</span> claude <span className="text-oai-gray-500">{'"refactor the parser"'}</span>
+          <span className="text-[color:var(--lv3-accent-soft)]">$</span> claude{" "}
+          <span className="text-oai-gray-500">
+            {copy("landing.v3.how.scene.prompt")}
+          </span>
         </p>
-        <p className="mt-2 text-oai-gray-500">⏺ thinking…</p>
-        <p className="text-oai-gray-500">⏺ editing src/lib/rollout.js</p>
-        <p className="mt-2 text-oai-gray-300">✓ 3 files changed</p>
+        <p className="mt-2 text-oai-gray-500">⏺ {copy("landing.v3.how.scene.thinking")}</p>
+        <p className="text-oai-gray-500">
+          ⏺ {copy("landing.v3.how.scene.editing", { path: "src/lib/rollout.js" })}
+        </p>
+        <p className="mt-2 text-oai-gray-300">
+          ✓ {copy("landing.v3.how.scene.files_changed", { count: 3 })}
+        </p>
       </PanelFrame>
     );
   }
   if (index === 1) {
     return (
-      <PanelFrame title="session log · last turn">
+      <PanelFrame title={copy("landing.v3.how.scene.session_title")}>
         <p className="text-oai-gray-500">{'"usage": {'}</p>
         <p className="pl-4 text-oai-gray-300">
           {'"input_tokens": '}<span className="text-[color:var(--lv3-accent-soft)]">12,482</span>,
@@ -67,7 +74,9 @@ function HowScene({ index }) {
           {'{"source":"claude","total_tokens":'}
           <span className="text-[color:var(--lv3-accent-soft)]">103,763</span>…
         </p>
-        <p className="mt-3 text-[10px] uppercase tracking-widest text-[color:var(--lv3-accent-soft)]">▌ appended locally</p>
+        <p className="mt-3 text-[10px] uppercase tracking-widest text-[color:var(--lv3-accent-soft)]">
+          ▌ {copy("landing.v3.how.scene.appended")}
+        </p>
       </PanelFrame>
     );
   }
@@ -85,7 +94,9 @@ function HowScene({ index }) {
           />
         ))}
       </div>
-      <p className="mt-4 text-[10px] uppercase tracking-widest text-oai-gray-500">total tokens</p>
+      <p className="mt-4 text-[10px] uppercase tracking-widest text-oai-gray-500">
+        {copy("landing.v3.how.scene.total_tokens")}
+      </p>
       <p className="text-lg font-bold tabular-nums text-white">6,830,736,916</p>
     </PanelFrame>
   );
@@ -191,7 +202,7 @@ export function HowItWorksSection({ copy, animate }) {
           <div className="relative col-span-7 h-[420px]">
             {STEP_KEYS.map((stepKey, i) => (
               <div key={stepKey} className="lv3-how-scene absolute inset-0">
-                <HowScene index={i} />
+                <HowScene index={i} copy={copy} />
               </div>
             ))}
           </div>
@@ -203,7 +214,7 @@ export function HowItWorksSection({ copy, animate }) {
             <div key={stepKey} className="space-y-4">
               <StepItem copy={copy} stepKey={stepKey} index={i} />
               <div className="h-64">
-                <HowScene index={i} />
+                <HowScene index={i} copy={copy} />
               </div>
             </div>
           ))}

@@ -57,6 +57,7 @@ jobs:
         run: |
           npm test
           npm run validate:copy
+          npm run validate:locale
           npm run validate:ui-hardcode
           npm run validate:guardrails
           node --test test/architecture-guardrails.test.js

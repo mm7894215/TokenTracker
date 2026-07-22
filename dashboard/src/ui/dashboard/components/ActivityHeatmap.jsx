@@ -321,7 +321,7 @@ export function ActivityHeatmap({
   const stats = useMemo(() => {
     let totalTokens = 0;
     let activeDays = 0;
-    let maxSingleDay = { day: "无数据", value: 0 };
+    let maxSingleDay = { day: null, value: 0 };
     let currentStreak = 0;
     let maxStreak = 0;
 
@@ -618,7 +618,7 @@ export function ActivityHeatmap({
                     <span className="relative inline-flex rounded-full h-1.5 w-1.5" style={{ backgroundColor: activeAccent.rawColor }} />
                   </span>
                   <span className="text-[9px] font-extrabold uppercase tracking-widest font-mono text-zinc-400 dark:text-zinc-500">
-                    3D Insight
+                    {copy("heatmap.3d.modal.eyebrow")}
                   </span>
                 </div>
                 <h4 className="text-xl font-black text-zinc-900 dark:text-zinc-50 tracking-tight leading-none mt-2 select-none">
@@ -639,7 +639,7 @@ export function ActivityHeatmap({
                     <div className="bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 text-[10px] font-semibold font-mono rounded-lg px-2.5 py-1.5 shadow-xl border border-zinc-200 dark:border-zinc-800/80 whitespace-nowrap flex flex-col">
                       <span className="text-[9px] text-zinc-400 dark:text-zinc-500">{copy("heatmap.3d.modal.stats.precision_total_tokens")}</span>
                       <span className="mt-0.5 font-bold text-zinc-900 dark:text-zinc-50">
-                        {formatTokensTooltip(stats.totalTokens)} Tokens
+                        {formatTokensTooltip(stats.totalTokens)} {copy("heatmap.unit.tokens")}
                       </span>
                     </div>
                   </div>
@@ -677,7 +677,10 @@ export function ActivityHeatmap({
                     {copy("heatmap.3d.modal.stats.active_rate_days")}
                   </span>
                   <span className="text-xl font-black text-zinc-900 dark:text-zinc-50 tracking-tight font-mono transition-transform duration-200 group-hover:-translate-y-[1px]">
-                    {stats.activeRate}% <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 font-mono">({stats.activeDays}D)</span>
+                    {stats.activeRate}%{" "}
+                    <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 font-mono">
+                      ({stats.activeDays}{copy("heatmap.3d.modal.stats.days_suffix")})
+                    </span>
                   </span>
                 </div>
 
@@ -698,9 +701,13 @@ export function ActivityHeatmap({
                     <div className="bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 text-[10px] font-semibold font-mono rounded-lg px-2.5 py-1.5 shadow-xl border border-zinc-200 dark:border-zinc-800/80 whitespace-nowrap flex flex-col">
                       <span className="text-[9px] text-zinc-400 dark:text-zinc-500">{copy("heatmap.3d.modal.stats.precision_peak_value")}</span>
                       <span className="mt-0.5 font-bold text-zinc-900 dark:text-zinc-50">
-                        {stats.maxSingleDay.value > 0 ? formatTokensTooltip(stats.maxSingleDay.value) : copy("heatmap.3d.modal.stats.no_data")} Tokens
+                        {stats.maxSingleDay.value > 0
+                          ? `${formatTokensTooltip(stats.maxSingleDay.value)} ${copy("heatmap.unit.tokens")}`
+                          : copy("heatmap.3d.modal.stats.no_data")}
                       </span>
-                      <span className="text-[8px] text-zinc-400 dark:text-zinc-500 mt-0.5">{stats.maxSingleDay.day !== "无数据" ? stats.maxSingleDay.day : copy("heatmap.3d.modal.stats.no_data")}</span>
+                      <span className="text-[8px] text-zinc-400 dark:text-zinc-500 mt-0.5">
+                        {stats.maxSingleDay.day || copy("heatmap.3d.modal.stats.no_data")}
+                      </span>
                     </div>
                   </div>
 
@@ -708,7 +715,12 @@ export function ActivityHeatmap({
                     {copy("heatmap.3d.modal.stats.peak_day")}
                   </span>
                   <span className="text-xl font-black text-zinc-900 dark:text-zinc-50 tracking-tight font-mono transition-transform duration-200 group-hover:-translate-y-[1px]">
-                    {stats.maxSingleDay.value > 0 ? formatTokens(stats.maxSingleDay.value, { decimals: 2 }) : copy("heatmap.3d.modal.stats.no_data")} <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 font-mono">({stats.maxSingleDay.day !== "无数据" ? stats.maxSingleDay.day : copy("heatmap.3d.modal.stats.no_data")})</span>
+                    {stats.maxSingleDay.value > 0
+                      ? formatTokens(stats.maxSingleDay.value, { decimals: 2 })
+                      : copy("heatmap.3d.modal.stats.no_data")}{" "}
+                    <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 font-mono">
+                      ({stats.maxSingleDay.day || copy("heatmap.3d.modal.stats.no_data")})
+                    </span>
                   </span>
                 </div>
 
@@ -749,7 +761,12 @@ export function ActivityHeatmap({
                   </div>
                   <div className="flex gap-1">
                     {activeAccentColors.map((color, idx) => (
-                      <div key={idx} className="flex-1 h-1 rounded-[2px]" style={{ backgroundColor: color }} title={`Level ${idx}`} />
+                      <div
+                        key={idx}
+                        className="flex-1 h-1 rounded-[2px]"
+                        style={{ backgroundColor: color }}
+                        title={copy("heatmap.tooltip.level", { level: idx })}
+                      />
                     ))}
                   </div>
                 </div>
@@ -882,7 +899,7 @@ export function ActivityHeatmap({
                       border: `1px solid ${badgeColor}44`
                     }}
                   >
-                    Level {hoveredCell.level}
+                    {copy("heatmap.tooltip.level", { level: hoveredCell.level })}
                   </span>
                 );
               })()}
@@ -898,14 +915,14 @@ export function ActivityHeatmap({
                   {formatTokens(hoveredCell.total_tokens ?? hoveredCell.value)}
                 </span>
                 <span className="text-[10px] text-oai-gray-400 uppercase tracking-wider font-semibold">
-                  Tokens
+                  {copy("heatmap.unit.tokens")}
                 </span>
               </div>
               
               {hoveredCell.models && Object.keys(hoveredCell.models).length > 0 ? (
                 <div className="mt-1.5 border-t border-oai-gray-100 dark:border-oai-gray-800/60 pt-2 flex flex-col gap-1.5">
                   <div className="text-[10px] font-semibold text-oai-gray-400 dark:text-oai-gray-500 uppercase tracking-wider">
-                    Model Breakdown
+                    {copy("heatmap.tooltip.model_breakdown")}
                   </div>
                   <div className="flex flex-col gap-2 max-h-[150px] overflow-y-auto pr-1.5 oai-scrollbar">
                     {Object.entries(hoveredCell.models)

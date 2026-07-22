@@ -657,7 +657,12 @@ export function ActivityHeatmap3D({
               }}
             >
               {!interactive && c.day && (
-                <title>{`${c.day}: ${formatTokensTooltip(c.value)} tokens`}</title>
+                <title>
+                  {copy("heatmap.tooltip.tokens", {
+                    day: c.day,
+                    value: formatTokensTooltip(c.value),
+                  })}
+                </title>
               )}
               {c.renderedFaces.map((f, idx) => (
                 <path
@@ -721,7 +726,7 @@ export function ActivityHeatmap3D({
                       border: `1px solid ${badgeColor}44`
                     }}
                   >
-                    Level {hoveredCell.level}
+                    {copy("heatmap.tooltip.level", { level: hoveredCell.level })}
                   </span>
                 );
               })()}
@@ -737,14 +742,14 @@ export function ActivityHeatmap3D({
                   {formatTokens(hoveredCell.value)}
                 </span>
                 <span className="text-[10px] text-oai-gray-400 uppercase tracking-wider font-semibold">
-                  Tokens
+                  {copy("heatmap.unit.tokens")}
                 </span>
               </div>
               
               {hoveredCell.models && Object.keys(hoveredCell.models).length > 0 ? (
                 <div className="mt-1.5 border-t border-oai-gray-100 dark:border-oai-gray-800/60 pt-2 flex flex-col gap-1.5">
                   <div className="text-[10px] font-semibold text-oai-gray-400 dark:text-oai-gray-500 uppercase tracking-wider">
-                    Model Breakdown
+                    {copy("heatmap.tooltip.model_breakdown")}
                   </div>
                   <div className="flex flex-col gap-2 max-h-[150px] overflow-y-auto pr-1.5 scrollbar-thin">
                     {Object.entries(hoveredCell.models)

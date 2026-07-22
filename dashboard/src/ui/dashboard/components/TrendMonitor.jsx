@@ -557,7 +557,9 @@ export function TrendMonitor({
               })
             ) : (
               <div className="flex-1 h-full flex items-center justify-center">
-                <p className="text-sm text-oai-gray-400 dark:text-oai-gray-400">No data yet</p>
+                <p className="text-sm text-oai-gray-400 dark:text-oai-gray-400">
+                  {copy("trend.monitor.empty")}
+                </p>
               </div>
             )}
           </div>
@@ -636,7 +638,7 @@ export function TrendMonitor({
               )}
               {hoveredBar.kind === "unsynced" && (
                 <span className="text-[9px] font-semibold uppercase tracking-wider text-oai-gray-400 dark:text-oai-gray-500">
-                  Unsynced
+                  {copy("trend.monitor.unsynced")}
                 </span>
               )}
             </div>
@@ -653,7 +655,7 @@ export function TrendMonitor({
                     : formatTokens(hoveredBar.value)}
                 </span>
                 <span className="text-[10px] text-oai-gray-400 uppercase tracking-wider font-semibold">
-                  Tokens
+                  {copy("heatmap.unit.tokens")}
                 </span>
               </div>
 
@@ -683,7 +685,9 @@ export function TrendMonitor({
               {hoveredBar.segments && hoveredBar.segments.length > 0 ? (
                 <div className="mt-1.5 border-t border-oai-gray-100 dark:border-oai-gray-800/60 pt-2 flex flex-col gap-1.5">
                   <div className="text-[10px] font-semibold text-oai-gray-400 dark:text-oai-gray-500 uppercase tracking-wider">
-                    {hoveredBar.segments[0].type === "model" ? "Model Breakdown" : "Token Breakdown"}
+                    {hoveredBar.segments[0].type === "model"
+                      ? copy("heatmap.tooltip.model_breakdown")
+                      : copy("heatmap.tooltip.token_breakdown")}
                   </div>
                   <div className="flex flex-col gap-2 max-h-[150px] overflow-y-auto pr-1.5 oai-scrollbar">
                     {hoveredBar.segments.map(({ name, value: val, type }) => {

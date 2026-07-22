@@ -16,11 +16,8 @@ import { FadeIn, StaggerContainer, StaggerItem } from "../ui/foundation/FadeIn.j
  * Hand-drawn previews of the real macOS widgets. Pure SVG so they stay
  * crisp at any scale and don't require shipping PNGs.
  *
- * Hardcoded strings ("TODAY", "203.2M", "claude-opus-4-6", etc.)
- * intentionally bypass copy.csv — they mirror the literal Swift string
- * constants in TokenTrackerWidget/Widgets/*.swift which ship English-only
- * in the native app. Keeping them inline makes the preview read as a
- * faithful screenshot.
+ * Example values and model IDs stay literal, while user-facing labels use
+ * copy.csv so the preview follows the dashboard locale.
  */
 
 const WIDGET_W = 264;
@@ -100,12 +97,12 @@ function SummaryWidgetPreview({ size = "sm" }) {
             <stop offset="100%" stopColor="#0A84FF" stopOpacity="0" />
           </linearGradient>
         </defs>
-        {/* TODAY column */}
-        <text x="14" y="20" className="fill-oai-gray-500 dark:fill-oai-gray-400" fontSize="8" fontWeight="700" letterSpacing="0.6">TODAY</text>
+        {/* Today column */}
+        <text x="14" y="20" className="fill-oai-gray-500 dark:fill-oai-gray-400" fontSize="8" fontWeight="700" letterSpacing="0.6">{copy("widgets.preview.today")}</text>
         <text x="14" y="46" className="fill-oai-black dark:fill-white" fontSize="22" fontWeight="700" fontFamily={ROUNDED_FONT}>203.2M</text>
         <text x="14" y="60" className="fill-oai-gray-500 dark:fill-oai-gray-400" fontSize="8" fontWeight="500" fontFamily={ROUNDED_FONT}>$129.56 ±0%</text>
-        {/* 7 DAYS column */}
-        <text x="134" y="20" className="fill-oai-gray-500 dark:fill-oai-gray-400" fontSize="8" fontWeight="700" letterSpacing="0.6">7 DAYS</text>
+        {/* Seven-day column */}
+        <text x="134" y="20" className="fill-oai-gray-500 dark:fill-oai-gray-400" fontSize="8" fontWeight="700" letterSpacing="0.6">{copy("widgets.preview.seven_days")}</text>
         <text x="134" y="46" className="fill-oai-black dark:fill-white" fontSize="22" fontWeight="700" fontFamily={ROUNDED_FONT}>880.9M</text>
         <text x="134" y="60" className="fill-oai-gray-500 dark:fill-oai-gray-400" fontSize="8" fontWeight="500" fontFamily={ROUNDED_FONT}>$673.61</text>
         {/* Area fill under the curve */}
@@ -170,7 +167,9 @@ function HeatmapWidgetPreview() {
           ))}
         </g>
         <text x={gridX} y="102" className="fill-oai-black dark:fill-white" fontSize="10" fontWeight="700" fontFamily={ROUNDED_FONT}>10.3B</text>
-        <text x={gridX + 30} y="102" className="fill-oai-gray-500 dark:fill-oai-gray-400" fontSize="9" fontWeight="500">tokens · 202 active days</text>
+        <text x={gridX + 30} y="102" className="fill-oai-gray-500 dark:fill-oai-gray-400" fontSize="9" fontWeight="500">
+          {copy("widgets.preview.heatmap_summary", { days: 202 })}
+        </text>
       </svg>
     </PreviewShell>
   );
@@ -216,10 +215,10 @@ function UsageLimitsWidgetPreview() {
   // Four rows mirroring LimitRow in UsageLimitsWidget.swift. Bullet color
   // follows the provider source; bar fill follows limitBarColor(fraction).
   const rows = [
-    { label: "Claude · 7d",    source: "claude", reset: "in 1d",     pct: 61 },
-    { label: "Claude · 5h",    source: "claude", reset: "in 4h 28m", pct: 4 },
-    { label: "Cursor",         source: "cursor", reset: "in 25d",    pct: 51 },
-    { label: "Codex · weekly", source: "codex",  reset: "in 1d",     pct: 32 },
+    { label: `${copy("limits.provider.claude")} · ${copy("limits.label.claude_7d")}`, source: "claude", reset: copy("widgets.preview.reset_days", { days: 1 }), pct: 61 },
+    { label: `${copy("limits.provider.claude")} · ${copy("limits.label.claude_5h")}`, source: "claude", reset: copy("widgets.preview.reset_hours_minutes", { hours: 4, minutes: 28 }), pct: 4 },
+    { label: copy("limits.provider.cursor"), source: "cursor", reset: copy("widgets.preview.reset_days", { days: 25 }), pct: 51 },
+    { label: `${copy("limits.provider.codex")} · ${copy("limits.label.codex_7d")}`, source: "codex", reset: copy("widgets.preview.reset_days", { days: 1 }), pct: 32 },
   ];
   const rowGap = 22;
   const rowStart = 28;
@@ -347,7 +346,7 @@ function MenuBarPreview({ slotConfigs, showStats }) {
                     {item?.previewValue || "--"}
                   </span>
                   <span className="mt-[2px] text-[6px] font-semibold uppercase leading-none text-white/75">
-                    {item?.shortLabel || "Metric"}
+                    {item?.shortLabel || copy("widgets.preview.metric")}
                   </span>
                 </div>
               </React.Fragment>

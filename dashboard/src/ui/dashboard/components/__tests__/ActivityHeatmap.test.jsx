@@ -1,4 +1,4 @@
-import { fireEvent, render } from "@testing-library/react";
+import { fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { ThemeContext } from "../../../foundation/ThemeProvider.jsx";
 import { ActivityHeatmap } from "../ActivityHeatmap.jsx";
@@ -38,17 +38,18 @@ describe("ActivityHeatmap", () => {
     window.localStorage.removeItem("tt:heatmap-view");
   });
 
-  it("keeps the 2D day detail card transparent to pointer movement", () => {
+  it("keeps the 2D day detail card transparent to pointer movement", async () => {
     const { container } = renderHeatmap();
     const firstCell = container.querySelector(".heatmap-scroll-thin span[style*='background']");
 
     fireEvent.mouseEnter(firstCell);
 
-    const tooltip = Array.from(document.body.querySelectorAll("div.fixed")).find((el) =>
-      el.textContent.includes("Tokens"),
-    );
+    const tooltip = await waitFor(() => {
+      const match = document.body.querySelector("div.fixed");
+      expect(match).toBeTruthy();
+      return match;
+    });
 
-    expect(tooltip).toBeTruthy();
     expect(tooltip.className).toContain("pointer-events-none");
     expect(tooltip.className).not.toContain("pointer-events-auto");
   });

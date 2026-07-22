@@ -109,7 +109,7 @@ export const CostAnalysisModal = React.memo(function CostAnalysisModal({
 
                 {normalizedFleet.length === 0 ? (
                   <p className="text-body-sm text-oai-gray-500 dark:text-oai-gray-400">
-                    No spend recorded.
+                    {copy("dashboard.cost_breakdown.empty")}
                   </p>
                 ) : (
                   <div role="table" aria-label={copy("dashboard.cost_breakdown.title")}>
@@ -117,8 +117,8 @@ export const CostAnalysisModal = React.memo(function CostAnalysisModal({
                     role="row"
                     className="flex items-center justify-between gap-4 py-2 mb-2 border-b border-oai-gray-200 dark:border-oai-gray-800 text-label uppercase text-oai-gray-500 dark:text-oai-gray-400"
                   >
-                    <span role="columnheader">Model</span>
-                    <span role="columnheader">Cost</span>
+                    <span role="columnheader">{copy("dashboard.cost_breakdown.model_column")}</span>
+                    <span role="columnheader">{copy("dashboard.cost_breakdown.cost_column")}</span>
                   </div>
 
                   {normalizedFleet.map((fleet, index) => {

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-18T14:32:38.830Z",
+  "generatedAt": "2026-07-22T05:09:42.766Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
@@ -7,7 +7,7 @@
   },
   "totals": {
     "colors": 371,
-    "rawText": 192
+    "rawText": 149
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -16,6 +16,25 @@
       "rawTextTokens": [
         ") : avatarSrc && !avatarFailed ? (",
         ") : initialsFromName(displayName) === \"?\" ? ("
+      ]
+    },
+    "dashboard/src/components/leaderboard/CommunityStatsModal.jsx": {
+      "colors": 0,
+      "rawText": 7,
+      "rawTextTokens": [
+        "(max.value",
+        "; if (normalized === \"win32\") return",
+        "; return",
+        "; return ("
+      ]
+    },
+    "dashboard/src/components/leaderboard/LeaderboardProfileModal.jsx": {
+      "colors": 6,
+      "rawText": 3,
+      "rawTextTokens": [
+        "0 && n",
+        "1 && (",
+        "= 1)) && ("
       ]
     },
     "dashboard/src/components/LeaderboardSummaryCard.test.jsx": {
@@ -28,31 +47,6 @@
       "rawText": 1,
       "rawTextTokens": [
         "); const GITHUB_ICON = ("
-      ]
-    },
-    "dashboard/src/components/SortableColumnHeader.jsx": {
-      "colors": 4,
-      "rawText": 0,
-      "rawTextTokens": []
-    },
-    "dashboard/src/components/leaderboard/CommunityStatsModal.jsx": {
-      "colors": 0,
-      "rawText": 8,
-      "rawTextTokens": [
-        "(max.value",
-        "; if (normalized === \"win32\") return",
-        "; return",
-        "; return (",
-        "Math.max(max, Number(band.developer_share) || 0), 0) || 1; return ("
-      ]
-    },
-    "dashboard/src/components/leaderboard/LeaderboardProfileModal.jsx": {
-      "colors": 6,
-      "rawText": 3,
-      "rawTextTokens": [
-        "0 && n",
-        "1 && (",
-        "= 1)) && ("
       ]
     },
     "dashboard/src/components/settings/AccountSection.jsx": {
@@ -69,6 +63,11 @@
         "GitHub"
       ]
     },
+    "dashboard/src/components/SortableColumnHeader.jsx": {
+      "colors": 4,
+      "rawText": 0,
+      "rawTextTokens": []
+    },
     "dashboard/src/contexts/LoginModalContext.jsx": {
       "colors": 0,
       "rawText": 1,
@@ -81,15 +80,6 @@
       "rawText": 1,
       "rawTextTokens": [
         "= 1).length, [merged], ); const total = BADGE_CATALOG.length; return ("
-      ]
-    },
-    "dashboard/src/pages/DevicePage.jsx": {
-      "colors": 0,
-      "rawText": 3,
-      "rawTextTokens": [
-        "Approve your CLI",
-        "CLI code",
-        "Sign in first, then return to this page."
       ]
     },
     "dashboard/src/pages/IpCheckPage.jsx": {
@@ -153,39 +143,21 @@
     },
     "dashboard/src/pages/WidgetsPage.jsx": {
       "colors": 25,
-      "rawText": 9,
+      "rawText": 6,
       "rawTextTokens": [
         "$129.56 ±0%",
         "$673.61",
         "0 ? (",
         "10.3B",
         "203.2M",
-        "7 DAYS",
-        "880.9M",
-        "TODAY",
-        "tokens · 202 active days"
+        "880.9M"
       ]
     },
     "dashboard/src/pages/WrappedPage.jsx": {
       "colors": 0,
-      "rawText": 18,
+      "rawText": 3,
       "rawTextTokens": [
-        "0 && (",
-        "Highlights",
-        "Loading…",
-        "Longest streak",
-        "No data for that year yet. Run",
-        "Peak hour",
-        "TokenTracker Wrapped",
-        "Top days",
-        "Top models",
-        "Top tools",
-        "Total tokens",
-        "across",
-        "first.",
-        "tools",
-        "tracker sync",
-        "tracker wrapped --json"
+        "0 && ("
       ]
     },
     "dashboard/src/pet.jsx": {
@@ -254,13 +226,6 @@
         "/\\d/.test(char) && (decimalIndex === -1 || index"
       ]
     },
-    "dashboard/src/ui/components/HeaderGithubStar.jsx": {
-      "colors": 0,
-      "rawText": 1,
-      "rawTextTokens": [
-        "Star"
-      ]
-    },
     "dashboard/src/ui/components/Shell.jsx": {
       "colors": 0,
       "rawText": 1,
@@ -270,30 +235,24 @@
     },
     "dashboard/src/ui/components/Sidebar.jsx": {
       "colors": 0,
-      "rawText": 3,
+      "rawText": 2,
       "rawTextTokens": [
-        "Star",
         "Token Tracker",
         "getNavGroups(), [resolvedLocale]); return ("
       ]
     },
     "dashboard/src/ui/dashboard/components/ActivityHeatmap.jsx": {
       "colors": 28,
-      "rawText": 4,
+      "rawText": 1,
       "rawTextTokens": [
-        "0 ? (",
-        "3D Insight",
-        "Model Breakdown",
-        "Tokens"
+        "0 ? ("
       ]
     },
     "dashboard/src/ui/dashboard/components/ActivityHeatmap3D.jsx": {
       "colors": 53,
-      "rawText": 4,
+      "rawText": 2,
       "rawTextTokens": [
         "0 ? (",
-        "Model Breakdown",
-        "Tokens",
         "maxX) maxX = x + padding; if (y - padding"
       ]
     },
@@ -312,12 +271,8 @@
     },
     "dashboard/src/ui/dashboard/components/CostAnalysisModal.jsx": {
       "colors": 2,
-      "rawText": 3,
-      "rawTextTokens": [
-        "Cost",
-        "Model",
-        "No spend recorded."
-      ]
+      "rawText": 0,
+      "rawTextTokens": []
     },
     "dashboard/src/ui/dashboard/components/DataDetails.jsx": {
       "colors": 0,
@@ -385,15 +340,11 @@
     },
     "dashboard/src/ui/dashboard/components/TrendMonitor.jsx": {
       "colors": 30,
-      "rawText": 9,
+      "rawText": 5,
       "rawTextTokens": [
         "0 && (",
         "0 ? (",
         "0) && (",
-        "No data yet",
-        "Predicted",
-        "Tokens",
-        "Unsynced",
         "sum + s.value, 0); const renderFlat = kind !== \"real\" || totalSegmentsValue"
       ]
     },
@@ -423,10 +374,9 @@
     },
     "dashboard/src/ui/dashboard/components/UsageOverview.jsx": {
       "colors": 13,
-      "rawText": 3,
+      "rawText": 2,
       "rawTextTokens": [
         "0 && (",
-        "0); return (",
         "1 ? ("
       ]
     },
@@ -461,15 +411,6 @@
         "zh-tw"
       ]
     },
-    "dashboard/src/ui/marketing/MarketingLanding.jsx": {
-      "colors": 0,
-      "rawText": 3,
-      "rawTextTokens": [
-        ") : ( // 未登录：Sign In 展示为主行动实色按钮，点击唤起 Modal",
-        ") : signedIn ? ( // 已登录：Open Dashboard 升级为主行动实色按钮",
-        "Token Tracker"
-      ]
-    },
     "dashboard/src/ui/marketing/components/BorderGlow.jsx": {
       "colors": 6,
       "rawText": 0,
@@ -479,6 +420,15 @@
       "colors": 2,
       "rawText": 0,
       "rawTextTokens": []
+    },
+    "dashboard/src/ui/marketing/MarketingLanding.jsx": {
+      "colors": 0,
+      "rawText": 3,
+      "rawTextTokens": [
+        ") : ( // 未登录：Sign In 展示为主行动实色按钮，点击唤起 Modal",
+        ") : signedIn ? ( // 已登录：Open Dashboard 升级为主行动实色按钮",
+        "Token Tracker"
+      ]
     },
     "dashboard/src/ui/marketing/v3/CapabilitiesSection.jsx": {
       "colors": 1,
@@ -492,19 +442,13 @@
     },
     "dashboard/src/ui/marketing/v3/HowItWorksSection.jsx": {
       "colors": 0,
-      "rawText": 11,
+      "rawText": 5,
       "rawTextTokens": [
         "103,763",
         "12,482",
         "3,067",
         "6,830,736,916",
-        "88,214",
-        "claude",
-        "total tokens",
-        "⏺ editing src/lib/rollout.js",
-        "⏺ thinking…",
-        "▌ appended locally",
-        "✓ 3 files changed"
+        "88,214"
       ]
     },
     "dashboard/src/ui/marketing/v3/LeaderboardSection.jsx": {
@@ -514,13 +458,13 @@
         "0 ? Math.max(6, Math.round((tokens / maxTokens) * 100)) : 0; return ("
       ]
     },
-    "dashboard/src/ui/marketing/v3/TokenGalaxy.jsx": {
-      "colors": 2,
+    "dashboard/src/ui/marketing/v3/palette.js": {
+      "colors": 21,
       "rawText": 0,
       "rawTextTokens": []
     },
-    "dashboard/src/ui/marketing/v3/palette.js": {
-      "colors": 21,
+    "dashboard/src/ui/marketing/v3/TokenGalaxy.jsx": {
+      "colors": 2,
       "rawText": 0,
       "rawTextTokens": []
     },

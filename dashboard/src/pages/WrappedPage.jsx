@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { copy, getCopyLocale } from "../lib/copy";
 import { formatCompactNumber } from "../lib/format";
 
 /**
@@ -64,7 +65,7 @@ export default function WrappedPage() {
   if (status === "loading") {
     return (
       <div className="min-h-screen bg-white dark:bg-oai-gray-950 flex items-center justify-center">
-        <p className="text-oai-gray-500">Loading…</p>
+        <p className="text-oai-gray-500">{copy("wrapped.loading")}</p>
       </div>
     );
   }
@@ -72,7 +73,9 @@ export default function WrappedPage() {
     return (
       <div className="min-h-screen bg-white dark:bg-oai-gray-950 flex items-center justify-center px-6">
         <Card>
-          <p className="text-red-600 dark:text-red-300">{"Couldn't load Wrapped: "}{error}</p>
+          <p className="text-red-600 dark:text-red-300">
+            {copy("wrapped.error", { error })}
+          </p>
         </Card>
       </div>
     );
@@ -82,7 +85,7 @@ export default function WrappedPage() {
       <div className="min-h-screen bg-white dark:bg-oai-gray-950 flex items-center justify-center px-6">
         <Card>
           <p className="text-oai-gray-500">
-            No data for that year yet. Run <code>tracker sync</code> first.
+            {copy("wrapped.empty", { command: "tracker sync" })}
           </p>
         </Card>
       </div>
@@ -90,13 +93,40 @@ export default function WrappedPage() {
   }
 
   const fmtShare = (s) => `${(s * 100).toFixed(0)}%`;
+  const locale = getCopyLocale();
+  const highlights = [];
+  if (data.top.models.length > 0) {
+    const model = data.top.models[0];
+    highlights.push(copy("wrapped.highlight.model", {
+      model: model.model,
+      percent: (model.share * 100).toFixed(0),
+    }));
+  }
+  if (data.top.days.length > 0) {
+    const day = data.top.days[0];
+    highlights.push(copy("wrapped.highlight.day", {
+      day: day.day,
+      tokens: compactNumber(day.tokens),
+    }));
+  }
+  if (data.peak_hour) {
+    highlights.push(copy("wrapped.highlight.hour", {
+      hour: String(data.peak_hour.hour).padStart(2, "0"),
+    }));
+  }
+  if (data.longest_streak?.days >= 2) {
+    highlights.push(copy("wrapped.highlight.streak", { days: data.longest_streak.days }));
+  }
+  if (data.totals.sources >= 4) {
+    highlights.push(copy("wrapped.highlight.tools", { count: data.totals.sources }));
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-oai-gray-50 dark:from-oai-gray-950 dark:to-oai-gray-900 px-6 py-12">
       <div className="max-w-3xl mx-auto space-y-6">
         <header className="text-center pb-6">
           <p className="text-sm uppercase tracking-widest text-oai-gray-500 dark:text-oai-gray-400">
-            TokenTracker Wrapped
+            {copy("wrapped.kicker")}
           </p>
           <h1 className="text-6xl font-bold text-oai-gray-900 dark:text-white mt-2">
             {data.year}
@@ -105,22 +135,24 @@ export default function WrappedPage() {
 
         <Card accent className="text-center">
           <p className="text-xs uppercase tracking-widest text-oai-gray-600 dark:text-oai-gray-300">
-            Total tokens
+            {copy("wrapped.total_tokens")}
           </p>
           <p className="text-7xl font-bold text-emerald-700 dark:text-emerald-300 mt-2">
             {compactNumber(data.totals.tokens)}
           </p>
           <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400 mt-4">
-            across <strong>{data.totals.conversations.toLocaleString("en-US")}</strong> conversations,{" "}
-            <strong>{data.totals.active_days}</strong> active days, and{" "}
-            <strong>{data.totals.sources}</strong> tools
+            {copy("wrapped.summary", {
+              conversations: data.totals.conversations.toLocaleString(locale),
+              days: data.totals.active_days,
+              tools: data.totals.sources,
+            })}
           </p>
         </Card>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <Card>
             <h3 className="text-xs uppercase tracking-widest text-oai-gray-500 dark:text-oai-gray-400 mb-4">
-              Top tools
+              {copy("wrapped.top_tools")}
             </h3>
             <ul className="space-y-3">
               {data.top.sources.slice(0, 5).map((s) => (
@@ -136,7 +168,7 @@ export default function WrappedPage() {
 
           <Card>
             <h3 className="text-xs uppercase tracking-widest text-oai-gray-500 dark:text-oai-gray-400 mb-4">
-              Top models
+              {copy("wrapped.top_models")}
             </h3>
             <ul className="space-y-3">
               {data.top.models.slice(0, 5).map((m) => (
@@ -155,23 +187,23 @@ export default function WrappedPage() {
           {data.peak_hour && (
             <Card>
               <p className="text-xs uppercase tracking-widest text-oai-gray-500 dark:text-oai-gray-400">
-                Peak hour
+                {copy("wrapped.peak_hour")}
               </p>
               <p className="text-4xl font-semibold text-oai-gray-900 dark:text-white mt-2">
                 {String(data.peak_hour.hour).padStart(2, "0")}:00 UTC
               </p>
               <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400 mt-1">
-                {compactNumber(data.peak_hour.tokens)} tokens
+                {copy("wrapped.tokens", { count: compactNumber(data.peak_hour.tokens) })}
               </p>
             </Card>
           )}
           {data.longest_streak && data.longest_streak.days > 0 && (
             <Card>
               <p className="text-xs uppercase tracking-widest text-oai-gray-500 dark:text-oai-gray-400">
-                Longest streak
+                {copy("wrapped.longest_streak")}
               </p>
               <p className="text-4xl font-semibold text-oai-gray-900 dark:text-white mt-2">
-                {data.longest_streak.days} days
+                {copy("wrapped.days", { count: data.longest_streak.days })}
               </p>
               <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400 mt-1">
                 {data.longest_streak.from} → {data.longest_streak.to}
@@ -183,7 +215,7 @@ export default function WrappedPage() {
         {data.top.days.length > 0 && (
           <Card>
             <h3 className="text-xs uppercase tracking-widest text-oai-gray-500 dark:text-oai-gray-400 mb-4">
-              Top days
+              {copy("wrapped.top_days")}
             </h3>
             <ul className="space-y-2">
               {data.top.days.slice(0, 5).map((d) => (
@@ -198,13 +230,13 @@ export default function WrappedPage() {
           </Card>
         )}
 
-        {data.highlights.length > 0 && (
+        {highlights.length > 0 && (
           <Card accent>
             <h3 className="text-xs uppercase tracking-widest text-oai-gray-600 dark:text-oai-gray-300 mb-3">
-              Highlights
+              {copy("wrapped.highlights")}
             </h3>
             <ul className="space-y-2 text-oai-gray-800 dark:text-oai-gray-200">
-              {data.highlights.map((h, i) => (
+              {highlights.map((h, i) => (
                 <li key={i} className="text-base">
                   · {h}
                 </li>
@@ -214,8 +246,7 @@ export default function WrappedPage() {
         )}
 
         <footer className="text-center text-xs text-oai-gray-400 dark:text-oai-gray-500 pt-6">
-          Generated from local queue.jsonl · share with{" "}
-          <code className="font-mono">tracker wrapped --json</code>
+          {copy("wrapped.footer", { command: "tracker wrapped --json" })}
         </footer>
       </div>
     </div>

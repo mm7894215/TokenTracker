@@ -1303,3 +1303,67 @@ limits.provenance.stale,limits,LimitsPage,UsageLimitsPanel,provenance_stale,"Sta
 limits.provenance.tooltip,limits,LimitsPage,UsageLimitsPanel,provenance_tooltip,"Source: {{source}}; confidence: {{confidence}}",,active
 limits.reauth.badge,limits,LimitsPage,UsageLimitsPanel,reauth_badge,"Re-auth",,active
 limits.reauth.tooltip,limits,LimitsPage,UsageLimitsPanel,reauth_tooltip,"Sign-in expired — run `{{command}}` in a terminal once to sign in again, then refresh.",,active
+shared.github.star,shared,*,GithubStar,star,"Star",,active
+device.approval.title,ui,DevicePage,DevicePage,title,"Approve your CLI",,active
+device.approval.description,ui,DevicePage,DevicePage,description,"Enter the code shown by your CLI. It will link this machine to your account so its token usage appears in your leaderboard profile.",,active
+device.approval.sign_in_banner,ui,DevicePage,DevicePage,sign_in_banner,"Sign in first, then return to this page.",,active
+device.approval.code_label,ui,DevicePage,DevicePage,code_label,"CLI code",,active
+device.approval.action.approve,ui,DevicePage,DevicePage,approve,"Approve",,active
+device.approval.action.approving,ui,DevicePage,DevicePage,approving,"Approving…",,active
+device.approval.error.sign_in,ui,DevicePage,DevicePage,error_sign_in,"Please sign in first.",,active
+device.approval.error.invalid_code,ui,DevicePage,DevicePage,error_invalid_code,"Invalid code format. Expected XXXX-XXXX.",,active
+device.approval.error.no_token,ui,DevicePage,DevicePage,error_no_token,"No access token — please sign in again.",,active
+device.approval.success.already,ui,DevicePage,DevicePage,success_already,"This device was already approved.",,active
+device.approval.success.already_client,ui,DevicePage,DevicePage,success_already_client,"{{client}} was already approved.",,active
+device.approval.success.approved,ui,DevicePage,DevicePage,success_approved,"Approved. You can close this tab — your CLI will connect within a few seconds.",,active
+device.approval.success.approved_client,ui,DevicePage,DevicePage,success_approved_client,"Approved for {{client}}. You can close this tab — your CLI will connect within a few seconds.",,active
+device.approval.error.not_found,ui,DevicePage,DevicePage,error_not_found,"Code not found. Double-check the code shown by your CLI.",,active
+device.approval.error.expired,ui,DevicePage,DevicePage,error_expired,"Code expired. Run `tracker device-login` again and retry.",,active
+device.approval.error.session_expired,ui,DevicePage,DevicePage,error_session_expired,"Session expired. Sign out, sign in, and try again.",,active
+device.approval.error.server,ui,DevicePage,DevicePage,error_server,"Server error (HTTP {{status}}).",,active
+device.approval.error.server_detail,ui,DevicePage,DevicePage,error_server_detail,"Server error: {{message}}",,active
+device.approval.error.network,ui,DevicePage,DevicePage,error_network,"Network error: {{message}}",,active
+dashboard.cost_breakdown.empty,ui,CostAnalysisModal,CostAnalysisModal,empty,"No spend recorded.",,active
+dashboard.cost_breakdown.model_column,ui,CostAnalysisModal,CostAnalysisModal,model_column,"Model",,active
+dashboard.cost_breakdown.cost_column,ui,CostAnalysisModal,CostAnalysisModal,cost_column,"Cost",,active
+heatmap.3d.modal.eyebrow,ui,ActivityHeatmap,ActivityHeatmap,eyebrow,"3D Insight",,active
+heatmap.tooltip.level,ui,ActivityHeatmap,ActivityHeatmap,tooltip_level,"Level {{level}}",,active
+heatmap.tooltip.tokens,ui,ActivityHeatmap3D,ActivityHeatmap3D,tooltip_tokens,"{{day}}: {{value}} tokens",,active
+heatmap.tooltip.model_breakdown,ui,ActivityHeatmap,ActivityHeatmap,model_breakdown,"Model Breakdown",,active
+heatmap.tooltip.token_breakdown,ui,TrendMonitor,TrendMonitor,token_breakdown,"Token Breakdown",,active
+trend.monitor.empty,ui,DashboardPage,TrendMonitor,empty,"No data yet",,active
+trend.monitor.unsynced,ui,DashboardPage,TrendMonitor,unsynced,"Unsynced",,active
+wrapped.loading,ui,WrappedPage,WrappedPage,loading,"Loading…",,active
+wrapped.error,ui,WrappedPage,WrappedPage,error,"Couldn't load Wrapped: {{error}}",,active
+wrapped.empty,ui,WrappedPage,WrappedPage,empty,"No data for that year yet. Run `{{command}}` first.",,active
+wrapped.kicker,ui,WrappedPage,WrappedPage,kicker,"TokenTracker Wrapped",,active
+wrapped.total_tokens,ui,WrappedPage,WrappedPage,total_tokens,"Total tokens",,active
+wrapped.summary,ui,WrappedPage,WrappedPage,summary,"Across {{conversations}} conversations, {{days}} active days, and {{tools}} tools",,active
+wrapped.top_tools,ui,WrappedPage,WrappedPage,top_tools,"Top tools",,active
+wrapped.top_models,ui,WrappedPage,WrappedPage,top_models,"Top models",,active
+wrapped.peak_hour,ui,WrappedPage,WrappedPage,peak_hour,"Peak hour",,active
+wrapped.tokens,ui,WrappedPage,WrappedPage,tokens,"{{count}} tokens",,active
+wrapped.longest_streak,ui,WrappedPage,WrappedPage,longest_streak,"Longest streak",,active
+wrapped.days,ui,WrappedPage,WrappedPage,days,"{{count}} days",,active
+wrapped.top_days,ui,WrappedPage,WrappedPage,top_days,"Top days",,active
+wrapped.highlights,ui,WrappedPage,WrappedPage,highlights,"Highlights",,active
+wrapped.footer,ui,WrappedPage,WrappedPage,footer,"Generated from local queue.jsonl · share with `{{command}}`",,active
+wrapped.highlight.model,ui,WrappedPage,WrappedPage,highlight_model,"{{model}} powered {{percent}}% of your year.",,active
+wrapped.highlight.day,ui,WrappedPage,WrappedPage,highlight_day,"Your busiest day was {{day}} ({{tokens}} tokens).",,active
+wrapped.highlight.hour,ui,WrappedPage,WrappedPage,highlight_hour,"You hit peak flow around {{hour}}:00 UTC.",,active
+wrapped.highlight.streak,ui,WrappedPage,WrappedPage,highlight_streak,"Longest streak: {{days}} consecutive days of coding with AI.",,active
+wrapped.highlight.tools,ui,WrappedPage,WrappedPage,highlight_tools,"You used {{count}} different AI tools — that's range.",,active
+widgets.preview.today,ui,WidgetsPage,WidgetsPage,preview_today,"Today",,active
+widgets.preview.seven_days,ui,WidgetsPage,WidgetsPage,preview_seven_days,"7 days",,active
+widgets.preview.heatmap_summary,ui,WidgetsPage,WidgetsPage,preview_heatmap_summary,"tokens · {{days}} active days",,active
+widgets.preview.reset_days,ui,WidgetsPage,WidgetsPage,preview_reset_days,"in {{days}}d",,active
+widgets.preview.reset_hours_minutes,ui,WidgetsPage,WidgetsPage,preview_reset_hours_minutes,"in {{hours}}h {{minutes}}m",,active
+widgets.preview.metric,ui,WidgetsPage,WidgetsPage,preview_metric,"Metric",,active
+landing.v3.how.scene.terminal_title,landing,LandingPage,HowItWorksSection,scene_terminal_title,"Terminal",,active
+landing.v3.how.scene.prompt,landing,LandingPage,HowItWorksSection,scene_prompt,"""refactor the parser""",,active
+landing.v3.how.scene.thinking,landing,LandingPage,HowItWorksSection,scene_thinking,"thinking…",,active
+landing.v3.how.scene.editing,landing,LandingPage,HowItWorksSection,scene_editing,"editing {{path}}",,active
+landing.v3.how.scene.files_changed,landing,LandingPage,HowItWorksSection,scene_files_changed,"{{count}} files changed",,active
+landing.v3.how.scene.session_title,landing,LandingPage,HowItWorksSection,scene_session_title,"session log · last turn",,active
+landing.v3.how.scene.appended,landing,LandingPage,HowItWorksSection,scene_appended,"appended locally",,active
+landing.v3.how.scene.total_tokens,landing,LandingPage,HowItWorksSection,scene_total_tokens,"total tokens",,active

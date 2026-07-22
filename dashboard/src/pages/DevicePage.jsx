@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useInsforgeAuth } from "../contexts/InsforgeAuthContext";
+import { copy } from "../lib/copy";
 import { getOrCreateInsforgeClient } from "../lib/insforge-config";
 
 /**
@@ -46,19 +47,19 @@ export default function DevicePage() {
   async function onSubmit(event) {
     event?.preventDefault?.();
     if (!auth?.signedIn) {
-      setStatus({ kind: "error", message: "Please sign in first." });
+      setStatus({ kind: "error", message: copy("device.approval.error.sign_in") });
       return;
     }
     const code = normalizeUserCode(userCode);
     if (!/^[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}$/.test(code)) {
-      setStatus({ kind: "error", message: "Invalid code format. Expected XXXX-XXXX." });
+      setStatus({ kind: "error", message: copy("device.approval.error.invalid_code") });
       return;
     }
-    setStatus({ kind: "working", message: "Approving…" });
+    setStatus({ kind: "working", message: copy("device.approval.action.approving") });
     try {
       const token = await auth.getAccessToken?.();
       if (!token) {
-        setStatus({ kind: "error", message: "No access token — please sign in again." });
+        setStatus({ kind: "error", message: copy("device.approval.error.no_token") });
         return;
       }
       const res = await fetch(buildGrantUrl(), {
@@ -75,23 +76,32 @@ export default function DevicePage() {
           kind: "success",
           message:
             body.status === "already_approved"
-              ? `Already approved earlier${body.client_info ? " (" + body.client_info + ")" : ""}.`
-              : `Approved${body.client_info ? " for " + body.client_info : ""}. You can close this tab — your CLI will pick it up within a few seconds.`,
+              ? body.client_info
+                ? copy("device.approval.success.already_client", { client: body.client_info })
+                : copy("device.approval.success.already")
+              : body.client_info
+                ? copy("device.approval.success.approved_client", { client: body.client_info })
+                : copy("device.approval.success.approved"),
         });
       } else if (res.status === 404) {
-        setStatus({ kind: "error", message: "Code not found. Double-check what your CLI printed." });
+        setStatus({ kind: "error", message: copy("device.approval.error.not_found") });
       } else if (res.status === 410) {
-        setStatus({ kind: "error", message: "Code expired. Re-run `tracker device-login` and try again." });
+        setStatus({ kind: "error", message: copy("device.approval.error.expired") });
       } else if (res.status === 401) {
-        setStatus({ kind: "error", message: "Session expired. Sign out, sign in, and try again." });
+        setStatus({ kind: "error", message: copy("device.approval.error.session_expired") });
       } else {
         setStatus({
           kind: "error",
-          message: body?.error || `Server error (HTTP ${res.status}).`,
+          message: body?.error
+            ? copy("device.approval.error.server_detail", { message: body.error })
+            : copy("device.approval.error.server", { status: res.status }),
         });
       }
     } catch (e) {
-      setStatus({ kind: "error", message: `Network error: ${e?.message || e}` });
+      setStatus({
+        kind: "error",
+        message: copy("device.approval.error.network", { message: e?.message || e }),
+      });
     }
   }
 
@@ -99,16 +109,16 @@ export default function DevicePage() {
     <div className="min-h-screen flex items-center justify-center bg-white dark:bg-oai-gray-950 px-6 py-12">
       <div className="w-full max-w-md rounded-xl border border-oai-gray-200 dark:border-oai-gray-800 bg-white dark:bg-oai-gray-900 p-8">
         <h1 className="text-2xl font-semibold text-oai-gray-900 dark:text-white mb-2">
-          Approve your CLI
+          {copy("device.approval.title")}
         </h1>
         <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400 mb-6">
-          {"Type the code your CLI showed you. We'll link it to your account so token usage from that machine flows into your leaderboard profile."}
+          {copy("device.approval.description")}
         </p>
 
         {!auth?.signedIn ? (
           <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800 p-4 mb-4">
             <p className="text-sm text-amber-700 dark:text-amber-300">
-              Sign in first, then return to this page.
+              {copy("device.approval.sign_in_banner")}
             </p>
           </div>
         ) : null}
@@ -116,7 +126,7 @@ export default function DevicePage() {
         <form onSubmit={onSubmit} className="space-y-4">
           <label className="block">
             <span className="block text-xs font-medium uppercase tracking-wide text-oai-gray-500 dark:text-oai-gray-400 mb-1">
-              CLI code
+              {copy("device.approval.code_label")}
             </span>
             <input
               type="text"
@@ -135,7 +145,9 @@ export default function DevicePage() {
             disabled={status.kind === "working" || !auth?.signedIn}
             className="w-full rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:bg-oai-gray-300 disabled:cursor-not-allowed text-white font-medium py-3 transition-colors"
           >
-            {status.kind === "working" ? "Approving…" : "Approve"}
+            {status.kind === "working"
+              ? copy("device.approval.action.approving")
+              : copy("device.approval.action.approve")}
           </button>
         </form>
 
