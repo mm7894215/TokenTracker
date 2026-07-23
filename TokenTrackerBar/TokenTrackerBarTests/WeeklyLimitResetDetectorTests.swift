@@ -158,4 +158,24 @@ final class WeeklyLimitResetDetectorTests: XCTestCase {
         XCTAssertNil(LimitResetProviderIconCatalog.assetName(for: "unknown"))
         XCTAssertNil(LimitResetProviderIconCatalog.svgFilename(for: "unknown"))
     }
+
+    func testToastAndConfettiPreferencesAreIndependentAndDefaultOn() {
+        let suiteName = "WeeklyLimitResetDetectorTests.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            return XCTFail("Could not create isolated UserDefaults suite")
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertTrue(WeeklyLimitResetDetector.toastEnabled(defaults))
+        XCTAssertTrue(WeeklyLimitResetDetector.confettiEnabled(defaults))
+
+        defaults.set(false, forKey: WeeklyLimitResetDetector.confettiEnabledKey)
+        XCTAssertTrue(WeeklyLimitResetDetector.toastEnabled(defaults))
+        XCTAssertFalse(WeeklyLimitResetDetector.confettiEnabled(defaults))
+
+        defaults.set(false, forKey: WeeklyLimitResetDetector.toastEnabledKey)
+        defaults.set(true, forKey: WeeklyLimitResetDetector.confettiEnabledKey)
+        XCTAssertFalse(WeeklyLimitResetDetector.toastEnabled(defaults))
+        XCTAssertTrue(WeeklyLimitResetDetector.confettiEnabled(defaults))
+    }
 }

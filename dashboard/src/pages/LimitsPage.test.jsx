@@ -131,4 +131,17 @@ describe("LimitsPage", () => {
       "remaining",
     );
   });
+
+  it("opens Settings directly on the Limits Display section", () => {
+    render(
+      <MemoryRouter>
+        <LimitsPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("link", { name: "Display settings" })).toHaveAttribute(
+      "href",
+      "/settings?section=limits",
+    );
+  });
 });

@@ -1,10 +1,18 @@
 import React from "react";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsPage } from "./SettingsPage.jsx";
 
-const nativeSettingsMock = vi.hoisted(() => ({ available: true }));
+const nativeSettingsMock = vi.hoisted(() => ({
+  available: true,
+  settings: {
+    toastOnReset: true,
+    confettiOnReset: true,
+  },
+  setSetting: vi.fn(),
+}));
 
 const LABELS = {
   "settings.page.title": "Settings",
@@ -14,6 +22,12 @@ const LABELS = {
   "settings.section.account": "Account",
   "settings.section.limits": "Limits Display",
   "settings.section.labs": "Labs",
+  "settings.limits.providers": "Providers",
+  "limits.settings.display_mode_label": "Usage Display",
+  "settings.menubar.toastOnReset": "Toast on limits reset",
+  "settings.menubar.toastOnResetHint": "Show a useful reset message",
+  "settings.menubar.confettiOnReset": "Confetti on limits reset",
+  "settings.menubar.confettiOnResetHint": "Play the reset celebration effect",
 };
 
 vi.mock("../lib/copy", () => ({
@@ -30,6 +44,14 @@ vi.mock("../hooks/use-limits-display-prefs.js", () => ({
   useLimitsDisplayPrefs: () => ({
     displayMode: "used",
     setDisplayMode: vi.fn(),
+  }),
+}));
+
+vi.mock("../hooks/use-native-settings.js", () => ({
+  useNativeSettings: () => ({
+    available: nativeSettingsMock.available,
+    settings: nativeSettingsMock.settings,
+    setSetting: nativeSettingsMock.setSetting,
   }),
 }));
 
@@ -55,18 +77,51 @@ vi.mock("../components/LimitsSettingsPanel.jsx", () => ({
 }));
 
 vi.mock("../components/settings/Controls.jsx", () => ({
-  SectionCard: ({ children }) => <div>{children}</div>,
+  SectionCard: ({ title, children }) => (
+    <div data-testid="section-card" data-section-card-title={title}>
+      {children}
+    </div>
+  ),
+  SettingsRow: ({ label, control }) => (
+    <div>
+      <span>{label}</span>
+      {control}
+    </div>
+  ),
   SegmentedControl: () => <div data-testid="limits-mode" />,
+  ToggleSwitch: ({ checked, onChange, disabled, ariaLabel }) => (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={ariaLabel}
+      onClick={onChange}
+      disabled={disabled}
+    />
+  ),
 }));
+
+function renderSettings(initialPath = "/settings") {
+  return render(
+    <MemoryRouter initialEntries={[initialPath]}>
+      <SettingsPage />
+    </MemoryRouter>,
+  );
+}
 
 describe("SettingsPage category navigation", () => {
   beforeEach(() => {
     nativeSettingsMock.available = true;
+    nativeSettingsMock.settings = {
+      toastOnReset: true,
+      confettiOnReset: true,
+    };
+    nativeSettingsMock.setSetting.mockReset();
   });
 
   it("switches the visible category while keeping every section mounted", async () => {
     const user = userEvent.setup();
-    const { container } = render(<SettingsPage />);
+    const { container } = renderSettings();
 
     const appearanceButton = screen.getByRole("button", { name: "Appearance" });
     const accountButton = screen.getByRole("button", { name: "Account" });
@@ -91,10 +146,61 @@ describe("SettingsPage category navigation", () => {
 
   it("omits the native-app category when the native bridge is unavailable", () => {
     nativeSettingsMock.available = false;
-    const { container } = render(<SettingsPage />);
+    const { container } = renderSettings();
 
     expect(screen.queryByRole("button", { name: "Menu Bar App" })).not.toBeInTheDocument();
     expect(container.querySelector('[data-settings-panel="native-app"]')).toBeNull();
     expect(screen.getByRole("button", { name: "Appearance" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("keeps reset feedback settings visible but disabled without the native bridge", () => {
+    nativeSettingsMock.available = false;
+    renderSettings("/settings?section=limits");
+
+    expect(screen.getByRole("switch", { name: "Toast on limits reset" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Confetti on limits reset" })).toBeDisabled();
+  });
+
+  it("selects Limits Display from a settings deep link", () => {
+    const { container } = renderSettings("/settings?section=limits");
+
+    expect(screen.getByRole("button", { name: "Limits Display" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(container.querySelector('[data-settings-panel="limits"]')).not.toHaveAttribute("hidden");
+    expect(container.querySelector('[data-settings-panel="appearance"]')).toHaveAttribute("hidden");
+  });
+
+  it("offers independent reset toast and confetti settings in Limits Display", async () => {
+    const user = userEvent.setup();
+    renderSettings("/settings?section=limits");
+
+    const toastSwitch = screen.getByRole("switch", { name: "Toast on limits reset" });
+    const confettiSwitch = screen.getByRole("switch", { name: "Confetti on limits reset" });
+
+    expect(toastSwitch).toHaveAttribute("aria-checked", "true");
+    expect(confettiSwitch).toHaveAttribute("aria-checked", "true");
+
+    await act(async () => {
+      await user.click(toastSwitch);
+      await user.click(confettiSwitch);
+    });
+
+    expect(nativeSettingsMock.setSetting).toHaveBeenCalledWith("toastOnReset", false);
+    expect(nativeSettingsMock.setSetting).toHaveBeenCalledWith("confettiOnReset", false);
+  });
+
+  it("groups display mode and reset feedback above the provider list", () => {
+    renderSettings("/settings?section=limits");
+
+    const [settingsCard, providersCard] = screen.getAllByTestId("section-card");
+    expect(settingsCard.dataset.sectionCardTitle).toBe("Limits Display");
+    expect(within(settingsCard).getByTestId("limits-mode")).toBeInTheDocument();
+    expect(within(settingsCard).getByRole("switch", { name: "Toast on limits reset" })).toBeInTheDocument();
+    expect(within(settingsCard).getByRole("switch", { name: "Confetti on limits reset" })).toBeInTheDocument();
+
+    expect(providersCard.dataset.sectionCardTitle).toBe("Providers");
+    expect(within(providersCard).getByTestId("limits-content")).toBeInTheDocument();
   });
 });

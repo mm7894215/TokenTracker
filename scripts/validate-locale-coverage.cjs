@@ -77,6 +77,14 @@ const PRODUCT_TERMINOLOGY_GLOSSARY = [
     ],
   },
   {
+    term: "Star",
+    translatedTerm: /加星|星标|星標/u,
+    sourceIdentical: /^Star$/i,
+    keyPatterns: [
+      /^shared[.]github[.]star$/,
+    ],
+  },
+  {
     term: "Prompt",
     translatedTerm: /提示词|提示詞/u,
     sourceIdentical: /^Prompt$/i,

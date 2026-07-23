@@ -38,7 +38,12 @@ final class DesktopPetWindowController: NSObject, NSWindowDelegate {
 
     /// Panel size for the current preset — width fixed, height grows with scale so a
     /// larger sprite isn't clipped at the panel's top/bottom.
-    private var petSize: NSSize { NSSize(width: PetSizePreset.panelWidth, height: sizePreset.panelHeight) }
+    private var petSize: NSSize {
+        NSSize(
+            width: PetSizePreset.panelWidth,
+            height: sizePreset.panelHeight + uiState.bubbleHeight - PetWindowState.minimumBubbleHeight
+        )
+    }
     /// The sprite is horizontally centered in the (wider) panel; this mirrors
     /// ClawdCompanionView's floating layout — sprite = 15 * px(4) * scale — so tucking
     /// exposes the *sprite*, not the panel's transparent margin.
@@ -141,6 +146,9 @@ final class DesktopPetWindowController: NSObject, NSWindowDelegate {
                     onKeepActive: { [weak self] in self?.keepActive() },
                     onSetSize: { [weak self] preset in self?.setSize(preset) },
                     onSetCharacter: { [weak self] character in self?.setCharacter(character) },
+                    onBubbleHeightChanged: { [weak self] height in
+                        self?.applyBubbleContentHeight(height)
+                    },
                     petState: uiState
                 )
             )
@@ -216,6 +224,36 @@ final class DesktopPetWindowController: NSObject, NSWindowDelegate {
         let visibleW = panel.frame.intersection(screen.visibleFrame).width
         let allowed = visibleW >= Self.bubbleMinWidth
         if uiState.bubbleAllowed != allowed { uiState.bubbleAllowed = allowed }
+    }
+
+    /// Grow the transparent host upward to the bubble's measured SwiftUI height. That
+    /// measurement already includes the bubble's visual-effect inset. The bottom edge
+    /// stays fixed so the pet remains under the pointer; only a screen-top collision
+    /// moves the panel down.
+    private func applyBubbleContentHeight(_ measuredHeight: CGFloat) {
+        guard measuredHeight.isFinite else { return }
+        let nextHeight = max(
+            PetWindowState.minimumBubbleHeight,
+            ceil(measuredHeight)
+        )
+        guard abs(nextHeight - uiState.bubbleHeight) >= 0.5 else { return }
+
+        uiState.bubbleHeight = nextHeight
+        guard let panel else { return }
+
+        let oldFrame = panel.frame
+        var nextFrame = NSRect(
+            x: oldFrame.origin.x,
+            y: oldFrame.origin.y,
+            width: petSize.width,
+            height: petSize.height
+        )
+        if let screen = panel.screen ?? NSScreen.main {
+            let visibleFrame = screen.visibleFrame
+            let highestAllowedOrigin = max(visibleFrame.minY, visibleFrame.maxY - nextFrame.height)
+            nextFrame.origin.y = min(nextFrame.origin.y, highestAllowedOrigin)
+        }
+        panel.setFrame(nextFrame, display: true)
     }
 
     // MARK: - Drag cursor + edge tucking
@@ -676,6 +714,8 @@ private struct DesktopPetHost: View {
         content.frame(
             width: PetSizePreset.panelWidth,
             height: PetSizePreset.from(scale: petState.floatingScale).panelHeight
+                + petState.bubbleHeight
+                - PetWindowState.minimumBubbleHeight
         )
     }
 }
@@ -686,8 +726,10 @@ private struct DesktopPetHost: View {
 final class PetWindowState: ObservableObject {
     enum DragDirection { case left, right }
 
+    static let minimumBubbleHeight: CGFloat = 138
     static let alwaysAllowed = PetWindowState()
     @Published var bubbleAllowed = true
+    @Published var bubbleHeight = minimumBubbleHeight
     @Published var isWindowVisible = true
     @Published var isTucked = false
     @Published var isHovered = false

@@ -18,6 +18,8 @@ export function MenuBarSection() {
   // they sit next to the live preview. This section keeps only the system-level
   // toggles + actions that don't have a visual analogue.
   const launchAtLogin = Boolean(settings?.launchAtLogin);
+  const toastOnReset = settings?.toastOnReset !== false;
+  const confettiOnReset = settings?.confettiOnReset !== false;
   const launchAtLoginSupported = settings?.launchAtLoginSupported !== false;
   const updateStatus = settings?.updateStatus || null;
   const updateBusy = Boolean(settings?.updateBusy);
@@ -36,6 +38,28 @@ export function MenuBarSection() {
             {copy("settings.menubar.appearanceLink")}
             <ArrowUpRight className="h-3.5 w-3.5" aria-hidden />
           </Link>
+        }
+      />
+      <SettingsRow
+        label={copy("settings.menubar.toastOnReset")}
+        hint={copy("settings.menubar.toastOnResetHint")}
+        control={
+          <ToggleSwitch
+            checked={toastOnReset}
+            onChange={() => setSetting("toastOnReset", !toastOnReset)}
+            ariaLabel={copy("settings.menubar.toastOnReset")}
+          />
+        }
+      />
+      <SettingsRow
+        label={copy("settings.menubar.confettiOnReset")}
+        hint={copy("settings.menubar.confettiOnResetHint")}
+        control={
+          <ToggleSwitch
+            checked={confettiOnReset}
+            onChange={() => setSetting("confettiOnReset", !confettiOnReset)}
+            ariaLabel={copy("settings.menubar.confettiOnReset")}
+          />
         }
       />
       {launchAtLoginSupported ? (

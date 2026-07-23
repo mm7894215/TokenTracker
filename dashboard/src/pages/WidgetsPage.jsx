@@ -461,6 +461,7 @@ function MenuBarDisplayCard() {
   const iconStyle = iconStyles.includes(settings?.menuBarIconStyle)
     ? settings.menuBarIconStyle
     : "clawd";
+  const toastOnReset = settings?.toastOnReset !== false;
   const confettiOnReset = settings?.confettiOnReset !== false;
 
   return (
@@ -500,6 +501,13 @@ function MenuBarDisplayCard() {
             { value: "static", label: copy("settings.menubar.iconStyle.static") },
           ]}
           onChange={(next) => setSetting("menuBarIconStyle", next)}
+        />
+        <MenuBarToggleRow
+          label={copy("settings.menubar.toastOnReset")}
+          hint={copy("settings.menubar.toastOnResetHint")}
+          checked={toastOnReset}
+          disabled={!available}
+          onChange={() => setSetting("toastOnReset", !toastOnReset)}
         />
         <MenuBarToggleRow
           label={copy("settings.menubar.confettiOnReset")}

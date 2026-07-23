@@ -85,8 +85,7 @@ final class StatusBarController: NSObject {
 
     // MARK: - Limit-reset celebration
 
-    /// Listen for the ViewModel's reset detection and fire the firework — but
-    /// only when the user has opted in.
+    /// Listen for reset detection and present the independently enabled feedback.
     private func observeWeeklyLimitReset() {
         NotificationCenter.default.addObserver(
             forName: .weeklyLimitReset,
@@ -99,11 +98,15 @@ final class StatusBarController: NSObject {
     }
 
     private func celebrateLimitReset(event: LimitResetEvent?) {
-        guard WeeklyLimitResetDetector.confettiEnabled() else { return }
+        let showsToast = WeeklyLimitResetDetector.toastEnabled()
+        let showsConfetti = WeeklyLimitResetDetector.confettiEnabled()
+        guard showsToast || showsConfetti else { return }
         let name = event.map { LimitsSettingsStore.displayNames[$0.provider] ?? $0.provider.capitalized }
         confettiController.play(
             message: Strings.limitResetCelebration(provider: name, window: event?.windowLabel),
-            provider: event?.provider
+            provider: event?.provider,
+            showsToast: showsToast,
+            showsConfetti: showsConfetti
         )
     }
 
@@ -117,9 +120,13 @@ final class StatusBarController: NSObject {
         let providerName = LimitsSettingsStore.displayNames[provider] ?? provider.capitalized
         let delay = environment["TOKENTRACKER_DEBUG_LIMIT_RESET_DELAY"].flatMap(Double.init) ?? 2
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            let showsToast = WeeklyLimitResetDetector.toastEnabled()
+            let showsConfetti = WeeklyLimitResetDetector.confettiEnabled()
             self?.confettiController.play(
                 message: Strings.limitResetCelebration(provider: providerName, window: "Weekly"),
-                provider: provider
+                provider: provider,
+                showsToast: showsToast,
+                showsConfetti: showsConfetti
             )
         }
         #endif
@@ -890,7 +897,12 @@ final class StatusBarController: NSObject {
         iconItem.submenu = iconMenu
         menu.addItem(iconItem)
 
-        // Confetti on Reset (toggle)
+        // Limit reset feedback (independent toggles)
+        let toastItem = NSMenuItem(title: Strings.toastOnResetLabel, action: #selector(toggleResetToast), keyEquivalent: "")
+        toastItem.target = self
+        toastItem.state = WeeklyLimitResetDetector.toastEnabled() ? .on : .off
+        menu.addItem(toastItem)
+
         let confettiItem = NSMenuItem(title: Strings.confettiOnResetLabel, action: #selector(toggleConfetti), keyEquivalent: "")
         confettiItem.target = self
         confettiItem.state = WeeklyLimitResetDetector.confettiEnabled() ? .on : .off
@@ -992,6 +1004,13 @@ final class StatusBarController: NSObject {
         guard let raw = sender.representedObject as? String,
               let style = MenuBarIconStyle(rawValue: raw) else { return }
         animator?.iconStyle = style
+        NativeBridge.shared.pushSettings()
+    }
+
+    @objc private func toggleResetToast() {
+        let current = WeeklyLimitResetDetector.toastEnabled()
+        UserDefaults.standard.set(!current, forKey: WeeklyLimitResetDetector.toastEnabledKey)
+        NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
         NativeBridge.shared.pushSettings()
     }
 

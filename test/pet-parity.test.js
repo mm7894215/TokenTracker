@@ -217,6 +217,123 @@ test("Windows bubble growth preserves the selected pet size", () => {
   }
 });
 
+test("macOS floating pet grows its host for multi-row usage bubbles", () => {
+  const floatingContentStart = companionSource.indexOf(
+    "    private var floatingContent: some View {",
+  );
+  const floatingContentEnd = companionSource.indexOf(
+    "    /// The floating bubble is shown",
+    floatingContentStart,
+  );
+  assert.ok(
+    floatingContentStart >= 0 && floatingContentEnd > floatingContentStart,
+    "the macOS floating pet view must stay source-inspectable",
+  );
+  const floatingContentSource = companionSource.slice(
+    floatingContentStart,
+    floatingContentEnd,
+  );
+
+  assert.match(companionSource, /FloatingBubbleHeightPreferenceKey/);
+  assert.match(companionSource, /onBubbleHeightChanged/);
+  assert.match(
+    floatingContentSource,
+    /\.onPreferenceChange\(FloatingBubbleHeightPreferenceKey\.self\)/,
+    "the height preference must be observed by an ancestor in the floating pet hierarchy",
+  );
+  assert.match(companionSource, /minHeight: petState\.bubbleHeight/);
+  assert.match(companionSource, /maxHeight: petState\.bubbleHeight/);
+  assert.doesNotMatch(
+    companionSource,
+    /minHeight: 138, maxHeight: 138/,
+    "the floating bubble slot must not remain fixed at 138pt",
+  );
+  assert.match(macControllerSource, /private func applyBubbleContentHeight/);
+  assert.match(
+    macControllerSource,
+    /sizePreset\.panelHeight \+ uiState\.bubbleHeight - PetWindowState\.minimumBubbleHeight/,
+  );
+  assert.match(
+    macControllerSource,
+    /let highestAllowedOrigin = max\(visibleFrame\.minY, visibleFrame\.maxY - nextFrame\.height\)/,
+  );
+  assert.match(
+    macControllerSource,
+    /nextFrame\.origin\.y = min\(nextFrame\.origin\.y, highestAllowedOrigin\)/,
+  );
+  assert.match(companionSource, /floatingBubbleTopEffectInset: CGFloat = 24/);
+  assert.match(
+    companionSource,
+    /bubbleView\s*\.padding\(\.top, Self\.floatingBubbleTopEffectInset\)/,
+  );
+  assert.doesNotMatch(
+    macControllerSource,
+    /bubbleOverflowPadding/,
+    "visual-effect outsets must participate in SwiftUI measurement instead of being hidden in the host",
+  );
+  assert.match(
+    companionSource,
+    /bubbleContent\s*\.foregroundStyle\(\.primary\)/,
+  );
+  assert.match(
+    companionSource,
+    /Text\(Strings\.petCostToday\(viewModel\.todayCost\)\)[\s\S]*?\.foregroundStyle\(\.secondary\)/,
+  );
+  assert.match(
+    companionSource,
+    /Text\(display\.resetText \?\? ""\)[\s\S]*?\.foregroundStyle\(\.secondary\)/,
+  );
+  assert.doesNotMatch(
+    companionSource,
+    /foregroundStyle\(\.white\.opacity\(0\.(?:62|94)\)\)/,
+    "native glass foregrounds must remain semantic so the system can adapt contrast",
+  );
+  assert.match(
+    companionSource,
+    /\.glassEffect\(\s*\.regular,\s*in: BubbleShape\(direction: \.down\)\s*\)/,
+  );
+  assert.doesNotMatch(
+    companionSource,
+    /\.regular\.tint\(/,
+    "the native floating bubble must keep the system-provided Liquid Glass appearance",
+  );
+  assert.match(companionSource, /BubbleShape\(direction: \.down\)\s*\.fill\(\.regularMaterial\)/);
+  assert.doesNotMatch(
+    companionSource,
+    /\.environment\(\\\.colorScheme, \.dark\)|\.fill\(\.black\.opacity\(0\.58\)\)/,
+    "the pre-macOS 26 fallback must also retain the system-provided material appearance",
+  );
+  assert.doesNotMatch(
+    companionSource,
+    /PetBubbleGlassBackground|PetBubbleGlassHostView/,
+    "the glass must wrap the bubble content instead of rendering as an AppKit background sibling",
+  );
+
+  const minimumBubbleHeight = 138;
+  const measuredBubbleContentHeight = 248;
+  const topEffectInset = 24;
+  const measuredBubbleHeight = measuredBubbleContentHeight + topEffectInset;
+  const bubbleHeight = Math.max(
+    minimumBubbleHeight,
+    Math.ceil(measuredBubbleHeight),
+  );
+  const basePanelHeight = 250;
+  const expandedPanelHeight = basePanelHeight + bubbleHeight - minimumBubbleHeight;
+
+  assert.equal(bubbleHeight, 272);
+  assert.equal(expandedPanelHeight, 384);
+  assert.equal(expandedPanelHeight - basePanelHeight, bubbleHeight - minimumBubbleHeight);
+
+  const visibleFrame = { minY: 25, maxY: 900 };
+  const oldOriginY = 600;
+  const highestAllowedOrigin = Math.max(
+    visibleFrame.minY,
+    visibleFrame.maxY - expandedPanelHeight,
+  );
+  const nextOriginY = Math.min(oldOriginY, highestAllowedOrigin);
+  assert.equal(nextOriginY + expandedPanelHeight, visibleFrame.maxY);
+});
+
 test("macOS edge tuck keeps a visible handle and restores every preset", () => {
   assert.match(macControllerSource, /private static let edgePeek: CGFloat = 48/);
 
@@ -276,13 +393,15 @@ test("desktop pet tooltips stay readable and use native macOS glass when availab
   assert.doesNotMatch(petPageSource, /↻ \{limit\.resetText\}/);
   assert.match(petPageSource, /pet:limits/);
   assert.match(companionSource, /lineLimit\(layout == \.floating \? 2 : 3\)/);
-  assert.match(companionSource, /PetBubbleGlassBackground/);
-  assert.match(companionSource, /NSGlassEffectView/);
+  assert.match(companionSource, /PetBubbleSurface/);
+  assert.match(companionSource, /\.glassEffect\(/);
+  assert.doesNotMatch(companionSource, /NSGlassEffectView/);
   assert.match(companionSource, /#available\(macOS 26/);
   assert.match(companionSource, /activePetLimits/);
   assert.match(companionSource, /petLimitAtLimit/);
   assert.match(companionSource, /floatingUsageContent/);
-  assert.match(companionSource, /minHeight: 138/);
+  assert.match(companionSource, /minHeight: petState\.bubbleHeight/);
+  assert.match(macControllerSource, /minimumBubbleHeight: CGFloat = 138/);
   assert.doesNotMatch(companionSource, /Text\(display\.resetText\.map \{ "↻/);
   assert.match(companionSource, /joined\(separator: "\\n"\)/);
   assert.match(windowsPetSource, /ApplyLimits/);

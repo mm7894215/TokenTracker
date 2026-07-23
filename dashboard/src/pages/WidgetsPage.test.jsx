@@ -132,4 +132,40 @@ describe("WidgetsPage menu bar configurator", () => {
     expect(primary).toHaveTextContent(copy("menubar.metric.codex_credits"));
     expect(secondary).toHaveTextContent(copy("menubar.metric.codex_spark_7d"));
   });
+
+  it("configures limit-reset toast and confetti independently", async () => {
+    const user = userEvent.setup();
+    const bridge = installNativeBridge({
+      toastOnReset: true,
+      confettiOnReset: true,
+    });
+
+    render(<WidgetsPage />);
+    act(() => bridge.pushSettings());
+
+    const toastSwitch = await screen.findByRole("switch", {
+      name: copy("settings.menubar.toastOnReset"),
+    });
+    const confettiSwitch = screen.getByRole("switch", {
+      name: copy("settings.menubar.confettiOnReset"),
+    });
+
+    await act(async () => {
+      await user.click(toastSwitch);
+    });
+    await act(async () => {
+      await user.click(confettiSwitch);
+    });
+
+    expect(bridge.messages).toContainEqual({
+      type: "setSetting",
+      key: "toastOnReset",
+      value: false,
+    });
+    expect(bridge.messages).toContainEqual({
+      type: "setSetting",
+      key: "confettiOnReset",
+      value: false,
+    });
+  });
 });

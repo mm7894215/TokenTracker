@@ -228,6 +228,7 @@ final class NativeBridge {
             // Legacy field kept so an older bundled dashboard still renders a
             // sensible toggle state.
             "animatedIcon": MenuBarIconStyle.current() != .static,
+            "toastOnReset": WeeklyLimitResetDetector.toastEnabled(),
             "confettiOnReset": WeeklyLimitResetDetector.confettiEnabled(),
             "launchAtLogin": launchAtLoginValue,
             "launchAtLoginSupported": launchAtLoginSupported,
@@ -288,6 +289,11 @@ final class NativeBridge {
             // character, false maps to the static icon.
             if let bool = value as? Bool {
                 MenuBarIconStyle.setCurrent(bool ? .clawd : .static)
+                NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
+            }
+        case "toastOnReset":
+            if let bool = value as? Bool {
+                UserDefaults.standard.set(bool, forKey: WeeklyLimitResetDetector.toastEnabledKey)
                 NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
             }
         case "confettiOnReset":

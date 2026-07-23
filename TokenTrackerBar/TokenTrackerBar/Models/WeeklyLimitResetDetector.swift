@@ -125,9 +125,16 @@ struct WeeklyLimitResetDetector {
 
 extension WeeklyLimitResetDetector {
     static let snapshotKey = "WeeklyLimitResetSnapshot"
+    static let toastEnabledKey = "LimitsToastOnResetEnabled"
     static let confettiEnabledKey = "LimitsConfettiOnResetEnabled"
-    /// Single source of truth for the confetti opt-out default (on by default).
+    /// Reset information and its celebratory effect are separate opt-outs.
+    static let toastEnabledDefault = true
     static let confettiEnabledDefault = true
+
+    /// Whether the informative reset toast is enabled, honoring the shared default.
+    static func toastEnabled(_ defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: toastEnabledKey) as? Bool ?? toastEnabledDefault
+    }
 
     /// Whether the celebration confetti is enabled, honoring the shared default.
     static func confettiEnabled(_ defaults: UserDefaults = .standard) -> Bool {

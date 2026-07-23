@@ -181,6 +181,7 @@ enum Strings {
     static var syncingUsageData: String { t("Syncing usage data…", "正在同步使用数据…", "正在同步使用資料…", "使用データを同期中…", "사용 데이터 동기화 중…") }
     static var syncingFirstLaunchHint: String { t("First launch may take a moment", "首次启动可能需要一点时间", "首次啟動可能需要一點時間", "初回起動は少し時間がかかる場合があります", "첫 실행은 잠시 시간이 걸릴 수 있습니다") }
     static var limitsDisplayTitle: String { t("Limit Display", "限额显示", "限額顯示", "上限の表示", "한도 표시") }
+    static var toastOnResetLabel: String { t("Toast on limits reset", "额度重置时显示提示", "額度重置時顯示提示", "リセット時に通知を表示", "한도 초기화 시 알림 표시") }
     static var confettiOnResetLabel: String { t("Confetti on limits reset", "额度重置时撒花", "額度重置時撒花", "リセット時に紙吹雪", "한도 초기화 시 색종이") }
     /// Toast shown with the celebration firework. `provider` is a display name (e.g. "Claude");
     /// `window` names the specific window that rolled over (e.g. "5h", "Gemini 5h"); nil = generic.

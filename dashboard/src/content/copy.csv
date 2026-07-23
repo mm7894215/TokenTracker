@@ -378,7 +378,7 @@ nav.aside_label,shared,*,Sidebar,aside_label,"Main navigation",,active
 nav.nav_label,shared,*,Sidebar,nav_label,"Primary",,active
 limits.page.subtitle,ui,LimitsPage,LimitsPage,subtitle,"Rate limits and quota usage across your AI tools.",,active
 limits.settings.toggle_visible,ui,LimitsPage,LimitsSettingsPanel,toggle_visible,"Toggle visibility",,active
-limits.settings.display_mode_label,ui,LimitsPage,LimitsSettingsPanel,display_mode_label,"Usage",,active
+limits.settings.display_mode_label,ui,LimitsPage,LimitsSettingsPanel,display_mode_label,"Usage Display",,active
 limits.settings.display_mode_used,ui,LimitsPage,LimitsSettingsPanel,display_mode_used,"Used",,active
 limits.settings.display_mode_remaining,ui,LimitsPage,LimitsSettingsPanel,display_mode_remaining,"Remaining",,active
 limits.page.openSettings,ui,LimitsPage,LimitsPage,open_settings,"Display settings",,active
@@ -460,6 +460,7 @@ settings.page.subtitle,ui,SettingsPage,SettingsPage,subtitle,"Manage your accoun
 settings.section.appearance,ui,SettingsPage,SettingsPage,sec_appearance,"Appearance",,active
 settings.section.account,ui,SettingsPage,SettingsPage,sec_account,"Account",,active
 settings.section.limits,ui,SettingsPage,SettingsPage,sec_limits,"Limits Display",,active
+settings.limits.providers,ui,SettingsPage,SettingsPage,limits_providers,"Providers",,active
 settings.labs.qpd.label,ui,SettingsPage,LabsSection,qpd_label,"Analyze PR cost-efficiency",,active
 settings.labs.qpd.hint,ui,SettingsPage,LabsSection,qpd_hint,"Analyze average delivery costs and effective Tokens per model from merged PRs and AI-attributed commits.",,active
 settings.labs.qpd.aria,ui,SettingsPage,LabsSection,qpd_aria,"Toggle PR cost-efficiency analysis",,active
@@ -560,6 +561,8 @@ settings.menubar.iconStyle.clawd,ui,WidgetsPage,MenuBarDisplayCard,mb_icon_style
 settings.menubar.iconStyle.cat,ui,WidgetsPage,MenuBarDisplayCard,mb_icon_style_cat,"Cat",,active
 settings.menubar.iconStyle.pet,ui,WidgetsPage,MenuBarDisplayCard,mb_icon_style_pet,"My pet",,active
 settings.menubar.iconStyle.static,ui,WidgetsPage,MenuBarDisplayCard,mb_icon_style_static,"Static",,active
+settings.menubar.toastOnReset,ui,SettingsPage,SettingsPage,mb_reset_toast,"Toast on limits reset",,active
+settings.menubar.toastOnResetHint,ui,SettingsPage,SettingsPage,mb_reset_toast_hint,"Show a brief message when a usage limit resets.",,active
 settings.menubar.confettiOnReset,ui,SettingsPage,SettingsPage,mb_confetti,"Confetti on limits reset",,active
 settings.menubar.confettiOnResetHint,ui,SettingsPage,SettingsPage,mb_confetti_hint,"Set off a fireworks celebration when a usage limit resets after you were near it.",,active
 settings.menubar.appearance,ui,SettingsPage,MenuBarSection,mb_appearance,"Menu bar display & icon",,active

@@ -1,15 +1,21 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { FlaskConical, Gauge, Monitor, Palette, UserRound } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { LimitsSettingsPanel } from "../components/LimitsSettingsPanel.jsx";
 import { AccountSection } from "../components/settings/AccountSection.jsx";
 import { AppearanceSection } from "../components/settings/AppearanceSection.jsx";
 import { LabsSection } from "../components/settings/LabsSection.jsx";
-import { SectionCard, SegmentedControl } from "../components/settings/Controls.jsx";
+import {
+  SectionCard,
+  SegmentedControl,
+  SettingsRow,
+  ToggleSwitch,
+} from "../components/settings/Controls.jsx";
 import { MenuBarSection, NativeAppFooter } from "../components/settings/MenuBarSection.jsx";
 import { LIMIT_DISPLAY_MODES, useLimitsDisplayPrefs } from "../hooks/use-limits-display-prefs.js";
+import { useNativeSettings } from "../hooks/use-native-settings.js";
 import { cn } from "../lib/cn";
 import { copy } from "../lib/copy";
-import { isBridgeAvailable, isNativeApp } from "../lib/native-bridge";
 
 const SETTINGS_SECTION_IDS = {
   APPEARANCE: "appearance",
@@ -34,8 +40,31 @@ function LimitsDisplayModeControl({ prefs }) {
 
 export function SettingsPage() {
   const limitsPrefs = useLimitsDisplayPrefs();
-  const nativeSettingsAvailable = isNativeApp() && isBridgeAvailable();
-  const [activeSection, setActiveSection] = useState(SETTINGS_SECTION_IDS.APPEARANCE);
+  const {
+    available: nativeSettingsAvailable,
+    settings: nativeSettings,
+    setSetting: setNativeSetting,
+  } = useNativeSettings();
+  const toastOnReset = nativeSettings?.toastOnReset !== false;
+  const confettiOnReset = nativeSettings?.confettiOnReset !== false;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedSection = searchParams.get("section");
+  const requestedSectionAvailable =
+    Object.values(SETTINGS_SECTION_IDS).includes(requestedSection) &&
+    (requestedSection !== SETTINGS_SECTION_IDS.NATIVE_APP || nativeSettingsAvailable);
+  const activeSection = requestedSectionAvailable
+    ? requestedSection
+    : SETTINGS_SECTION_IDS.APPEARANCE;
+
+  const selectSection = (section) => {
+    const next = new URLSearchParams(searchParams);
+    if (section === SETTINGS_SECTION_IDS.APPEARANCE) {
+      next.delete("section");
+    } else {
+      next.set("section", section);
+    }
+    setSearchParams(next, { replace: true });
+  };
 
   const sections = [
     {
@@ -63,12 +92,41 @@ export function SettingsPage() {
       label: copy("settings.section.limits"),
       Icon: Gauge,
       content: (
-        <SectionCard
-          title={copy("settings.section.limits")}
-          action={<LimitsDisplayModeControl prefs={limitsPrefs} />}
-        >
-          <LimitsSettingsPanel prefs={limitsPrefs} />
-        </SectionCard>
+        <div className="space-y-4">
+          <SectionCard title={copy("settings.section.limits")}>
+            <SettingsRow
+              label={copy("limits.settings.display_mode_label")}
+              control={<LimitsDisplayModeControl prefs={limitsPrefs} />}
+            />
+            <SettingsRow
+              label={copy("settings.menubar.toastOnReset")}
+              hint={copy("settings.menubar.toastOnResetHint")}
+              control={
+                <ToggleSwitch
+                  checked={toastOnReset}
+                  disabled={!nativeSettingsAvailable}
+                  onChange={() => setNativeSetting("toastOnReset", !toastOnReset)}
+                  ariaLabel={copy("settings.menubar.toastOnReset")}
+                />
+              }
+            />
+            <SettingsRow
+              label={copy("settings.menubar.confettiOnReset")}
+              hint={copy("settings.menubar.confettiOnResetHint")}
+              control={
+                <ToggleSwitch
+                  checked={confettiOnReset}
+                  disabled={!nativeSettingsAvailable}
+                  onChange={() => setNativeSetting("confettiOnReset", !confettiOnReset)}
+                  ariaLabel={copy("settings.menubar.confettiOnReset")}
+                />
+              }
+            />
+          </SectionCard>
+          <SectionCard title={copy("settings.limits.providers")}>
+            <LimitsSettingsPanel prefs={limitsPrefs} />
+          </SectionCard>
+        </div>
       ),
     },
     {
@@ -78,12 +136,6 @@ export function SettingsPage() {
       content: <LabsSection />,
     },
   ];
-
-  useEffect(() => {
-    if (activeSection === SETTINGS_SECTION_IDS.NATIVE_APP && !nativeSettingsAvailable) {
-      setActiveSection(SETTINGS_SECTION_IDS.APPEARANCE);
-    }
-  }, [activeSection, nativeSettingsAvailable]);
 
   return (
     <div className="flex flex-1 flex-col font-oai text-oai-black antialiased dark:text-oai-white">
@@ -110,7 +162,7 @@ export function SettingsPage() {
                       type="button"
                       aria-current={active ? "page" : undefined}
                       aria-controls={`settings-panel-${id}`}
-                      onClick={() => setActiveSection(id)}
+                      onClick={() => selectSection(id)}
                       className={cn(
                         "inline-flex min-h-10 min-w-max shrink-0 items-center gap-1.5 rounded-md px-2 py-2 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-oai-brand-500 md:w-full md:min-w-0 md:gap-2 md:px-3",
                         active

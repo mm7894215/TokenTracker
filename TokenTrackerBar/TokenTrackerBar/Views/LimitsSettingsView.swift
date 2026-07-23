@@ -5,6 +5,7 @@ struct LimitsSettingsView: View {
     @ObservedObject var store: LimitsSettingsStore
     @Environment(\.colorScheme) private var colorScheme
     @State private var draggingId: String?
+    @AppStorage(WeeklyLimitResetDetector.toastEnabledKey) private var toastOnReset = WeeklyLimitResetDetector.toastEnabledDefault
     @AppStorage(WeeklyLimitResetDetector.confettiEnabledKey) private var confettiOnReset = WeeklyLimitResetDetector.confettiEnabledDefault
 
     var body: some View {
@@ -35,6 +36,19 @@ struct LimitsSettingsView: View {
             Text("")
                 .tag(0)
                 .frame(width: 0, height: 0)
+
+            HStack(spacing: 10) {
+                Text(Strings.toastOnResetLabel)
+                    .font(.system(.body, design: .default))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Toggle("", isOn: $toastOnReset)
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .labelsHidden()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
 
             HStack(spacing: 10) {
                 Text(Strings.confettiOnResetLabel)

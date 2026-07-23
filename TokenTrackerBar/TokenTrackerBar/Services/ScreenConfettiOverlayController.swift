@@ -18,9 +18,15 @@ final class ScreenConfettiOverlayController {
     private var dismissTask: Task<Void, Never>?
     private let lifetime: TimeInterval = 9.0
 
-    /// Fire the celebration. `message`, when present, is shown as a fading toast
-    /// alongside the provider's brand icon.
-    func play(message: String?, provider: String?) {
+    /// Present either part of the reset feedback independently. `message`, when
+    /// present and enabled, is shown as a fading toast alongside the provider icon.
+    func play(
+        message: String?,
+        provider: String?,
+        showsToast: Bool,
+        showsConfetti: Bool
+    ) {
+        guard showsToast || showsConfetti else { return }
         guard panels.isEmpty else { return }            // already celebrating — ignore re-entry
         let screens = NSScreen.screens
         guard !screens.isEmpty else { return }
@@ -30,7 +36,12 @@ final class ScreenConfettiOverlayController {
             // Fireworks span every display, so the context must be visible on every
             // display too. Otherwise a user working on a secondary screen sees the
             // celebration but not which provider/window reset.
-            let host = NSHostingView(rootView: FireworkOverlayView(message: message, provider: provider))
+            let host = NSHostingView(rootView: FireworkOverlayView(
+                message: message,
+                provider: provider,
+                showsToast: showsToast,
+                showsConfetti: showsConfetti
+            ))
             host.frame = CGRect(origin: .zero, size: screen.frame.size)
             host.wantsLayer = true
             host.layer?.backgroundColor = NSColor.clear.cgColor
@@ -88,6 +99,8 @@ private final class ClickThroughPanel: NSPanel {
 private struct FireworkOverlayView: View {
     let message: String?
     let provider: String?
+    let showsToast: Bool
+    let showsConfetti: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var toastShown = false
     @State private var fireworksShown = true
@@ -97,7 +110,7 @@ private struct FireworkOverlayView: View {
     var body: some View {
         ZStack(alignment: .top) {
             Color.clear
-            if fireworksShown {
+            if showsConfetti && fireworksShown {
                 VortexView(.fireworks)
                     .transition(.opacity)
                     .allowsHitTesting(false)
@@ -108,7 +121,7 @@ private struct FireworkOverlayView: View {
                     }
             }
 
-            if let message {
+            if showsToast, let message {
                 HStack(spacing: 10) {
                     LimitResetProviderIcon(provider: provider)
 

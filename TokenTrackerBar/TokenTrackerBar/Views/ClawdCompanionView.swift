@@ -23,6 +23,9 @@ struct ClawdCompanionView: View {
     var onSetSize: ((PetSizePreset) -> Void)? = nil
     /// Floating pet: switch the persistent companion identity.
     var onSetCharacter: ((PetCharacter) -> Void)? = nil
+    /// Floating pet: report the bubble's intrinsic height so its transparent host
+    /// can grow without clipping multi-row usage content.
+    var onBubbleHeightChanged: ((CGFloat) -> Void)? = nil
     /// Floating pet: gates the bubble by on-screen width (set by DesktopPetWindowController).
     @ObservedObject var petState: PetWindowState = .alwaysAllowed
     /// Appearance is shared with the floating pet so the popover changes immediately.
@@ -56,6 +59,10 @@ struct ClawdCompanionView: View {
 
     private let px: CGFloat = 4.0
     private let syncSpinPeriod: TimeInterval = 0.8
+    /// Liquid Glass and its shadow paint outside the bubble's layout bounds. Reserve
+    /// that optical area inside the measured SwiftUI hierarchy so the NSPanel grows
+    /// with the complete rendered bubble instead of clipping its top edge.
+    private static let floatingBubbleTopEffectInset: CGFloat = 24
     /// Sprite magnification for the standalone desktop-pet window, driven by the chosen
     /// size preset (only applied in the `.floating` layout).
     private var floatingScale: CGFloat { petState.floatingScale }
@@ -153,20 +160,32 @@ struct ClawdCompanionView: View {
     /// Standalone desktop pet: enlarged sprite with a hover/tap bubble floating above it.
     private var floatingContent: some View {
         VStack(spacing: 3) {
-            // The bubble sits in a fixed-size slot ABOVE the sprite and is ALWAYS in the
-            // view tree — only its opacity toggles. No `if` insert/remove means no layout
-            // churn and no transition, which is exactly what caused the jitter/flicker
-            // loop (bubble appears → relayout → sprite shifts off the cursor → hover ends
-            // → bubble removed → sprite snaps back → hover again → …). The fixed slot
-            // also keeps the sprite's position rock-steady regardless of bubble width.
+            // The bubble is ALWAYS in the view tree — only its opacity toggles. Its
+            // intrinsic height grows the transparent panel upward while the panel's
+            // bottom edge (and therefore the sprite) stays fixed, avoiding both clipping
+            // and the hover feedback loop caused by moving the sprite under the cursor.
             bubbleView
+                .padding(.top, Self.floatingBubbleTopEffectInset)
                 .id("quip-\(quipIndex)")
                 .fixedSize()
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: FloatingBubbleHeightPreferenceKey.self,
+                            value: proxy.size.height
+                        )
+                    }
+                }
                 .allowsHitTesting(false)
                 .opacity(floatingBubbleVisible ? 1 : 0)
                 .animation(.easeOut(duration: 0.18), value: floatingBubbleVisible)
                 .offset(x: petState.isSnapped ? (petState.isRightEdge ? -40 : 40) : 0)
-                .frame(maxWidth: .infinity, minHeight: 138, maxHeight: 138, alignment: .bottom)
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: petState.bubbleHeight,
+                    maxHeight: petState.bubbleHeight,
+                    alignment: .bottom
+                )
 
             characterView
                 .frame(width: 15 * px, height: 16 * px)
@@ -235,12 +254,16 @@ struct ClawdCompanionView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+        .onPreferenceChange(FloatingBubbleHeightPreferenceKey.self) { height in
+            onBubbleHeightChanged?(height)
+        }
     }
 
     /// The floating bubble is shown while hovering (precise data) or briefly after a tap —
     /// but only when enough of the pet is on-screen (not edge-tucked or dragging off).
     private var floatingBubbleVisible: Bool {
-        (hoveringCharacter || floatingBubbleShown || modelStatusText != nil) && petState.bubbleAllowed
+        (hoveringCharacter || floatingBubbleShown || modelStatusText != nil)
+            && petState.bubbleAllowed
     }
 
     // MARK: - Speech Bubble
@@ -262,25 +285,7 @@ struct ClawdCompanionView: View {
             // Floating bubble has a downward tail (6pt) carved out of the bottom; add
             // matching bottom padding so the text stays centered in the rounded body.
             .padding(.bottom, layout == .floating ? 7 : 0)
-            .background {
-                if layout == .floating {
-                    PetBubbleGlassBackground()
-                        .clipShape(BubbleShape(direction: .down))
-                        .overlay {
-                            BubbleShape(direction: .down)
-                                .stroke(.white.opacity(0.18), lineWidth: 0.6)
-                        }
-                        .shadow(color: .black.opacity(0.16), radius: 4, y: 1)
-                } else {
-                    BubbleShape(direction: .left)
-                        .fill(.regularMaterial)
-                        .overlay {
-                            BubbleShape(direction: .left)
-                                .stroke(.white.opacity(0.12), lineWidth: 0.5)
-                        }
-                        .shadow(color: .black.opacity(0.08), radius: 1.5, y: 0.5)
-                }
-            }
+            .modifier(PetBubbleSurface(isFloating: layout == .floating))
             .scaleEffect(hoveringBubble ? 1.03 : 1.0)
             .animation(.easeOut(duration: 0.12), value: hoveringBubble)
             .onHover { h in
@@ -1941,61 +1946,59 @@ private struct BubbleShape: Shape {
     }
 }
 
-/// Native Liquid Glass surface for the floating pet tooltip.
-///
-/// The app still supports macOS 12, while `NSGlassEffectView` only exists on
-/// macOS 26. Runtime lookup keeps older SDKs/build machines compiling and gives
-/// older systems the closest native fallback instead of a hand-drawn imitation.
-private struct PetBubbleGlassBackground: NSViewRepresentable {
-    func makeNSView(context: Context) -> PetBubbleGlassHostView {
-        PetBubbleGlassHostView()
-    }
+/// Applies glass to the bubble content itself. On macOS 26 the native SwiftUI
+/// modifier owns both foreground treatment and glass geometry; older systems use a
+/// shape-backed material without crossing the SwiftUI/AppKit rendering boundary.
+private struct PetBubbleSurface: ViewModifier {
+    let isFloating: Bool
 
-    func updateNSView(_ nsView: PetBubbleGlassHostView, context: Context) {}
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isFloating {
+            if #available(macOS 26, *) {
+                content
+                    .glassEffect(
+                        .regular,
+                        in: BubbleShape(direction: .down)
+                    )
+                    .overlay {
+                        BubbleShape(direction: .down)
+                            .stroke(.white.opacity(0.18), lineWidth: 0.6)
+                    }
+                    .shadow(color: .black.opacity(0.16), radius: 4, y: 1)
+            } else {
+                content
+                    .background {
+                        BubbleShape(direction: .down)
+                            .fill(.regularMaterial)
+                    }
+                    .overlay {
+                        BubbleShape(direction: .down)
+                            .stroke(.white.opacity(0.18), lineWidth: 0.6)
+                    }
+                    .shadow(color: .black.opacity(0.16), radius: 4, y: 1)
+            }
+        } else {
+            content
+                .background {
+                    BubbleShape(direction: .left)
+                        .fill(.regularMaterial)
+                        .overlay {
+                            BubbleShape(direction: .left)
+                                .stroke(.white.opacity(0.12), lineWidth: 0.5)
+                        }
+                        .shadow(color: .black.opacity(0.08), radius: 1.5, y: 0.5)
+                }
+        }
+    }
 }
 
-private final class PetBubbleGlassHostView: NSView {
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
+/// Carries the bubble's unconstrained height out of its fixed-bottom layout slot.
+private struct FloatingBubbleHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
 
-        let background = Self.makeBackgroundView()
-        background.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(background)
-        NSLayoutConstraint.activate([
-            background.leadingAnchor.constraint(equalTo: leadingAnchor),
-            background.trailingAnchor.constraint(equalTo: trailingAnchor),
-            background.topAnchor.constraint(equalTo: topAnchor),
-            background.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    private static func makeBackgroundView() -> NSView {
-        if #available(macOS 26, *),
-           let glassClass = NSClassFromString("NSGlassEffectView") as? NSView.Type {
-            let glass = glassClass.init(frame: .zero)
-            glass.alphaValue = 0.82
-            if glass.responds(to: NSSelectorFromString("setCornerRadius:")) {
-                glass.setValue(NSNumber(value: 22.0), forKey: "cornerRadius")
-            }
-            if glass.responds(to: NSSelectorFromString("setContentView:")) {
-                let content = NSView(frame: .zero)
-                content.wantsLayer = true
-                content.layer?.backgroundColor = NSColor.clear.cgColor
-                glass.setValue(content, forKey: "contentView")
-            }
-            return glass
-        }
-
-        let visualEffect = NSVisualEffectView(frame: .zero)
-        visualEffect.material = .popover
-        visualEffect.blendingMode = .withinWindow
-        visualEffect.state = .active
-        visualEffect.alphaValue = 0.82
-        return visualEffect
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 

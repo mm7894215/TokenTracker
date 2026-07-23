@@ -11,10 +11,79 @@ const overlayPath = path.join(
   "Services",
   "ScreenConfettiOverlayController.swift",
 );
+const resetDetectorPath = path.join(
+  __dirname,
+  "..",
+  "TokenTrackerBar",
+  "TokenTrackerBar",
+  "Models",
+  "WeeklyLimitResetDetector.swift",
+);
+const statusBarControllerPath = path.join(
+  __dirname,
+  "..",
+  "TokenTrackerBar",
+  "TokenTrackerBar",
+  "Services",
+  "StatusBarController.swift",
+);
+const nativeBridgePath = path.join(
+  __dirname,
+  "..",
+  "TokenTrackerBar",
+  "TokenTrackerBar",
+  "Services",
+  "NativeBridge.swift",
+);
+const limitsSettingsViewPath = path.join(
+  __dirname,
+  "..",
+  "TokenTrackerBar",
+  "TokenTrackerBar",
+  "Views",
+  "LimitsSettingsView.swift",
+);
 
 function overlaySource() {
   return fs.readFileSync(overlayPath, "utf8");
 }
+
+test("limit-reset toast and confetti use independent durable preferences", () => {
+  const detector = fs.readFileSync(resetDetectorPath, "utf8");
+  const statusBar = fs.readFileSync(statusBarControllerPath, "utf8");
+  const nativeBridge = fs.readFileSync(nativeBridgePath, "utf8");
+  const settingsView = fs.readFileSync(limitsSettingsViewPath, "utf8");
+
+  assert.match(detector, /toastEnabledKey\s*=\s*"LimitsToastOnResetEnabled"/);
+  assert.match(detector, /toastEnabledDefault\s*=\s*true/);
+  assert.match(detector, /static func toastEnabled\(/);
+  assert.match(
+    statusBar,
+    /let showsToast = WeeklyLimitResetDetector\.toastEnabled\(\)[\s\S]*let showsConfetti = WeeklyLimitResetDetector\.confettiEnabled\(\)[\s\S]*guard showsToast \|\| showsConfetti else \{ return \}/,
+  );
+  assert.match(
+    statusBar,
+    /confettiController\.play\([\s\S]*showsToast: showsToast,[\s\S]*showsConfetti: showsConfetti/,
+  );
+  assert.doesNotMatch(
+    statusBar,
+    /guard WeeklyLimitResetDetector\.confettiEnabled\(\) else \{ return \}/,
+    "Turning off confetti must not suppress the reset toast.",
+  );
+  assert.match(nativeBridge, /"toastOnReset": WeeklyLimitResetDetector\.toastEnabled\(\)/);
+  assert.match(nativeBridge, /case "toastOnReset":[\s\S]*WeeklyLimitResetDetector\.toastEnabledKey/);
+  assert.match(settingsView, /@AppStorage\(WeeklyLimitResetDetector\.toastEnabledKey\)/);
+  assert.match(settingsView, /Text\(Strings\.toastOnResetLabel\)/);
+});
+
+test("overlay can render toast and fireworks independently", () => {
+  const source = overlaySource();
+
+  assert.match(source, /func play\([\s\S]*showsToast: Bool,[\s\S]*showsConfetti: Bool/);
+  assert.match(source, /guard showsToast \|\| showsConfetti else \{ return \}/);
+  assert.match(source, /if showsConfetti && fireworksShown/);
+  assert.match(source, /if showsToast, let message/);
+});
 
 test("limit-reset toast is rendered on every fireworks screen", () => {
   const source = overlaySource();
@@ -26,7 +95,7 @@ test("limit-reset toast is rendered on every fireworks screen", () => {
   );
   assert.match(
     source,
-    /for screen in screens[\s\S]*FireworkOverlayView\(message: message, provider: provider\)/,
+    /for screen in screens[\s\S]*FireworkOverlayView\([\s\S]*message: message,[\s\S]*provider: provider,[\s\S]*showsToast: showsToast,[\s\S]*showsConfetti: showsConfetti/,
     "Every screen panel should receive the same reset message and provider icon.",
   );
 });
