@@ -12,6 +12,10 @@ process.env.USERPROFILE = sandboxHome;
 process.env.TOKENTRACKER_GROK_HOME = path.join(sandboxHome, ".grok");
 delete process.env.GROK_HOME;
 delete process.env.TOKENTRACKER_ANTIGRAVITY_HOME;
+delete process.env.CODEX_HOME;
+delete process.env.ZCODE_HOME;
+delete process.env.TOKENTRACKER_OPENCLAW_HOME;
+delete process.env.TOKENTRACKER_OPENCLAW_WORKSPACE;
 
 const skills = require("../src/lib/skills-manager");
 
@@ -58,6 +62,73 @@ describe("listInstalledSkills lowercase skill.md regression", () => {
     // skill exists, "off" elsewhere.
     assert.equal(found.targetStates.claude, "synced");
     assert.equal(found.targetStates.codex, "off");
+  });
+});
+
+describe("read-only plugin skill inventory", () => {
+  it("excludes Codex built-in skills from the inventory", () => {
+    resetRegistry();
+    writeSkillDir(
+      path.join(sandboxHome, ".codex", "skills", ".system", "skill-creator"),
+      "SKILL.md",
+      "---\nname: Skill Creator\ndescription: Built in\n---\n",
+    );
+
+    const entry = skills.listInstalledSkills().find((s) => s.name === "Skill Creator");
+    assert.equal(entry, undefined, "built-in skills should not clutter the user inventory");
+  });
+
+  it("counts Codex, Claude, and ZCode plugin-cache skills without exposing them as manageable", () => {
+    resetRegistry();
+    const fixtures = [
+      [".codex/plugins/cache/openai-bundled/browser/1.2.3/skills/browser-control", "Codex Browser"],
+      [".claude/plugins/cache/acme/tools/2.0.0/skills/reviewer", "Claude Reviewer"],
+      [".zcode/cli/plugins/cache/zcode-official/guide/0.1.0/skills/diagnostics", "ZCode Diagnostics"],
+    ];
+    for (const [relative, name] of fixtures) {
+      writeSkillDir(path.join(sandboxHome, relative), "SKILL.md", `---\nname: ${name}\n---\n`);
+    }
+
+    const installed = skills.listInstalledSkills();
+    for (const [name, target] of [
+      ["Codex Browser", "codex"],
+      ["Claude Reviewer", "claude"],
+      ["ZCode Diagnostics", "zcode"],
+    ]) {
+      const entry = installed.find((s) => s.name === name);
+      assert.ok(entry, `${name} should be counted`);
+      assert.equal(entry.readOnly, true);
+      assert.equal(entry.scope, "plugin");
+      assert.deepEqual(entry.targets, [target]);
+    }
+
+    const zcode = skills.targetList().find((target) => target.id === "zcode");
+    assert.ok(zcode, "ZCode should be available as an inventory filter");
+    assert.equal(zcode.manageable, false);
+    assert.equal(zcode.path, null);
+  });
+
+  it("scans only the active OpenClaw workspace skills directory", () => {
+    resetRegistry();
+    const openclawHome = path.join(sandboxHome, ".openclaw");
+    const activeWorkspace = path.join(openclawHome, "active-workspace");
+    fs.mkdirSync(openclawHome, { recursive: true });
+    fs.writeFileSync(
+      path.join(openclawHome, "openclaw.json"),
+      JSON.stringify({ agents: { defaults: { workspace: activeWorkspace } } }),
+    );
+    writeSkillDir(path.join(activeWorkspace, "skills", "active-skill"), "SKILL.md", "---\nname: Active Skill\n---\n");
+    writeSkillDir(
+      path.join(openclawHome, "workspace", "backup", "Other-Mac", "skills", "remote-snapshot"),
+      "SKILL.md",
+      "---\nname: Remote Snapshot\n---\n",
+    );
+
+    const installed = skills.listInstalledSkills();
+    const active = installed.find((s) => s.name === "Active Skill");
+    assert.ok(active);
+    assert.deepEqual(active.targets, ["openclaw"]);
+    assert.equal(installed.some((s) => s.name === "Remote Snapshot"), false);
   });
 });
 

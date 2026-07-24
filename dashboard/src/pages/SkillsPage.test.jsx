@@ -4,12 +4,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { copy } from "../lib/copy";
 import {
   addSkillRepo,
+  getAccountSkillInventories,
   deleteLocalSkill,
   discoverSkills,
   getInstalledSkills,
   getSkillRepos,
   importLocalSkill,
   installSkill,
+  publishSkillInventory,
   removeSkillRepo,
   restoreSkill,
   searchSkills,
@@ -20,12 +22,14 @@ import { SkillsPage } from "./SkillsPage.jsx";
 
 vi.mock("../lib/skills-api", () => ({
   addSkillRepo: vi.fn(),
+  getAccountSkillInventories: vi.fn(),
   deleteLocalSkill: vi.fn(),
   discoverSkills: vi.fn(),
   getInstalledSkills: vi.fn(),
   getSkillRepos: vi.fn(),
   importLocalSkill: vi.fn(),
   installSkill: vi.fn(),
+  publishSkillInventory: vi.fn(),
   removeSkillRepo: vi.fn(),
   restoreSkill: vi.fn(),
   searchSkills: vi.fn(),
@@ -63,6 +67,8 @@ beforeEach(() => {
   vi.mocked(discoverSkills).mockResolvedValue({ skills: [] });
   vi.mocked(searchSkills).mockResolvedValue({ skills: [] });
   vi.mocked(installSkill).mockResolvedValue({ ok: true });
+  vi.mocked(getAccountSkillInventories).mockResolvedValue({ devices: [] });
+  vi.mocked(publishSkillInventory).mockResolvedValue({ ok: true });
   vi.mocked(uninstallSkill).mockResolvedValue({ ok: true });
   vi.mocked(restoreSkill).mockResolvedValue({ ok: true });
   vi.mocked(setSkillTargets).mockResolvedValue({ ok: true });
@@ -128,6 +134,68 @@ describe("SkillsPage", () => {
       expect(screen.getByText("Beta Skill")).toBeInTheDocument();
       expect(searchInput).toHaveValue("");
     });
+  });
+
+  it("shows inventory-only skills as read-only and excludes them from destructive actions", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getInstalledSkills).mockResolvedValue({
+      targets: [
+        { id: "codex", label: "Codex", manageable: true },
+        { id: "zcode", label: "ZCode", manageable: false },
+      ],
+      skills: [{
+        id: "inventory:zcode:plugin:guide:diagnostics",
+        key: "inventory:zcode:plugin:guide:diagnostics",
+        name: "ZCode Diagnostics",
+        directory: "diagnostics",
+        targets: ["zcode"],
+        targetStates: { zcode: "synced" },
+        managed: false,
+        readOnly: true,
+        inventoryOnly: true,
+        scope: "plugin",
+        sourceName: "zcode-official/guide",
+      }],
+    });
+
+    render(<SkillsPage />);
+
+    expect(await screen.findByText("ZCode Diagnostics")).toBeInTheDocument();
+    expect(screen.getByText(copy("skills.inventory.plugin"))).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", {
+      name: copy("skills.select.row_aria", { name: "ZCode Diagnostics" }),
+    })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", {
+      name: copy("skills.row.open_details", { name: "ZCode Diagnostics" }),
+    }));
+    expect(await screen.findByText(copy("skills.inventory.read_only_managed"))).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: copy("skills.detail.remove_button") })).not.toBeInTheDocument();
+  });
+
+  it("keeps unmanaged skill selection isolated by directory", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getInstalledSkills).mockResolvedValue({
+      targets: [{ id: "claude", label: "Claude" }],
+      skills: [
+        { name: "Local Alpha", directory: "local-alpha", targets: ["claude"], managed: false },
+        { name: "Local Beta", directory: "local-beta", targets: ["claude"], managed: false },
+      ],
+    });
+
+    render(<SkillsPage />);
+
+    const alpha = await screen.findByRole("checkbox", {
+      name: copy("skills.select.row_aria", { name: "Local Alpha" }),
+    });
+    const beta = screen.getByRole("checkbox", {
+      name: copy("skills.select.row_aria", { name: "Local Beta" }),
+    });
+    await user.click(alpha);
+
+    expect(alpha).toBeChecked();
+    expect(beta).not.toBeChecked();
+    expect(screen.getByText(copy("skills.select.count", { count: 1 }))).toBeInTheDocument();
   });
 
   it("does not mark an unrelated browse skill installed when only the nested local leaf matches", async () => {

@@ -14,28 +14,63 @@ const DEFAULT_REPOS = [
 
 const TARGETS = {
   claude: { id: "claude", label: "Claude", dir: () => path.join(os.homedir(), ".claude", "skills") },
-  codex: { id: "codex", label: "Codex", dir: () => path.join(os.homedir(), ".codex", "skills") },
+  codex: { id: "codex", label: "Codex", dir: () => path.join(resolveCodexHome(), "skills") },
   grok: { id: "grok", label: "Grok", dir: () => path.join(resolveGrokHome(process.env), "skills") },
   antigravity: { id: "antigravity", label: "Antigravity", dirs: () => resolveAntigravitySkillDirs(process.env) },
   gemini: { id: "gemini", label: "Gemini", dir: () => path.join(os.homedir(), ".gemini", "skills") },
   opencode: { id: "opencode", label: "OpenCode", dir: () => path.join(os.homedir(), ".config", "opencode", "skills") },
+  openclaw: { id: "openclaw", label: "OpenClaw", dir: resolveOpenClawSkillsDir },
   hermes: { id: "hermes", label: "Hermes", dir: () => path.join(os.homedir(), ".hermes", "skills") },
+  // ZCode currently exposes skills through its plugin cache rather than a
+  // documented user-writable skills directory. Surface it in the inventory
+  // and filters, but never offer sync/delete operations against the cache.
+  zcode: { id: "zcode", label: "ZCode", manageable: false },
   agents: { id: "agents", label: "Agents", visible: false, dir: () => path.join(os.homedir(), ".agents", "skills") },
 };
+
+function resolveCodexHome() {
+  return String(process.env.CODEX_HOME || "").trim() || path.join(os.homedir(), ".codex");
+}
+
+function resolveZcodeHome() {
+  return String(process.env.ZCODE_HOME || "").trim() || path.join(os.homedir(), ".zcode");
+}
+
+function resolveOpenClawHome() {
+  return String(process.env.TOKENTRACKER_OPENCLAW_HOME || "").trim() || path.join(os.homedir(), ".openclaw");
+}
+
+// OpenClaw can point at an arbitrary active workspace. Only scan that one
+// explicit workspace; recursively scanning ~/.openclaw would incorrectly
+// import backup/config snapshots belonging to other devices.
+function resolveOpenClawSkillsDir() {
+  const home = resolveOpenClawHome();
+  const override = String(process.env.TOKENTRACKER_OPENCLAW_WORKSPACE || "").trim();
+  let workspace = override;
+  if (!workspace) {
+    const config = readJson(path.join(home, "openclaw.json"), null);
+    workspace = String(config?.agents?.defaults?.workspace || "").trim();
+  }
+  if (!workspace) workspace = path.join(home, "workspace");
+  if (!path.isAbsolute(workspace)) workspace = path.resolve(home, workspace);
+  return path.join(workspace, "skills");
+}
 
 // Dual contract: a target exposes either dir() → string (single path) or
 // dirs() → string[] (parallel-write to multiple paths, e.g. Antigravity which
 // has separate user-skills dirs for the main app and the IDE). Consumers must
 // route through these helpers so the single-path targets stay zero-overhead.
 function targetDirs(target) {
+  if (!target || target.manageable === false) return [];
   if (typeof target.dirs === "function") return target.dirs();
-  return [target.dir()];
+  if (typeof target.dir === "function") return [target.dir()];
+  return [];
 }
 
 // Used for surfacing one path in UI/local-api responses. For multi-dir targets
 // this is the canonical "first" entry by convention (main app before IDE).
 function targetPrimaryDir(target) {
-  return targetDirs(target)[0];
+  return targetDirs(target)[0] || null;
 }
 
 const FETCH_TIMEOUT_MS = 20_000;
@@ -203,6 +238,7 @@ function targetList() {
       id: target.id,
       label: target.label,
       path: targetPrimaryDir(target),
+      manageable: target.manageable !== false,
     }));
 }
 
@@ -267,7 +303,7 @@ function findSkillMarker(dir) {
 
 const MAX_LOCAL_SKILL_SCAN_DEPTH = 3;
 
-function scanSkillDirectories(rootDir) {
+function scanSkillDirectories(rootDir, { maxDepth = MAX_LOCAL_SKILL_SCAN_DEPTH } = {}) {
   const found = [];
   const walk = (dir, relDir = "", depth = 0) => {
     let entries = [];
@@ -288,11 +324,130 @@ function scanSkillDirectories(rootDir) {
       }
       // Direct symlinked skills are accepted above, but symlinked group folders
       // are not traversed so the scan stays within the target skills tree.
-      if (entry.isDirectory() && depth + 1 < MAX_LOCAL_SKILL_SCAN_DEPTH) walk(full, rel, depth + 1);
+      if (entry.isDirectory() && depth + 1 < maxDepth) walk(full, rel, depth + 1);
     }
   };
   walk(rootDir);
   return found;
+}
+
+const INVENTORY_PLUGIN_SCAN_DEPTH = 6;
+
+function completeTargetStates(activeTargetId) {
+  return Object.fromEntries(
+    Object.keys(TARGETS).map((id) => [id, id === activeTargetId ? "synced" : "off"]),
+  );
+}
+
+function inventorySkillFromMarker({
+  marker,
+  directory,
+  id,
+  targetId,
+  scope,
+  sourceName = null,
+}) {
+  try {
+    const metadata = readSkillMetadata(
+      fs.readFileSync(marker, "utf8"),
+      installNameFromDirectory(directory) || directory,
+    );
+    return {
+      id,
+      key: id,
+      name: metadata.name,
+      description: metadata.description,
+      directory,
+      readmeUrl: null,
+      repoOwner: null,
+      repoName: null,
+      repoBranch: null,
+      installedAt: null,
+      managed: false,
+      readOnly: true,
+      inventoryOnly: true,
+      scope,
+      sourceName,
+      targets: [targetId],
+      targetStates: completeTargetStates(targetId),
+    };
+  } catch (_e) {
+    return null;
+  }
+}
+
+// Plugin caches use <publisher>/<plugin>/<version>/skills/<skill>/SKILL.md.
+// Walk only far enough to find a directory literally named "skills", then use
+// the bounded skill scanner below it. We never traverse node_modules, hidden
+// metadata directories, or symlinked group directories.
+function scanPluginInventoryRoot({ root, targetId }) {
+  const found = [];
+  const walk = (dir, depth = 0) => {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (_e) {
+      return;
+    }
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      if (!entry.name || entry.name.startsWith(".") || entry.name === "node_modules") continue;
+      const full = path.join(dir, entry.name);
+      if (entry.name.toLowerCase() === "skills") {
+        const container = path.relative(root, full).replace(/\\/g, "/");
+        const beforeSkills = container.split("/").filter(Boolean).slice(0, -1);
+        // Drop the cache version from the identity so installing a newer plugin
+        // version updates one inventory row instead of creating a duplicate.
+        const packageParts = beforeSkills.length > 1 ? beforeSkills.slice(0, -1) : beforeSkills;
+        const sourceName = packageParts.join("/") || beforeSkills.join("/") || null;
+        for (const directory of scanSkillDirectories(full, { maxDepth: 5 })) {
+          const marker = findSkillMarker(path.join(full, directory));
+          if (!marker) continue;
+          const sourceKey = sourceName || "plugin";
+          const id = `inventory:${targetId}:plugin:${sourceKey}:${directory}`;
+          const skill = inventorySkillFromMarker({
+            marker,
+            directory,
+            id,
+            targetId,
+            scope: "plugin",
+            sourceName,
+          });
+          if (skill) found.push(skill);
+        }
+        continue;
+      }
+      if (depth + 1 < INVENTORY_PLUGIN_SCAN_DEPTH) walk(full, depth + 1);
+    }
+  };
+  walk(root);
+  return found;
+}
+
+function listInventorySkills() {
+  const sources = [
+    {
+      root: path.join(resolveCodexHome(), "plugins", "cache"),
+      targetId: "codex",
+    },
+    {
+      root: path.join(os.homedir(), ".claude", "plugins", "cache"),
+      targetId: "claude",
+    },
+    {
+      root: path.join(resolveZcodeHome(), "cli", "plugins", "cache"),
+      targetId: "zcode",
+    },
+  ];
+  const byId = new Map();
+  for (const source of sources) {
+    const skills = scanPluginInventoryRoot(source);
+    // Later (normally newer, lexically sorted cache version) copies replace an
+    // older version with the same stable plugin+skill identity.
+    for (const skill of skills) byId.set(skill.id.toLowerCase(), skill);
+  }
+  return Array.from(byId.values());
 }
 
 const HASH_IGNORE = new Set([".git", ".DS_Store", "Thumbs.db", ".gitignore"]);
@@ -625,7 +780,7 @@ function removeEmptyAncestors(startDir, stopDir) {
 
 function syncSkillToTarget(directory, targetId) {
   const target = TARGETS[targetId];
-  if (!target) throw new Error(`Unsupported target: ${targetId}`);
+  if (!target || target.manageable === false) throw new Error(`Unsupported target: ${targetId}`);
   const source = managedSkillPath(directory);
   if (!fs.existsSync(source)) throw new Error(`Managed skill not found: ${directory}`);
   for (const baseDir of targetDirs(target)) {
@@ -738,7 +893,11 @@ function listInstalledSkills() {
     }
   }
 
-  return [...managed, ...unmanaged.values()].sort((a, b) => a.name.localeCompare(b.name));
+  return [...managed, ...unmanaged.values(), ...listInventorySkills()].sort((a, b) => {
+    const byName = a.name.localeCompare(b.name);
+    if (byName !== 0) return byName;
+    return String(a.id || a.key || "").localeCompare(String(b.id || b.key || ""));
+  });
 }
 
 async function installSkill(skillInput, targetIds = ["claude", "codex"]) {

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Checkbox } from "@base-ui/react/checkbox";
-import { ArrowUpCircle, Check, ExternalLink, Info, Loader2, Trash2, X } from "lucide-react";
+import { ArrowUpCircle, Check, ExternalLink, Info, Loader2, MonitorSmartphone, Trash2, X } from "lucide-react";
 import { ProviderIcon } from "../ui/dashboard/components/ProviderIcon.jsx";
 import { copy } from "../lib/copy";
 import { cn } from "../lib/cn";
@@ -121,10 +121,10 @@ function SkillDetailPanelInner({
       onClose?.();
     };
     document.addEventListener("keydown", onKeyDown);
-    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("pointerdown", onPointerDown);
     return () => {
       document.removeEventListener("keydown", onKeyDown);
-      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("pointerdown", onPointerDown);
     };
   }, [onClose]);
 
@@ -134,6 +134,10 @@ function SkillDetailPanelInner({
     ? `https://github.com/${skill.repoOwner}/${skill.repoName}`
     : null;
   const activeTargetIds = new Set(skill.targets || []);
+  const readOnly = Boolean(skill.readOnly || skill.remote);
+  const remote = Boolean(skill.remote);
+  const deviceSources = Array.isArray(skill.deviceSources) ? skill.deviceSources : [];
+  const showUsage = !remote && (!readOnly || activeTargetIds.has("claude"));
   const removing = busyKey === removeBusyKey(skill);
   const lastUsed = relativeLastUsed(usage?.lastUsedAt);
   const hasUsage = Boolean(usage && usage.invocations > 0);
@@ -240,11 +244,39 @@ function SkillDetailPanelInner({
               {skill.description}
             </p>
           ) : null}
+          {readOnly ? (
+            <div className="mt-4 rounded-xl bg-oai-gray-50 px-3 py-2.5 text-xs leading-5 text-oai-gray-600 ring-1 ring-oai-gray-200 dark:bg-oai-gray-900/60 dark:text-oai-gray-300 dark:ring-oai-gray-800">
+              {copy(remote ? "skills.inventory.read_only_remote" : "skills.inventory.read_only_managed")}
+            </div>
+          ) : null}
+          {skill.sourceName ? (
+            <div className="mt-3 text-xs text-oai-gray-500 dark:text-oai-gray-400">
+              {copy("skills.inventory.source", { source: skill.sourceName })}
+            </div>
+          ) : null}
+          {deviceSources.length ? (
+            <section className="mt-5">
+              <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-oai-gray-500 dark:text-oai-gray-400">
+                {copy("skills.inventory.devices_title")}
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                {deviceSources.map((device) => (
+                  <span
+                    key={device.id}
+                    className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-oai-gray-100 px-2.5 py-1 text-xs text-oai-gray-700 ring-1 ring-oai-gray-200 dark:bg-oai-gray-800 dark:text-oai-gray-200 dark:ring-oai-gray-700"
+                  >
+                    <MonitorSmartphone className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                    <span className="max-w-52 truncate">{device.name}</span>
+                  </span>
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           {/* Activity — properties list (NOT a metrics dashboard). Surfaced near
               the top because "do I use this / what does it cost" is the keep-or-cut
               decision and the angle only a token tracker can show. */}
-          <section className="mt-6">
+          {showUsage ? <section className="mt-6">
             <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-oai-gray-500 dark:text-oai-gray-400">
               {copy("skills.usage.section_title")}
             </h3>
@@ -282,9 +314,9 @@ function SkillDetailPanelInner({
                 {copy("skills.usage.unused")}
               </p>
             ) : null}
-          </section>
+          </section> : null}
 
-          <section className="mt-6">
+          {!readOnly ? <section className="mt-6">
             <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-oai-gray-500 dark:text-oai-gray-400">
               {copy("skills.detail.sync_section_title")}
             </h3>
@@ -292,9 +324,9 @@ function SkillDetailPanelInner({
                 keeps the hover highlight padded without indenting the checkbox).
                 No outer ring box — that was a nested card and pushed the column in. */}
             <div>
-              {(targets || []).map((target) => {
+              {(targets || []).filter((target) => target.manageable !== false).map((target) => {
                 const checked = activeTargetIds.has(target.id);
-                const busy = busyKey === targetBusyKey(skill.id, target.id);
+                const busy = busyKey === targetBusyKey(skill.id || skill.directory, target.id);
                 const rowId = `skill-detail-sync-${skill.id || skill.directory}-${target.id}`;
                 return (
                   <label
@@ -333,11 +365,11 @@ function SkillDetailPanelInner({
                 );
               })}
             </div>
-          </section>
+          </section> : null}
         </div>
 
         {/* Footer — destructive remove */}
-        <footer className="border-t border-white/40 bg-white/30 px-5 py-4 dark:border-white/10 dark:bg-white/[0.02]">
+        {!readOnly ? <footer className="border-t border-white/40 bg-white/30 px-5 py-4 dark:border-white/10 dark:bg-white/[0.02]">
           <button
             type="button"
             onClick={() => onRemove?.(skill)}
@@ -354,7 +386,7 @@ function SkillDetailPanelInner({
           <p className="mt-2 text-center text-[11px] text-oai-gray-500 dark:text-oai-gray-400">
             {copy("skills.detail.remove_confirm_hint")}
           </p>
-        </footer>
+        </footer> : null}
       </motion.aside>
     </>
   );

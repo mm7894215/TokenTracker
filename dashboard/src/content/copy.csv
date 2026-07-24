@@ -1138,6 +1138,13 @@ skills.usage.months_ago,ui,SkillsPage,SkillDetailPanel,usage_months_ago,"{{month
 skills.usage.unknown,ui,SkillsPage,SkillDetailPanel,usage_unknown,"Unknown",,active
 skills.usage.unused,ui,SkillsPage,SkillDetailPanel,usage_unused,"Not invoked yet. Possible dead weight if you never use it.",,active
 skills.usage.disclaimer,ui,SkillsPage,SkillDetailPanel,usage_disclaimer,"Counts from Claude transcripts. Cost is the approximate spend of turns that invoked this skill.",,active
+skills.inventory.plugin,ui,SkillsPage,InstalledSkillRow,inventory_plugin,"Plugin",,active
+skills.inventory.remote,ui,SkillsPage,InstalledSkillRow,inventory_remote,"Other device",,active
+skills.inventory.on_devices,ui,SkillsPage,InstalledSkillRow,inventory_on_devices,"Also on {{devices}}",,active
+skills.inventory.read_only_remote,ui,SkillsPage,SkillDetailPanel,inventory_read_only_remote,"This skill is installed on another device and is shown here as read-only.",,active
+skills.inventory.read_only_managed,ui,SkillsPage,SkillDetailPanel,inventory_read_only_managed,"This plugin skill is managed by its tool and cannot be changed or removed from Token Tracker.",,active
+skills.inventory.source,ui,SkillsPage,SkillDetailPanel,inventory_source,"Source: {{source}}",,active
+skills.inventory.devices_title,ui,SkillsPage,SkillDetailPanel,inventory_devices_title,"Installed on other devices",,active
 dashboard.device_filter.all,dashboard,DashboardPage,UsageOverview,option_all,"All devices",,active
 dashboard.device_filter.aria,dashboard,DashboardPage,UsageOverview,select_aria,"Filter by device",,active
 dashboard.device_card.title,dashboard,DashboardPage,DeviceUsageCard,title,"By device",,active

@@ -1205,7 +1205,11 @@ function localDataApiPlugin() {
           url.pathname === "/functions/tokentracker-session-insights"
           || url.pathname === "/functions/tokentracker-context-health"
           || url.pathname === "/functions/tokentracker-outcomes";
-        if (isRepoPetApi || isRepoProjectUsageApi || isRepoSessionAnalyticsApi) {
+        // Skills inventory evolves with both the dashboard and skills-manager.
+        // Serve the checkout implementation so a stale packaged desktop app (or
+        // Windows DoSvc occupying :7680) cannot hide newly supported tool roots.
+        const isRepoSkillsApi = url.pathname === "/functions/tokentracker-skills";
+        if (isRepoPetApi || isRepoProjectUsageApi || isRepoSessionAnalyticsApi || isRepoSkillsApi) {
           Promise.resolve(handleRepoLocalApi(req, res, url))
             .then((handled) => { if (!handled) next(); })
             .catch(next);
