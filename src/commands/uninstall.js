@@ -2,7 +2,12 @@ const os = require("node:os");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 
-const { restoreCodexNotify, restoreEveryCodeNotify } = require("../lib/codex-config");
+const {
+  restoreCodexNotify,
+  restoreEveryCodeNotify,
+  buildCodexNotifyCmd,
+  buildEveryCodeNotifyCmd,
+} = require("../lib/codex-config");
 const {
   removeClaudeHook,
   removeClaudeUsageHooks,
@@ -40,8 +45,8 @@ async function cmdUninstall(argv) {
   const notifyPath = path.join(binDir, "notify.cjs");
   const notifyOriginalPath = path.join(trackerDir, "codex_notify_original.json");
   const codeNotifyOriginalPath = path.join(trackerDir, "code_notify_original.json");
-  const codexNotifyCmd = ["/usr/bin/env", "node", notifyPath];
-  const codeNotifyCmd = ["/usr/bin/env", "node", notifyPath, "--source=every-code"];
+  const codexNotifyCmd = buildCodexNotifyCmd(notifyPath);
+  const codeNotifyCmd = buildEveryCodeNotifyCmd(notifyPath);
   const claudeHookCommand = buildClaudeHookCommand(notifyPath);
   const codebuddyHookCommand = buildHookCommand(notifyPath, "codebuddy");
   const workbuddyHookCommand = buildHookCommand(notifyPath, "workbuddy");

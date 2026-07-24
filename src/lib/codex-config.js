@@ -3,6 +3,22 @@ const path = require("node:path");
 
 const { ensureDir, readJson, writeJson } = require("./fs");
 
+// Build the notify command Codex/Every Code exec on turn end. `/usr/bin/env` is
+// not executable on native Windows, so the wrapper never launches notify.cjs
+// (issue #361). On Windows, invoke the running Node executable directly.
+function buildCodexNotifyCmd(
+  notifyPath,
+  { platform = process.platform, execPath = process.execPath } = {},
+) {
+  return platform === "win32"
+    ? [execPath, notifyPath]
+    : ["/usr/bin/env", "node", notifyPath];
+}
+
+function buildEveryCodeNotifyCmd(notifyPath, options) {
+  return [...buildCodexNotifyCmd(notifyPath, options), "--source=every-code"];
+}
+
 async function upsertNotify({
   configPath,
   notifyCmd,
@@ -479,6 +495,8 @@ function arraysEqual(a, b) {
 }
 
 module.exports = {
+  buildCodexNotifyCmd,
+  buildEveryCodeNotifyCmd,
   upsertNotify,
   restoreNotify,
   loadNotifyOriginal,

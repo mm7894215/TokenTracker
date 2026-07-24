@@ -6,7 +6,7 @@ const pkg = require("../../package.json");
 
 const { readJson } = require("../lib/fs");
 const { readCursorStateSummary } = require("../lib/cursor-store");
-const { readCodexNotify, readEveryCodeNotify } = require("../lib/codex-config");
+const { readCodexNotify, readEveryCodeNotify, buildCodexNotifyCmd } = require("../lib/codex-config");
 const {
   isClaudeHookConfigured,
   areClaudeUsageHooksConfigured,
@@ -128,7 +128,7 @@ async function cmdStatus(argv = []) {
     env: process.env,
   });
   const notifyPath = path.join(binDir, "notify.cjs");
-  const codexNotifyCmd = ["/usr/bin/env", "node", notifyPath];
+  const codexNotifyCmd = buildCodexNotifyCmd(notifyPath);
   const claudeHookCommand = buildClaudeHookCommand(notifyPath);
   const codebuddyHookCommand = buildHookCommand(notifyPath, "codebuddy");
   const workbuddyHookCommand = buildHookCommand(notifyPath, "workbuddy");

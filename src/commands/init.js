@@ -18,6 +18,8 @@ const {
   upsertEveryCodeNotify,
   readCodexNotify,
   readEveryCodeNotify,
+  buildCodexNotifyCmd,
+  buildEveryCodeNotifyCmd,
 } = require("../lib/codex-config");
 const {
   upsertClaudeHook,
@@ -499,8 +501,8 @@ function buildIntegrationTargets({ home, trackerDir, notifyPath }) {
   const codeConfigPath = path.join(codeHome, "config.toml");
   const notifyOriginalPath = path.join(trackerDir, "codex_notify_original.json");
   const codeNotifyOriginalPath = path.join(trackerDir, "code_notify_original.json");
-  const notifyCmd = ["/usr/bin/env", "node", notifyPath];
-  const codeNotifyCmd = ["/usr/bin/env", "node", notifyPath, "--source=every-code"];
+  const notifyCmd = buildCodexNotifyCmd(notifyPath);
+  const codeNotifyCmd = buildEveryCodeNotifyCmd(notifyPath);
   const claudeDir = path.join(home, ".claude");
   const claudeSettingsPath = path.join(claudeDir, "settings.json");
   const claudeHookCommand = buildClaudeHookCommand(notifyPath);
