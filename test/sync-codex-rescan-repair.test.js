@@ -1218,3 +1218,489 @@ describe("repairCodexForkReplayInflation (#169 follow-up) — fork replay histor
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Interleaved SessionState historical repair. Multi-agent Codex can emit two
+// independent cumulative counters into one rollout; older TokenTracker builds
+// treated them as one counter and persisted the cross-stream gaps.
+// ---------------------------------------------------------------------------
+
+const {
+  repairCodexInterleavedUsageInflation,
+  CODEX_USAGE_LINEAGE_REPAIR_KEY,
+} = require("../src/commands/sync");
+
+const lineageUsage = (totalTokens) => ({
+  input_tokens: totalTokens,
+  cached_input_tokens: 0,
+  output_tokens: 0,
+  reasoning_output_tokens: 0,
+  total_tokens: totalTokens,
+});
+const LINEAGE_TRUE_TOTAL = 380;
+
+async function writeLineageCodexFile(home, {
+  archived = false,
+  cwd = null,
+  interleaved = true,
+  lineagePaddingLines = 0,
+  resumedMultiAgent = false,
+  uuid = "dddddddd-eeee-ffff-aaaa-bbbbbbbbbbbb",
+} = {}) {
+  const dir = archived
+    ? path.join(home, ".codex", "archived_sessions", "nested")
+    : path.join(home, ".codex", "sessions", "2025", "12", "18");
+  await fs.mkdir(dir, { recursive: true });
+  const fp = path.join(dir, `rollout-2025-12-18T00-00-00-${uuid}.jsonl`);
+  const lines = [
+    // The real affected rollout's marker begins after byte 95,915. Keep this
+    // fixture above the old 64 KiB fork-head window to lock in the wider gate.
+    JSON.stringify({
+      type: "session_meta",
+      payload: { id: uuid, base_instructions: { text: "x".repeat(96 * 1024) } },
+    }),
+    JSON.stringify({
+      type: "turn_context",
+      payload: {
+        cwd,
+        model: "gpt-5.6",
+        multi_agent_version: resumedMultiAgent ? "none" : "v2",
+      },
+    }),
+  ];
+  for (let index = 0; index < lineagePaddingLines; index += 1) {
+    lines.push(JSON.stringify({
+      type: "event_msg",
+      payload: { type: "note", text: "x".repeat(32 * 1024) },
+    }));
+  }
+  if (interleaved) {
+    lines.push(tokenCountLine({
+      ts: "2025-12-18T00:00:00.000Z",
+      last: lineageUsage(100),
+      total: lineageUsage(100),
+    }));
+    if (resumedMultiAgent) {
+      // Old sessions can be resumed after upgrading Codex. The active marker
+      // then appears after an earlier token_count, so the migration must use
+      // its bounded tail gate instead of finalizing from the first turn.
+      lines.push(JSON.stringify({
+        type: "turn_context",
+        payload: { cwd, model: "gpt-5.6", multi_agent_version: "v2" },
+      }));
+    }
+    lines.push(
+      tokenCountLine({ ts: "2025-12-18T00:00:01.000Z", last: lineageUsage(200), total: lineageUsage(200) }),
+      tokenCountLine({ ts: "2025-12-18T00:00:02.000Z", last: lineageUsage(100), total: lineageUsage(100) }),
+      tokenCountLine({ ts: "2025-12-18T00:00:03.000Z", last: lineageUsage(50), total: lineageUsage(250) }),
+      tokenCountLine({ ts: "2025-12-18T00:00:04.000Z", last: lineageUsage(30), total: lineageUsage(130) }),
+    );
+  } else {
+    lines.push(
+      tokenCountLine({ ts: "2025-12-18T00:00:00.000Z", last: lineageUsage(100), total: lineageUsage(100) }),
+      tokenCountLine({ ts: "2025-12-18T00:00:01.000Z", last: lineageUsage(150), total: lineageUsage(250) }),
+    );
+  }
+  await fs.writeFile(fp, lines.join("\n") + "\n", "utf8");
+  return fp;
+}
+
+async function seedInflatedLineageInstall(home, codexFile) {
+  const trackerDir = path.join(home, ".tokentracker", "tracker");
+  const cursorsPath = path.join(trackerDir, "cursors.json");
+  const queuePath = path.join(trackerDir, "queue.jsonl");
+  const queueStatePath = path.join(trackerDir, "queue.state.json");
+  const hour = "2025-12-18T00:00:00.000Z";
+  const inflated = 4_700_000_000;
+  await fs.mkdir(trackerDir, { recursive: true });
+  await fs.writeFile(
+    cursorsPath,
+    JSON.stringify({
+      version: 1,
+      files: { [codexFile]: { inode: 1, offset: 5, lastTotal: lineageUsage(inflated) } },
+      hourly: {
+        buckets: {
+          [`codex|gpt-5.6|${hour}`]: { totals: { total_tokens: inflated } },
+        },
+        groupQueued: {},
+      },
+      codexHashes: ["stale:background-lineage"],
+      migrations: {},
+    }),
+    "utf8",
+  );
+  await fs.writeFile(
+    queuePath,
+    JSON.stringify({
+      source: "codex",
+      model: "gpt-5.6",
+      hour_start: hour,
+      total_tokens: inflated,
+    }) + "\n",
+    "utf8",
+  );
+  await fs.writeFile(queueStatePath, JSON.stringify({ offset: 777 }), "utf8");
+  return { cursorsPath, queuePath, queueStatePath };
+}
+
+describe("repairCodexInterleavedUsageInflation — cumulative lineage repair", () => {
+  it("rebuilds affected main and project history, preserves other sources, resets uploads, and is idempotent", async () => {
+    const home = await makeTempHome();
+    try {
+      const repoRoot = path.join(home, "work", "lineage");
+      await fs.mkdir(path.join(repoRoot, ".git"), { recursive: true });
+      await fs.writeFile(
+        path.join(repoRoot, ".git", "config"),
+        `[remote "origin"]\n\turl = https://github.com/acme/lineage.git\n`,
+        "utf8",
+      );
+      const codexFile = await writeLineageCodexFile(home, {
+        cwd: repoRoot,
+        resumedMultiAgent: true,
+      });
+      const hour = "2025-12-18T00:00:00.000Z";
+      const projectKey = "acme/lineage";
+      const projectRef = "https://github.com/acme/lineage";
+      const inflated = 4_700_000_000;
+      const queuePath = path.join(home, "queue.jsonl");
+      const queueStatePath = path.join(home, "queue.state.json");
+      const projectQueuePath = path.join(home, "project.queue.jsonl");
+      const projectQueueStatePath = path.join(home, "project.queue.state.json");
+      await fs.writeFile(
+        queuePath,
+        [
+          JSON.stringify({ source: "codex", model: "gpt-5.6", hour_start: hour, total_tokens: inflated }),
+          JSON.stringify({ source: "claude", model: "opus", hour_start: hour, total_tokens: 5000 }),
+        ].join("\n") + "\n",
+        "utf8",
+      );
+      await fs.writeFile(
+        projectQueuePath,
+        [
+          JSON.stringify({ project_ref: projectRef, project_key: projectKey, source: "codex", hour_start: hour, total_tokens: inflated }),
+          JSON.stringify({ project_ref: projectRef, project_key: projectKey, source: "claude", hour_start: hour, total_tokens: 5000 }),
+        ].join("\n") + "\n",
+        "utf8",
+      );
+      await fs.writeFile(queueStatePath, JSON.stringify({ offset: 999 }), "utf8");
+      await fs.writeFile(projectQueueStatePath, JSON.stringify({ offset: 888 }), "utf8");
+
+      const cursors = {
+        hourly: {
+          buckets: {
+            [`codex|gpt-5.6|${hour}`]: { totals: { total_tokens: inflated } },
+            [`claude|opus|${hour}`]: { totals: { total_tokens: 5000 } },
+          },
+          groupQueued: {},
+        },
+        projectHourly: {
+          version: 2,
+          buckets: {
+            [`${projectKey}|codex|${hour}`]: {
+              project_ref: projectRef,
+              project_key: projectKey,
+              source: "codex",
+              hour_start: hour,
+              totals: { total_tokens: inflated },
+            },
+            [`${projectKey}|claude|${hour}`]: {
+              project_ref: projectRef,
+              project_key: projectKey,
+              source: "claude",
+              hour_start: hour,
+              totals: { total_tokens: 5000 },
+            },
+          },
+          projects: { [projectKey]: { projectRef, projectKey, status: "public_verified" } },
+        },
+        files: { [codexFile]: { inode: 1, offset: 5, lastTotal: lineageUsage(inflated) } },
+        codexHashes: ["stale:lineage"],
+        migrations: {},
+      };
+
+      const args = {
+        cursors,
+        queuePath,
+        queueStatePath,
+        projectQueuePath,
+        projectQueueStatePath,
+        rolloutFiles: [{ path: codexFile, source: "codex" }],
+      };
+      assert.equal(await repairCodexInterleavedUsageInflation(args), true);
+      assert.equal(codexBucketTotal(cursors), LINEAGE_TRUE_TOTAL);
+      assert.equal(projectBucketTotal(cursors, "codex"), LINEAGE_TRUE_TOTAL);
+      assert.equal(cursors.hourly.buckets[`claude|opus|${hour}`].totals.total_tokens, 5000);
+      assert.equal(projectBucketTotal(cursors, "claude"), 5000);
+
+      const queue = await queueRowsBySource(queuePath);
+      const projectQueue = await queueRowsBySource(projectQueuePath);
+      assert.equal(queue.codex.total, LINEAGE_TRUE_TOTAL);
+      assert.equal(queue.claude.total, 5000);
+      assert.equal(projectQueue.codex.total, LINEAGE_TRUE_TOTAL);
+      assert.equal(projectQueue.claude.total, 5000);
+
+      const uploadState = JSON.parse(await fs.readFile(queueStatePath, "utf8"));
+      const projectUploadState = JSON.parse(await fs.readFile(projectQueueStatePath, "utf8"));
+      assert.equal(uploadState.offset, 0);
+      assert.equal(projectUploadState.offset, 0);
+      assert.equal(uploadState.note, "reset_after_codex_usage_lineage_2026_07");
+      assert.equal(projectUploadState.note, "reset_after_codex_usage_lineage_2026_07");
+      assert.equal(cursors.files[codexFile].tokenUsageBaselines.length, 2);
+      assert.equal(typeof cursors.migrations[CODEX_USAGE_LINEAGE_REPAIR_KEY], "string");
+
+      const queueAfterRepair = await fs.readFile(queuePath, "utf8");
+      const projectQueueAfterRepair = await fs.readFile(projectQueuePath, "utf8");
+      assert.equal(await repairCodexInterleavedUsageInflation(args), false);
+      assert.equal(await fs.readFile(queuePath, "utf8"), queueAfterRepair);
+      assert.equal(await fs.readFile(projectQueuePath, "utf8"), projectQueueAfterRepair);
+      assert.equal(codexBucketTotal(cursors), LINEAGE_TRUE_TOTAL);
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("defers without mutation when affected history includes an unreproducible session", async () => {
+    const home = await makeTempHome();
+    try {
+      const codexFile = await writeLineageCodexFile(home);
+      const deletedPath = path.join(
+        home,
+        ".codex",
+        "sessions",
+        "2025",
+        "12",
+        "10",
+        "rollout-2025-12-10T00-00-00-99999999-9999-9999-9999-999999999999.jsonl",
+      );
+      const queuePath = path.join(home, "queue.jsonl");
+      const queueStatePath = path.join(home, "queue.state.json");
+      const originalQueue = JSON.stringify({
+        source: "codex",
+        model: "gpt-5.6",
+        hour_start: "2025-12-18T00:00:00.000Z",
+        total_tokens: 4_700_000_000,
+      }) + "\n";
+      const originalUploadState = JSON.stringify({ offset: 444 });
+      await fs.writeFile(queuePath, originalQueue, "utf8");
+      await fs.writeFile(queueStatePath, originalUploadState, "utf8");
+      const cursors = {
+        hourly: {
+          buckets: {
+            "codex|gpt-5.6|2025-12-18T00:00:00.000Z": {
+              totals: { total_tokens: 4_700_000_000 },
+            },
+          },
+          groupQueued: {},
+        },
+        files: {
+          [codexFile]: { inode: 1, offset: 5 },
+          [deletedPath]: { inode: 2, offset: 5 },
+        },
+        codexHashes: ["keep:lineage"],
+        migrations: {},
+      };
+
+      const ran = await repairCodexInterleavedUsageInflation({
+        cursors,
+        queuePath,
+        queueStatePath,
+        rolloutFiles: [{ path: codexFile, source: "codex" }],
+      });
+      assert.equal(ran, false);
+      assert.equal(codexBucketTotal(cursors), 4_700_000_000);
+      assert.equal(await fs.readFile(queuePath, "utf8"), originalQueue);
+      assert.equal(await fs.readFile(queueStatePath, "utf8"), originalUploadState);
+      assert.deepEqual(cursors.codexHashes, ["keep:lineage"]);
+      assert.equal(cursors.migrations[CODEX_USAGE_LINEAGE_REPAIR_KEY].skipped, true);
+      assert.equal(
+        cursors.migrations[CODEX_USAGE_LINEAGE_REPAIR_KEY].reason,
+        "codex_session_unreproducible",
+      );
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("marks a covered, single-lineage multi-agent history complete without queue mutation", async () => {
+    const home = await makeTempHome();
+    try {
+      const codexFile = await writeLineageCodexFile(home, { interleaved: false });
+      const queuePath = path.join(home, "queue.jsonl");
+      const queueStatePath = path.join(home, "queue.state.json");
+      const originalQueue = JSON.stringify({
+        source: "codex",
+        model: "gpt-5.6",
+        hour_start: "2025-12-18T00:00:00.000Z",
+        total_tokens: 250,
+      }) + "\n";
+      const originalUploadState = JSON.stringify({ offset: 321 });
+      await fs.writeFile(queuePath, originalQueue, "utf8");
+      await fs.writeFile(queueStatePath, originalUploadState, "utf8");
+      const cursors = {
+        hourly: {
+          buckets: {
+            "codex|gpt-5.6|2025-12-18T00:00:00.000Z": { totals: { total_tokens: 250 } },
+          },
+          groupQueued: {},
+        },
+        files: { [codexFile]: { inode: 1, offset: 5 } },
+        codexHashes: ["keep:single"],
+        migrations: {},
+      };
+
+      assert.equal(
+        await repairCodexInterleavedUsageInflation({
+          cursors,
+          queuePath,
+          queueStatePath,
+          rolloutFiles: [{ path: codexFile, source: "codex" }],
+        }),
+        false,
+      );
+      assert.equal(typeof cursors.migrations[CODEX_USAGE_LINEAGE_REPAIR_KEY], "string");
+      assert.equal(await fs.readFile(queuePath, "utf8"), originalQueue);
+      assert.equal(await fs.readFile(queueStatePath, "utf8"), originalUploadState);
+      assert.deepEqual(cursors.codexHashes, ["keep:single"]);
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("marks complete without scanning when an earlier guarded repair rebuilt this sync", async () => {
+    const cursors = { migrations: {} };
+    assert.equal(
+      await repairCodexInterleavedUsageInflation({
+        cursors,
+        rolloutFiles: [],
+        legacyRepairRan: true,
+      }),
+      false,
+    );
+    assert.equal(typeof cursors.migrations[CODEX_USAGE_LINEAGE_REPAIR_KEY], "string");
+  });
+
+  it("bounds the background lineage scan and leaves an explicit full repair retryable", async () => {
+    await withTempSyncEnv(async (home) => {
+      const codexFile = await writeLineageCodexFile(home, {
+        archived: true,
+        lineagePaddingLines: 40,
+      });
+      const { cursorsPath, queuePath, queueStatePath } =
+        await seedInflatedLineageInstall(home, codexFile);
+
+      await cmdSync(["--auto", "--background", "--all-local-sources"]);
+
+      const bounded = JSON.parse(await fs.readFile(cursorsPath, "utf8"));
+      assert.equal(
+        bounded.migrations[CODEX_USAGE_LINEAGE_REPAIR_KEY].reason,
+        "usage_lineage_scan_indeterminate",
+      );
+      assert.equal(
+        await repairCodexInterleavedUsageInflation({
+          cursors: bounded,
+          queuePath,
+          queueStatePath,
+          rolloutFiles: [{ path: codexFile, source: "codex" }],
+        }),
+        true,
+      );
+      assert.equal(codexBucketTotal(bounded), LINEAGE_TRUE_TOTAL);
+      assert.equal((await queueRowsBySource(queuePath)).codex.total, LINEAGE_TRUE_TOTAL);
+      assert.equal(typeof bounded.migrations[CODEX_USAGE_LINEAGE_REPAIR_KEY], "string");
+    });
+  });
+
+  it("keeps background refreshes alive when the one-time repair commit throws", async () => {
+    await withTempSyncEnv(async (home) => {
+      const codexFile = await writeLineageCodexFile(home, {
+        archived: true,
+        resumedMultiAgent: true,
+      });
+      const { cursorsPath, queuePath } = await seedInflatedLineageInstall(home, codexFile);
+      const realRename = fs.rename;
+      let injectedFailure = false;
+      fs.rename = async function failRepairQueueRename(from, to, ...args) {
+        if (
+          !injectedFailure &&
+          String(to) === queuePath &&
+          String(from).startsWith(`${queuePath}.tmp.`)
+        ) {
+          injectedFailure = true;
+          throw new Error("injected repair queue rename failure");
+        }
+        return realRename.call(this, from, to, ...args);
+      };
+      try {
+        await cmdSync(["--auto", "--background", "--all-local-sources"]);
+      } finally {
+        fs.rename = realRename;
+      }
+
+      assert.equal(injectedFailure, true);
+      const persisted = JSON.parse(await fs.readFile(cursorsPath, "utf8"));
+      assert.equal(
+        persisted.migrations[CODEX_USAGE_LINEAGE_REPAIR_KEY].reason,
+        "background_repair_requires_full_sync",
+      );
+
+      const archiveRoot = path.join(home, ".codex", "archived_sessions");
+      const realReaddir = fs.readdir;
+      let archiveReads = 0;
+      fs.readdir = async function countedReaddir(target, ...args) {
+        const value = String(target);
+        if (value === archiveRoot || value.startsWith(`${archiveRoot}${path.sep}`)) {
+          archiveReads += 1;
+        }
+        return realReaddir.call(this, target, ...args);
+      };
+      try {
+        await cmdSync(["--auto", "--background", "--all-local-sources"]);
+      } finally {
+        fs.readdir = realReaddir;
+      }
+      assert.equal(archiveReads, 0);
+    });
+  });
+
+  it("repairs an existing native install on its first background sync, then restores lightweight archive scanning", async () => {
+    await withTempSyncEnv(async (home) => {
+      const codexFile = await writeLineageCodexFile(home, {
+        archived: true,
+        resumedMultiAgent: true,
+      });
+      const { cursorsPath, queuePath, queueStatePath } =
+        await seedInflatedLineageInstall(home, codexFile);
+
+      await cmdSync(["--auto", "--background", "--all-local-sources"]);
+
+      const repaired = JSON.parse(await fs.readFile(cursorsPath, "utf8"));
+      assert.equal(codexBucketTotal(repaired), LINEAGE_TRUE_TOTAL);
+      assert.equal(
+        typeof repaired.migrations[CODEX_USAGE_LINEAGE_REPAIR_KEY],
+        "string",
+      );
+      assert.equal((await queueRowsBySource(queuePath)).codex.total, LINEAGE_TRUE_TOTAL);
+      assert.equal(
+        JSON.parse(await fs.readFile(queueStatePath, "utf8")).note,
+        "reset_after_codex_usage_lineage_2026_07",
+      );
+
+      const archiveRoot = path.join(home, ".codex", "archived_sessions");
+      const realReaddir = fs.readdir;
+      let archiveReads = 0;
+      fs.readdir = async function countedReaddir(target, ...args) {
+        const value = String(target);
+        if (value === archiveRoot || value.startsWith(`${archiveRoot}${path.sep}`)) {
+          archiveReads += 1;
+        }
+        return realReaddir.call(this, target, ...args);
+      };
+      try {
+        await cmdSync(["--auto", "--background", "--all-local-sources"]);
+      } finally {
+        fs.readdir = realReaddir;
+      }
+      assert.equal(archiveReads, 0);
+    });
+  });
+});
