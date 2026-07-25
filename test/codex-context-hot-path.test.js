@@ -902,6 +902,82 @@ test("Context incrementally parses append-only sessions with pending tools and d
   }
 });
 
+test("Context resume state preserves interleaved cumulative usage lineages", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "tt-codex-context-lineage-"));
+  const freshRoot = await fs.mkdtemp(path.join(os.tmpdir(), "tt-codex-context-lineage-fresh-"));
+  try {
+    const day = "2030-06-02";
+    const fileName =
+      "rollout-2030-06-02T04-45-00-44444444-4444-4444-8444-444444444444.jsonl";
+    const usage = (totalTokens) => ({
+      input_tokens: totalTokens,
+      cached_input_tokens: 0,
+      cache_write_input_tokens: 0,
+      output_tokens: 0,
+      reasoning_output_tokens: 0,
+      total_tokens: totalTokens,
+    });
+    const event = (timestamp, last, total) => ({
+      timestamp,
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          last_token_usage: last,
+          total_token_usage: total,
+          model_context_window: 258400,
+        },
+      },
+    });
+    const initialEvents = [
+      {
+        timestamp: `${day}T04:45:00.000Z`,
+        type: "session_meta",
+        payload: {
+          id: "44444444-4444-4444-8444-444444444444",
+          cwd: "/tmp/project",
+          model_provider: "openai",
+        },
+      },
+      event(`${day}T04:45:39.000Z`, usage(100), usage(100)),
+      event(`${day}T04:45:45.000Z`, usage(200), usage(200)),
+    ];
+    const appendedEvents = [
+      event(`${day}T04:46:02.000Z`, usage(100), usage(100)),
+      event(`${day}T04:46:05.000Z`, usage(50), usage(250)),
+      event(`${day}T04:46:10.000Z`, usage(30), usage(130)),
+    ];
+    const filePath = await writeRollout(root, day, fileName, initialEvents);
+    const args = {
+      from: day,
+      to: day,
+      codexDir: root,
+      timeZoneContext: { timeZone: "UTC", offsetMinutes: 0 },
+    };
+
+    const primed = await computeCodexContextBreakdown(args);
+    assert.equal(primed.totals.total_tokens, 300);
+    await fs.appendFile(filePath, rolloutContents(appendedEvents), "utf8");
+    const active = new Date(`${day}T12:01:00.000Z`);
+    await fs.utimes(filePath, active, active);
+
+    const resumed = await computeCodexContextBreakdown(args);
+    const freshPath = await writeRollout(freshRoot, day, fileName, []);
+    await fs.copyFile(filePath, freshPath);
+    await fs.utimes(freshPath, active, active);
+    const fresh = await computeCodexContextBreakdown({ ...args, codexDir: freshRoot });
+
+    assert.equal(resumed.totals.total_tokens, 100 + 200 + 50 + 30);
+    assert.equal(resumed.message_count, 4);
+    assert.deepEqual(resumed.totals, fresh.totals);
+    assert.equal(resumed.diagnostics.incremental_parse_hits, 1);
+    assert.equal(resumed.diagnostics.incremental_parse_fallbacks, 0);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(freshRoot, { recursive: true, force: true });
+  }
+});
+
 test("Context preserves appended JSONL records larger than the stable read buffer", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "tt-codex-context-large-record-"));
   const freshRoot = await fs.mkdtemp(

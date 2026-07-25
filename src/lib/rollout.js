@@ -8,6 +8,11 @@ const { ensureDir } = require("./fs");
 const { readSqliteJsonRows, readSqliteJsonRowsAsync } = require("./sqlite-reader");
 const wsl = require("./wsl-probe");
 const { resolveInstallPaths } = require("./install-resolver");
+const {
+  consumeUsageDelta,
+  createUsageDeltaState,
+  snapshotUsageBaselines,
+} = require("./codex-token-usage");
 
 const DEFAULT_SOURCE = "codex";
 const DEFAULT_MODEL = "unknown";
@@ -360,6 +365,9 @@ async function parseRolloutIncremental({
     const lastTotal = sameInode && !truncated && !rebuildingCodexBaseline
       ? prev.lastTotal || null
       : null;
+    const tokenUsageBaselines = sameInode && !truncated && !rebuildingCodexBaseline
+      ? prev.tokenUsageBaselines || null
+      : null;
     const lastModel = sameInode && !truncated ? prev.lastModel || null : null;
 
     const codexProjectFastPath = projectEnabled && fileSource === DEFAULT_SOURCE;
@@ -430,6 +438,7 @@ async function parseRolloutIncremental({
           filePath,
           fileStat: st,
           lastTotal,
+          tokenUsageBaselines,
           lastModel,
           projectState,
           projectMetaCache,
@@ -442,6 +451,7 @@ async function parseRolloutIncremental({
           fileStat: st,
           startOffset,
           lastTotal,
+          tokenUsageBaselines,
           lastModel,
           hourlyState,
           touchedBuckets,
@@ -462,6 +472,7 @@ async function parseRolloutIncremental({
       inode,
       offset: result.endOffset,
       lastTotal: result.lastTotal,
+      tokenUsageBaselines: result.tokenUsageBaselines,
       lastModel: result.lastModel,
       updatedAt: new Date().toISOString(),
     };
@@ -1731,6 +1742,7 @@ async function parseRolloutFile({
   fileStat,
   startOffset,
   lastTotal,
+  tokenUsageBaselines,
   lastModel,
   hourlyState,
   touchedBuckets,
@@ -1751,14 +1763,25 @@ async function parseRolloutFile({
   const projectFileContexts = [];
   addProjectFileContext(projectFileContexts, projectContext);
   if (startOffset >= endOffset) {
-    return { endOffset, lastTotal, lastModel, eventsAggregated: 0, projectFileContexts };
+    return {
+      endOffset,
+      lastTotal,
+      tokenUsageBaselines,
+      lastModel,
+      eventsAggregated: 0,
+      projectFileContexts,
+    };
   }
 
   const stream = fssync.createReadStream(filePath, { encoding: "utf8", start: startOffset });
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
 
   let model = typeof lastModel === "string" ? lastModel : null;
-  let totals = lastTotal && typeof lastTotal === "object" ? lastTotal : null;
+  const usageDeltaState = createUsageDeltaState({
+    lastTotal,
+    baselines: tokenUsageBaselines,
+  });
+  let latestTotal = lastTotal && typeof lastTotal === "object" ? lastTotal : null;
   let currentCwd = null;
   let currentDate = null;
   let isForkedRollout = false;
@@ -1840,14 +1863,12 @@ async function parseRolloutFile({
 
     const lastUsage = info.last_token_usage;
     const totalUsage = info.total_token_usage;
+    if (totalUsage && typeof totalUsage === "object") latestTotal = totalUsage;
 
-    const delta = pickDelta(lastUsage, totalUsage, totals);
-    if (!delta) continue;
+    const rawDelta = consumeUsageDelta(usageDeltaState, lastUsage, totalUsage);
+    const delta = rawDelta ? normalizeUsage(rawDelta) : null;
+    if (!delta || isAllZeroUsage(delta)) continue;
     delta.conversation_count = 1;
-
-    if (totalUsage && typeof totalUsage === "object") {
-      totals = totalUsage;
-    }
 
     // Forked Codex rollouts replay the parent session's entire token history
     // into the child file the moment the fork is created. The date guard below
@@ -1863,8 +1884,8 @@ async function parseRolloutFile({
     // flush spacing and well below genuine turn cadence (≥~4.6s observed). The
     // first replayed row cannot be identified without lookahead, so it is still
     // counted (a bounded, <1% residual over-count); dropping real usage is the
-    // worse failure, so we bias against it. `totals` is already advanced above,
-    // keeping the cumulative-delta baseline correct for the live turns we keep.
+    // worse failure, so we bias against it. `usageDeltaState` is already advanced above,
+    // keeping the cumulative lineage correct for the live turns we keep.
     // Scoped to forked codex rollouts. (issue #169 follow-up.)
     let forkedReplaySkip = false;
     if (isForkedRollout && source === DEFAULT_SOURCE && replayPrefixActive) {
@@ -1903,8 +1924,8 @@ async function parseRolloutFile({
     // buckets. External tools rewrite session files without changing the token
     // data — Codex-Manager atomically rewrites them (new inode) to patch the
     // provider on every account/channel switch — so without dedup each switch
-    // double-counts the rewritten sessions. `totals` is already advanced above,
-    // so skipping an already-seen event keeps the cumulative-delta chain intact
+    // double-counts the rewritten sessions. `usageDeltaState` is already advanced above,
+    // so skipping an already-seen event keeps the cumulative lineage intact
     // while preventing the re-add; genuinely new turns carry new timestamps and
     // are still counted. Key = sessionUUID:eventTimestamp (both stable across the
     // rewrite and across a sessions/ -> archived_sessions/ move).
@@ -1939,13 +1960,21 @@ async function parseRolloutFile({
     eventsAggregated += 1;
   }
 
-  return { endOffset, lastTotal: totals, lastModel: model, eventsAggregated, projectFileContexts };
+  return {
+    endOffset,
+    lastTotal: latestTotal,
+    tokenUsageBaselines: snapshotUsageBaselines(usageDeltaState),
+    lastModel: model,
+    eventsAggregated,
+    projectFileContexts,
+  };
 }
 
 async function scanRolloutProjectFileContexts({
   filePath,
   fileStat,
   lastTotal,
+  tokenUsageBaselines,
   lastModel,
   projectState,
   projectMetaCache,
@@ -1958,7 +1987,14 @@ async function scanRolloutProjectFileContexts({
   const projectFileContexts = [];
   addProjectFileContext(projectFileContexts, projectContext);
   if (!projectState || endOffset <= 0) {
-    return { endOffset, lastTotal, lastModel, eventsAggregated: 0, projectFileContexts };
+    return {
+      endOffset,
+      lastTotal,
+      tokenUsageBaselines,
+      lastModel,
+      eventsAggregated: 0,
+      projectFileContexts,
+    };
   }
 
   const stream = fssync.createReadStream(filePath, { encoding: "utf8", start: 0 });
@@ -2005,7 +2041,14 @@ async function scanRolloutProjectFileContexts({
     addProjectFileContext(projectFileContexts, context);
   }
 
-  return { endOffset, lastTotal, lastModel, eventsAggregated: 0, projectFileContexts };
+  return {
+    endOffset,
+    lastTotal,
+    tokenUsageBaselines,
+    lastModel,
+    eventsAggregated: 0,
+    projectFileContexts,
+  };
 }
 
 async function parseClaudeFile({
@@ -3570,48 +3613,6 @@ function extractTokenCount(obj) {
   return null;
 }
 
-function pickDelta(lastUsage, totalUsage, prevTotals) {
-  const hasLast = isNonEmptyObject(lastUsage);
-  const hasTotal = isNonEmptyObject(totalUsage);
-  const hasPrevTotals = isNonEmptyObject(prevTotals);
-
-  if (hasTotal && hasPrevTotals) {
-    if (totalsReset(totalUsage, prevTotals)) {
-      const resetUsage = hasLast ? lastUsage : totalUsage;
-      const normalized = normalizeUsage(resetUsage);
-      return isAllZeroUsage(normalized) ? null : normalized;
-    }
-
-    const delta = {};
-    for (const k of [
-      "input_tokens",
-      "cached_input_tokens",
-      "cache_creation_input_tokens",
-      "output_tokens",
-      "reasoning_output_tokens",
-      "total_tokens",
-    ]) {
-      const a = Number(totalUsage[k]);
-      const b = Number(prevTotals[k]);
-      if (Number.isFinite(a) && Number.isFinite(b)) delta[k] = Math.max(0, a - b);
-    }
-    const normalized = normalizeUsage(delta);
-    return isAllZeroUsage(normalized) ? null : normalized;
-  }
-
-  if (hasLast) {
-    const normalized = normalizeUsage(lastUsage);
-    return isAllZeroUsage(normalized) ? null : normalized;
-  }
-
-  if (hasTotal) {
-    const normalized = normalizeUsage(totalUsage);
-    return isAllZeroUsage(normalized) ? null : normalized;
-  }
-
-  return null;
-}
-
 function normalizeUsage(u) {
   const out = {};
   for (const k of [
@@ -3692,13 +3693,6 @@ function isAllZeroUsage(u) {
     if (Number(u[k] || 0) !== 0) return false;
   }
   return true;
-}
-
-function totalsReset(curr, prev) {
-  const currTotal = curr?.total_tokens;
-  const prevTotal = prev?.total_tokens;
-  if (!isFiniteNumber(currTotal) || !isFiniteNumber(prevTotal)) return false;
-  return currTotal < prevTotal;
 }
 
 function isFiniteNumber(v) {

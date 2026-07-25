@@ -12,6 +12,12 @@ const readline = require("node:readline");
 
 const { listRolloutFiles } = require("./rollout");
 const {
+  consumeUsageDelta,
+  createUsageDeltaState,
+  snapshotUsageBaselines,
+  totalsReset,
+} = require("./codex-token-usage");
+const {
   emptyTotals,
   addInto,
   inferExecCommandKind,
@@ -434,42 +440,10 @@ function normalizeUsage(u) {
   return out;
 }
 
-function totalsReset(curr, prev) {
-  const a = Number(curr?.total_tokens);
-  const b = Number(prev?.total_tokens);
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
-  return a < b;
-}
-
 function pickDelta(lastUsage, totalUsage, prevTotals) {
-  const hasLast = lastUsage && typeof lastUsage === "object";
-  const hasTotal = totalUsage && typeof totalUsage === "object";
-  const hasPrev = prevTotals && typeof prevTotals === "object";
-
-  if (hasTotal && hasPrev) {
-    if (totalsReset(totalUsage, prevTotals)) {
-      const resetUsage = hasLast ? lastUsage : totalUsage;
-      return normalizeUsage(resetUsage);
-    }
-    const delta = {};
-    for (const k of [
-      "input_tokens",
-      "cached_input_tokens",
-      "cache_creation_input_tokens",
-      "output_tokens",
-      "reasoning_output_tokens",
-      "total_tokens",
-    ]) {
-      const a = Number(totalUsage[k]);
-      const b = Number(prevTotals[k]);
-      if (Number.isFinite(a) && Number.isFinite(b)) delta[k] = Math.max(0, a - b);
-    }
-    return normalizeUsage(delta);
-  }
-
-  if (hasLast) return normalizeUsage(lastUsage);
-  if (hasTotal) return normalizeUsage(totalUsage);
-  return null;
+  const state = createUsageDeltaState({ lastTotal: prevTotals });
+  const delta = consumeUsageDelta(state, lastUsage, totalUsage);
+  return delta ? normalizeUsage(delta) : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -596,7 +570,10 @@ async function parseCodexRolloutFile(filePath, {
   let provider = isResuming ? resumeState.provider || null : null;
   let cliVersion = isResuming ? resumeState.cliVersion || null : null;
 
-  let prevTotals = isResuming ? resumeState.prevTotals || null : null;
+  const usageDeltaState = createUsageDeltaState({
+    lastTotal: isResuming ? resumeState.prevTotals || null : null,
+    baselines: isResuming ? resumeState.tokenUsageBaselines || null : null,
+  });
   let pendingToolNames = isResuming
     ? Array.from(resumeState.pendingToolNames || [])
     : [];
@@ -875,8 +852,8 @@ async function parseCodexRolloutFile(filePath, {
       const info = tokenCount.info;
       const lastUsage = info?.last_token_usage;
       const totalUsage = info?.total_token_usage;
-      const delta = pickDelta(lastUsage, totalUsage, prevTotals);
-      if (totalUsage && typeof totalUsage === "object") prevTotals = totalUsage;
+      const rawDelta = consumeUsageDelta(usageDeltaState, lastUsage, totalUsage);
+      const delta = rawDelta ? normalizeUsage(rawDelta) : null;
       const isNewResumeEvent = noteTokenEvent(ts, lastUsage, totalUsage);
       if (inRequestedRange) {
         const eventSessionId = sessionId || rolloutSessionIdFromPath(primaryFilePath) || primaryFilePath;
@@ -927,7 +904,8 @@ async function parseCodexRolloutFile(filePath, {
       model,
       provider,
       cliVersion,
-      prevTotals,
+      prevTotals: usageDeltaState.lastTotal,
+      tokenUsageBaselines: snapshotUsageBaselines(usageDeltaState),
       pendingToolNames,
       pendingSkills,
       pendingExecDetails,

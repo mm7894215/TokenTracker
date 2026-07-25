@@ -150,6 +150,60 @@ test("parseRolloutIncremental ignores repeated token_count records with unchange
   }
 });
 
+test("parseRolloutIncremental separates interleaved cumulative usage lineages", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
+  try {
+    const rolloutPath = path.join(tmp, "rollout-interleaved.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    const usage = (totalTokens) => ({
+      input_tokens: totalTokens,
+      cached_input_tokens: 0,
+      output_tokens: 0,
+      reasoning_output_tokens: 0,
+      total_tokens: totalTokens,
+    });
+
+    // A and B are independent Codex SessionState counters emitted into one
+    // rollout. They intentionally share a context window to prove that the
+    // parser follows cumulative lineage rather than treating that field as an
+    // identity. The repeated A snapshot after B must remain a no-op.
+    const initialLines = [
+      buildTokenCountLine({ ts: "2026-07-24T04:45:39.000Z", last: usage(100), total: usage(100), contextWindow: 258400 }),
+      buildTokenCountLine({ ts: "2026-07-24T04:45:45.000Z", last: usage(200), total: usage(200), contextWindow: 258400 }),
+    ];
+    const appendedLines = [
+      buildTokenCountLine({ ts: "2026-07-24T04:46:02.000Z", last: usage(100), total: usage(100), contextWindow: 258400 }),
+      buildTokenCountLine({ ts: "2026-07-24T04:46:05.000Z", last: usage(50), total: usage(250), contextWindow: 258400 }),
+      buildTokenCountLine({ ts: "2026-07-24T04:46:10.000Z", last: usage(30), total: usage(130), contextWindow: 258400 }),
+    ];
+    await fs.writeFile(rolloutPath, initialLines.join("\n") + "\n", "utf8");
+
+    const first = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+    });
+    assert.equal(first.eventsAggregated, 2);
+    assert.equal(cursors.files[rolloutPath].tokenUsageBaselines.length, 2);
+
+    await fs.appendFile(rolloutPath, appendedLines.join("\n") + "\n", "utf8");
+    const second = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+    });
+
+    assert.equal(second.eventsAggregated, 2);
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 2);
+    assert.equal(queued.at(-1).total_tokens, 100 + 200 + 50 + 30);
+    assert.equal(cursors.files[rolloutPath].tokenUsageBaselines.length, 2);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseRolloutIncremental does not re-count a session file rewritten with a new inode (issue #187)", async () => {
   // Codex-Manager atomically rewrites session rollout files (new inode, same
   // token data) when switching account/channel. The parser keys incremental
@@ -4512,16 +4566,18 @@ function buildSessionMetaLine({ model, cwd, forkedFromId }) {
   });
 }
 
-function buildTokenCountLine({ ts, last, total }) {
+function buildTokenCountLine({ ts, last, total, contextWindow }) {
+  const info = {
+    last_token_usage: last,
+    total_token_usage: total,
+  };
+  if (Number.isFinite(contextWindow)) info.model_context_window = contextWindow;
   return JSON.stringify({
     type: "event_msg",
     timestamp: ts,
     payload: {
       type: "token_count",
-      info: {
-        last_token_usage: last,
-        total_token_usage: total,
-      },
+      info,
     },
   });
 }
