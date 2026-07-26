@@ -585,6 +585,7 @@ test("fetchQoderLimits does not probe the macOS browser Keychain by default", as
   fs.writeFileSync(cookiePath, "");
   let keychainReads = 0;
   let cookieReads = 0;
+  let networkReads = 0;
 
   const result = await fetchQoderLimits({
     home,
@@ -601,14 +602,32 @@ test("fetchQoderLimits does not probe the macOS browser Keychain by default", as
       cookieReads += 1;
       return [];
     },
+    fetchImpl: async () => {
+      networkReads += 1;
+      throw new Error("Unexpected provider request.");
+    },
   });
 
   assert.deepEqual(result, { configured: false });
   assert.equal(keychainReads, 0);
   assert.equal(cookieReads, 0);
+  assert.equal(networkReads, 0);
 });
 
 test("Qoder limits source contains no browser credential-store access", () => {
   const source = fs.readFileSync(path.join(__dirname, "..", "src", "lib", "qoder-limits.js"), "utf8");
-  assert.doesNotMatch(source, /\/usr\/bin\/security|find-generic-password|Safe Storage/);
+  const normalizedSource = source.replace(/\s+/g, " ");
+  const forbiddenPatterns = [
+    [/["'](?:node:)?child_process["']/, "child process execution", 'require("child_process")'],
+    [/["'][^"']*sqlite-reader(?:\.js)?["']/, "browser SQLite access", 'require("../lib/sqlite-reader.js")'],
+    [/["'](?:\/usr\/bin\/)?security["']/, "macOS Keychain CLI access", 'execFile("security", args)'],
+    [/find-generic-password|Safe Storage/i, "browser Safe Storage access", "Microsoft Edge Safe Storage"],
+    [/decryptChromiumCookie/, "Chromium cookie decryption", "decryptChromiumCookie(payload)"],
+    [/encrypted_value/, "encrypted browser cookie reads", "SELECT encrypted_value FROM cookies"],
+  ];
+
+  for (const [pattern, capability, example] of forbiddenPatterns) {
+    assert.match(example, pattern, `guard must detect ${capability}`);
+    assert.doesNotMatch(normalizedSource, pattern, `Qoder limits must not contain ${capability}`);
+  }
 });
