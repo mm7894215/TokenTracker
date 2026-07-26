@@ -29,8 +29,8 @@ const response = {
   from: "",
   to: "",
   available: true,
-  session_count: 2,
-  returned_count: 2,
+  session_count: 3,
+  returned_count: 3,
   sessions: [
     {
       session_hash: "claude-row",
@@ -74,6 +74,27 @@ const response = {
       first_pass: false,
       resume_command: "codex resume aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
     },
+    {
+      session_hash: "grok-row",
+      session_id: "019f740c-e792-7fb1-a218-59ea1b340714",
+      title: "Debug local proxy",
+      source: "grok",
+      project_key: "alphafox-web",
+      project_ref: "/work/alphafox-web",
+      model: "grok-4.5-build-free",
+      started_at: "2026-07-22T08:00:00Z",
+      ended_at: "2026-07-22T08:15:00Z",
+      duration_ms: 900_000,
+      turns: 3,
+      edit_turns: 1,
+      retry_turns: 0,
+      subagent_calls: 0,
+      total_tokens: 21_000,
+      cost_usd: 0,
+      productive: true,
+      first_pass: true,
+      resume_command: "grok --resume 019f740c-e792-7fb1-a218-59ea1b340714",
+    },
   ],
 };
 
@@ -89,6 +110,7 @@ describe("SessionsPage", () => {
 
     expect(await screen.findByText("Fix authentication flow")).toBeInTheDocument();
     expect(screen.getByText("Review release")).toBeInTheDocument();
+    expect(screen.getByText("Debug local proxy")).toBeInTheDocument();
     // The whole list is fetched once; no row cap and no server-side window.
     expect(getSessions).toHaveBeenCalledWith({ refresh: false });
 
@@ -96,6 +118,11 @@ describe("SessionsPage", () => {
     fireEvent.click(sourceTabs.getByRole("tab", { name: "Codex" }));
     expect(screen.queryByText("Fix authentication flow")).not.toBeInTheDocument();
     expect(screen.getByText("Review release")).toBeInTheDocument();
+    expect(screen.queryByText("Debug local proxy")).not.toBeInTheDocument();
+
+    fireEvent.click(sourceTabs.getByRole("tab", { name: "Grok" }));
+    expect(screen.queryByText("Review release")).not.toBeInTheDocument();
+    expect(screen.getByText("Debug local proxy")).toBeInTheDocument();
 
     fireEvent.click(sourceTabs.getByRole("tab", { name: "All" }));
     fireEvent.change(screen.getByRole("searchbox", { name: "Search sessions" }), {
@@ -103,6 +130,7 @@ describe("SessionsPage", () => {
     });
     expect(screen.getByText("Fix authentication flow")).toBeInTheDocument();
     expect(screen.queryByText("Review release")).not.toBeInTheDocument();
+    expect(screen.queryByText("Debug local proxy")).not.toBeInTheDocument();
   });
 
   it("filters the date range client-side without re-querying", async () => {
