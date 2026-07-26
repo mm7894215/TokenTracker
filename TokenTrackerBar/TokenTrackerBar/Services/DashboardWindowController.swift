@@ -82,7 +82,6 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         let webView = WKWebView(frame: .zero, configuration: webConfig)
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.allowsBackForwardNavigationGestures = true
         webView.setValue(false, forKey: "drawsBackground")
         self.webView = webView
 
