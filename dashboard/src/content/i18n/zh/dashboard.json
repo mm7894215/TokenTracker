@@ -536,5 +536,8 @@
   "wrapped.highlight.day": "最忙碌的一天是 {{day}}（{{tokens}} Token）。",
   "wrapped.highlight.hour": "你的高效时段集中在 UTC {{hour}}:00 左右。",
   "wrapped.highlight.streak": "最长连续活跃：连续 {{days}} 天使用 AI 编程。",
-  "wrapped.highlight.tools": "你使用了 {{count}} 款不同的 AI 工具，涉猎广泛。"
+  "wrapped.highlight.tools": "你使用了 {{count}} 款不同的 AI 工具，涉猎广泛。",
+  "dashboard.context_breakdown.empty_grok": "所选时间段内没有 Grok Build 活动。",
+  "dashboard.context_breakdown.error_grok": "无法读取此视图所需的 Grok Build 日志。",
+  "dashboard.context_breakdown.footnote_grok": "Grok 在此使用互不重叠的 Token 分类。工具和命令执行下钻数据，是对同一批对话轮次进行的独立启发式归因，以 turn_completed.usage 为权威总量。"
 }

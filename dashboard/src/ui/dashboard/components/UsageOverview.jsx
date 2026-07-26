@@ -96,7 +96,15 @@ function resolveContextBreakdownSource(provider) {
   const label = String(provider?.label || "").trim().toLowerCase();
   if (source === "claude" || label === "claude") return "claude";
   if (source === "codex" || label === "codex") return "codex";
+  if (source === "grok" || label === "grok" || label.includes("grok")) return "grok";
   return null;
+}
+
+function contextBreakdownHeading(source) {
+  if (source === "claude") return "Claude Context Breakdown";
+  if (source === "codex") return "Codex Context Breakdown";
+  if (source === "grok") return "Grok Context Breakdown";
+  return "Context Breakdown";
 }
 
 function hasProviderModels(provider) {
@@ -611,7 +619,7 @@ export function UsageOverview({
                     );
 
                     const providerHeading = contextSource
-                      ? `${contextSource === "claude" ? "Claude" : "Codex"} Context Breakdown`
+                      ? contextBreakdownHeading(contextSource)
                       : formatProviderDisplayName(provider.label);
                     return (
                       <ProviderExpandedSection

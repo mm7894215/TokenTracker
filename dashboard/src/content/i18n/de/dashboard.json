@@ -452,5 +452,8 @@
   "achievements.signin.action": "Anmelden",
   "achievements.scope.local": "Lokal",
   "achievements.page.suggest": "Eine Idee für ein neues Abzeichen?",
-  "achievements.page.suggest_link": "Auf GitHub vorschlagen"
+  "achievements.page.suggest_link": "Auf GitHub vorschlagen",
+  "dashboard.context_breakdown.empty_grok": "Keine Grok-Build-Aktivität im ausgewählten Zeitraum.",
+  "dashboard.context_breakdown.error_grok": "Grok-Build-Logs für diese Ansicht konnten nicht gelesen werden.",
+  "dashboard.context_breakdown.footnote_grok": "Grok nutzt hier nicht-überlappende Token-Buckets. Tool- und Exec-Details sind separate heuristische Zuordnungen über dieselben Turns, mit turn_completed.usage als autoritativer Gesamtsumme."
 }

@@ -836,6 +836,9 @@ dashboard.context_breakdown.bar_aria,dashboard,DashboardPage,ContextBreakdownPan
 dashboard.context_breakdown.system_prefix_tooltip,dashboard,DashboardPage,ContextBreakdownPanel,tooltip,"System prompt, tools schema, skills, rules, and MCP descriptions are cached together as one prefix and can't be separated from the logs.",,active
 dashboard.context_breakdown.footnote,dashboard,DashboardPage,ContextBreakdownPanel,footnote,"Approximate: cache reads accumulate across turns, so conversation history dominates over time. Only Claude Code logs expose the per-message detail this view requires.",,active
 dashboard.context_breakdown.footnote_codex,dashboard,DashboardPage,ContextBreakdownPanel,footnote_codex,"Codex uses non-overlapping token buckets here. Tool and exec drill-downs are separate heuristic attributions over the same turns.",,active
+dashboard.context_breakdown.empty_grok,dashboard,DashboardPage,ContextBreakdownPanel,empty_grok,"No Grok Build activity in the selected period.",,active
+dashboard.context_breakdown.error_grok,dashboard,DashboardPage,ContextBreakdownPanel,error_grok,"Couldn't read Grok Build logs for this view.",,active
+dashboard.context_breakdown.footnote_grok,dashboard,DashboardPage,ContextBreakdownPanel,footnote_grok,"Grok uses non-overlapping token buckets here. Tool and exec drill-downs are separate heuristic attributions over the same turns, using turn_completed.usage as the authoritative total.",,active
 dashboard.context_breakdown.category.system_prompt,dashboard,DashboardPage,ContextBreakdownPanel,cat,"System prompt",,active
 dashboard.context_breakdown.category.messages,dashboard,DashboardPage,ContextBreakdownPanel,cat,"Messages",,active
 dashboard.context_breakdown.category.tool_calls,dashboard,DashboardPage,ContextBreakdownPanel,cat,"Tool calls",,active

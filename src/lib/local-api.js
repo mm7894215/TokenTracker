@@ -57,6 +57,7 @@ const {
 } = require("./claude-categorizer");
 
 const { computeCodexContextBreakdown } = require("./codex-context-breakdown");
+const { computeGrokContextBreakdown } = require("./grok-context-breakdown");
 
 const {
   deriveProjectKeyFromRef,
@@ -2308,11 +2309,11 @@ function createLocalApiHandler({ queuePath }) {
       return true;
     }
 
-    // --- usage-category-breakdown (Claude + Codex) ---
+    // --- usage-category-breakdown (Claude + Codex + Grok) ---
     // Claude: splits historical Claude usage into seven semantic categories
     // mirroring Claude Code's /context view (approx).
-    // Codex: provides a tool-oriented breakdown, attributing per-turn token
-    // deltas to observed tool calls (heuristic).
+    // Codex/Grok: tool-oriented breakdown, attributing per-turn token
+    // totals to observed tool calls (heuristic).
     if (p === "/functions/tokentracker-usage-category-breakdown") {
       const from = url.searchParams.get("from") || "";
       const to = url.searchParams.get("to") || "";
@@ -2350,6 +2351,23 @@ function createLocalApiHandler({ queuePath }) {
         } catch (e) {
           console.error("[LocalAPI] usage-category-breakdown(codex):", e?.message || e);
           json(res, { from, to, ...unsupportedCategoryPayload("codex"), error: "compute_failed" }, 500);
+        }
+        return true;
+      }
+
+      if (requestedSource === "grok") {
+        try {
+          const timeZoneContext = getTimeZoneContext(url);
+          const result = await computeGrokContextBreakdown({
+            from,
+            to,
+            top: 50,
+            timeZoneContext,
+          });
+          json(res, { from, to, ...result });
+        } catch (e) {
+          console.error("[LocalAPI] usage-category-breakdown(grok):", e?.message || e);
+          json(res, { from, to, ...unsupportedCategoryPayload("grok"), error: "compute_failed" }, 500);
         }
         return true;
       }
