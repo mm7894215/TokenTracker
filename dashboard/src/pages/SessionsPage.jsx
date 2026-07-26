@@ -31,6 +31,7 @@ const SOURCE_FILTERS = [
   { id: "all", label: () => copy("sessions.filter.source_all") },
   { id: "claude", label: () => "Claude Code" },
   { id: "codex", label: () => "Codex" },
+  { id: "grok", label: () => "Grok" },
 ];
 
 const DATE_RANGES = [
@@ -375,7 +376,7 @@ export function SessionsPage() {
 
   const truncated = Number(data?.session_count) > Number(data?.returned_count);
 
-  // Sessions read local Claude/Codex logs from the machine running the CLI;
+  // Sessions read local Claude/Codex/Grok logs from the machine running the CLI;
   // there is no cloud source. On the deployed web app, surface the local-only
   // notice instead of an empty list.
   if (!IS_LOCAL_HOST && !isMockEnabled()) {
