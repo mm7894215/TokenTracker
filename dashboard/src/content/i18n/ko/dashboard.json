@@ -444,5 +444,9 @@
   "achievements.page.suggest_link": "GitHub에서 제안하기",
   "dashboard.context_breakdown.empty_grok": "선택한 기간에 Grok Build 활동이 없습니다.",
   "dashboard.context_breakdown.error_grok": "이 보기에 필요한 Grok Build 로그를 읽을 수 없습니다.",
-  "dashboard.context_breakdown.footnote_grok": "Grok는 겹치지 않는 토큰 버킷을 사용합니다. 도구/실행 드릴다운은 동일 턴에 대한 휴리스틱 귀속이며 turn_completed.usage를 기준으로 합니다."
+  "dashboard.context_breakdown.footnote_grok": "Grok는 겹치지 않는 토큰 버킷을 사용합니다. 도구/실행 드릴다운은 동일 턴에 대한 휴리스틱 귀속이며 turn_completed.usage를 기준으로 합니다.",
+  "dashboard.context_breakdown.heading": "컨텍스트 분석",
+  "dashboard.context_breakdown.heading_claude": "Claude 컨텍스트 분석",
+  "dashboard.context_breakdown.heading_codex": "Codex 컨텍스트 분석",
+  "dashboard.context_breakdown.heading_grok": "Grok 컨텍스트 분석"
 }

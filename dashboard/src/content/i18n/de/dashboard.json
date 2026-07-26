@@ -455,5 +455,9 @@
   "achievements.page.suggest_link": "Auf GitHub vorschlagen",
   "dashboard.context_breakdown.empty_grok": "Keine Grok-Build-Aktivität im ausgewählten Zeitraum.",
   "dashboard.context_breakdown.error_grok": "Grok-Build-Logs für diese Ansicht konnten nicht gelesen werden.",
-  "dashboard.context_breakdown.footnote_grok": "Grok nutzt hier nicht-überlappende Token-Buckets. Tool- und Exec-Details sind separate heuristische Zuordnungen über dieselben Turns, mit turn_completed.usage als autoritativer Gesamtsumme."
+  "dashboard.context_breakdown.footnote_grok": "Grok nutzt hier nicht-überlappende Token-Buckets. Tool- und Exec-Details sind separate heuristische Zuordnungen über dieselben Turns, mit turn_completed.usage als autoritativer Gesamtsumme.",
+  "dashboard.context_breakdown.heading": "Kontextaufschlüsselung",
+  "dashboard.context_breakdown.heading_claude": "Claude Kontextaufschlüsselung",
+  "dashboard.context_breakdown.heading_codex": "Codex Kontextaufschlüsselung",
+  "dashboard.context_breakdown.heading_grok": "Grok Kontextaufschlüsselung"
 }

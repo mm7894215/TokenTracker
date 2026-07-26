@@ -101,10 +101,10 @@ function resolveContextBreakdownSource(provider) {
 }
 
 function contextBreakdownHeading(source) {
-  if (source === "claude") return "Claude Context Breakdown";
-  if (source === "codex") return "Codex Context Breakdown";
-  if (source === "grok") return "Grok Context Breakdown";
-  return "Context Breakdown";
+  if (source === "claude") return copy("dashboard.context_breakdown.heading_claude");
+  if (source === "codex") return copy("dashboard.context_breakdown.heading_codex");
+  if (source === "grok") return copy("dashboard.context_breakdown.heading_grok");
+  return copy("dashboard.context_breakdown.heading");
 }
 
 function hasProviderModels(provider) {
@@ -614,9 +614,9 @@ export function UsageOverview({
                   .map((provider) => {
                     const color = getProviderColor(provider.label, 0);
                     const contextSource = resolveContextBreakdownSource(provider);
-                    const sortedModels = [...provider.models].sort(
-                      (a, b) => (b.share || 0) - (a.share || 0)
-                    );
+                    const sortedModels = [...provider.models].sort((a, b) => {
+                      return (b.share || 0) - (a.share || 0);
+                    });
 
                     const providerHeading = contextSource
                       ? contextBreakdownHeading(contextSource)

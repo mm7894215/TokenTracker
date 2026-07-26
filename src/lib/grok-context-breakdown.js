@@ -588,7 +588,7 @@ async function computeGrokContextBreakdown({
   const limitedTop = Number.isFinite(top) && top > 0 ? Math.min(Math.floor(top), 200) : 50;
   const sessions = discoverGrokSessionFiles(env);
   const inventorySig = crypto
-    .createHash("sha1")
+    .createHash("sha256")
     .update(
       sessions
         .map((s) => `${s.updatesPath}:${s.size}:${Math.floor(s.mtimeMs)}`)

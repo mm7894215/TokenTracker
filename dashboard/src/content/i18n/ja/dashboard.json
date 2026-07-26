@@ -444,5 +444,9 @@
   "achievements.page.suggest_link": "GitHub で提案する",
   "dashboard.context_breakdown.empty_grok": "選択した期間に Grok Build のアクティビティがありません。",
   "dashboard.context_breakdown.error_grok": "このビューに必要な Grok Build ログを読み取れませんでした。",
-  "dashboard.context_breakdown.footnote_grok": "Grok では重複しないトークン区分を使います。ツールと exec の詳細は同一ターンへのヒューリスティックな帰属で、turn_completed.usage を正とします。"
+  "dashboard.context_breakdown.footnote_grok": "Grok では重複しないトークン区分を使います。ツールと exec の詳細は同一ターンへのヒューリスティックな帰属で、turn_completed.usage を正とします。",
+  "dashboard.context_breakdown.heading": "コンテキスト内訳",
+  "dashboard.context_breakdown.heading_claude": "Claude コンテキスト内訳",
+  "dashboard.context_breakdown.heading_codex": "Codex コンテキスト内訳",
+  "dashboard.context_breakdown.heading_grok": "Grok コンテキスト内訳"
 }

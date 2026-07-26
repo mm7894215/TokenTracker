@@ -598,5 +598,9 @@
   "wrapped.highlight.tools": "你使用了 {{count}} 款不同的 AI 工具，涉獵廣泛。",
   "dashboard.context_breakdown.empty_grok": "所選時間範圍內沒有 Grok Build 活動。",
   "dashboard.context_breakdown.error_grok": "無法讀取此檢視所需的 Grok Build 日誌。",
-  "dashboard.context_breakdown.footnote_grok": "Grok 在此使用互不重疊的 Token 分類。工具和命令執行下鑽資料，是對同一批對話輪次進行的獨立啟發式歸因，以 turn_completed.usage 為權威總量。"
+  "dashboard.context_breakdown.footnote_grok": "Grok 在此使用互不重疊的 Token 分類。工具和命令執行下鑽資料，是對同一批對話輪次進行的獨立啟發式歸因，以 turn_completed.usage 為權威總量。",
+  "dashboard.context_breakdown.heading": "上下文細分",
+  "dashboard.context_breakdown.heading_claude": "Claude 上下文細分",
+  "dashboard.context_breakdown.heading_codex": "Codex 上下文細分",
+  "dashboard.context_breakdown.heading_grok": "Grok 上下文細分"
 }

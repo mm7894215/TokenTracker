@@ -828,6 +828,10 @@ settings.appearance.language.traditional_chinese,ui,SettingsPage,SettingsPage,la
 settings.appearance.language.japanese,ui,SettingsPage,SettingsPage,language_japanese,Japanese,,active
 settings.appearance.language.korean,ui,SettingsPage,SettingsPage,language_korean,Korean,,active
 settings.appearance.language.german,ui,SettingsPage,SettingsPage,language_german,German,,active
+dashboard.context_breakdown.heading,dashboard,DashboardPage,UsageOverview,heading,"Context Breakdown",,active
+dashboard.context_breakdown.heading_claude,dashboard,DashboardPage,UsageOverview,heading_claude,"Claude Context Breakdown",,active
+dashboard.context_breakdown.heading_codex,dashboard,DashboardPage,UsageOverview,heading_codex,"Codex Context Breakdown",,active
+dashboard.context_breakdown.heading_grok,dashboard,DashboardPage,UsageOverview,heading_grok,"Grok Context Breakdown",,active
 dashboard.context_breakdown.empty,dashboard,DashboardPage,ContextBreakdownPanel,empty,"No Claude Code activity in the selected period.",,active
 dashboard.context_breakdown.empty_codex,dashboard,DashboardPage,ContextBreakdownPanel,empty_codex,"No Codex activity in the selected period.",,active
 dashboard.context_breakdown.error,dashboard,DashboardPage,ContextBreakdownPanel,error,"Couldn't read Claude Code logs for this view.",,active
