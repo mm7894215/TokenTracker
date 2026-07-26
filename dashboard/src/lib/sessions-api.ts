@@ -5,7 +5,7 @@ import { copy } from "./copy";
 
 const SLUG = "tokentracker-sessions";
 
-export type SessionSource = "claude" | "codex";
+export type SessionSource = "claude" | "codex" | "grok";
 
 export interface SessionRow {
   session_hash: string;

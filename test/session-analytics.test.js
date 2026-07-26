@@ -605,9 +605,10 @@ test("Grok session analytics bills from turn_completed.usage and keeps titles lo
   assert.equal(session.one_shot, true);
   assert.equal(session.subagent_calls, 1);
   assert.equal(session.subagent_types.spawn_subagent, 1);
-  // 100 input + 10 cached + 20 output = 130 (reasoning is tracked separately)
-  assert.equal(session.total_tokens, 130);
-  assert.equal(session.tokens.input_tokens, 100);
+  // Grok inputTokens is cache-inclusive: non-cached input = 100 - 10 = 90.
+  // Prefer reported totalTokens (120), never input+cached+output (would be 130).
+  assert.equal(session.total_tokens, 120);
+  assert.equal(session.tokens.input_tokens, 90);
   assert.equal(session.tokens.cached_input_tokens, 10);
   assert.equal(session.tokens.output_tokens, 20);
   assert.equal(session.tokens.reasoning_output_tokens, 5);
@@ -683,17 +684,63 @@ test("Grok discovery builds sessions from ~/.grok/sessions layout", async () => 
     ],
   });
 
-  const rows = await buildSessionAnalytics({ home, force: true });
-  const grokRows = rows.filter((row) => row.source === "grok");
-  assert.equal(grokRows.length, 1);
-  assert.equal(grokRows[0].session_id, sessionId);
-  assert.equal(grokRows[0].title, "Discovered Grok session");
-  assert.equal(grokRows[0].total_tokens, 10);
+  // Pin Grok home to the fixture tree so a developer-exported GROK_HOME /
+  // TOKENTRACKER_GROK_HOME cannot pull real sessions into this unit test.
+  const prevGrokHome = process.env.GROK_HOME;
+  const prevTtGrokHome = process.env.TOKENTRACKER_GROK_HOME;
+  delete process.env.GROK_HOME;
+  delete process.env.TOKENTRACKER_GROK_HOME;
+  try {
+    const rows = await buildSessionAnalytics({ home, force: true });
+    const grokRows = rows.filter((row) => row.source === "grok");
+    assert.equal(grokRows.length, 1);
+    assert.equal(grokRows[0].session_id, sessionId);
+    assert.equal(grokRows[0].title, "Discovered Grok session");
+    assert.equal(grokRows[0].total_tokens, 10);
 
-  const browser = listSessionsForBrowser(rows);
-  const grokOnly = browser.sessions.filter((row) => row.source === "grok");
-  assert.equal(grokOnly.length, 1);
-  assert.equal(grokOnly[0].resume_command, `grok --resume ${sessionId}`);
+    const browser = listSessionsForBrowser(rows);
+    const grokOnly = browser.sessions.filter((row) => row.source === "grok");
+    assert.equal(grokOnly.length, 1);
+    assert.equal(grokOnly[0].resume_command, `grok --resume ${sessionId}`);
+  } finally {
+    if (prevGrokHome === undefined) delete process.env.GROK_HOME;
+    else process.env.GROK_HOME = prevGrokHome;
+    if (prevTtGrokHome === undefined) delete process.env.TOKENTRACKER_GROK_HOME;
+    else process.env.TOKENTRACKER_GROK_HOME = prevTtGrokHome;
+  }
+});
+
+test("Grok tool-only turn after turn_completed still increments turns", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tt-grok-tool-only-"));
+  const sessionId = "dddddddd-eeee-4fff-8000-111111111111";
+  const usage = {
+    inputTokens: 20,
+    outputTokens: 5,
+    totalTokens: 25,
+    cachedReadTokens: 0,
+    reasoningTokens: 0,
+    modelUsage: { "grok-4.5": { inputTokens: 20, outputTokens: 5, totalTokens: 25 } },
+  };
+  const updatesPath = writeGrokSessionFixture(home, {
+    sessionId,
+    title: "Tool-only follow-up",
+    updates: [
+      grokUpdate(sessionId, "user_message_chunk", { content: { type: "text", text: "first" } }, { timestamp: 100, agentTimestampMs: 100_000 }),
+      grokUpdate(sessionId, "turn_completed", { usage }, { timestamp: 101, agentTimestampMs: 101_000 }),
+      // No new user_message_chunk — only a tool after the previous turn closed.
+      grokUpdate(sessionId, "tool_call", {
+        title: "search_replace",
+        _meta: { "x.ai/tool": { name: "search_replace" } },
+      }, { timestamp: 102, agentTimestampMs: 102_000 }),
+      grokUpdate(sessionId, "turn_completed", { usage }, { timestamp: 103, agentTimestampMs: 103_000 }),
+    ],
+  });
+
+  const session = await scanGrokSession(updatesPath);
+  assert.equal(session.turns, 2);
+  assert.equal(session.edit_turns, 1);
+  assert.ok(session.edit_turns <= session.turns);
+  assert.equal(session.total_tokens, 50);
 });
 
 test("Grok does not invent billable tokens from context window occupancy", async () => {

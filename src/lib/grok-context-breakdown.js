@@ -251,8 +251,10 @@ function readUsageTotals(usage) {
     Number(usage.reasoningTokens ?? usage.reasoning_output_tokens ?? 0) || 0,
   );
   const nonCachedInput = Math.max(0, inputRaw - cached);
+  // Prefer the reported totalTokens (authoritative billable total). Fallback
+  // includes reasoning so a missing total still matches usage-parser shape.
   let total = Math.max(0, Number(usage.totalTokens ?? usage.total_tokens ?? 0) || 0);
-  if (total <= 0) total = nonCachedInput + cached + output;
+  if (total <= 0) total = nonCachedInput + cached + output + reasoning;
   if (total <= 0) return null;
   return {
     input_tokens: nonCachedInput,

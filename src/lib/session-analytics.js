@@ -513,15 +513,40 @@ function grokTimestampIso(obj) {
   return new Date(ms).toISOString();
 }
 
+// Grok reports inputTokens as the full prompt (including cache hits). Split so
+// pricing can apply cache_read rates correctly — same authority as the usage
+// parser and grok-context-breakdown.readUsageTotals. Prefer the reported
+// totalTokens; do not re-sum input+cached (that double-counts cache hits).
 function grokUsageTotals(usage) {
   if (!usage || typeof usage !== "object") return emptyTotals();
-  return tokenTotals({
-    input_tokens: usage.inputTokens ?? usage.input_tokens,
-    cache_read_input_tokens: usage.cachedReadTokens ?? usage.cache_read_input_tokens ?? usage.cached_input_tokens,
-    cache_creation_input_tokens: usage.cachedWriteTokens ?? usage.cache_creation_input_tokens,
-    output_tokens: usage.outputTokens ?? usage.output_tokens,
-    reasoning_output_tokens: usage.reasoningTokens ?? usage.reasoning_output_tokens,
-  });
+  const inputRaw = finite(usage.inputTokens ?? usage.input_tokens);
+  const cached_input_tokens = finite(
+    usage.cachedReadTokens ?? usage.cache_read_input_tokens ?? usage.cached_input_tokens,
+  );
+  const cache_creation_input_tokens = finite(
+    usage.cachedWriteTokens ?? usage.cache_creation_input_tokens,
+  );
+  const output_tokens = finite(usage.outputTokens ?? usage.output_tokens);
+  const reasoning_output_tokens = finite(
+    usage.reasoningTokens ?? usage.reasoning_output_tokens,
+  );
+  const input_tokens = Math.max(0, inputRaw - cached_input_tokens);
+  let total_tokens = finite(usage.totalTokens ?? usage.total_tokens);
+  if (total_tokens <= 0) {
+    total_tokens = input_tokens
+      + cached_input_tokens
+      + cache_creation_input_tokens
+      + output_tokens
+      + reasoning_output_tokens;
+  }
+  return {
+    input_tokens,
+    cached_input_tokens,
+    cache_creation_input_tokens,
+    output_tokens,
+    reasoning_output_tokens,
+    total_tokens,
+  };
 }
 
 function pickGrokModel(usage, fallback) {
@@ -594,6 +619,8 @@ async function listGrokSessionFiles(sessionsRoot) {
     }
   }
   await walk(sessionsRoot, 0);
+  // Deterministic order so filesSignature is stable across readdir() shuffles.
+  found.sort((a, b) => a.localeCompare(b));
   return found;
 }
 
@@ -669,10 +696,10 @@ async function scanGrokSession(filePath) {
     }
 
     if (sessionUpdate === "tool_call") {
-      // Tools belong to the current user turn. If Grok never emitted a user
-      // chunk (rare / resumed partial logs), open an anonymous turn so edit
-      // accounting still works.
-      if (!openUserTurn && turns === 0) {
+      // Tools belong to the current user turn. After turn_completed closes a
+      // turn, a tool-only follow-up must open a new anonymous turn — otherwise
+      // edit_turns can exceed turns.
+      if (!openUserTurn) {
         turns += 1;
         openUserTurn = true;
       }
@@ -697,12 +724,9 @@ async function scanGrokSession(filePath) {
   }
   closeTurn();
 
-  // Prefer observed turn_completed totals. Fall back to signals only when the
-  // updates stream had no billable turns (empty/partial session).
-  if (tokens.total_tokens === 0 && finite(signals.contextTokensUsed) > 0) {
-    // Do NOT invent billable totals from context occupancy. Leave zeros so
-    // listSessionsForBrowser filters empty sessions out.
-  }
+  // Prefer observed turn_completed totals. Never invent billable totals from
+  // signals.contextTokensUsed (context-window occupancy is not API usage);
+  // leave zeros so listSessionsForBrowser filters empty sessions out.
   if (turns === 0 && finite(signals.turnCount) > 0) {
     turns = finite(signals.turnCount);
   }
