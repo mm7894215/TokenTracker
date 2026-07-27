@@ -768,27 +768,30 @@ async function scanGrokSession(filePath) {
 // and its project list. TOKENTRACKER_WSL_MODE gates which sides are probed;
 // duplicated files synced between environments collapse via the Codex session-id
 // pass below and claudeMessageDedupKey downstream.
-function providerRoots(home, providerDir, env) {
+function providerRoots(home, providerDir, env, deps = {}) {
+  const platform = deps.platform || process.platform;
+  const homedir = deps.homedir || os.homedir;
+  const discoverWslHome = deps.discoverWslHome || wsl.discoverWslHome;
   const roots = [];
-  if (process.platform !== "win32" || wsl.shouldProbeNative(env)) {
+  if (platform !== "win32" || wsl.shouldProbeNative(env)) {
     roots.push(path.join(home, providerDir));
   }
   // Only the real native home has a WSL sibling worth probing. discoverWslHome
   // resolves \\wsl$ independently of `home`, so callers that inject their own
   // home (tests, a custom HOME) would otherwise get the machine's live WSL
   // sessions spliced into an isolated fixture.
-  const isRealHome = path.resolve(home) === path.resolve(os.homedir());
-  if (process.platform === "win32" && isRealHome && wsl.shouldProbeWsl(env)) {
-    const wslRoot = wsl.discoverWslHome(providerDir, { env });
+  const isRealHome = path.resolve(home) === path.resolve(homedir());
+  if (platform === "win32" && isRealHome && wsl.shouldProbeWsl(env)) {
+    const wslRoot = discoverWslHome(providerDir, { env });
     if (wslRoot) roots.push(wslRoot);
   }
   return [...new Set(roots)];
 }
 
-async function discoverSessionFiles(home, env = process.env) {
+async function discoverSessionFiles(home, env = process.env, deps = {}) {
   const grokHome = resolveGrokHome(home);
-  const claudeRoots = providerRoots(home, ".claude", env);
-  const codexRoots = providerRoots(home, ".codex", env);
+  const claudeRoots = providerRoots(home, ".claude", env, deps);
+  const codexRoots = providerRoots(home, ".codex", env, deps);
   const [claudeGroups, codexGroups, archivedGroups, grok] = await Promise.all([
     Promise.all(claudeRoots.map((r) => listClaudeProjectFiles(path.join(r, "projects")))),
     Promise.all(codexRoots.map((r) => listRolloutFilesDeep(path.join(r, "sessions")))),
@@ -1291,4 +1294,5 @@ module.exports = {
   listSessionsForBrowser,
   resumeCommandFor,
   sessionsToCsv,
+  providerRoots,
 };
