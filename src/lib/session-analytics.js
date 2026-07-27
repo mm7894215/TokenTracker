@@ -31,6 +31,7 @@ const readline = require("node:readline");
 const { listClaudeProjectFiles, listRolloutFilesDeep, claudeMessageDedupKey } = require("./rollout");
 const { parseCodexRolloutFile } = require("./codex-rollout-parser");
 const { computeRowCost } = require("./pricing");
+const wsl = require("./wsl-probe");
 
 // Bump the sidecar when derived metrics change so cached rows are rebuilt
 // instead of leaving the dashboard on the previous (over-counted) heuristic.
@@ -761,14 +762,42 @@ async function scanGrokSession(filePath) {
   });
 }
 
-async function discoverSessionFiles(home) {
+// Multi-root discovery: on Windows a native install and a WSL one both count.
+// `sync` already walks both Claude homes (src/commands/sync.js), so without this
+// the WSL work lands in the token totals but is invisible in the session browser
+// and its project list. TOKENTRACKER_WSL_MODE gates which sides are probed;
+// duplicated files synced between environments collapse via the Codex session-id
+// pass below and claudeMessageDedupKey downstream.
+function providerRoots(home, providerDir, env) {
+  const roots = [];
+  if (process.platform !== "win32" || wsl.shouldProbeNative(env)) {
+    roots.push(path.join(home, providerDir));
+  }
+  // Only the real native home has a WSL sibling worth probing. discoverWslHome
+  // resolves \\wsl$ independently of `home`, so callers that inject their own
+  // home (tests, a custom HOME) would otherwise get the machine's live WSL
+  // sessions spliced into an isolated fixture.
+  const isRealHome = path.resolve(home) === path.resolve(os.homedir());
+  if (process.platform === "win32" && isRealHome && wsl.shouldProbeWsl(env)) {
+    const wslRoot = wsl.discoverWslHome(providerDir, { env });
+    if (wslRoot) roots.push(wslRoot);
+  }
+  return [...new Set(roots)];
+}
+
+async function discoverSessionFiles(home, env = process.env) {
   const grokHome = resolveGrokHome(home);
-  const [allClaude, codex, archived, grok] = await Promise.all([
-    listClaudeProjectFiles(path.join(home, ".claude", "projects")),
-    listRolloutFilesDeep(path.join(home, ".codex", "sessions")),
-    listRolloutFilesDeep(path.join(home, ".codex", "archived_sessions")),
+  const claudeRoots = providerRoots(home, ".claude", env);
+  const codexRoots = providerRoots(home, ".codex", env);
+  const [claudeGroups, codexGroups, archivedGroups, grok] = await Promise.all([
+    Promise.all(claudeRoots.map((r) => listClaudeProjectFiles(path.join(r, "projects")))),
+    Promise.all(codexRoots.map((r) => listRolloutFilesDeep(path.join(r, "sessions")))),
+    Promise.all(codexRoots.map((r) => listRolloutFilesDeep(path.join(r, "archived_sessions")))),
     listGrokSessionFiles(path.join(grokHome, "sessions")),
   ]);
+  const allClaude = [...new Set(claudeGroups.flat())];
+  const codex = [...new Set(codexGroups.flat())];
+  const archived = [...new Set(archivedGroups.flat())];
   // Claude Memory stores thousands of background observer transcripts beside
   // real Claude Code sessions. They contain <synthetic>/haiku bookkeeping and
   // no user coding outcome, so scanning them both slows the card dramatically
