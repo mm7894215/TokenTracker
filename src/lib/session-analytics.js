@@ -776,12 +776,19 @@ function providerRoots(home, providerDir, env, deps = {}) {
   if (platform !== "win32" || wsl.shouldProbeNative(env)) {
     roots.push(path.join(home, providerDir));
   }
-  // Only the real native home has a WSL sibling worth probing. discoverWslHome
-  // resolves \\wsl$ independently of `home`, so callers that inject their own
-  // home (tests, a custom HOME) would otherwise get the machine's live WSL
-  // sessions spliced into an isolated fixture.
-  const isRealHome = path.resolve(home) === path.resolve(homedir());
-  if (platform === "win32" && isRealHome && wsl.shouldProbeWsl(env)) {
+  // Only the machine's own home has a WSL sibling worth probing.
+  // discoverWslHome resolves \\wsl$ independently of `home`, so probing for an
+  // injected home (tests, a custom HOME) would splice the machine's live WSL
+  // sessions into what the caller expects to be an isolated tree.
+  //
+  // This defaults rather than hard-codes: the whole reason to thread a
+  // non-default home is to scan a tree that is not os.homedir(), and such a
+  // caller would otherwise lose WSL discovery silently, with nothing failing.
+  // `probeWsl` is the deliberate opt-in for that case.
+  const probeWsl = deps.probeWsl !== undefined
+    ? Boolean(deps.probeWsl)
+    : path.resolve(home) === path.resolve(homedir());
+  if (platform === "win32" && probeWsl && wsl.shouldProbeWsl(env)) {
     const wslRoot = discoverWslHome(providerDir, { env });
     if (wslRoot) roots.push(wslRoot);
   }

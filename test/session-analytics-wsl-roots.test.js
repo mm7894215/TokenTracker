@@ -96,6 +96,33 @@ test("an injected home never inherits the machine's real WSL sessions", () => {
   assert.equal(probed, false, "WSL must not be probed for a home that is not os.homedir()");
 });
 
+// The default is a heuristic ("is this the machine's own home?"), so the
+// escape hatch has to be reachable and pinned: a caller that deliberately
+// scans a non-default tree must be able to keep WSL discovery, and one
+// scanning the real home must be able to turn it off. Without these, a future
+// refactor threading a custom home would lose WSL roots with nothing failing.
+test("probeWsl:true opts a non-default home back into WSL discovery", () => {
+  const roots = providerRoots("C:\\Temp\\other-profile", ".claude", { TOKENTRACKER_WSL_MODE: "both" }, {
+    platform: "win32",
+    homedir: () => REAL_HOME,
+    discoverWslHome: () => WSL_HOME,
+    probeWsl: true,
+  });
+  assert.deepEqual(roots, [path.join("C:\\Temp\\other-profile", ".claude"), WSL_HOME]);
+});
+
+test("probeWsl:false opts the real home out of WSL discovery", () => {
+  let probed = false;
+  const roots = providerRoots(REAL_HOME, ".claude", { TOKENTRACKER_WSL_MODE: "both" }, {
+    platform: "win32",
+    homedir: () => REAL_HOME,
+    discoverWslHome: () => { probed = true; return WSL_HOME; },
+    probeWsl: false,
+  });
+  assert.deepEqual(roots, [path.join(REAL_HOME, ".claude")]);
+  assert.equal(probed, false);
+});
+
 test("codex roots resolve independently of claude roots", () => {
   const deps = {
     platform: "win32",
