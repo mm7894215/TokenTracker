@@ -89,6 +89,7 @@ describe("mergeSkillInventories", () => {
       name: "Reviewer",
       directory: "reviewer",
       targets: ["claude"],
+      targetStates: { claude: "synced", codex: "available" },
       managed: true,
     }];
     const merged = mergeSkillInventories(local, {
@@ -105,6 +106,7 @@ describe("mergeSkillInventories", () => {
     expect(merged[0].readOnly).not.toBe(true);
     expect(merged[0].remote).not.toBe(true);
     expect(merged[0].targets).toEqual(["claude"]);
+    expect(merged[0].targetStates).toEqual({ claude: "synced", codex: "available" });
     expect(merged[0].deviceSources).toEqual([{
       id: "other-device",
       name: "Mac mini",
@@ -139,6 +141,37 @@ describe("mergeSkillInventories", () => {
       targets: ["zcode"],
     });
     expect(merged[0].deviceSources.map((source: { name: string }) => source.name)).toEqual(["MacBook", "Work PC"]);
+  });
+
+  it("merges different targets reported for one remote-only skill", () => {
+    const sharedSkill = {
+      key: "local:reviewer",
+      name: "Reviewer",
+      directory: "reviewer",
+    };
+    const merged = mergeSkillInventories([], {
+      devices: [
+        {
+          id: "mac",
+          device_name: "MacBook",
+          skills: [{ ...sharedSkill, targets: ["claude"] }],
+        },
+        {
+          id: "pc",
+          device_name: "Work PC",
+          skills: [{ ...sharedSkill, targets: ["codex"] }],
+        },
+      ],
+    }, "current");
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      remote: true,
+      readOnly: true,
+      targets: ["claude", "codex"],
+      targetStates: { claude: "synced", codex: "synced" },
+    });
+    expect(merged[0].deviceSources.map((source: { id: string }) => source.id)).toEqual(["mac", "pc"]);
   });
 
   it("filters built-in skills from local and stale remote inventories", () => {

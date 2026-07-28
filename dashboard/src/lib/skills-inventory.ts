@@ -22,6 +22,12 @@ function cleanString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function cleanTargets(value: unknown): string[] {
+  return Array.isArray(value)
+    ? [...new Set(value.map(cleanString).filter(Boolean))]
+    : [];
+}
+
 function cleanRelativePath(value: unknown): string {
   const raw = cleanString(value).replace(/\\/g, "/");
   if (!raw || raw.startsWith("/") || /^[A-Za-z]:\//.test(raw)) return "";
@@ -63,9 +69,7 @@ export function buildSkillInventoryMetadata(skills: AnyRecord[]): SkillInventory
         key,
         name: cleanString(skill?.name) || directory.split("/").pop() || "Skill",
         directory,
-        targets: Array.isArray(skill?.targets)
-          ? [...new Set(skill.targets.map(cleanString).filter(Boolean))]
-          : [],
+        targets: cleanTargets(skill?.targets),
         managed: skill?.managed === true,
         readOnly: skill?.readOnly === true,
         scope,
@@ -117,14 +121,23 @@ export function mergeSkillInventories(
       const directory = cleanString(remote?.directory);
       if (!key || !directory) continue;
       const normalizedKey = key.toLowerCase();
+      const remoteTargets = cleanTargets(remote.targets);
       const existingIndex = byKey.get(normalizedKey);
       if (existingIndex != null) {
         const existing = merged[existingIndex];
-        merged[existingIndex] = addDeviceSource(existing, source);
+        if (existing.remote === true && existing.inventoryOnly === true) {
+          const targets = [...new Set([...cleanTargets(existing.targets), ...remoteTargets])];
+          const targetStates = Object.fromEntries(targets.map((target) => [target, "synced"]));
+          merged[existingIndex] = addDeviceSource({ ...existing, targets, targetStates }, source);
+        } else {
+          // Local targets describe this machine's filesystem and must not be
+          // contaminated by targets reported from another device.
+          merged[existingIndex] = addDeviceSource(existing, source);
+        }
         continue;
       }
 
-      const targets = Array.isArray(remote.targets) ? [...new Set(remote.targets.map(cleanString).filter(Boolean))] : [];
+      const targets = remoteTargets;
       const targetStates = Object.fromEntries(targets.map((target) => [target, "synced"]));
       const entry = addDeviceSource({
         id: `remote:${encodeURIComponent(key)}`,
