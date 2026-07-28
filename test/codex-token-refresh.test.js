@@ -9,10 +9,16 @@ const {
   refreshCodexTokens,
   persistRefreshedAuth,
   REFRESH_THRESHOLD_MS,
+  ACCESS_TOKEN_REFRESH_WINDOW_MS,
   REFRESH_ENDPOINT,
 } = require("../src/lib/codex-token-refresh");
 
 describe("isTokenStale", () => {
+  function jwtWithExpiration(exp) {
+    const payload = Buffer.from(JSON.stringify({ exp })).toString("base64url");
+    return `header.${payload}.signature`;
+  }
+
   it("treats missing last_refresh as stale", () => {
     assert.equal(isTokenStale(null), true);
     assert.equal(isTokenStale(""), true);
@@ -37,6 +43,28 @@ describe("isTokenStale", () => {
 
   it("uses an 8-day threshold (not 7, not 30)", () => {
     assert.equal(REFRESH_THRESHOLD_MS, 8 * 24 * 60 * 60 * 1000);
+  });
+
+  it("prefers JWT expiry over an old last_refresh timestamp", () => {
+    const now = Date.parse("2026-05-05T00:00:00Z");
+    const expiresInTwoDays = Math.floor((now + 2 * 24 * 60 * 60 * 1000) / 1000);
+    assert.equal(
+      isTokenStale("2026-01-01T00:00:00Z", now, jwtWithExpiration(expiresInTwoDays)),
+      false,
+    );
+  });
+
+  it("refreshes JWT access tokens within the official five-minute window", () => {
+    const now = Date.parse("2026-05-05T00:00:00Z");
+    assert.equal(ACCESS_TOKEN_REFRESH_WINDOW_MS, 5 * 60 * 1000);
+    assert.equal(
+      isTokenStale(null, now, jwtWithExpiration(Math.floor((now + 6 * 60 * 1000) / 1000))),
+      false,
+    );
+    assert.equal(
+      isTokenStale(null, now, jwtWithExpiration(Math.floor((now + 5 * 60 * 1000) / 1000))),
+      true,
+    );
   });
 });
 
@@ -65,6 +93,7 @@ describe("refreshCodexTokens", () => {
     assert.equal(observedBody.client_id, "app_EMoamEEZ73f0CkXaXp7hrann");
     assert.equal(observedBody.grant_type, "refresh_token");
     assert.equal(observedBody.refresh_token, "rt-abc");
+    assert.equal(observedBody.scope, undefined);
     assert.deepEqual(result, {
       access_token: "new-access",
       refresh_token: "new-refresh",
@@ -102,7 +131,26 @@ describe("refreshCodexTokens", () => {
     assert.ok(thrown);
     assert.equal(thrown.code, "REFRESH_TOKEN_EXPIRED");
     assert.equal(thrown.openaiErrorCode, "refresh_token_expired");
-    assert.match(thrown.message, /Run `codex` to re-authenticate/);
+    assert.match(thrown.message, /Run `codex login` to re-authenticate/);
+  });
+
+  it("explains a refresh_token_reused 401 separately", async () => {
+    await assert.rejects(
+      refreshCodexTokens({
+        refreshToken: "rt-abc",
+        fetchImpl: async () => ({
+          ok: false,
+          status: 401,
+          json: async () => ({ error: { code: "refresh_token_reused" } }),
+        }),
+      }),
+      (err) => {
+        assert.equal(err.code, "REFRESH_TOKEN_EXPIRED");
+        assert.equal(err.openaiErrorCode, "refresh_token_reused");
+        assert.match(err.message, /already used/);
+        return true;
+      },
+    );
   });
 
   it("throws NO_REFRESH_TOKEN when no refresh_token is available", async () => {

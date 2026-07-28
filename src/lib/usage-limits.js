@@ -523,15 +523,16 @@ async function fetchCodexUsageLimits(
       // 401/403/404 from wham means "no usage data available for this auth state" — render
       // a neutral empty state instead of a red "Fetch failed" error.
       if (res.status === 401 || res.status === 403 || res.status === 404) {
-        return { body: null };
+        return { body: null, status: res.status };
       }
       if (res.status !== 200) {
         throw new Error(`Codex API returned ${res.status}`);
       }
-      return { body: await res.json() };
+      return { body: await res.json(), status: res.status };
     }), "Codex", providerTimeoutMs);
   if (!usage.body) {
     return {
+      upstream_status: usage.status,
       primary_window: null,
       secondary_window: null,
       credit_window: null,
@@ -558,6 +559,7 @@ async function fetchCodexUsageLimits(
     }
   }
   return {
+    upstream_status: usage.status,
     ...normalizeCodexRateWindows(body.rate_limit || {}),
     credit_window: normalizeCodexCreditWindow(body.spend_control?.individual_limit),
     ...normalizeCodexSparkRateWindows(body.additional_rate_limits),
@@ -3051,14 +3053,14 @@ async function fetchUsageLimitsUncached({
   ]);
   const claudePlanType = claudeSubscription?.planType || null;
 
-  // Proactively refresh Codex tokens that are >8 days stale, mirroring CodexBar's
-  // CodexTokenRefresher.swift. Without this, users who logged in once and didn't run
-  // `codex` for >a week get wham 401 → "Fetch failed" (issue #52). Best-effort: any
-  // refresh failure falls through to using the existing (possibly stale) token, then the
-  // 4xx graceful path in fetchCodexUsageLimits surfaces a neutral state instead of red.
+  // Match the official Codex CLI: prefer the access token's JWT expiry and refresh only
+  // within five minutes of it; fall back to last_refresh >8 days for opaque/legacy tokens.
+  // Best-effort: a refresh failure still falls through to the existing access token.
   let refreshError = null;
   let codexAuthRefreshed = codexAuth;
-  if (codexAuth && isTokenStale(codexAuth.lastRefresh) && codexAuth.refreshToken) {
+  if (codexAuth
+    && isTokenStale(codexAuth.lastRefresh, nowMs, codexAuth.accessToken)
+    && codexAuth.refreshToken) {
     try {
       const newTokens = await refreshCodexTokens({
         refreshToken: codexAuth.refreshToken,
@@ -3225,12 +3227,39 @@ async function fetchUsageLimitsUncached({
     claude.service_status = claudeServiceStatus;
   }
 
+  const codexRefreshRequiresReauth = refreshError?.code === "REFRESH_TOKEN_EXPIRED";
+  const codexLiveUsageSucceeded = codexResult?.status === "fulfilled"
+    && codexResult.value.upstream_status === 200;
   let codex;
   if (!codexToken) {
     codex = { configured: false };
-  } else if (refreshError && refreshError.code === "REFRESH_TOKEN_EXPIRED") {
+  } else if (codexResult?.status === "fulfilled"
+    && (!codexRefreshRequiresReauth || codexLiveUsageSucceeded)) {
+    // A proactive refresh can fail while the existing access token is still valid.
+    // Prefer a confirmed 200 live usage read over the refresh error so usable quota
+    // data is not discarded before the access token actually expires. A neutral
+    // 401/403/404 no-data response must not mask a failed refresh.
+    codex = {
+      configured: true,
+      error: null,
+      plan_type: codexPlanType || null,
+      primary_window: codexResult.value.primary_window,
+      secondary_window: codexResult.value.secondary_window,
+      credit_window: codexResult.value.credit_window,
+      spark_primary_window: codexResult.value.spark_primary_window,
+      spark_secondary_window: codexResult.value.spark_secondary_window,
+      reset_credits: codexResult.value.reset_credits,
+      // Live read is current as of now; the stale fallback path below serves the
+      // disk cache with `stale: true`. Always emitting both lets the client show a
+      // data-age label uniformly (see the Claude live-success block).
+      stale: false,
+      cached_at: new Date(nowMs).toISOString(),
+    };
+    writeCodexLimitsCache(codex, { home, nowMs });
+  } else if (codexRefreshRequiresReauth) {
     // Refresh token is dead — the user must re-run `codex` to log in again. Surface a
-    // specific, actionable message rather than the generic "Fetch failed".
+    // specific, actionable message rather than the generic "Fetch failed", but only
+    // after the existing access token also failed to fetch live usage above.
     codex = {
       configured: true,
       error: refreshError.message,
@@ -3246,24 +3275,6 @@ async function fetchUsageLimitsUncached({
     } else {
       codex = { configured: true, error: codexResult?.reason?.message || "Unknown error" };
     }
-  } else {
-    codex = {
-      configured: true,
-      error: null,
-      plan_type: codexPlanType || null,
-      primary_window: codexResult.value.primary_window,
-      secondary_window: codexResult.value.secondary_window,
-      credit_window: codexResult.value.credit_window,
-      spark_primary_window: codexResult.value.spark_primary_window,
-      spark_secondary_window: codexResult.value.spark_secondary_window,
-      reset_credits: codexResult.value.reset_credits,
-      // Live read is current as of now; the stale fallback path above serves the
-      // disk cache with `stale: true`. Always emitting both lets the client show a
-      // data-age label uniformly (see the Claude live-success block).
-      stale: false,
-      cached_at: new Date(nowMs).toISOString(),
-    };
-    writeCodexLimitsCache(codex, { home, nowMs });
   }
 
   const data = {

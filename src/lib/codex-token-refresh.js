@@ -6,11 +6,29 @@ const path = require("node:path");
 const REFRESH_ENDPOINT = "https://auth.openai.com/oauth/token";
 const CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 
-// CodexBar refreshes when last_refresh > 8 days. We mirror that — actual TTL is shorter so
-// we always refresh before the access token can expire while users have the app running.
+// Match the official Codex CLI: when the access token exposes a JWT expiry, refresh only
+// shortly before it expires. Fall back to last_refresh > 8 days for opaque/legacy tokens.
 const REFRESH_THRESHOLD_MS = 8 * 24 * 60 * 60 * 1000;
+const ACCESS_TOKEN_REFRESH_WINDOW_MS = 5 * 60 * 1000;
 
-function isTokenStale(lastRefreshIso, nowMs = Date.now()) {
+function parseJwtExpirationMs(token) {
+  if (typeof token !== "string" || token.length === 0) return null;
+  const parts = token.split(".");
+  if (parts.length < 2 || !parts[1]) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    const exp = Number(payload?.exp);
+    return Number.isFinite(exp) ? exp * 1000 : null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+function isTokenStale(lastRefreshIso, nowMs = Date.now(), accessToken = null) {
+  const expiresAtMs = parseJwtExpirationMs(accessToken);
+  if (expiresAtMs !== null) {
+    return expiresAtMs <= nowMs + ACCESS_TOKEN_REFRESH_WINDOW_MS;
+  }
   if (!lastRefreshIso) return true;
   const ts = Date.parse(lastRefreshIso);
   if (!Number.isFinite(ts)) return true;
@@ -34,7 +52,6 @@ async function refreshCodexTokens({ refreshToken, fetchImpl = fetch }) {
       client_id: CODEX_CLIENT_ID,
       grant_type: "refresh_token",
       refresh_token: refreshToken,
-      scope: "openid profile email",
     }),
   });
 
@@ -50,9 +67,18 @@ async function refreshCodexTokens({ refreshToken, fetchImpl = fetch }) {
     } catch (_e) {
       // Ignore parse failure — surface the generic reason.
     }
-    const err = new Error(
-      "Codex refresh token expired or revoked. Run `codex` to re-authenticate.",
-    );
+    const reason = String(openaiErrorCode || "").toLowerCase();
+    let message = "Codex refresh token was rejected. Run `codex login` to re-authenticate.";
+    if (reason === "refresh_token_expired") {
+      message = "Codex refresh token expired. Run `codex login` to re-authenticate.";
+    } else if (reason === "refresh_token_reused") {
+      message =
+        "Codex refresh token was already used, likely by another Codex process. " +
+        "Run `codex login` to re-authenticate.";
+    } else if (reason === "refresh_token_invalidated") {
+      message = "Codex refresh token was revoked. Run `codex login` to re-authenticate.";
+    }
+    const err = new Error(message);
     err.code = "REFRESH_TOKEN_EXPIRED";
     err.openaiErrorCode = openaiErrorCode;
     throw err;
@@ -106,6 +132,8 @@ module.exports = {
   REFRESH_ENDPOINT,
   CODEX_CLIENT_ID,
   REFRESH_THRESHOLD_MS,
+  ACCESS_TOKEN_REFRESH_WINDOW_MS,
+  parseJwtExpirationMs,
   isTokenStale,
   refreshCodexTokens,
   persistRefreshedAuth,

@@ -1502,13 +1502,92 @@ describe("getUsageLimits", () => {
               json: async () => ({ error: { code: "refresh_token_expired" } }),
             });
           }
+          if (url === CODEX_WHAM_USAGE_URL) {
+            return Promise.resolve({
+              ok: false,
+              status: 401,
+              json: async () => ({}),
+            });
+          }
           return pendingUnlessCodexReset(url);
         },
       });
 
       assert.equal(result.codex.configured, true);
       assert.equal(result.codex.auth_action_required, "reauth");
-      assert.match(result.codex.error, /Run `codex` to re-authenticate/);
+      assert.match(result.codex.error, /Run `codex login` to re-authenticate/);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("uses live Codex usage when refresh fails but the access token remains valid", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-codex-valid-access-"));
+    try {
+      const codexHome = path.join(tmp, ".codex");
+      const accessToken = makeFakeCodexJwt("plus");
+      fs.mkdirSync(codexHome, { recursive: true });
+      fs.writeFileSync(
+        path.join(codexHome, "auth.json"),
+        JSON.stringify({
+          tokens: {
+            access_token: accessToken,
+            id_token: accessToken,
+            refresh_token: "rt-dead-valid-access",
+            account_id: "acc-valid-access",
+          },
+          last_refresh: "2026-01-01T00:00:00Z",
+        }),
+      );
+
+      let whamAuthHeader = null;
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 2000,
+        securityRunner: inactiveRunner,
+        commandRunner: inactiveRunner,
+        fetchImpl(url, options) {
+          if (url === "https://auth.openai.com/oauth/token") {
+            return Promise.resolve({
+              ok: false,
+              status: 401,
+              json: async () => ({ error: { code: "refresh_token_expired" } }),
+            });
+          }
+          if (url === CODEX_WHAM_USAGE_URL) {
+            whamAuthHeader = options?.headers?.Authorization || null;
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                rate_limit: {
+                  primary_window: {
+                    used_percent: 12,
+                    limit_window_seconds: 604800,
+                    reset_at: 1_900_000_000,
+                  },
+                  secondary_window: null,
+                },
+              }),
+            });
+          }
+          return pendingUnlessCodexReset(url);
+        },
+      });
+
+      assert.equal(whamAuthHeader, `Bearer ${accessToken}`);
+      assert.equal(result.codex.configured, true);
+      assert.equal(result.codex.error, null);
+      assert.equal(result.codex.auth_action_required, undefined);
+      assert.equal(result.codex.primary_window, null);
+      assert.deepEqual(result.codex.secondary_window, {
+        used_percent: 12,
+        limit_window_seconds: 604800,
+        reset_at: 1_900_000_000,
+      });
     } finally {
       resetUsageLimitsCache();
       fs.rmSync(tmp, { recursive: true, force: true });
