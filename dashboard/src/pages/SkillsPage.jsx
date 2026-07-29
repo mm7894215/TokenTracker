@@ -144,13 +144,12 @@ function isManageableTarget(target) {
 function AgentDot({ target, state, busy, disabled, disabledLabel, onToggle }) {
   const synced = state === "synced";
   const orphan = state === "orphan";
-  const label = disabled && disabledLabel
-    ? disabledLabel
-    : orphan
+  const stateLabel = orphan
     ? copy("skills.dot.orphan_aria", { agent: target.label })
     : synced
       ? copy("skills.dot.synced_aria", { agent: target.label })
       : copy("skills.dot.off_aria", { agent: target.label });
+  const label = disabled && disabledLabel ? `${stateLabel} — ${disabledLabel}` : stateLabel;
   return (
     <button
       type="button"

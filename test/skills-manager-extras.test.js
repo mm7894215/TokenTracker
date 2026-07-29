@@ -84,6 +84,8 @@ describe("read-only plugin skill inventory", () => {
       [".codex/plugins/cache/openai-bundled/browser/1.2.3/skills/browser-control", "Codex Browser"],
       [".claude/plugins/cache/acme/tools/2.0.0/skills/reviewer", "Claude Reviewer"],
       [".zcode/cli/plugins/cache/zcode-official/guide/0.1.0/skills/diagnostics", "ZCode Diagnostics"],
+      [".claude/plugins/cache/acme/first/skills/shared", "Claude First Plugin"],
+      [".claude/plugins/cache/acme/second/skills/shared", "Claude Second Plugin"],
     ];
     for (const [relative, name] of fixtures) {
       writeSkillDir(path.join(sandboxHome, relative), "SKILL.md", `---\nname: ${name}\n---\n`);
@@ -106,6 +108,13 @@ describe("read-only plugin skill inventory", () => {
     assert.ok(zcode, "ZCode should be available as an inventory filter");
     assert.equal(zcode.manageable, false);
     assert.equal(zcode.path, null);
+
+    const sharedPlugins = installed.filter((entry) => entry.directory === "shared");
+    assert.equal(sharedPlugins.length, 2, "versionless plugins with the same skill must keep distinct identities");
+    assert.deepEqual(
+      sharedPlugins.map((entry) => entry.sourceName).sort(),
+      ["acme/first", "acme/second"],
+    );
   });
 
   it("scans only the active OpenClaw workspace skills directory", () => {

@@ -399,7 +399,11 @@ function scanPluginInventoryRoot({ root, targetId }) {
         const beforeSkills = container.split("/").filter(Boolean).slice(0, -1);
         // Drop the cache version from the identity so installing a newer plugin
         // version updates one inventory row instead of creating a duplicate.
-        const packageParts = beforeSkills.length > 1 ? beforeSkills.slice(0, -1) : beforeSkills;
+        const looksLikeVersion = (value) => /^v?\d+(?:\.\d+)*$/.test(String(value || ""));
+        const packageParts =
+          beforeSkills.length > 1 && looksLikeVersion(beforeSkills[beforeSkills.length - 1])
+            ? beforeSkills.slice(0, -1)
+            : beforeSkills;
         const sourceName = packageParts.join("/") || beforeSkills.join("/") || null;
         for (const directory of scanSkillDirectories(full, { maxDepth: 5 })) {
           const marker = findSkillMarker(path.join(full, directory));
