@@ -179,7 +179,7 @@ brew install mm7894215/tokentracker/tokentracker
 | **GitHub Copilot App / CLI** | ✅ 自动 | 统一逐请求 SQLite 用量（`~/.copilot/session-store.db`）；App DB 作为旧数据基线 |
 | **GitHub Copilot Chat 扩展 / 旧版 CLI** | ✅ 自动 | OpenTelemetry 文件导出（`COPILOT_OTEL_FILE_EXPORTER_PATH`） |
 | **Kimi Code** | ✅ 自动 | 被动读取 `wire.jsonl`（`~/.kimi/sessions/**/wire.jsonl`） |
-| **oh-my-pi (Pi Coding Agent)** | ✅ 自动 | 被动读取（`~/.omp/agent/sessions/**/*.jsonl`） |
+| **oh-my-pi (Pi Coding Agent)** | ✅ 自动 | 被动读取（`~/.omp/agent/sessions/**/*.jsonl`）+ 可选 notify 扩展（`~/.omp/agent/extensions/tokentracker-notify.ts`）近实时同步 |
 | **CodeBuddy** (腾讯) | ✅ 自动 | 写入 `~/.codebuddy/settings.json` 的 SessionEnd hook（Claude-Code fork） |
 | **WorkBuddy** (腾讯) | ✅ 自动 | 写入 `~/.workbuddy/settings.json` 的 SessionEnd hook（Claude-Code fork）+ 被动扫描 `projects/**/*.jsonl` |
 | **Grok Build** (xAI) | ✅ 自动 | SessionEnd hook + 被动扫描 `updates.jsonl` / `signals.json`（`~/.grok/sessions/**/`） |

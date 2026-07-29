@@ -84,6 +84,7 @@ const wsl = require("../lib/wsl-probe");
 const { getWslMode, isInvalidWslMode, shouldProbeWsl, discoverWslHome } = wsl;
 const { resolveInstallPaths } = require("../lib/install-resolver");
 const { probeGrokHookState, resolveGrokHome } = require("../lib/grok-hook");
+const { probeOmpHookState } = require("../lib/omp-hook");
 
 function formatResolvedPaths(paths, filename) {
   const active = [];
@@ -359,10 +360,11 @@ async function cmdStatus(argv = []) {
     ? fssync.existsSync(path.join(workbuddyHome, "workbuddy.db"))
     : false;
 
-  // oh-my-pi — passive scan only (no hooks).
+  // oh-my-pi — passive scan + optional notify extension.
   const ompAgentDir = resolveOmpAgentDir(process.env);
   const ompInstalled = Boolean(ompAgentDir) && fssync.existsSync(path.join(ompAgentDir, "sessions"));
   const ompFiles = ompInstalled ? resolveOmpSessionFiles(process.env) : [];
+  const ompHookState = await probeOmpHookState({ home, trackerDir, env: process.env });
 
   // pi (@mariozechner/pi-coding-agent) — passive scan only (no hooks).
   // Skip when its agent dir collides with omp's; sync would dedupe anyway.
@@ -771,8 +773,13 @@ async function cmdStatus(argv = []) {
         workbuddy: workbuddyInstalled
           ? { installed: true, files: workbuddyFiles.length }
           : { installed: false },
-        omp: ompInstalled
-          ? { installed: true, files: ompFiles.length }
+        omp: ompInstalled || ompHookState.ompPresent
+          ? {
+              installed: true,
+              files: ompFiles.length,
+              notify_extension: Boolean(ompHookState.configured),
+              notify_extension_path: ompHookState.extensionPath || null,
+            }
           : { installed: false },
         pi: piInstalled
           ? { installed: true, files: piFiles.length }
@@ -895,8 +902,8 @@ async function cmdStatus(argv = []) {
       workbuddyInstalled
         ? `- WorkBuddy hooks: ${workbuddyHookConfigured ? "set" : "unset"} (${workbuddyFiles.length} session jsonl file${workbuddyFiles.length !== 1 ? "s" : ""} found, SQLite DB ${workbuddyDbExists ? "found" : "not found"})`
         : null,
-      ompInstalled
-        ? `- oh-my-pi: passive reader (${ompFiles.length} session jsonl file${ompFiles.length !== 1 ? "s" : ""} found)`
+      ompInstalled || ompHookState.ompPresent
+        ? `- oh-my-pi: passive reader (${ompFiles.length} session jsonl file${ompFiles.length !== 1 ? "s" : ""} found${ompHookState.configured ? ", notify extension: yes" : ", notify extension: no"})`
         : null,
       piInstalled
         ? `- pi: passive reader (${piFiles.length} session jsonl file${piFiles.length !== 1 ? "s" : ""} found)`

@@ -41,3 +41,19 @@ describe("ProviderIcon", () => {
     expect(icon?.querySelector("circle")).toBeNull();
   });
 });
+
+  it("renders the multi-color oh-my-pi brand logo", () => {
+    const { container } = render(<ProviderIcon provider="omp" size={20} />);
+    const icon = container.querySelector('img[src="/brand-logos/omp.svg"]');
+    expect(icon).not.toBeNull();
+    expect(icon).toHaveAttribute("width", "20");
+    expect(icon).toHaveAttribute("height", "20");
+  });
+
+  it("renders the multi-color Pi brand logo", () => {
+    const { container } = render(<ProviderIcon provider="pi" size={18} />);
+    const icon = container.querySelector('img[src="/brand-logos/pi.svg"]');
+    expect(icon).not.toBeNull();
+    expect(icon).toHaveAttribute("width", "18");
+  });
+

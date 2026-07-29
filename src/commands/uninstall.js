@@ -24,6 +24,7 @@ const { resolveOpencodeConfigDir, removeOpencodePlugin } = require("../lib/openc
 const { removeOpenclawHookConfig } = require("../lib/openclaw-hook");
 const { removeOpenclawSessionPluginConfig } = require("../lib/openclaw-session-plugin");
 const { removeGrokHook } = require("../lib/grok-hook");
+const { removeOmpHook } = require("../lib/omp-hook");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
 
 async function cmdUninstall(argv) {
@@ -104,6 +105,7 @@ async function cmdUninstall(argv) {
   });
   const openclawHookRemove = await removeOpenclawHookConfig({ home, trackerDir, env: process.env });
   const grokHookRemove = await removeGrokHook({ home, trackerDir, env: process.env });
+  const ompHookRemove = await removeOmpHook({ home, trackerDir, env: process.env });
 
   // Remove installed notify handler.
   await fs.unlink(notifyPath).catch(() => {});
@@ -195,6 +197,11 @@ async function cmdUninstall(argv) {
       grokHookRemove?.removed
         ? `- Grok Build hook removed: ${grokHookRemove.hookPath}`
         : "- Grok Build hook: no change",
+      ompHookRemove?.removed
+        ? `- oh-my-pi notify extension removed: ${ompHookRemove.extensionPath}`
+        : ompHookRemove?.skippedReason === "unmanaged"
+          ? "- oh-my-pi notify extension: skipped (unmanaged file)"
+          : "- oh-my-pi notify extension: no change",
       opts.purge ? `- Purged: ${path.join(home, ".tokentracker")}` : "- Purge: skipped (use --purge)",
       ...(machineIdSeedKept
         ? [`- Kept: ${machineIdSeedPath} (cloud device identity — a reinstall reuses the same device; delete it to fully reset)`]

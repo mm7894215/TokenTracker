@@ -56,6 +56,11 @@ const {
   removeGrokHook,
   GROK_HOOK_FILENAME
 } = require("../lib/grok-hook");
+const {
+  upsertOmpHook,
+  probeOmpHookState,
+  removeOmpHook,
+} = require("../lib/omp-hook");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
 const {
   resolveOmpAgentDir,
@@ -642,15 +647,44 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
     }
   }
 
-  // oh-my-pi: passive reader — no hook installation needed.
-  // TokenTracker reads ~/.omp/agent/sessions/**/*.jsonl directly.
+  // oh-my-pi: passive session scan always works; also install an optional
+  // notify extension so turn_end triggers sync --source omp near-real-time.
   {
-    // resolveOmpAgentDir returns null on Windows when ~/.omp doesn't exist (the
-    // win32 path resolver only yields a dir it can see) — null means "not
-    // installed", so skip rather than path.join(null, …) and crash.
+    const fssyncLocal = require("node:fs");
     const ompAgentDir = resolveOmpAgentDir(process.env);
-    if (ompAgentDir && fssync.existsSync(path.join(ompAgentDir, "sessions"))) {
-      summary.push({ label: "oh-my-pi", status: "detected", detail: "Passive reader (no hook needed)" });
+    const ompSessions = ompAgentDir && fssyncLocal.existsSync(path.join(ompAgentDir, "sessions"));
+    if (ompAgentDir && (ompSessions || fssyncLocal.existsSync(ompAgentDir))) {
+      if (opts.dryRun) {
+        const probe = await probeOmpHookState({ home, trackerDir, env: process.env });
+        summary.push({
+          label: "oh-my-pi",
+          status: "detected",
+          detail: probe.configured
+            ? "Notify extension already installed (passive scan still runs)"
+            : "Will install notify extension + keep passive scan",
+        });
+      } else {
+        const result = await upsertOmpHook({ home, trackerDir, env: process.env });
+        if (result.written) {
+          summary.push({
+            label: "oh-my-pi",
+            status: "installed",
+            detail: `Notify extension → ${result.extensionPath} (passive scan still runs)`,
+          });
+        } else if (result.skippedReason === "unmanaged-extension-present") {
+          summary.push({
+            label: "oh-my-pi",
+            status: "skipped",
+            detail: "Existing unmanaged tokentracker-notify extension left untouched",
+          });
+        } else {
+          summary.push({
+            label: "oh-my-pi",
+            status: "detected",
+            detail: "Passive reader (notify extension not written)",
+          });
+        }
+      }
     }
   }
 

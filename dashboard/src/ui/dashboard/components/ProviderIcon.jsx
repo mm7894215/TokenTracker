@@ -320,8 +320,14 @@ const PROVIDER_LOGO_MAP = {
   "KILO-CLI": "/brand-logos/kilo.svg",
   "KILO-CODE": "/brand-logos/kilo.svg",
   MIMO: "/brand-logos/mimo.svg",
+  // oh-my-pi / pi: multi-color brand marks (pi letterform + plugin connector).
+  OMP: "/brand-logos/omp.svg",
   OPENCLAW: "/brand-logos/openclaw.svg",
   OPENCODE: "/brand-logos/opencode.svg",
+  PI: "/brand-logos/pi.svg",
+  "PI-ANTHROPIC": "/brand-logos/pi.svg",
+  "PI-GITHUB-COPILOT": "/brand-logos/pi.svg",
+  "PI-COPILOT": "/brand-logos/pi.svg",
   QODER: "/brand-logos/qoder.svg",
 };
 

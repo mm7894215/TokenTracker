@@ -1,6 +1,7 @@
 const SPECIAL_PROVIDER_NAMES = {
   anythingllm: "AnythingLLM",
   claudescience: "Claude Science",
+  omp: "oh-my-pi",
   pianthropic: "Pi · Anthropic",
   pigithubcopilot: "Pi · GitHub Copilot",
   picopilot: "Pi · Copilot",
