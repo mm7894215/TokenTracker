@@ -204,20 +204,18 @@ async function upsertOmpHook({ home = os.homedir(), trackerDir, env = process.en
   await fs.mkdir(extensionsDir, { recursive: true });
 
   // Don't clobber a user-authored extension that isn't ours.
-  if (fssync.existsSync(extensionPath)) {
-    try {
-      const existing = await fs.readFile(extensionPath, "utf8");
-      if (existing && !isManagedOmpExtension(existing) && !/tokentracker/i.test(existing)) {
-        return {
-          written: false,
-          skippedReason: "unmanaged-extension-present",
-          extensionPath,
-          notifyPath,
-        };
-      }
-    } catch {
-      // overwrite if unreadable
+  try {
+    const existing = await fs.readFile(extensionPath, "utf8");
+    if (existing && !isManagedOmpExtension(existing) && !/tokentracker/i.test(existing)) {
+      return {
+        written: false,
+        skippedReason: "unmanaged-extension-present",
+        extensionPath,
+        notifyPath,
+      };
     }
+  } catch {
+    // Missing or unreadable extensions can be replaced by the managed file.
   }
 
   const source = buildOmpNotifyExtensionSource({ notifyPath });
