@@ -19,6 +19,8 @@ describe("Skills cloud inventory guardrails", () => {
   it("verifies JWT ownership and strips content-bearing fields", () => {
     const source = read("dashboard/edge-patches/tokentracker-account-skills.ts");
     assert.match(source, /verifiedUserIdFromJwt/);
+    assert.match(source, /typeof payload\.exp !== "number" \|\| !Number\.isFinite\(payload\.exp\)/);
+    assert.match(source, /Date\.now\(\) \/ 1000 > payload\.exp/);
     assert.match(source, /\.eq\("id", deviceId\)[\s\S]*\.eq\("user_id", userId\)[\s\S]*\.is\("revoked_at", null\)/);
     assert.match(source, /sanitizeSkill/);
     assert.match(source, /raw\.startsWith\("\/"\)/);

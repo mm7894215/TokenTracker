@@ -68,7 +68,8 @@ async function verifiedUserIdFromJwt(authHeader: string | null): Promise<string 
     );
     if (!ok) return null;
     const payload = JSON.parse(new TextDecoder().decode(b64urlToBytes(parts[1]))) as Record<string, unknown>;
-    if (typeof payload.exp === "number" && Date.now() / 1000 > payload.exp) return null;
+    if (typeof payload.exp !== "number" || !Number.isFinite(payload.exp)) return null;
+    if (Date.now() / 1000 > payload.exp) return null;
     if (typeof payload.sub === "string" && payload.sub) return payload.sub;
     if (typeof payload.user_id === "string" && payload.user_id) return payload.user_id;
   } catch { /* invalid token */ }

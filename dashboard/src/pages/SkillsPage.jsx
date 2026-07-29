@@ -101,6 +101,22 @@ function installedSkillKeys(skill) {
   return keys;
 }
 
+function countsAsLocallyInstalled(skill) {
+  return !skill?.remote && !skill?.inventoryOnly && !skill?.readOnly;
+}
+
+export function buildLocallyInstalledKeys(skills) {
+  const keys = new Set();
+  for (const skill of Array.isArray(skills) ? skills : []) {
+    // Inventory-only and read-only rows describe another device or a
+    // managed plugin cache. They are visible in My, but Browse must still
+    // offer Install so the skill can be added to this machine.
+    if (!countsAsLocallyInstalled(skill)) continue;
+    for (const key of installedSkillKeys(skill)) keys.add(key);
+  }
+  return keys;
+}
+
 function installBusyKey(skill) {
   return `install:${getSkillKey(skill)}`;
 }
@@ -829,11 +845,7 @@ export function SkillsPage() {
   const cloudInventoryRequest = useRef(0);
 
   const installedKeys = useMemo(() => {
-    const keys = new Set();
-    for (const skill of installedData.skills || []) {
-      for (const key of installedSkillKeys(skill)) keys.add(key);
-    }
-    return keys;
+    return buildLocallyInstalledKeys(installedData.skills);
   }, [installedData.skills]);
 
   const loadInstalled = useCallback(async () => {
@@ -851,10 +863,12 @@ export function SkillsPage() {
       try {
         const accessToken = await getAccessToken();
         if (!accessToken || cloudInventoryRequest.current !== requestId) return;
-        const [cloud] = await Promise.all([
+        const [cloudResult] = await Promise.allSettled([
           getAccountSkillInventories(accessToken),
           publishSkillInventory({ accessToken, deviceId, skills: localData.skills }),
         ]);
+        if (cloudResult.status !== "fulfilled") return;
+        const cloud = cloudResult.value;
         if (cloudInventoryRequest.current !== requestId) return;
         setInstalledData({
           targets: localData.targets,

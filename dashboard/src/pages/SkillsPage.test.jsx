@@ -18,7 +18,7 @@ import {
   setSkillTargets,
   uninstallSkill,
 } from "../lib/skills-api";
-import { SkillsPage } from "./SkillsPage.jsx";
+import { buildLocallyInstalledKeys, SkillsPage } from "./SkillsPage.jsx";
 
 vi.mock("../lib/skills-api", () => ({
   addSkillRepo: vi.fn(),
@@ -37,7 +37,18 @@ vi.mock("../lib/skills-api", () => ({
   uninstallSkill: vi.fn(),
 }));
 
+const testAuth = vi.hoisted(() => ({
+  signedIn: true,
+  getAccessToken: async () => "test-access-token",
+}));
+
+vi.mock("../contexts/InsforgeAuthContext.jsx", () => ({
+  useInsforgeAuth: () => testAuth,
+}));
+
 beforeEach(() => {
+  window.history.replaceState({}, "", "/skills");
+  localStorage.removeItem("tokentracker_cloud_device_id_v1");
   vi.mocked(getInstalledSkills).mockResolvedValue({
     targets: [
       { id: "claude", label: "Claude" },
@@ -241,5 +252,60 @@ describe("SkillsPage", () => {
     expect(await screen.findByText("Remote Apple Notes")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: copy("skills.action.install") })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: copy("skills.card.manage") })).not.toBeInTheDocument();
+  });
+
+  it("keeps remote-only inventory rows installable from Browse", () => {
+    const keys = buildLocallyInstalledKeys([
+      {
+        key: "local/local:remote-only",
+        directory: "remote-only",
+        readOnly: true,
+        inventoryOnly: true,
+        remote: true,
+      },
+      {
+        key: "local/local:plugin-only",
+        directory: "plugin-only",
+        readOnly: true,
+      },
+      {
+        key: "local/local:installed",
+        directory: "installed",
+      },
+    ]);
+
+    expect(keys.has("local/local:remote-only")).toBe(false);
+    expect(keys.has("dir:remote-only")).toBe(false);
+    expect(keys.has("local/local:plugin-only")).toBe(false);
+    expect(keys.has("dir:plugin-only")).toBe(false);
+    expect(keys.has("local/local:installed")).toBe(true);
+    expect(keys.has("dir:installed")).toBe(true);
+  });
+
+  it("keeps the other-device view when publishing this device inventory fails", async () => {
+    localStorage.setItem("tokentracker_cloud_device_id_v1", "this-device");
+    vi.mocked(getInstalledSkills).mockResolvedValue({
+      targets: [{ id: "codex", label: "Codex" }],
+      skills: [],
+    });
+    vi.mocked(getAccountSkillInventories).mockResolvedValue({
+      devices: [{
+        id: "other-device",
+        device_name: "Other PC",
+        skills: [{
+          key: "local/local:remote-only",
+          name: "Remote Only Skill",
+          directory: "remote-only",
+          targets: ["codex"],
+        }],
+      }],
+    });
+    vi.mocked(publishSkillInventory).mockRejectedValue(new Error("device revoked"));
+
+    render(<SkillsPage />);
+
+    expect(await screen.findByText("Remote Only Skill")).toBeInTheDocument();
+    await waitFor(() => expect(getAccountSkillInventories).toHaveBeenCalledWith("test-access-token"));
+    expect(screen.getByText(copy("skills.inventory.remote"))).toBeInTheDocument();
   });
 });
