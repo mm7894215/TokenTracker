@@ -40,7 +40,6 @@ describe("ProviderIcon", () => {
     expect(icon?.querySelector("path")).not.toBeNull();
     expect(icon?.querySelector("circle")).toBeNull();
   });
-});
 
   it("renders the multi-color oh-my-pi brand logo", () => {
     const { container } = render(<ProviderIcon provider="omp" size={20} />);
@@ -56,4 +55,4 @@ describe("ProviderIcon", () => {
     expect(icon).not.toBeNull();
     expect(icon).toHaveAttribute("width", "18");
   });
-
+});

@@ -5,36 +5,21 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const fssync = require("node:fs");
 
+// Reuse the passive scanner's path resolvers so init/status/uninstall target
+// the same OMP installation that sync scans (HOME overrides, PI_CONFIG_DIR,
+// PI_CODING_AGENT_DIR ownership, ~ expansion, Windows/WSL paths).
+const {
+  resolveOmpHome,
+  resolveOmpAgentDir,
+} = require("./rollout");
+
 const EXTENSION_FILENAME = "tokentracker-notify.ts";
 const MARKER = "// @tokentracker-managed-omp-extension";
 
-function resolveOmpHome(env = process.env) {
-  if (env.TOKENTRACKER_OMP_HOME && env.TOKENTRACKER_OMP_HOME.length > 0) {
-    return env.TOKENTRACKER_OMP_HOME;
-  }
-  if (env.OMP_HOME && env.OMP_HOME.length > 0) {
-    return env.OMP_HOME;
-  }
-  // Align with oh-my-pi default agent dir (~/.omp/agent) parent.
-  return path.join(os.homedir(), ".omp");
-}
-
-function resolveOmpAgentDir(env = process.env) {
-  if (env.TOKENTRACKER_OMP_AGENT_DIR && env.TOKENTRACKER_OMP_AGENT_DIR.length > 0) {
-    return env.TOKENTRACKER_OMP_AGENT_DIR;
-  }
-  if (env.PI_CODING_AGENT_DIR && env.PI_CODING_AGENT_DIR.length > 0) {
-    // Shared env with pi; only treat as omp when ~/.omp exists or override says so.
-    const candidate = env.PI_CODING_AGENT_DIR;
-    if (candidate.includes(`${path.sep}.omp${path.sep}`) || candidate.endsWith(`${path.sep}.omp`)) {
-      return candidate;
-    }
-  }
-  return path.join(resolveOmpHome(env), "agent");
-}
-
 function resolveOmpExtensionsDir(env = process.env) {
-  return path.join(resolveOmpAgentDir(env), "extensions");
+  const agentDir = resolveOmpAgentDir(env);
+  if (!agentDir) return null;
+  return path.join(agentDir, "extensions");
 }
 
 function resolveTrackerBinDir(trackerDir) {
@@ -42,10 +27,6 @@ function resolveTrackerBinDir(trackerDir) {
   return path.basename(trackerDir) === "tracker"
     ? path.join(path.dirname(trackerDir), "bin")
     : path.join(trackerDir, "bin");
-}
-
-function shellQuote(value) {
-  return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
 /**
@@ -163,19 +144,25 @@ function isManagedOmpExtension(content) {
 async function probeOmpHookState({ home = os.homedir(), trackerDir, env = process.env } = {}) {
   const agentDir = resolveOmpAgentDir(env);
   const extensionsDir = resolveOmpExtensionsDir(env);
-  const extensionPath = path.join(extensionsDir, EXTENSION_FILENAME);
-  const sessionsDir = path.join(agentDir, "sessions");
-  const ompPresent = fssync.existsSync(agentDir) || fssync.existsSync(sessionsDir);
+  const extensionPath = extensionsDir
+    ? path.join(extensionsDir, EXTENSION_FILENAME)
+    : null;
+  const sessionsDir = agentDir ? path.join(agentDir, "sessions") : null;
+  const ompPresent = Boolean(
+    (agentDir && fssync.existsSync(agentDir)) ||
+      (sessionsDir && fssync.existsSync(sessionsDir)),
+  );
 
   let configured = false;
   let managed = false;
   let exists = false;
-  if (fssync.existsSync(extensionPath)) {
+  if (extensionPath && fssync.existsSync(extensionPath)) {
     exists = true;
     try {
       const content = await fs.readFile(extensionPath, "utf8");
       managed = isManagedOmpExtension(content);
       // Treat any tokentracker-notify extension as configured for status UX.
+      // Ownership decisions (overwrite/remove) still require the exact MARKER.
       configured = managed || /notify\.cjs|--source=omp|tokentracker/i.test(content);
     } catch {
       configured = false;
@@ -199,14 +186,23 @@ async function upsertOmpHook({ home = os.homedir(), trackerDir, env = process.en
   const binDir = resolveTrackerBinDir(trackerDir);
   const notifyPath = path.join(binDir, "notify.cjs");
   const extensionsDir = resolveOmpExtensionsDir(env);
+  if (!extensionsDir) {
+    return {
+      written: false,
+      skippedReason: "omp-agent-dir-unresolved",
+      extensionPath: null,
+      notifyPath,
+    };
+  }
   const extensionPath = path.join(extensionsDir, EXTENSION_FILENAME);
 
   await fs.mkdir(extensionsDir, { recursive: true });
 
-  // Don't clobber a user-authored extension that isn't ours.
+  // Ownership is marker-only: never overwrite a same-named file that lacks MARKER,
+  // even if it mentions "tokentracker" (user-authored bridges are common).
   try {
     const existing = await fs.readFile(extensionPath, "utf8");
-    if (existing && !isManagedOmpExtension(existing) && !/tokentracker/i.test(existing)) {
+    if (!isManagedOmpExtension(existing)) {
       return {
         written: false,
         skippedReason: "unmanaged-extension-present",
@@ -214,8 +210,17 @@ async function upsertOmpHook({ home = os.homedir(), trackerDir, env = process.en
         notifyPath,
       };
     }
-  } catch {
-    // Missing or unreadable extensions can be replaced by the managed file.
+  } catch (err) {
+    if (err && err.code !== "ENOENT") {
+      return {
+        written: false,
+        skippedReason: "extension-read-failed",
+        error: String(err?.message || err),
+        extensionPath,
+        notifyPath,
+      };
+    }
+    // ENOENT — safe to create the managed extension.
   }
 
   const source = buildOmpNotifyExtensionSource({ notifyPath });
@@ -231,19 +236,44 @@ async function upsertOmpHook({ home = os.homedir(), trackerDir, env = process.en
 }
 
 async function removeOmpHook({ home = os.homedir(), trackerDir, env = process.env } = {}) {
-  const extensionPath = path.join(resolveOmpExtensionsDir(env), EXTENSION_FILENAME);
-  if (!fssync.existsSync(extensionPath)) {
-    return { removed: false, skippedReason: "missing", extensionPath };
+  const extensionsDir = resolveOmpExtensionsDir(env);
+  if (!extensionsDir) {
+    return { removed: false, skippedReason: "omp-agent-dir-unresolved", extensionPath: null };
   }
+  const extensionPath = path.join(extensionsDir, EXTENSION_FILENAME);
+  let content;
   try {
-    const content = await fs.readFile(extensionPath, "utf8");
-    if (!isManagedOmpExtension(content) && !/tokentracker/i.test(content)) {
-      return { removed: false, skippedReason: "unmanaged", extensionPath };
+    content = await fs.readFile(extensionPath, "utf8");
+  } catch (err) {
+    if (err && err.code === "ENOENT") {
+      return { removed: false, skippedReason: "missing", extensionPath };
     }
-  } catch {
-    // fall through to attempt remove
+    return {
+      removed: false,
+      skippedReason: "extension-read-failed",
+      error: String(err?.message || err),
+      extensionPath,
+    };
   }
-  await fs.unlink(extensionPath).catch(() => {});
+
+  // Marker-only ownership: never delete user-authored files that mention tokentracker.
+  if (!isManagedOmpExtension(content)) {
+    return { removed: false, skippedReason: "unmanaged", extensionPath };
+  }
+
+  try {
+    await fs.unlink(extensionPath);
+  } catch (err) {
+    if (err?.code === "ENOENT") {
+      return { removed: true, extensionPath };
+    }
+    return {
+      removed: false,
+      skippedReason: "unlink-failed",
+      error: String(err?.message || err),
+      extensionPath,
+    };
+  }
   return { removed: true, extensionPath };
 }
 

@@ -59,7 +59,6 @@ const {
 const {
   upsertOmpHook,
   probeOmpHookState,
-  removeOmpHook,
 } = require("../lib/omp-hook");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
 const {
@@ -366,6 +365,7 @@ async function runSetup({
     trackerDir,
     notifyPath,
     notifyOriginalPath,
+    dryRun: Boolean(opts.dryRun),
   });
 
   return {
@@ -556,7 +556,13 @@ function buildIntegrationTargets({ home, trackerDir, notifyPath }) {
   };
 }
 
-async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOriginalPath }) {
+async function applyIntegrationSetup({
+  home,
+  trackerDir,
+  notifyPath,
+  notifyOriginalPath,
+  dryRun = false,
+}) {
   const context = buildIntegrationTargets({ home, trackerDir, notifyPath });
   context.notifyOriginalPath = notifyOriginalPath;
 
@@ -654,7 +660,7 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
     const ompAgentDir = resolveOmpAgentDir(process.env);
     const ompSessions = ompAgentDir && fssyncLocal.existsSync(path.join(ompAgentDir, "sessions"));
     if (ompAgentDir && (ompSessions || fssyncLocal.existsSync(ompAgentDir))) {
-      if (opts.dryRun) {
+      if (dryRun) {
         const probe = await probeOmpHookState({ home, trackerDir, env: process.env });
         summary.push({
           label: "oh-my-pi",
@@ -1938,6 +1944,7 @@ module.exports = {
   installLocalTrackerApp,
   repairCodexNotifyIntegration,
   repairRuntimeIntegrations,
+  applyIntegrationSetup,
 };
 
 async function probeFile(p) {

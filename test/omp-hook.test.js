@@ -15,20 +15,74 @@ const {
   removeOmpHook,
   resolveOmpAgentDir,
   resolveOmpExtensionsDir,
+  resolveOmpHome,
 } = require("../src/lib/omp-hook");
+const rollout = require("../src/lib/rollout");
+const { applyIntegrationSetup } = require("../src/commands/init");
 
-test("resolveOmpAgentDir prefers TokenTracker override", () => {
+test("resolveOmpAgentDir prefers TokenTracker override and expands ~", () => {
+  const home = "/tmp/tt-home-omp";
   assert.equal(
     resolveOmpAgentDir({
+      HOME: home,
       TOKENTRACKER_OMP_AGENT_DIR: "/tmp/tt-omp-agent",
       OMP_HOME: "/tmp/omp-home",
     }),
     "/tmp/tt-omp-agent",
   );
   assert.equal(
-    resolveOmpExtensionsDir({ TOKENTRACKER_OMP_AGENT_DIR: "/tmp/tt-omp-agent" }),
+    resolveOmpAgentDir({
+      HOME: home,
+      TOKENTRACKER_OMP_AGENT_DIR: "~/.omp/agent",
+    }),
+    path.join(home, ".omp", "agent"),
+  );
+  assert.equal(
+    resolveOmpExtensionsDir({ HOME: home, TOKENTRACKER_OMP_AGENT_DIR: "/tmp/tt-omp-agent" }),
     path.join("/tmp/tt-omp-agent", "extensions"),
   );
+});
+
+test("omp-hook path resolvers stay in parity with rollout passive scanner", () => {
+  const cases = [
+    { HOME: "/Users/alice" },
+    { HOME: "/Users/alice", OMP_HOME: "/custom/omp" },
+    { HOME: "/Users/alice", PI_CONFIG_DIR: ".config/omp" },
+    { HOME: "/Users/alice", TOKENTRACKER_OMP_AGENT_DIR: "~/.omp/agent" },
+    {
+      HOME: "/Users/alice",
+      PI_CODING_AGENT_DIR: "~/shared/agent",
+      // no ~/.pi dir signal in env alone; owner defaults to omp
+    },
+    {
+      HOME: "/Users/alice",
+      TOKENTRACKER_OMP_AGENT_DIR: "/abs/omp/agent",
+      PI_CODING_AGENT_DIR: "/abs/pi/agent",
+    },
+  ];
+
+  for (const env of cases) {
+    assert.equal(
+      resolveOmpHome(env),
+      rollout.resolveOmpHome(env),
+      `resolveOmpHome parity failed for ${JSON.stringify(env)}`,
+    );
+    assert.equal(
+      resolveOmpAgentDir(env),
+      rollout.resolveOmpAgentDir(env),
+      `resolveOmpAgentDir parity failed for ${JSON.stringify(env)}`,
+    );
+  }
+
+  // Windows-style env: both resolvers must agree (and expand HOME).
+  if (process.platform === "win32") {
+    const winEnv = {
+      HOME: "C:\\Users\\alice",
+      USERPROFILE: "C:\\Users\\alice",
+    };
+    assert.equal(resolveOmpHome(winEnv), rollout.resolveOmpHome(winEnv));
+    assert.equal(resolveOmpAgentDir(winEnv), rollout.resolveOmpAgentDir(winEnv));
+  }
 });
 
 test("buildOmpNotifyExtensionSource embeds notify path and marker", () => {
@@ -85,7 +139,7 @@ test("upsertOmpHook writes managed extension and remove cleans it", async () => 
   }
 });
 
-test("upsertOmpHook does not clobber unmanaged extension", async () => {
+test("upsertOmpHook does not clobber unmanaged extension without marker", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-hook-unmanaged-"));
   try {
     const home = tmp;
@@ -108,6 +162,177 @@ test("upsertOmpHook does not clobber unmanaged extension", async () => {
     const content = await fs.readFile(extensionPath, "utf8");
     assert.equal(content, "export default function () {}\n");
   } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("upsert and remove leave unmanaged tokentracker-mentioning extension untouched", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-hook-user-bridge-"));
+  try {
+    const home = tmp;
+    const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+    const ompAgentDir = path.join(tmp, ".omp", "agent");
+    const extDir = path.join(ompAgentDir, "extensions");
+    await fs.mkdir(extDir, { recursive: true });
+    await fs.mkdir(path.join(trackerDir, "..", "bin"), { recursive: true });
+    const extensionPath = path.join(extDir, EXTENSION_FILENAME);
+    // User-authored bridge that mentions tokentracker but has no managed marker.
+    const userSource = [
+      "// custom tokentracker notify bridge",
+      'import { spawn } from "node:child_process";',
+      "export default function (pi) {",
+      '  pi.on("turn_end", () => spawn("node", ["notify.cjs", "--source=omp"]));',
+      "}",
+      "",
+    ].join("\n");
+    await fs.writeFile(extensionPath, userSource, "utf8");
+
+    const env = {
+      ...process.env,
+      HOME: home,
+      TOKENTRACKER_OMP_AGENT_DIR: ompAgentDir,
+    };
+
+    const upsert = await upsertOmpHook({ home, trackerDir, env });
+    assert.equal(upsert.written, false);
+    assert.equal(upsert.skippedReason, "unmanaged-extension-present");
+    assert.equal(await fs.readFile(extensionPath, "utf8"), userSource);
+
+    const removed = await removeOmpHook({ home, trackerDir, env });
+    assert.equal(removed.removed, false);
+    assert.equal(removed.skippedReason, "unmanaged");
+    assert.equal(await fs.readFile(extensionPath, "utf8"), userSource);
+
+    const state = await probeOmpHookState({ home, trackerDir, env });
+    assert.equal(state.exists, true);
+    assert.equal(state.managed, false);
+    // Status UX may still report configured=true because content mentions tokentracker.
+    assert.equal(state.configured, true);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("removeOmpHook reports unlink-failed when deletion is blocked", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-hook-unlink-"));
+  const realUnlink = fs.unlink;
+  try {
+    const home = tmp;
+    const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+    const ompAgentDir = path.join(tmp, ".omp", "agent");
+    await fs.mkdir(path.join(trackerDir, "..", "bin"), { recursive: true });
+    await fs.mkdir(path.join(ompAgentDir, "sessions"), { recursive: true });
+    await fs.writeFile(
+      path.join(trackerDir, "..", "bin", "notify.cjs"),
+      "#!/usr/bin/env node\nconsole.log('notify');\n",
+      "utf8",
+    );
+
+    const env = {
+      ...process.env,
+      HOME: home,
+      TOKENTRACKER_OMP_AGENT_DIR: ompAgentDir,
+    };
+    const written = await upsertOmpHook({ home, trackerDir, env });
+    assert.equal(written.written, true);
+
+    fs.unlink = async () => {
+      const err = new Error("permission denied");
+      err.code = "EPERM";
+      throw err;
+    };
+
+    const removed = await removeOmpHook({ home, trackerDir, env });
+    assert.equal(removed.removed, false);
+    assert.equal(removed.skippedReason, "unlink-failed");
+    assert.ok(fssync.existsSync(written.extensionPath));
+  } finally {
+    fs.unlink = realUnlink;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("applyIntegrationSetup installs omp notify extension without opts ReferenceError", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-init-integration-"));
+  const prevHome = process.env.HOME;
+  const prevOmpAgent = process.env.TOKENTRACKER_OMP_AGENT_DIR;
+  try {
+    const home = tmp;
+    const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+    const ompAgentDir = path.join(tmp, ".omp", "agent");
+    await fs.mkdir(path.join(trackerDir), { recursive: true });
+    await fs.mkdir(path.join(trackerDir, "..", "bin"), { recursive: true });
+    await fs.mkdir(path.join(ompAgentDir, "sessions"), { recursive: true });
+    await fs.writeFile(
+      path.join(trackerDir, "..", "bin", "notify.cjs"),
+      "#!/usr/bin/env node\nconsole.log('notify');\n",
+      "utf8",
+    );
+
+    process.env.HOME = home;
+    process.env.TOKENTRACKER_OMP_AGENT_DIR = ompAgentDir;
+
+    const notifyPath = path.join(trackerDir, "..", "bin", "notify.cjs");
+    const summary = await applyIntegrationSetup({
+      home,
+      trackerDir,
+      notifyPath,
+      notifyOriginalPath: null,
+      dryRun: false,
+    });
+
+    const ompRow = summary.find((row) => row.label === "oh-my-pi");
+    assert.ok(ompRow, "expected oh-my-pi summary row");
+    assert.equal(ompRow.status, "installed");
+
+    const extensionPath = path.join(ompAgentDir, "extensions", EXTENSION_FILENAME);
+    assert.ok(fssync.existsSync(extensionPath));
+    const content = await fs.readFile(extensionPath, "utf8");
+    assert.ok(isManagedOmpExtension(content));
+  } finally {
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    if (prevOmpAgent === undefined) delete process.env.TOKENTRACKER_OMP_AGENT_DIR;
+    else process.env.TOKENTRACKER_OMP_AGENT_DIR = prevOmpAgent;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("applyIntegrationSetup dryRun probes omp without writing extension", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-init-dry-"));
+  const prevHome = process.env.HOME;
+  const prevOmpAgent = process.env.TOKENTRACKER_OMP_AGENT_DIR;
+  try {
+    const home = tmp;
+    const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+    const ompAgentDir = path.join(tmp, ".omp", "agent");
+    await fs.mkdir(path.join(trackerDir), { recursive: true });
+    await fs.mkdir(path.join(ompAgentDir, "sessions"), { recursive: true });
+
+    process.env.HOME = home;
+    process.env.TOKENTRACKER_OMP_AGENT_DIR = ompAgentDir;
+
+    const summary = await applyIntegrationSetup({
+      home,
+      trackerDir,
+      notifyPath: path.join(trackerDir, "..", "bin", "notify.cjs"),
+      notifyOriginalPath: null,
+      dryRun: true,
+    });
+
+    const ompRow = summary.find((row) => row.label === "oh-my-pi");
+    assert.ok(ompRow);
+    assert.equal(ompRow.status, "detected");
+    assert.match(ompRow.detail, /Will install notify extension/);
+    assert.equal(
+      fssync.existsSync(path.join(ompAgentDir, "extensions", EXTENSION_FILENAME)),
+      false,
+    );
+  } finally {
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    if (prevOmpAgent === undefined) delete process.env.TOKENTRACKER_OMP_AGENT_DIR;
+    else process.env.TOKENTRACKER_OMP_AGENT_DIR = prevOmpAgent;
     await fs.rm(tmp, { recursive: true, force: true });
   }
 });
