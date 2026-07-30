@@ -336,3 +336,130 @@ test("applyIntegrationSetup dryRun probes omp without writing extension", async 
     await fs.rm(tmp, { recursive: true, force: true });
   }
 });
+
+test("upsertOmpHook does not overwrite a user file created between check and create", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-hook-create-race-"));
+  const { _testHooks } = require("../src/lib/omp-hook");
+  try {
+    const home = tmp;
+    const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+    const ompAgentDir = path.join(tmp, ".omp", "agent");
+    const extDir = path.join(ompAgentDir, "extensions");
+    await fs.mkdir(extDir, { recursive: true });
+    await fs.mkdir(path.join(trackerDir, "..", "bin"), { recursive: true });
+    await fs.writeFile(
+      path.join(trackerDir, "..", "bin", "notify.cjs"),
+      "#!/usr/bin/env node\nconsole.log('notify');\n",
+      "utf8",
+    );
+
+    const extensionPath = path.join(extDir, EXTENSION_FILENAME);
+    const userSource = "// user tokentracker bridge created during race\nexport default function () {}\n";
+
+    _testHooks.beforeExclusiveCreate = async (targetPath) => {
+      await fs.writeFile(targetPath, userSource, "utf8");
+    };
+
+    const env = {
+      ...process.env,
+      HOME: home,
+      TOKENTRACKER_OMP_AGENT_DIR: ompAgentDir,
+    };
+    const result = await upsertOmpHook({ home, trackerDir, env });
+    assert.equal(result.written, false);
+    assert.equal(result.skippedReason, "unmanaged-extension-present");
+    assert.equal(await fs.readFile(extensionPath, "utf8"), userSource);
+  } finally {
+    _testHooks.beforeExclusiveCreate = null;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("removeOmpHook does not delete a user replacement created between check and unlink", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-hook-remove-race-"));
+  const { _testHooks } = require("../src/lib/omp-hook");
+  try {
+    const home = tmp;
+    const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+    const ompAgentDir = path.join(tmp, ".omp", "agent");
+    await fs.mkdir(path.join(trackerDir, "..", "bin"), { recursive: true });
+    await fs.mkdir(path.join(ompAgentDir, "sessions"), { recursive: true });
+    await fs.writeFile(
+      path.join(trackerDir, "..", "bin", "notify.cjs"),
+      "#!/usr/bin/env node\nconsole.log('notify');\n",
+      "utf8",
+    );
+
+    const env = {
+      ...process.env,
+      HOME: home,
+      TOKENTRACKER_OMP_AGENT_DIR: ompAgentDir,
+    };
+    const written = await upsertOmpHook({ home, trackerDir, env });
+    assert.equal(written.written, true);
+    const extensionPath = written.extensionPath;
+    const userReplacement =
+      "// user replacement during uninstall race\nexport default function (pi) { pi.on('turn_end', () => {}); }\n";
+
+    _testHooks.beforeUnlink = async (targetPath) => {
+      // Replace managed file with user-authored content under the same path.
+      await fs.unlink(targetPath);
+      await fs.writeFile(targetPath, userReplacement, "utf8");
+    };
+
+    const removed = await removeOmpHook({ home, trackerDir, env });
+    assert.equal(removed.removed, false);
+    assert.equal(removed.skippedReason, "identity-changed");
+    assert.equal(fssync.existsSync(extensionPath), true);
+    assert.equal(await fs.readFile(extensionPath, "utf8"), userReplacement);
+    assert.equal(isManagedOmpExtension(await fs.readFile(extensionPath, "utf8")), false);
+  } finally {
+    _testHooks.beforeUnlink = null;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("formatOmpHookRemoveLine surfaces unlink/read failures with residual path", () => {
+  const { formatOmpHookRemoveLine } = require("../src/commands/uninstall");
+  assert.match(
+    formatOmpHookRemoveLine({
+      removed: false,
+      skippedReason: "unlink-failed",
+      error: "EPERM",
+      extensionPath: "/tmp/ext/tokentracker-notify.ts",
+    }),
+    /failed to remove.*EPERM.*left in place: \/tmp\/ext\/tokentracker-notify\.ts/,
+  );
+  assert.match(
+    formatOmpHookRemoveLine({
+      removed: false,
+      skippedReason: "extension-read-failed",
+      error: "EACCES",
+      extensionPath: "/tmp/ext/tokentracker-notify.ts",
+    }),
+    /failed to read.*EACCES.*left in place/,
+  );
+  assert.match(
+    formatOmpHookRemoveLine({
+      removed: false,
+      skippedReason: "identity-changed",
+      extensionPath: "/tmp/ext/tokentracker-notify.ts",
+    }),
+    /file changed during uninstall.*left in place/,
+  );
+  assert.match(
+    formatOmpHookRemoveLine({
+      removed: false,
+      skippedReason: "unmanaged",
+      extensionPath: "/tmp/ext/tokentracker-notify.ts",
+    }),
+    /unmanaged file.*left in place/,
+  );
+  assert.match(
+    formatOmpHookRemoveLine({
+      removed: true,
+      extensionPath: "/tmp/ext/tokentracker-notify.ts",
+    }),
+    /notify extension removed/,
+  );
+});

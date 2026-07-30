@@ -16,6 +16,19 @@ const {
 const EXTENSION_FILENAME = "tokentracker-notify.ts";
 const MARKER = "// @tokentracker-managed-omp-extension";
 
+/**
+ * Test-only injection points for deterministic race repros.
+ * Production code never sets these; tests may assign async functions:
+ * - beforeExclusiveCreate(extensionPath)
+ * - beforeManagedWrite(extensionPath, identity)
+ * - beforeUnlink(extensionPath, identity)
+ */
+const _testHooks = {
+  beforeExclusiveCreate: null,
+  beforeManagedWrite: null,
+  beforeUnlink: null,
+};
+
 function resolveOmpExtensionsDir(env = process.env) {
   const agentDir = resolveOmpAgentDir(env);
   if (!agentDir) return null;
@@ -141,6 +154,24 @@ function isManagedOmpExtension(content) {
   return typeof content === "string" && content.includes(MARKER);
 }
 
+function fileIdentity(stat) {
+  if (!stat) return null;
+  return { dev: stat.dev, ino: stat.ino };
+}
+
+function sameFileIdentity(a, b) {
+  return Boolean(a && b && a.dev === b.dev && a.ino === b.ino);
+}
+
+async function pathIdentity(filePath) {
+  try {
+    return fileIdentity(await fs.stat(filePath));
+  } catch (err) {
+    if (err && err.code === "ENOENT") return null;
+    throw err;
+  }
+}
+
 async function probeOmpHookState({ home = os.homedir(), trackerDir, env = process.env } = {}) {
   const agentDir = resolveOmpAgentDir(env);
   const extensionsDir = resolveOmpExtensionsDir(env);
@@ -181,6 +212,33 @@ async function probeOmpHookState({ home = os.homedir(), trackerDir, env = proces
   };
 }
 
+/**
+ * Write managed source through an already-opened handle, then confirm the
+ * directory entry still refers to that same inode (so a path replacement
+ * during the write cannot be reported as success against a user file).
+ */
+async function writeManagedThroughHandle(handle, extensionPath, source, openedIdentity) {
+  if (typeof _testHooks.beforeManagedWrite === "function") {
+    await _testHooks.beforeManagedWrite(extensionPath, openedIdentity);
+  }
+
+  const pathIdBefore = await pathIdentity(extensionPath);
+  if (!sameFileIdentity(pathIdBefore, openedIdentity)) {
+    return { written: false, skippedReason: "identity-changed" };
+  }
+
+  await handle.truncate(0);
+  await handle.writeFile(source, "utf8");
+
+  const pathIdAfter = await pathIdentity(extensionPath);
+  if (!sameFileIdentity(pathIdAfter, openedIdentity)) {
+    // Path now points elsewhere (or is gone). The handle write hit the
+    // original managed inode only; do not claim ownership of the path.
+    return { written: false, skippedReason: "identity-changed" };
+  }
+  return { written: true };
+}
+
 async function upsertOmpHook({ home = os.homedir(), trackerDir, env = process.env } = {}) {
   if (!trackerDir) throw new Error("trackerDir is required");
   const binDir = resolveTrackerBinDir(trackerDir);
@@ -195,23 +253,85 @@ async function upsertOmpHook({ home = os.homedir(), trackerDir, env = process.en
     };
   }
   const extensionPath = path.join(extensionsDir, EXTENSION_FILENAME);
+  const source = buildOmpNotifyExtensionSource({ notifyPath });
 
   await fs.mkdir(extensionsDir, { recursive: true });
 
-  // Ownership is marker-only: never overwrite a same-named file that lacks MARKER,
-  // even if it mentions "tokentracker" (user-authored bridges are common).
+  if (typeof _testHooks.beforeExclusiveCreate === "function") {
+    await _testHooks.beforeExclusiveCreate(extensionPath);
+  }
+
+  // Create path: exclusive open so a concurrent user create cannot be clobbered.
   try {
-    const existing = await fs.readFile(extensionPath, "utf8");
-    if (!isManagedOmpExtension(existing)) {
+    const createHandle = await fs.open(extensionPath, "wx");
+    try {
+      await createHandle.writeFile(source, "utf8");
+    } finally {
+      await createHandle.close();
+    }
+    const state = await probeOmpHookState({ home, trackerDir, env });
+    return {
+      written: true,
+      extensionPath,
+      notifyPath,
+      state,
+    };
+  } catch (err) {
+    if (!err || err.code !== "EEXIST") {
       return {
         written: false,
-        skippedReason: "unmanaged-extension-present",
+        skippedReason: "extension-write-failed",
+        error: String(err?.message || err),
         extensionPath,
         notifyPath,
       };
     }
+    // Fall through: path exists — only rewrite if still our managed inode.
+  }
+
+  // Update path: open by path, verify marker on the opened inode, mutate only
+  // that inode, and refuse if the directory entry changes identity mid-flight.
+  let handle;
+  try {
+    handle = await fs.open(extensionPath, "r+");
   } catch (err) {
-    if (err && err.code !== "ENOENT") {
+    if (err && err.code === "ENOENT") {
+      // Lost the race to a delete; retry exclusive create once without the
+      // create-hook (hook already ran for the first attempt).
+      try {
+        const createHandle = await fs.open(extensionPath, "wx");
+        try {
+          await createHandle.writeFile(source, "utf8");
+        } finally {
+          await createHandle.close();
+        }
+        const state = await probeOmpHookState({ home, trackerDir, env });
+        return { written: true, extensionPath, notifyPath, state };
+      } catch (retryErr) {
+        if (retryErr && retryErr.code === "EEXIST") {
+          // Concurrent create won; re-enter ownership check below.
+          try {
+            handle = await fs.open(extensionPath, "r+");
+          } catch (openErr) {
+            return {
+              written: false,
+              skippedReason: "extension-read-failed",
+              error: String(openErr?.message || openErr),
+              extensionPath,
+              notifyPath,
+            };
+          }
+        } else {
+          return {
+            written: false,
+            skippedReason: "extension-write-failed",
+            error: String(retryErr?.message || retryErr),
+            extensionPath,
+            notifyPath,
+          };
+        }
+      }
+    } else {
       return {
         written: false,
         skippedReason: "extension-read-failed",
@@ -220,19 +340,45 @@ async function upsertOmpHook({ home = os.homedir(), trackerDir, env = process.en
         notifyPath,
       };
     }
-    // ENOENT — safe to create the managed extension.
   }
 
-  const source = buildOmpNotifyExtensionSource({ notifyPath });
-  await fs.writeFile(extensionPath, source, "utf8");
+  try {
+    const existing = await handle.readFile("utf8");
+    if (!isManagedOmpExtension(existing)) {
+      return {
+        written: false,
+        skippedReason: "unmanaged-extension-present",
+        extensionPath,
+        notifyPath,
+      };
+    }
 
-  const state = await probeOmpHookState({ home, trackerDir, env });
-  return {
-    written: true,
-    extensionPath,
-    notifyPath,
-    state,
-  };
+    const openedIdentity = fileIdentity(await handle.stat());
+    const writeResult = await writeManagedThroughHandle(
+      handle,
+      extensionPath,
+      source,
+      openedIdentity,
+    );
+    if (!writeResult.written) {
+      return {
+        written: false,
+        skippedReason: writeResult.skippedReason,
+        extensionPath,
+        notifyPath,
+      };
+    }
+
+    const state = await probeOmpHookState({ home, trackerDir, env });
+    return {
+      written: true,
+      extensionPath,
+      notifyPath,
+      state,
+    };
+  } finally {
+    await handle.close().catch(() => {});
+  }
 }
 
 async function removeOmpHook({ home = os.homedir(), trackerDir, env = process.env } = {}) {
@@ -241,9 +387,13 @@ async function removeOmpHook({ home = os.homedir(), trackerDir, env = process.en
     return { removed: false, skippedReason: "omp-agent-dir-unresolved", extensionPath: null };
   }
   const extensionPath = path.join(extensionsDir, EXTENSION_FILENAME);
-  let content;
+
+  // Peek first so the common unmanaged/missing cases do not thrash the path.
   try {
-    content = await fs.readFile(extensionPath, "utf8");
+    const peek = await fs.readFile(extensionPath, "utf8");
+    if (!isManagedOmpExtension(peek)) {
+      return { removed: false, skippedReason: "unmanaged", extensionPath };
+    }
   } catch (err) {
     if (err && err.code === "ENOENT") {
       return { removed: false, skippedReason: "missing", extensionPath };
@@ -256,16 +406,24 @@ async function removeOmpHook({ home = os.homedir(), trackerDir, env = process.en
     };
   }
 
-  // Marker-only ownership: never delete user-authored files that mention tokentracker.
-  if (!isManagedOmpExtension(content)) {
-    return { removed: false, skippedReason: "unmanaged", extensionPath };
+  if (typeof _testHooks.beforeUnlink === "function") {
+    await _testHooks.beforeUnlink(extensionPath, null);
   }
 
+  // Atomically claim the directory entry via rename. Whatever inode was at the
+  // path at rename-time moves to a private temp name; a concurrent replacement
+  // either wins the rename (we then put it back if unmanaged) or lands at the
+  // original path after we moved our managed file aside.
+  const stagingPath = path.join(
+    extensionsDir,
+    `.${EXTENSION_FILENAME}.tokentracker-removing-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  );
+
   try {
-    await fs.unlink(extensionPath);
+    await fs.rename(extensionPath, stagingPath);
   } catch (err) {
-    if (err?.code === "ENOENT") {
-      return { removed: true, extensionPath };
+    if (err && err.code === "ENOENT") {
+      return { removed: false, skippedReason: "missing", extensionPath };
     }
     return {
       removed: false,
@@ -274,6 +432,55 @@ async function removeOmpHook({ home = os.homedir(), trackerDir, env = process.en
       extensionPath,
     };
   }
+
+  let stagedContent;
+  try {
+    stagedContent = await fs.readFile(stagingPath, "utf8");
+  } catch (err) {
+    // Best-effort restore if we cannot inspect what we claimed.
+    await fs.rename(stagingPath, extensionPath).catch(() => {});
+    return {
+      removed: false,
+      skippedReason: "extension-read-failed",
+      error: String(err?.message || err),
+      extensionPath,
+    };
+  }
+
+  if (!isManagedOmpExtension(stagedContent)) {
+    // Restored user/replacement file under the original path.
+    try {
+      await fs.rename(stagingPath, extensionPath);
+    } catch (restoreErr) {
+      // If the original path was recreated, leave the staged file for the user.
+      return {
+        removed: false,
+        skippedReason: "identity-changed",
+        error: String(restoreErr?.message || restoreErr),
+        extensionPath,
+        stagedPath: stagingPath,
+      };
+    }
+    return { removed: false, skippedReason: "identity-changed", extensionPath };
+  }
+
+  try {
+    await fs.unlink(stagingPath);
+  } catch (err) {
+    if (err?.code === "ENOENT") {
+      return { removed: true, extensionPath };
+    }
+    // Restore the managed file so uninstall does not leave a silent orphan
+    // under a temp name when the final delete is blocked.
+    await fs.rename(stagingPath, extensionPath).catch(() => {});
+    return {
+      removed: false,
+      skippedReason: "unlink-failed",
+      error: String(err?.message || err),
+      extensionPath,
+    };
+  }
+
   return { removed: true, extensionPath };
 }
 
@@ -288,4 +495,5 @@ module.exports = {
   probeOmpHookState,
   upsertOmpHook,
   removeOmpHook,
+  _testHooks,
 };
