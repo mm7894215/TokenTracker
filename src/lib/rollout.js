@@ -8883,8 +8883,8 @@ async function parseWorkbuddyIncremental({
       const messageId =
         typeof entry.id === "string" && entry.id
           ? entry.id
-          : typeof provider?.messageId === "string" && provider.messageId
-            ? provider.messageId
+          : typeof provider?.messageId === "string" && provider?.messageId
+            ? provider?.messageId
             : tsMs != null
               ? `${sessionId}:${tsMs}`
               : null;
@@ -8954,8 +8954,8 @@ async function parseWorkbuddyIncremental({
       if (!bucketStart) continue;
 
       const model =
-        normalizeModelInput(provider.model) ||
-        normalizeModelInput(provider.requestModelId) ||
+        normalizeModelInput(provider?.model) ||
+        normalizeModelInput(provider?.requestModelId) ||
         normalizeModelInput(entry.model) ||
         fallbackModel;
 
