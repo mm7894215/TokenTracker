@@ -7076,8 +7076,10 @@ test("resolveCodebuddyProjectFiles walks ~/.codebuddy/projects/<cwd>/*.jsonl and
     await fs.writeFile(path.join(cwdB, "s2.jsonl"), "");
 
     const files = resolveCodebuddyProjectFiles({ CODEBUDDY_HOME: tmp });
-    assert.equal(files.length, 2);
-    assert.ok(files.every((f) => f.endsWith(".jsonl")));
+    // resolveCodebuddyProjectFiles returns {path, kind} objects (jsonl | trace | log).
+    const paths = files.map((f) => (typeof f === "string" ? f : f.path));
+    assert.equal(paths.length, 2);
+    assert.ok(paths.every((f) => f.endsWith(".jsonl")));
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
@@ -7230,9 +7232,11 @@ test("resolveWorkbuddyProjectFiles recurses into nested subagent logs and skips 
     await fs.writeFile(path.join(toolResults, "chatcmpl-tool-x.txt"), ""); // must be ignored
 
     const files = resolveWorkbuddyProjectFiles({ WORKBUDDY_HOME: tmp });
-    assert.equal(files.length, 3, "main log + 2 nested subagent logs");
-    assert.ok(files.every((f) => f.endsWith(".jsonl")));
-    assert.ok(files.some((f) => f.includes(path.join("subagents", "agent-aaa.jsonl"))));
+    // resolveWorkbuddyProjectFiles returns {path, kind} objects (jsonl | trace).
+    const paths = files.map((f) => (typeof f === "string" ? f : f.path));
+    assert.equal(paths.length, 3, "main log + 2 nested subagent logs");
+    assert.ok(paths.every((f) => f.endsWith(".jsonl")));
+    assert.ok(paths.some((f) => f.includes(path.join("subagents", "agent-aaa.jsonl"))));
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
