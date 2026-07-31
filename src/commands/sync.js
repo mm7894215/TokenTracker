@@ -589,17 +589,31 @@ async function cmdSync(argv, context = {}) {
       const wslCodexDir = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
         ? wsl.discoverWslHome(".codex")
         : null;
+      // resolveInstallPaths in wsl-first/native-first modes returns a SINGLE
+      // path (the preferred install) with wsl=null, which silently drops the
+      // other install's usage. For codex a user may have it installed in BOTH
+      // Windows and WSL, and each install has its own sessions/ tree — we must
+      // scan both or usage goes missing. So instead of trusting the single-path
+      // resolution, collect every install whose sessions/ actually exists and
+      // push each as its own source. The codexHashes event-dedup (keyed by
+      // sessionUUID:eventTimestamp) makes overlapping scans idempotent even if
+      // the same file is somehow reachable from both paths. (issue #codex-wsl-shadow)
+      const codexSessionsExists = (p) => {
+        if (!p) return false;
+        try { return fssync.existsSync(path.join(p, "sessions")); } catch { return false; }
+      };
+      const codexInstalls = new Set();
+      if (codexSessionsExists(codexNativeValue)) codexInstalls.add(codexNativeValue);
+      if (codexSessionsExists(wslCodexDir)) codexInstalls.add(wslCodexDir);
+      // Also honor resolveInstallPaths' pick (it may include env-overridden
+      // paths or future resolution logic we don't want to bypass entirely).
       const codexPaths = resolveInstallPaths({ nativeValue: codexNativeValue, wslValue: wslCodexDir });
-      if (codexPaths.native) {
-        sources.push({ source: "codex", sessionsDir: path.join(codexPaths.native, "sessions"), codexInventoryCache: true });
+      if (codexPaths.native && codexSessionsExists(codexPaths.native)) codexInstalls.add(codexPaths.native);
+      if (codexPaths.wsl && codexSessionsExists(codexPaths.wsl)) codexInstalls.add(codexPaths.wsl);
+      for (const install of codexInstalls) {
+        sources.push({ source: "codex", sessionsDir: path.join(install, "sessions"), codexInventoryCache: true });
         if (!isBackgroundLightweightSync || backgroundCodexUsageRepair) {
-          sources.push({ source: "codex", sessionsDir: path.join(codexPaths.native, "archived_sessions"), deep: true });
-        }
-      }
-      if (codexPaths.wsl) {
-        sources.push({ source: "codex", sessionsDir: path.join(codexPaths.wsl, "sessions"), codexInventoryCache: true });
-        if (!isBackgroundLightweightSync || backgroundCodexUsageRepair) {
-          sources.push({ source: "codex", sessionsDir: path.join(codexPaths.wsl, "archived_sessions"), deep: true });
+          sources.push({ source: "codex", sessionsDir: path.join(install, "archived_sessions"), deep: true });
         }
       }
     }
