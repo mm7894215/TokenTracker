@@ -13,23 +13,23 @@ const {
 function traceJson({ traceId, sessionId, startedAt, totalTokens, miInput, miOutput, miCached, model }) {
   return {
     trace: {
-      traceId: traceId || "trace_test_001",
+      traceId: traceId ?? "trace_test_001",
       name: "Agent workflow",
       workerPid: 12345,
       workerHostname: "test",
-      startedAt: startedAt || "2026-07-31T00:00:00.000Z",
+      startedAt: startedAt ?? "2026-07-31T00:00:00.000Z",
       endedAt: "2026-07-31T00:01:00.000Z",
       duration: 60000,
       status: "ok",
       spanCount: 6,
-      totalTokens: totalTokens || 1208838,
-      sessionId: sessionId || "sess-001",
+      totalTokens: totalTokens ?? 1208838,
+      sessionId: sessionId ?? "sess-001",
       agentName: "cli",
       modelInfo: {
-        models: [model || "glm-5.2"],
-        totalInputTokens: miInput || 1206233,
-        totalOutputTokens: miOutput || 2605,
-        totalCachedTokens: miCached || 1196800,
+        models: [model ?? "glm-5.2"],
+        totalInputTokens: miInput ?? 1206233,
+        totalOutputTokens: miOutput ?? 2605,
+        totalCachedTokens: miCached ?? 1196800,
         lastCallInputTokens: 1206233,
         callCount: 6,
       },
@@ -40,21 +40,23 @@ function traceJson({ traceId, sessionId, startedAt, totalTokens, miInput, miOutp
 
 // JSONL fixture: a single assistant message with providerData.rawUsage.
 function jsonlLine({ ts, uuid, sessionId, promptTokens, completionTokens, cachedTokens, reasoningTokens, model }) {
+  const pt = promptTokens ?? 71161;
+  const ct = completionTokens ?? 2305;
   return JSON.stringify({
-    id: uuid || "msg-001",
-    timestamp: ts || 1753900800000,
+    id: uuid ?? "msg-001",
+    timestamp: ts ?? 1753900800000,
     type: "message",
     role: "assistant",
-    sessionId: sessionId || "sess-001",
+    sessionId: sessionId ?? "sess-001",
     content: [{ type: "output_text", text: "..." }],
     providerData: {
-      model: model || "glm-5.2",
+      model: model ?? "glm-5.2",
       rawUsage: {
-        prompt_tokens: promptTokens || 71161,
-        completion_tokens: completionTokens || 2305,
-        total_tokens: (promptTokens || 71161) + (completionTokens || 2305),
-        prompt_tokens_details: { cached_tokens: cachedTokens || 62656, reasoning_tokens: 0 },
-        completion_tokens_details: { reasoning_tokens: reasoningTokens || 999 },
+        prompt_tokens: pt,
+        completion_tokens: ct,
+        total_tokens: pt + ct,
+        prompt_tokens_details: { cached_tokens: cachedTokens ?? 62656, reasoning_tokens: 0 },
+        completion_tokens_details: { reasoning_tokens: reasoningTokens ?? 999 },
       },
     },
   });
@@ -74,7 +76,7 @@ async function withTempHome(fn) {
   } finally {
     process.env.HOME = saved.HOME;
     process.env.USERPROFILE = saved.USERPROFILE;
-    if (saved.CODEX_HOME === undefined) delete process.env.CODEBUDDY_HOME;
+    if (saved.CODEBUDDY_HOME === undefined) delete process.env.CODEBUDDY_HOME;
     else process.env.CODEBUDDY_HOME = saved.CODEBUDDY_HOME;
     await fs.rm(home, { recursive: true, force: true }).catch(() => {});
   }
