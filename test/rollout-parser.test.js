@@ -7065,7 +7065,12 @@ test("parseCodebuddyIncremental keeps extension log model across incremental tai
 
 test("resolveCodebuddyProjectFiles walks ~/.codebuddy/projects/<cwd>/*.jsonl and skips others", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-codebuddy-"));
+  const savedLogFallback = process.env.TOKENTRACKER_CODEBUDDY_LOG_FALLBACK;
   try {
+    // Force-off the extension-log fallback so auto-mode doesn't scan the real
+    // host's CodeBuddyExtension logs (the tmp dir has jsonl files, but the
+    // three-state auto gate would still enable logs if jsonl lacks usage).
+    process.env.TOKENTRACKER_CODEBUDDY_LOG_FALLBACK = "0";
     const projectsDir = path.join(tmp, "projects");
     const cwdA = path.join(projectsDir, "cwd-a");
     const cwdB = path.join(projectsDir, "cwd-b");
@@ -7075,12 +7080,19 @@ test("resolveCodebuddyProjectFiles walks ~/.codebuddy/projects/<cwd>/*.jsonl and
     await fs.writeFile(path.join(cwdA, "ignored.txt"), "");
     await fs.writeFile(path.join(cwdB, "s2.jsonl"), "");
 
-    const files = resolveCodebuddyProjectFiles({ CODEBUDDY_HOME: tmp });
+    const files = resolveCodebuddyProjectFiles({
+      CODEBUDDY_HOME: tmp,
+      // Force-off the extension-log fallback so auto-mode doesn't scan the real
+      // host's CodeBuddyExtension logs.
+      TOKENTRACKER_CODEBUDDY_LOG_FALLBACK: "0",
+    });
     // resolveCodebuddyProjectFiles returns {path, kind} objects (jsonl | trace | log).
     const paths = files.map((f) => (typeof f === "string" ? f : f.path));
     assert.equal(paths.length, 2);
     assert.ok(paths.every((f) => f.endsWith(".jsonl")));
   } finally {
+    if (savedLogFallback === undefined) delete process.env.TOKENTRACKER_CODEBUDDY_LOG_FALLBACK;
+    else process.env.TOKENTRACKER_CODEBUDDY_LOG_FALLBACK = savedLogFallback;
     await fs.rm(tmp, { recursive: true, force: true });
   }
 });

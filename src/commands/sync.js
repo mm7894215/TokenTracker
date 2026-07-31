@@ -226,6 +226,15 @@ const LEGACY_BASE_URL_MIGRATION_NOTE = "reset_after_legacy_baseurl_migration_202
 // the same migration without this ceiling when the history needs a deeper scan.
 const CODEX_BACKGROUND_LINEAGE_SCAN_MAX_BYTES = 1024 * 1024;
 const DROID_DUP_SESSION_REPAIR_KEY = "droidDupSessionInflationRepair_2026_06";
+// One-time repair (PR #399 blocker): pre-tracedSessionIds CodeBuddy versions
+// aggregated jsonl message tokens into hourly buckets even for sessions that
+// ALSO had a trace file. tracedSessionIds is a forward-only blacklist — it
+// suppresses jsonl parsed after the trace within one run but cannot roll back
+// jsonl contributions an older version already aggregated (buckets key on
+// codebuddy|model|halfHour, with no session dimension). The first post-upgrade
+// sync would stack the trace total on top of the stale jsonl total. Guarded
+// atomic rebuild — see repairCodebuddyTraceJsonlOverlap.
+const CODEBUDDY_TRACE_OVERLAP_REPAIR_KEY = "codebuddyTraceJsonlOverlapRepair_2026_08";
 const CODEX_COLD_SCAN_AUDIT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const NOTIFY_LOCK_WAIT_MS = 130_000;
 const NOTIFY_LOCK_POLL_MS = 5_000;
@@ -1772,6 +1781,26 @@ async function cmdSync(argv, context = {}) {
     const codebuddyFiles = sourceAllowed("codebuddy")
       ? mergeBothFileSources({ resolveFiles: resolveCodebuddyProjectFiles, env: process.env })
       : [];
+    // One-time historical repair (PR #399): roll back the pre-tracedSessionIds
+    // trace+jsonl double count BEFORE the parse below (and before any upload
+    // this sync — the repair rewrites queue.jsonl and resets the upload
+    // offset). Sentinel-gated: O(1) no-op once completed. See
+    // repairCodebuddyTraceJsonlOverlap for the guard/rebuild/commit design.
+    if (sourceAllowed("codebuddy")) {
+      try {
+        await repairCodebuddyTraceJsonlOverlap({
+          cursors,
+          queuePath,
+          queueStatePath,
+          codebuddyFiles,
+          env: process.env,
+        });
+      } catch (err) {
+        // The repair is designed to fail closed (live state untouched, no
+        // sentinel) so a later sync can retry; never let it break the sync.
+        warnProviderParseFailure("CodeBuddy trace/jsonl overlap repair", err, opts);
+      }
+    }
     if (codebuddyFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing CodeBuddy ${renderBar(0)} | buckets 0`);
@@ -2732,6 +2761,7 @@ module.exports = {
   repairCodexRescanInflation,
   repairCodexForkReplayInflation,
   repairCodexInterleavedUsageInflation,
+  repairCodebuddyTraceJsonlOverlap,
   repairDroidDuplicateSessionInflation,
   repairMimoClaudeMislabel,
   reincludeClaudeMemObserverFiles,
@@ -2747,6 +2777,7 @@ module.exports = {
   CODEX_FORK_REPLAY_REPAIR_KEY,
   CODEX_USAGE_LINEAGE_REPAIR_KEY,
   DROID_DUP_SESSION_REPAIR_KEY,
+  CODEBUDDY_TRACE_OVERLAP_REPAIR_KEY,
   CLAUDE_MEM_OBSERVER_REINCLUDE_KEY,
   GROK_APPEND_ONLY_REPAIR_MIGRATION_KEY,
   CLOUD_CONVERSATIONS_BACKFILL_KEY,
@@ -4263,6 +4294,255 @@ async function repairCodexForkReplayInflation({
     migrationKey: CODEX_FORK_REPLAY_REPAIR_KEY,
     uploadNote: "reset_after_codex_fork_replay_2026_07",
   });
+}
+
+// One-time repair (PR #399 blocker): rebuild codebuddy hourly buckets that
+// pre-tracedSessionIds versions inflated by counting BOTH the trace file and
+// the jsonl messages of the same session. tracedSessionIds is a forward-only
+// blacklist: it suppresses jsonl parsed after the trace within one run, but
+// cannot roll back jsonl contributions an older version already aggregated —
+// buckets key on codebuddy|model|halfHour with no session dimension, and
+// seenIds stores message IDs without their token contributions, so no
+// surgical per-session subtraction is possible after the fact. The only
+// correct fix is a full rebuild with the trace-authoritative parser.
+//
+// Mirrors the repairCodexRescanInflation (#187) skeleton:
+//   1. sentinel gate (ISO string = final, {skipped:true} = retry next sync);
+//   2. fast path: no 'codebuddy|' bucket key → finalize in O(1);
+//   3. reproducibility guard: every file in cursors.codebuddy.fileOffsets must
+//      be present in THIS sync's discovered codebuddyFiles (codebuddy jsonl/
+//      traces are never moved/archived like codex sessions, so a plain path
+//      check suffices — no UUID relocation). A missing file defers the whole
+//      repair with a retryable sentinel; forward tracedSessionIds still stops
+//      NEW double-counting in the meantime;
+//   4. atomic rebuild into a THROWAWAY cursors + tmp queue using the CURRENT
+//      parser (trace-first sort + tracedSessionIds reproduces the
+//      trace-authoritative history; any failure leaves ALL live state
+//      untouched and sets no sentinel — never a clear-then-parse, whose
+//      failure would permanently zero history, see the codex comment ~3920);
+//   5. commit: strip codebuddy rows from queue.jsonl (atomic tmp+rename),
+//      swap the codebuddy buckets/groupQueued, replace cursors.codebuddy
+//      wholesale (seenIds/seenTraceIds/tracedSessionIds/fileOffsets are
+//      regenerated together — the old IDs belong to the inflated history),
+//      append all-zero retraction rows for live keys the rebuild did NOT
+//      reproduce (the cloud overwrite-upserts by key, so a locally deleted
+//      key would otherwise stay stale-high forever), and reset the upload
+//      offset so the corrected queue re-uploads BEFORE any upload this sync.
+// The rebuilt fileOffsets sit at EOF, so the regular codebuddy parse later in
+// the same sync is a natural no-op and cannot double-count.
+async function repairCodebuddyTraceJsonlOverlap({
+  cursors,
+  queuePath,
+  queueStatePath,
+  codebuddyFiles,
+  env = process.env,
+}) {
+  if (!cursors || typeof cursors !== "object") return false;
+  const migrations = (cursors.migrations ||= {});
+  // Same completed-vs-skipped semantics as the codex repairs: an ISO string
+  // is final; a {skipped:true} object MUST be retried — the skip condition
+  // (e.g. a temporarily missing file) can clear on a later sync.
+  const prior = migrations[CODEBUDDY_TRACE_OVERLAP_REPAIR_KEY];
+  if (prior && !(typeof prior === "object" && prior.skipped)) return false;
+
+  const liveBuckets =
+    cursors.hourly && typeof cursors.hourly === "object" && cursors.hourly.buckets && typeof cursors.hourly.buckets === "object"
+      ? cursors.hourly.buckets
+      : {};
+  const liveCodebuddyKeys = Object.keys(liveBuckets).filter((k) => k.startsWith("codebuddy|"));
+
+  // Fast path: fresh install, or codebuddy never aggregated anything — there
+  // is no history that could be inflated. Finalize in O(1).
+  if (liveCodebuddyKeys.length === 0) {
+    migrations[CODEBUDDY_TRACE_OVERLAP_REPAIR_KEY] = new Date().toISOString();
+    return false;
+  }
+
+  const discovered = new Set();
+  for (const entry of Array.isArray(codebuddyFiles) ? codebuddyFiles : []) {
+    const fp = typeof entry === "string" ? entry : entry?.path;
+    if (fp) discovered.add(fp);
+  }
+
+  // Reproducibility guard: the rebuild re-creates buckets ONLY from the files
+  // discovered this sync. If any file that previously contributed is gone
+  // from disk, clearing the live buckets would lose that history — defer.
+  const cbState =
+    cursors.codebuddy && typeof cursors.codebuddy === "object" ? cursors.codebuddy : {};
+  const fileOffsets =
+    cbState.fileOffsets && typeof cbState.fileOffsets === "object" ? cbState.fileOffsets : {};
+  for (const fp of Object.keys(fileOffsets)) {
+    if (discovered.has(fp)) continue;
+    migrations[CODEBUDDY_TRACE_OVERLAP_REPAIR_KEY] = {
+      skipped: true,
+      reason: "codebuddy_file_unreproducible",
+      at: new Date().toISOString(),
+    };
+    return false;
+  }
+
+  // Atomic rebuild into throwaway state. The parse enqueues the rebuilt
+  // codebuddy rows into tmpQueue and regenerates the full codebuddy cursor
+  // state from byte zero.
+  let rebuilt;
+  const tmpQueue = `${queuePath}.codebuddyrebuild.${process.pid}.${Date.now()}`;
+  try {
+    const tmpCursors = {
+      version: 1,
+      codebuddy: {},
+      hourly: { buckets: {}, groupQueued: {} },
+    };
+    // CRITICAL: sort trace files before jsonl files so tracedSessionIds is
+    // populated before any jsonl line is read. parseCodebuddyIncremental's
+    // internal file loop processes files in array order; if jsonl comes first
+    // it would be counted BEFORE the trace establishes tracedSessionIds,
+    // re-introducing the double count this repair is meant to eliminate.
+    const sortedFiles = (Array.isArray(codebuddyFiles) ? codebuddyFiles : []).slice().sort((a, b) => {
+      const aKind = typeof a === "string" ? "jsonl" : (a?.kind || "jsonl");
+      const bKind = typeof b === "string" ? "jsonl" : (b?.kind || "jsonl");
+      if (aKind === "trace" && bKind !== "trace") return -1;
+      if (aKind !== "trace" && bKind === "trace") return 1;
+      const aPath = typeof a === "string" ? a : (a?.path || "");
+      const bPath = typeof b === "string" ? b : (b?.path || "");
+      return aPath.localeCompare(bPath);
+    });
+    await parseCodebuddyIncremental({
+      projectFiles: sortedFiles,
+      cursors: tmpCursors,
+      queuePath: tmpQueue,
+      env,
+    });
+    let tmpRaw = "";
+    try {
+      tmpRaw = await fs.readFile(tmpQueue, "utf8");
+    } catch (e) {
+      if (e?.code !== "ENOENT") throw e;
+    }
+    rebuilt = {
+      buckets: (tmpCursors.hourly && tmpCursors.hourly.buckets) || {},
+      groupQueued: (tmpCursors.hourly && tmpCursors.hourly.groupQueued) || {},
+      codebuddy:
+        tmpCursors.codebuddy && typeof tmpCursors.codebuddy === "object"
+          ? tmpCursors.codebuddy
+          : {},
+      queueRows: tmpRaw.split("\n").filter((l) => l.trim()),
+    };
+  } catch (e) {
+    console.error(
+      "[sync] codebuddy trace/jsonl overlap repair: rebuild failed, leaving all data untouched:",
+      e?.message || e,
+    );
+    return false;
+  } finally {
+    await fs.rm(tmpQueue, { force: true }).catch(() => {});
+  }
+
+  // SANITY: live codebuddy history exists but the rebuild produced no
+  // codebuddy buckets at all → treat as a failed rebuild and retry next sync
+  // (never zero out live history on an unreproducible parse).
+  const rebuiltCodebuddyKeys = Object.keys(rebuilt.buckets).filter((k) => k.startsWith("codebuddy|"));
+  if (rebuiltCodebuddyKeys.length === 0) {
+    console.error(
+      "[sync] codebuddy trace/jsonl overlap repair: rebuild produced 0 codebuddy buckets over a non-empty live history — skipping to avoid data loss",
+    );
+    return false;
+  }
+
+  // COMMIT (only after a verified rebuild). A crash partway leaves the
+  // migration key unset, so the next sync re-runs the deterministic rebuild
+  // and converges.
+  //
+  // All-zero retraction rows for every live codebuddy key the rebuild did not
+  // reproduce (mirrors migrateRolloutCumulativeDeltaBuckets): the cloud
+  // overwrite-upserts by key, so without these the inflated keys would stay
+  // stale-high even after the queue strip.
+  const retractions = [];
+  for (const key of liveCodebuddyKeys) {
+    if (Object.prototype.hasOwnProperty.call(rebuilt.buckets, key)) continue;
+    const [, model, ...hourParts] = key.split("|");
+    retractions.push(
+      JSON.stringify({
+        source: "codebuddy",
+        model: model || "unknown",
+        hour_start: hourParts.join("|"),
+        input_tokens: 0,
+        cached_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        output_tokens: 0,
+        reasoning_output_tokens: 0,
+        total_tokens: 0,
+        billable_total_tokens: 0,
+        conversation_count: 0,
+      }),
+    );
+  }
+
+  // 1. queue.jsonl: drop ALL codebuddy rows (inflated or not), append the
+  //    rebuilt rows plus the retraction rows (atomic tmp+rename so a crash
+  //    never loses OTHER providers' pending upload rows).
+  if (typeof queuePath === "string" && queuePath) {
+    let raw = "";
+    try {
+      raw = await fs.readFile(queuePath, "utf8");
+    } catch (e) {
+      if (e?.code !== "ENOENT") throw e;
+    }
+    const kept = [];
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      let row;
+      try {
+        row = JSON.parse(line);
+      } catch (_e) {
+        kept.push(line);
+        continue;
+      }
+      if (row?.source === "codebuddy") continue;
+      kept.push(line);
+    }
+    await ensureDir(path.dirname(queuePath));
+    const tmp = `${queuePath}.tmp.${process.pid}.${Date.now()}`;
+    await fs.writeFile(tmp, kept.concat(rebuilt.queueRows, retractions).join("\n") + "\n", "utf8");
+    await fs.rename(tmp, queuePath);
+  }
+
+  // 2. Swap the live codebuddy hourly state for the rebuilt one, and install
+  //    the rebuilt codebuddy cursor state wholesale.
+  const liveHourly = (cursors.hourly ||= { buckets: {}, groupQueued: {} });
+  liveHourly.buckets ||= {};
+  liveHourly.groupQueued ||= {};
+  for (const k of Object.keys(liveHourly.buckets)) {
+    if (k.startsWith("codebuddy|")) delete liveHourly.buckets[k];
+  }
+  for (const k of Object.keys(liveHourly.groupQueued)) {
+    if (k.startsWith("codebuddy|")) delete liveHourly.groupQueued[k];
+  }
+  for (const [k, v] of Object.entries(rebuilt.buckets)) {
+    if (k.startsWith("codebuddy|")) liveHourly.buckets[k] = v;
+  }
+  for (const [k, v] of Object.entries(rebuilt.groupQueued)) {
+    if (k.startsWith("codebuddy|")) liveHourly.groupQueued[k] = v;
+  }
+  cursors.codebuddy = rebuilt.codebuddy;
+
+  // 3. Reset the cloud upload offset so the corrected queue (rebuilt rows +
+  //    zero retractions) re-uploads and overwrite-upserts the inflated keys.
+  //    Other sources re-upsert idempotently (last emission per key wins).
+  if (typeof queueStatePath === "string" && queueStatePath) {
+    let uploadState = {};
+    try {
+      uploadState = JSON.parse(await fs.readFile(queueStatePath, "utf8"));
+    } catch (_e) {
+      uploadState = {};
+    }
+    uploadState.offset = 0;
+    uploadState.updatedAt = new Date().toISOString();
+    uploadState.note = "reset_after_codebuddy_trace_overlap_2026_08";
+    await fs.writeFile(queueStatePath, JSON.stringify(uploadState));
+  }
+
+  migrations[CODEBUDDY_TRACE_OVERLAP_REPAIR_KEY] = new Date().toISOString();
+  return true;
 }
 
 // Rebuild historical Codex usage only when a rollout proves that the old

@@ -7840,6 +7840,101 @@ function resolveCodebuddyDefaultModel(env = process.env) {
   return fallback;
 }
 
+// Sniff the head of a CodeBuddy session jsonl for assistant messages that
+// carry token usage. Two-stage per line: a cheap substring screen for
+// "rawUsage"/"usage" and then JSON.parse to confirm the line is really a
+// type=message/role=assistant record with a usage object (the substring alone
+// could appear in unrelated string values). Reads at most the first 64KB and
+// inspects at most the first 100 lines — bounded I/O, safe on huge logs.
+// Truncated tail lines (partial final line inside the 64KB window) fail
+// JSON.parse and are skipped. Any parse error on the file itself → false.
+function sniffCodebuddyJsonlHasUsage(filePath) {
+  let fd;
+  try {
+    fd = fssync.openSync(filePath, "r");
+  } catch { return false; }
+  let head;
+  try {
+    const buf = Buffer.alloc(64 * 1024);
+    const bytesRead = fssync.readSync(fd, buf, 0, buf.length, 0);
+    head = buf.toString("utf8", 0, bytesRead);
+  } catch { return false; } finally {
+    try { fssync.closeSync(fd); } catch {}
+  }
+  if (!head.includes("\"rawUsage\"") && !head.includes("\"usage\"")) return false;
+  const lines = head.split("\n");
+  const limit = Math.min(lines.length, 100);
+  for (let i = 0; i < limit; i++) {
+    const line = lines[i];
+    if (!line || (line.indexOf("\"rawUsage\"") === -1 && line.indexOf("\"usage\"") === -1)) continue;
+    let entry;
+    try { entry = JSON.parse(line); } catch { continue; }
+    if (!entry || entry.type !== "message" || entry.role !== "assistant") continue;
+    const provider = entry.providerData;
+    const rawUsage = provider && typeof provider === "object" ? provider.rawUsage : null;
+    if (rawUsage && typeof rawUsage === "object") return true;
+    if (entry.usage && typeof entry.usage === "object") return true;
+  }
+  return false;
+}
+
+// Property key used to carry the log-fallback decision from
+// resolveCodebuddyProjectFiles (where the gate runs) to
+// parseCodebuddyProjectFiles (where it is persisted as diagnostics) without
+// re-sniffing every jsonl head. Attached as a non-index property on the
+// returned array; survives sort() because sort mutates in place.
+const CODEBUDDY_LOG_FALLBACK_INFO = "__codebuddyLogFallbackInfo";
+
+// Three-state gate for the legacy IDE extension-log fallback:
+//   TOKENTRACKER_CODEBUDDY_LOG_FALLBACK=1 → force-on   (debug; known to
+//                                                        double-count vs jsonl)
+//   TOKENTRACKER_CODEBUDDY_LOG_FALLBACK=0 → force-off  (new escape hatch)
+//   unset                                 → auto:
+//     (a) any trace file discovered        → off (traces are authoritative)
+//     (b) else any jsonl carries usage     → off (jsonl branch produces data)
+//     (c) else                             → on  (pre-2026-04 CodeBuddy: no
+//                                                 traces, jsonl has no
+//                                                 rawUsage/usage — extension
+//                                                 logs are the ONLY source)
+// Auto-on is physically incapable of double-counting: it only triggers when
+// the jsonl branch would produce zero records (no file carries usage) and
+// there are no traces, so the dedup-namespace collision that caused the
+// historical 3x inflation is unreachable on the auto path.
+// Returns { enabled, mode, reason, traceFiles, jsonlFiles, jsonlWithUsage } —
+// everything after `enabled` is diagnostics only.
+function detectCodebuddyLogFallback(env, files) {
+  const raw = String(env.TOKENTRACKER_CODEBUDDY_LOG_FALLBACK || "").trim();
+  const list = Array.isArray(files) ? files : [];
+  let traceFiles = 0;
+  const jsonlPaths = [];
+  for (const f of list) {
+    const kind = typeof f === "string"
+      ? (f.endsWith(".log") ? "log" : "jsonl")
+      : (f?.kind || "jsonl");
+    const p = typeof f === "string" ? f : f?.path;
+    if (kind === "trace") traceFiles++;
+    else if (kind === "jsonl" && p) jsonlPaths.push(p);
+  }
+  if (raw === "1") {
+    return { enabled: true, mode: "force-on", reason: "env_forced_on", traceFiles, jsonlFiles: jsonlPaths.length, jsonlWithUsage: 0 };
+  }
+  if (raw === "0") {
+    return { enabled: false, mode: "force-off", reason: "env_forced_off", traceFiles, jsonlFiles: jsonlPaths.length, jsonlWithUsage: 0 };
+  }
+  if (traceFiles > 0) {
+    return { enabled: false, mode: "auto-off", reason: "traces_present", traceFiles, jsonlFiles: jsonlPaths.length, jsonlWithUsage: 0 };
+  }
+  for (const p of jsonlPaths) {
+    if (sniffCodebuddyJsonlHasUsage(p)) {
+      // Any single jsonl with usage is enough — the jsonl branch will produce
+      // records, so enabling logs would re-introduce the namespace double
+      // count. Early exit keeps the sniff O(first-hit) on modern installs.
+      return { enabled: false, mode: "auto-off", reason: "jsonl_usage_present", traceFiles, jsonlFiles: jsonlPaths.length, jsonlWithUsage: 1 };
+    }
+  }
+  return { enabled: true, mode: "auto-on", reason: "no_traces_no_jsonl_usage", traceFiles, jsonlFiles: jsonlPaths.length, jsonlWithUsage: 0 };
+}
+
 function resolveCodebuddyProjectFiles(env = process.env) {
   const codebuddyHome = resolveCodebuddyHome(env);
   // Each entry is { path, kind } where kind ∈ {"jsonl", "log", "trace"}.
@@ -7907,16 +8002,21 @@ function resolveCodebuddyProjectFiles(env = process.env) {
   }
 
   // 2. Active IDE extension logs scan.
-  //    DEFAULT DISABLED: extension logs overlap with the jsonl session log and
-  //    use a different dedup key namespace (codebuddy:extension-log:agentId:sec
-  //    vs jsonl's entry.uuid), causing the same LLM round-trip to be counted
-  //    twice — observed 3x inflation on a real machine (45.9M vs true 15.3M).
-  //    The traces dir (added above) is the authoritative source; jsonl is the
-  //    fallback for sessions without traces. Extension logs are only consulted
-  //    when explicitly enabled via TOKENTRACKER_CODEBUDDY_LOG_FALLBACK=1, for
-  //    users on older CodeBuddy builds that have neither traces nor rawUsage.
-  const enableLogFallback = String(env.TOKENTRACKER_CODEBUDDY_LOG_FALLBACK || "").trim() === "1";
-  if (enableLogFallback) {
+  //    Extension logs overlap with the jsonl session log and use a different
+  //    dedup key namespace (codebuddy:extension-log:agentId:sec vs jsonl's
+  //    entry.uuid), so counting both double-counts the same LLM round-trip —
+  //    observed 3x inflation on a real machine (45.9M vs true 15.3M). They
+  //    are therefore gated by detectCodebuddyLogFallback: enabled only when
+  //    forced (=1, debug) or when auto-detection finds NEITHER trace files
+  //    NOR any jsonl assistant message with usage — i.e. pre-2026-04
+  //    CodeBuddy builds where extension logs are the only usage source.
+  //    Auto-on cannot double-count because the jsonl branch yields zero
+  //    records in exactly that situation. See detectCodebuddyLogFallback.
+  const logFallbackInfo = detectCodebuddyLogFallback(env, files);
+  // Stash the decision on the array so parseCodebuddyIncremental can persist
+  // it as diagnostics without re-sniffing every jsonl head.
+  try { files[CODEBUDDY_LOG_FALLBACK_INFO] = logFallbackInfo; } catch {}
+  if (logFallbackInfo.enabled) {
     const logRoots = [];
     const home = env.HOME || require("node:os").homedir();
 
@@ -8068,6 +8168,15 @@ async function parseCodebuddyIncremental({
     ? projectFiles
     : resolveCodebuddyProjectFiles(env || process.env);
   const fallbackModel = defaultModel || resolveCodebuddyDefaultModel(env || process.env);
+  // Observational diagnostics for the extension-log fallback gate — recorded
+  // in cursors.codebuddy.logFallback so silent auto-on/off decisions are
+  // visible after the fact. Reuses the decision made inside
+  // resolveCodebuddyProjectFiles when available (avoids re-sniffing); when
+  // files were passed in explicitly we recompute deterministically from the
+  // given list. NOT used for any correctness decision in this function.
+  const logFallbackInfo =
+    (files && files[CODEBUDDY_LOG_FALLBACK_INFO]) ||
+    detectCodebuddyLogFallback(env || process.env, files);
 
   if (files.length === 0) {
     cursors.codebuddy = {
@@ -8076,6 +8185,7 @@ async function parseCodebuddyIncremental({
       seenTraceIds: Array.from(seenTraceIds),
       tracedSessionIds: Array.from(tracedSessionIds),
       fileOffsets,
+      logFallback: { ...logFallbackInfo, detectedAt: new Date().toISOString() },
       updatedAt: new Date().toISOString(),
     };
     return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
@@ -8531,6 +8641,10 @@ async function parseCodebuddyIncremental({
     tracedSessionIds: cappedTracedSessions,
     fileOffsets,
     logModelsByAgent: cappedLogModelsByAgent,
+    // Diagnostics only (see detectCodebuddyLogFallback): which log-fallback
+    // mode was in effect this run and why. Additive/optional — old cursors
+    // simply lack the key.
+    logFallback: { ...logFallbackInfo, detectedAt: updatedAt },
     updatedAt,
   };
 
@@ -8706,6 +8820,16 @@ async function parseWorkbuddyIncremental({
   const seenTraceIds = new Set(
     Array.isArray(workbuddyState.seenTraceIds) ? workbuddyState.seenTraceIds : [],
   );
+  // Sessions covered by at least one trace file that passed all usage gates
+  // below. For these sessions we skip BOTH the jsonl branch and the sqlite
+  // fallback (priority: trace > jsonl/detailed > sqlite) because the trace
+  // already carries the complete workflow-level token total — counting jsonl
+  // or sqlite rows too would double-count (mirrors codebuddy's
+  // tracedSessionIds at ~8055). Missing on old cursors → empty set, which
+  // keeps the new field additive and backward compatible.
+  const tracedSessionIds = new Set(
+    Array.isArray(workbuddyState.tracedSessionIds) ? workbuddyState.tracedSessionIds : [],
+  );
   const fileOffsets =
     workbuddyState.fileOffsets && typeof workbuddyState.fileOffsets === "object"
       ? { ...workbuddyState.fileOffsets }
@@ -8734,6 +8858,7 @@ async function parseWorkbuddyIncremental({
       ...workbuddyState,
       seenIds: Array.from(seenIds),
       seenTraceIds: Array.from(seenTraceIds),
+      tracedSessionIds: Array.from(tracedSessionIds),
       fileOffsets,
       sqliteSessions,
       detailedSessions,
@@ -8804,6 +8929,12 @@ async function parseWorkbuddyIncremental({
 
       const models = Array.isArray(mi.models) ? mi.models : [];
       const traceModel = normalizeModelInput(models[0]) || fallbackModel;
+      // Mark the session as trace-covered ONLY after all usage/timestamp
+      // gates above passed (zero-token / missing startedAt traces returned
+      // earlier and intentionally do NOT suppress jsonl — for those, jsonl
+      // remains the authoritative usage source). Same placement as codebuddy.
+      const traceSessionId = typeof trace.sessionId === "string" && trace.sessionId ? trace.sessionId : null;
+      if (traceSessionId) tracedSessionIds.add(traceSessionId);
 
       const traceDelta = {
         input_tokens: traceInputTokens,
@@ -8869,6 +9000,11 @@ async function parseWorkbuddyIncremental({
         typeof entry.sessionId === "string" && entry.sessionId
           ? entry.sessionId
           : path.basename(filePath, ".jsonl");
+      // Skip sessions already covered by a trace file — the trace carries the
+      // complete workflow-level total. Trace-first sort in
+      // resolveWorkbuddyProjectFiles guarantees tracedSessionIds is populated
+      // before any jsonl line is read within a run.
+      if (tracedSessionIds.has(sessionId)) continue;
       if (Object.prototype.hasOwnProperty.call(sqliteSessions, sessionId)) {
         continue;
       }
@@ -9030,6 +9166,12 @@ async function parseWorkbuddyIncremental({
         if (!row || typeof row !== "object") continue;
         const sessionId = typeof row.session_id === "string" ? row.session_id.trim() : "";
         if (!sessionId) continue;
+        // Trace-covered sessions win over the sqlite fallback too. CRITICAL:
+        // this check must come BEFORE the detailedSessions check — the jsonl
+        // branch now skips traced sessions without populating
+        // detailedSessions, so without this guard the sqlite fallback would
+        // count the session and re-create the double count (trace+sqlite).
+        if (tracedSessionIds.has(sessionId)) continue;
         if (detailedSessions[sessionId] || detailedSessionsWithUsage.has(sessionId)) continue;
 
         const usedNow = toNonNegativeInt(row.used);
@@ -9123,10 +9265,19 @@ async function parseWorkbuddyIncremental({
   const seenTraceArr = Array.from(seenTraceIds);
   const cappedSeenTraces =
     seenTraceArr.length > 10_000 ? seenTraceArr.slice(seenTraceArr.length - 10_000) : seenTraceArr;
+  // Cap tracedSessionIds to the last 10k (same convention as seenIds /
+  // seenTraceIds). Evicted sessions are still protected by seenIds /
+  // fileOffsets for already-read jsonl lines, so only genuinely new jsonl
+  // lines for a very old traced session could leak — accepted trade-off,
+  // identical to codebuddy.
+  const tracedSessionArr = Array.from(tracedSessionIds);
+  const cappedTracedSessions =
+    tracedSessionArr.length > 10_000 ? tracedSessionArr.slice(tracedSessionArr.length - 10_000) : tracedSessionArr;
   cursors.workbuddy = {
     ...workbuddyState,
     seenIds: cappedSeen,
     seenTraceIds: cappedSeenTraces,
+    tracedSessionIds: cappedTracedSessions,
     fileOffsets,
     sqliteSessions: cappedSqliteSessions,
     detailedSessions: cappedDetailedSessions,
@@ -15610,6 +15761,7 @@ module.exports = {
   resolveCodebuddyHome,
   resolveCodebuddyProjectFiles,
   resolveCodebuddyDefaultModel,
+  detectCodebuddyLogFallback,
   parseCodebuddyIncremental,
   resolveWorkbuddyHome,
   resolveWorkbuddyProjectFiles,
