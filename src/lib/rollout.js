@@ -7842,6 +7842,12 @@ function resolveCodebuddyDefaultModel(env = process.env) {
 
 function resolveCodebuddyProjectFiles(env = process.env) {
   const codebuddyHome = resolveCodebuddyHome(env);
+  // Each entry is { path, kind } where kind ∈ {"jsonl", "log", "trace"}.
+  // "trace" files are ~/.codebuddy/traces/<pid>/trace_*.json — the authoritative
+  // token source written by CodeBuddy CLI's OpenTelemetry-style trace exporter.
+  // Newer CodeBuddy versions stop writing providerData.rawUsage on every
+  // assistant message in ~/.codebuddy/projects/**/*.jsonl (only ~10% of
+  // messages carry it), so the traces dir is the only complete source.
   const files = [];
 
   // 1. Recursive JSONL scan in codebuddyHome/projects
@@ -7863,72 +7869,113 @@ function resolveCodebuddyProjectFiles(env = process.env) {
             } catch { continue; }
           }
           if (isDir) walkJsonl(full);
-          else if (isFile && entry.name.endsWith(".jsonl")) files.push(full);
+          else if (isFile && entry.name.endsWith(".jsonl")) files.push({ path: full, kind: "jsonl" });
         }
       };
       walkJsonl(projectsDir);
     }
-  }
 
-  // 2. Active IDE extension logs scan
-  const logRoots = [];
-  const home = env.HOME || require("node:os").homedir();
-
-  if (process.platform === "darwin") {
-    const appSupport = path.join(home, "Library", "Application Support");
-    logRoots.push({ dir: path.join(appSupport, "CodeBuddy CN", "logs"), pattern: "codebuddy-extension-log" });
-    logRoots.push({ dir: path.join(appSupport, "Code", "logs"), pattern: "codebuddy-extension-log" });
-    logRoots.push({ dir: path.join(appSupport, "CodeBuddyExtension", "Logs", "CodeBuddyIDE"), pattern: "*.log" });
-    logRoots.push({ dir: path.join(appSupport, "CodeBuddyExtension", "Logs", "VSCode"), pattern: "*.log" });
-  } else if (process.platform === "win32") {
-    const appData = env.APPDATA || path.join(home, "AppData", "Roaming");
-    const localAppData = env.LOCALAPPDATA || path.join(home, "AppData", "Local");
-    logRoots.push({ dir: path.join(appData, "CodeBuddy CN", "logs"), pattern: "codebuddy-extension-log" });
-    logRoots.push({ dir: path.join(appData, "Code", "logs"), pattern: "codebuddy-extension-log" });
-    logRoots.push({ dir: path.join(localAppData, "CodeBuddyExtension", "Logs", "CodeBuddyIDE"), pattern: "*.log" });
-    logRoots.push({ dir: path.join(localAppData, "CodeBuddyExtension", "Logs", "VSCode"), pattern: "*.log" });
-  } else {
-    const xdgConfig = env.XDG_CONFIG_HOME || path.join(home, ".config");
-    const xdgData = env.XDG_DATA_HOME || path.join(home, ".local", "share");
-    logRoots.push({ dir: path.join(xdgConfig, "CodeBuddy CN", "logs"), pattern: "codebuddy-extension-log" });
-    logRoots.push({ dir: path.join(xdgConfig, "Code", "logs"), pattern: "codebuddy-extension-log" });
-    logRoots.push({ dir: path.join(xdgData, "CodeBuddyExtension", "Logs", "CodeBuddyIDE"), pattern: "*.log" });
-    logRoots.push({ dir: path.join(xdgData, "CodeBuddyExtension", "Logs", "VSCode"), pattern: "*.log" });
-  }
-
-  for (const root of logRoots) {
-    if (!fssync.existsSync(root.dir)) continue;
-    const walkLogs = (dir) => {
-      let entries;
-      try { entries = fssync.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-      for (const entry of entries) {
-        const full = path.join(dir, entry.name);
-        let isDir = entry.isDirectory();
-        let isFile = entry.isFile();
-        if (!isDir && !isFile) {
-          try {
-            const st = fssync.statSync(full);
-            isDir = st.isDirectory();
-            isFile = st.isFile();
-          } catch { continue; }
+    // 1b. Recursive trace JSON scan in codebuddyHome/traces/<pid>/trace_*.json
+    //     Each file is a single JSON object { trace: {...}, spans: [...] } with
+    //     trace.totalTokens, trace.modelInfo.{totalInputTokens,totalOutputTokens,
+    //     totalCachedTokens,callCount}, trace.sessionId, trace.startedAt.
+    //     100% field stability verified on 286 real traces (2026-07).
+    const tracesDir = path.join(codebuddyHome, "traces");
+    if (fssync.existsSync(tracesDir)) {
+      const walkTraces = (dir) => {
+        let entries;
+        try { entries = fssync.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        for (const entry of entries) {
+          const full = path.join(dir, entry.name);
+          let isDir = entry.isDirectory();
+          let isFile = entry.isFile();
+          if (!isDir && !isFile) {
+            try {
+              const st = fssync.statSync(full);
+              isDir = st.isDirectory();
+              isFile = st.isFile();
+            } catch { continue; }
+          }
+          if (isDir) walkTraces(full);
+          else if (isFile && entry.name.startsWith("trace_") && entry.name.endsWith(".json")) {
+            files.push({ path: full, kind: "trace" });
+          }
         }
-        if (isDir) {
-          walkLogs(full);
-        } else if (isFile && entry.name.endsWith(".log")) {
-          if (root.pattern === "*.log") {
-            files.push(full);
-          } else if (root.pattern === "codebuddy-extension-log") {
-            if (full.toLowerCase().includes("tencent-cloud.coding-copilot")) {
-              files.push(full);
+      };
+      walkTraces(tracesDir);
+    }
+  }
+
+  // 2. Active IDE extension logs scan.
+  //    DEFAULT DISABLED: extension logs overlap with the jsonl session log and
+  //    use a different dedup key namespace (codebuddy:extension-log:agentId:sec
+  //    vs jsonl's entry.uuid), causing the same LLM round-trip to be counted
+  //    twice — observed 3x inflation on a real machine (45.9M vs true 15.3M).
+  //    The traces dir (added above) is the authoritative source; jsonl is the
+  //    fallback for sessions without traces. Extension logs are only consulted
+  //    when explicitly enabled via TOKENTRACKER_CODEBUDDY_LOG_FALLBACK=1, for
+  //    users on older CodeBuddy builds that have neither traces nor rawUsage.
+  const enableLogFallback = String(env.TOKENTRACKER_CODEBUDDY_LOG_FALLBACK || "").trim() === "1";
+  if (enableLogFallback) {
+    const logRoots = [];
+    const home = env.HOME || require("node:os").homedir();
+
+    if (process.platform === "darwin") {
+      const appSupport = path.join(home, "Library", "Application Support");
+      logRoots.push({ dir: path.join(appSupport, "CodeBuddy CN", "logs"), pattern: "codebuddy-extension-log" });
+      logRoots.push({ dir: path.join(appSupport, "Code", "logs"), pattern: "codebuddy-extension-log" });
+      logRoots.push({ dir: path.join(appSupport, "CodeBuddyExtension", "Logs", "CodeBuddyIDE"), pattern: "*.log" });
+      logRoots.push({ dir: path.join(appSupport, "CodeBuddyExtension", "Logs", "VSCode"), pattern: "*.log" });
+    } else if (process.platform === "win32") {
+      const appData = env.APPDATA || path.join(home, "AppData", "Roaming");
+      const localAppData = env.LOCALAPPDATA || path.join(home, "AppData", "Local");
+      logRoots.push({ dir: path.join(appData, "CodeBuddy CN", "logs"), pattern: "codebuddy-extension-log" });
+      logRoots.push({ dir: path.join(appData, "Code", "logs"), pattern: "codebuddy-extension-log" });
+      logRoots.push({ dir: path.join(localAppData, "CodeBuddyExtension", "Logs", "CodeBuddyIDE"), pattern: "*.log" });
+      logRoots.push({ dir: path.join(localAppData, "CodeBuddyExtension", "Logs", "VSCode"), pattern: "*.log" });
+    } else {
+      const xdgConfig = env.XDG_CONFIG_HOME || path.join(home, ".config");
+      const xdgData = env.XDG_DATA_HOME || path.join(home, ".local", "share");
+      logRoots.push({ dir: path.join(xdgConfig, "CodeBuddy CN", "logs"), pattern: "codebuddy-extension-log" });
+      logRoots.push({ dir: path.join(xdgConfig, "Code", "logs"), pattern: "codebuddy-extension-log" });
+      logRoots.push({ dir: path.join(xdgData, "CodeBuddyExtension", "Logs", "CodeBuddyIDE"), pattern: "*.log" });
+      logRoots.push({ dir: path.join(xdgData, "CodeBuddyExtension", "Logs", "VSCode"), pattern: "*.log" });
+    }
+
+    for (const root of logRoots) {
+      if (!fssync.existsSync(root.dir)) continue;
+      const walkLogs = (dir) => {
+        let entries;
+        try { entries = fssync.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        for (const entry of entries) {
+          const full = path.join(dir, entry.name);
+          let isDir = entry.isDirectory();
+          let isFile = entry.isFile();
+          if (!isDir && !isFile) {
+            try {
+              const st = fssync.statSync(full);
+              isDir = st.isDirectory();
+              isFile = st.isFile();
+            } catch { continue; }
+          }
+          if (isDir) {
+            walkLogs(full);
+          } else if (isFile && entry.name.endsWith(".log")) {
+            if (root.pattern === "*.log") {
+              files.push({ path: full, kind: "log" });
+            } else if (root.pattern === "codebuddy-extension-log") {
+              if (full.toLowerCase().includes("tencent-cloud.coding-copilot")) {
+                files.push({ path: full, kind: "log" });
+              }
             }
           }
         }
-      }
-    };
-    walkLogs(root.dir);
+      };
+      walkLogs(root.dir);
+    }
   }
 
-  files.sort((a, b) => a.localeCompare(b));
+  files.sort((a, b) => a.path.localeCompare(b.path));
   return files;
 }
 
@@ -7981,6 +8028,22 @@ async function parseCodebuddyIncremental({
   const seenIds = new Set(
     Array.isArray(codebuddyState.seenIds) ? codebuddyState.seenIds : [],
   );
+  // Separate dedup namespace for trace files — keyed by traceId (globally
+  // unique, 100% present in real traces). Kept separate from seenIds (which
+  // holds jsonl/log message IDs) so a session that has BOTH a trace file and
+  // a jsonl file does not double-count: the trace is workflow-level (one trace
+  // per agent workflow), the jsonl is message-level, and their token totals
+  // are not additive — we prefer the trace (authoritative) and skip the jsonl
+  // messages for sessions covered by traces.
+  const seenTraceIds = new Set(
+    Array.isArray(codebuddyState.seenTraceIds) ? codebuddyState.seenTraceIds : [],
+  );
+  // Sessions that have at least one trace file with totalTokens > 0. For these
+  // sessions we skip jsonl message parsing to avoid double-counting (the trace
+  // already carries the complete workflow-level token total).
+  const tracedSessionIds = new Set(
+    Array.isArray(codebuddyState.tracedSessionIds) ? codebuddyState.tracedSessionIds : [],
+  );
   const fileOffsets =
     codebuddyState.fileOffsets && typeof codebuddyState.fileOffsets === "object"
       ? { ...codebuddyState.fileOffsets }
@@ -7999,6 +8062,8 @@ async function parseCodebuddyIncremental({
     cursors.codebuddy = {
       ...codebuddyState,
       seenIds: Array.from(seenIds),
+      seenTraceIds: Array.from(seenTraceIds),
+      tracedSessionIds: Array.from(tracedSessionIds),
       fileOffsets,
       updatedAt: new Date().toISOString(),
     };
@@ -8012,9 +8077,111 @@ async function parseCodebuddyIncremental({
   let eventsAggregated = 0;
 
   for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
-    const filePath = files[fileIdx];
+    const fileEntry = files[fileIdx];
+    // Accept both new-style {path, kind} entries and legacy bare-string paths.
+    const filePath = typeof fileEntry === "string" ? fileEntry : fileEntry?.path;
+    const fileKind = typeof fileEntry === "string"
+      ? (filePath.endsWith(".log") ? "log" : "jsonl")
+      : (fileEntry?.kind || "jsonl");
+    if (!filePath) continue;
     let stat;
     try { stat = fssync.statSync(filePath); } catch { continue; }
+
+    // ── Trace JSON branch ────────────────────────────────────────────────
+    // Each trace file is a single JSON object { trace, spans }. Read the whole
+    // file (not incremental) because traces are write-once: a trace is
+    // finalized when the workflow ends, so a file that hasn't grown since the
+    // last sync carries no new data. Dedup by traceId (globally unique).
+    if (fileKind === "trace") {
+      const prevTraceEntry = fileOffsets[filePath] || {};
+      const prevTraceSize = Number(prevTraceEntry.size) || 0;
+      const prevTraceIno = prevTraceEntry.ino;
+      const traceInodeChanged = typeof prevTraceIno === "number" && prevTraceIno !== stat.ino;
+      if (stat.size === prevTraceSize && !traceInodeChanged && prevTraceSize > 0) continue;
+      if (stat.size === 0) continue;
+
+      let traceObj;
+      try {
+        const raw = fssync.readFileSync(filePath, "utf8");
+        traceObj = JSON.parse(raw);
+      } catch { continue; }
+
+      const trace = traceObj && typeof traceObj === "object" ? traceObj.trace : null;
+      if (!trace || typeof trace !== "object") continue;
+      const traceId = typeof trace.traceId === "string" ? trace.traceId : null;
+      if (!traceId) continue;
+      if (seenTraceIds.has(traceId)) continue;
+
+      const traceTotalTokens = toNonNegativeInt(trace.totalTokens);
+      if (traceTotalTokens === 0) {
+        seenTraceIds.add(traceId);
+        continue;
+      }
+
+      const mi = trace.modelInfo && typeof trace.modelInfo === "object" ? trace.modelInfo : {};
+      const miInput = toNonNegativeInt(mi.totalInputTokens);
+      const miOutput = toNonNegativeInt(mi.totalOutputTokens);
+      const miCached = toNonNegativeInt(mi.totalCachedTokens);
+      // modelInfo is the authoritative breakdown. trace.totalTokens (top level)
+      // == totalInputTokens + totalOutputTokens (excludes cached). Queue
+      // convention: cached is separate from input (matches jsonl branch).
+      const traceInputTokens = Math.max(0, miInput - miCached);
+      const traceCachedTokens = miCached;
+      const traceOutputTokens = miOutput;
+      const traceCacheCreation = 0; // trace does not carry cache_creation
+      const traceReasoningTokens = 0;
+
+      if (traceInputTokens === 0 && traceOutputTokens === 0 && traceCachedTokens === 0) {
+        seenTraceIds.add(traceId);
+        continue;
+      }
+
+      const startedAt = typeof trace.startedAt === "string" ? trace.startedAt : null;
+      if (!startedAt) { seenTraceIds.add(traceId); continue; }
+      const traceBucketStart = toUtcHalfHourStart(startedAt);
+      if (!traceBucketStart) { seenTraceIds.add(traceId); continue; }
+
+      const models = Array.isArray(mi.models) ? mi.models : [];
+      const traceModel = normalizeModelInput(models[0]) || fallbackModel;
+      const traceSessionId = typeof trace.sessionId === "string" && trace.sessionId ? trace.sessionId : null;
+      if (traceSessionId) tracedSessionIds.add(traceSessionId);
+
+      const traceDelta = {
+        input_tokens: traceInputTokens,
+        cached_input_tokens: traceCachedTokens,
+        cache_creation_input_tokens: traceCacheCreation,
+        output_tokens: traceOutputTokens,
+        reasoning_output_tokens: traceReasoningTokens,
+        total_tokens: traceInputTokens + traceOutputTokens + traceCachedTokens + traceCacheCreation + traceReasoningTokens,
+        conversation_count: 1,
+      };
+
+      const traceBucket = getHourlyBucket(hourlyState, "codebuddy", traceModel, traceBucketStart);
+      addTotals(traceBucket.totals, traceDelta);
+      touchedBuckets.add(bucketKey("codebuddy", traceModel, traceBucketStart));
+      seenTraceIds.add(traceId);
+      recordsProcessed++;
+      eventsAggregated++;
+
+      fileOffsets[filePath] = {
+        size: stat.size,
+        mtimeMs: stat.mtimeMs,
+        ino: stat.ino,
+      };
+
+      if (cb) {
+        cb({
+          index: fileIdx + 1,
+          total: files.length,
+          filePath,
+          recordsProcessed,
+          eventsAggregated,
+          bucketsQueued: touchedBuckets.size,
+        });
+      }
+      continue;
+    }
+    // ── End trace JSON branch ────────────────────────────────────────────
 
     const prevEntry = fileOffsets[filePath] || {};
     const prevSize = Number(prevEntry.size) || 0;
@@ -8184,12 +8351,22 @@ async function parseCodebuddyIncremental({
 
         const provider = entry.providerData;
         const rawUsage = provider && typeof provider === "object" ? provider.rawUsage : null;
-        if (!rawUsage || typeof rawUsage !== "object") continue;
+        // Fallback: newer CodeBuddy versions stop writing providerData.rawUsage
+        // on most assistant messages (~90% of messages lack it). The same
+        // token data is available on the top-level `usage` field (camelCase
+        // convention: inputTokens/outputTokens/inputTokensDetails[].cached_tokens).
+        // Use it when rawUsage is absent so we don't silently drop 90% of usage.
+        const topUsage = !rawUsage && entry.usage && typeof entry.usage === "object" ? entry.usage : null;
+        if (!rawUsage && !topUsage) continue;
 
         const sessionId =
           typeof entry.sessionId === "string" && entry.sessionId
             ? entry.sessionId
             : path.basename(filePath, ".jsonl");
+        // Skip jsonl message parsing for sessions already covered by trace
+        // files — the trace carries the complete workflow-level total and
+        // counting jsonl messages too would double-count.
+        if (tracedSessionIds.has(sessionId)) continue;
         const tsMs =
           Number.isFinite(Number(entry.timestamp)) && Number(entry.timestamp) > 0
             ? Number(entry.timestamp)
@@ -8207,17 +8384,31 @@ async function parseCodebuddyIncremental({
 
         recordsProcessed++;
 
-        const promptTokens = toNonNegativeInt(rawUsage.prompt_tokens);
-        const completionTokens = toNonNegativeInt(rawUsage.completion_tokens);
-        const details =
-          rawUsage.prompt_tokens_details && typeof rawUsage.prompt_tokens_details === "object"
-            ? rawUsage.prompt_tokens_details
-            : {};
-        const cachedTokens = toNonNegativeInt(details.cached_tokens);
-        const cacheReadAlt = toNonNegativeInt(rawUsage.cache_read_input_tokens);
-        const cacheCreation = toNonNegativeInt(rawUsage.cache_creation_input_tokens);
-        const reasoningTokens = toNonNegativeInt(details.reasoning_tokens);
-
+        let promptTokens, completionTokens, cachedTokens, cacheReadAlt, cacheCreation, reasoningTokens;
+        if (rawUsage) {
+          promptTokens = toNonNegativeInt(rawUsage.prompt_tokens);
+          completionTokens = toNonNegativeInt(rawUsage.completion_tokens);
+          const details =
+            rawUsage.prompt_tokens_details && typeof rawUsage.prompt_tokens_details === "object"
+              ? rawUsage.prompt_tokens_details
+              : {};
+          cachedTokens = toNonNegativeInt(details.cached_tokens);
+          cacheReadAlt = toNonNegativeInt(rawUsage.cache_read_input_tokens);
+          cacheCreation = toNonNegativeInt(rawUsage.cache_creation_input_tokens);
+          reasoningTokens = toNonNegativeInt(details.reasoning_tokens);
+        } else {
+          // topUsage fallback (camelCase)
+          promptTokens = toNonNegativeInt(topUsage.inputTokens ?? topUsage.prompt_tokens);
+          completionTokens = toNonNegativeInt(topUsage.outputTokens ?? topUsage.completion_tokens);
+          const inputDetails = Array.isArray(topUsage.inputTokensDetails)
+            ? topUsage.inputTokensDetails[0]
+            : (topUsage.inputTokensDetails && typeof topUsage.inputTokensDetails === "object"
+              ? topUsage.inputTokensDetails : {});
+          cachedTokens = toNonNegativeInt(inputDetails?.cached_tokens);
+          cacheReadAlt = 0;
+          cacheCreation = toNonNegativeInt(topUsage.cache_creation_input_tokens);
+          reasoningTokens = toNonNegativeInt(inputDetails?.reasoning_tokens);
+        }
         const cacheRead = Math.max(cachedTokens, cacheReadAlt);
         const inputTokens = Math.max(0, promptTokens - cacheRead);
 
@@ -8300,10 +8491,19 @@ async function parseCodebuddyIncremental({
   });
   const updatedAt = new Date().toISOString();
   hourlyState.updatedAt = updatedAt;
+  // Cap trace dedup sets too (same 10k convention as seenIds).
+  const seenTraceArr = Array.from(seenTraceIds);
+  const cappedSeenTraces =
+    seenTraceArr.length > 10_000 ? seenTraceArr.slice(seenTraceArr.length - 10_000) : seenTraceArr;
+  const tracedSessionArr = Array.from(tracedSessionIds);
+  const cappedTracedSessions =
+    tracedSessionArr.length > 10_000 ? tracedSessionArr.slice(tracedSessionArr.length - 10_000) : tracedSessionArr;
   cursors.hourly = hourlyState;
   cursors.codebuddy = {
     ...codebuddyState,
     seenIds: cappedSeen,
+    seenTraceIds: cappedSeenTraces,
+    tracedSessionIds: cappedTracedSessions,
     fileOffsets,
     logModelsByAgent: cappedLogModelsByAgent,
     updatedAt,
@@ -8394,30 +8594,63 @@ function resolveWorkbuddyDefaultModel(env = process.env) {
 function resolveWorkbuddyProjectFiles(env = process.env) {
   const workbuddyHome = resolveWorkbuddyHome(env);
   if (!workbuddyHome) return [];
-  const projectsDir = path.join(workbuddyHome, "projects");
-  if (!fssync.existsSync(projectsDir)) return [];
   const files = [];
-  const walk = (dir) => {
-    let entries;
-    try { entries = fssync.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const entry of entries) {
-      const full = path.join(dir, entry.name);
-      let isDir = entry.isDirectory();
-      let isFile = entry.isFile();
-      // Resolve symlinks defensively (Dirent flags are false for symlinks).
-      if (!isDir && !isFile) {
-        try {
-          const st = fssync.statSync(full);
-          isDir = st.isDirectory();
-          isFile = st.isFile();
-        } catch { continue; }
+
+  // 1. JSONL session logs under projects/
+  const projectsDir = path.join(workbuddyHome, "projects");
+  if (fssync.existsSync(projectsDir)) {
+    const walk = (dir) => {
+      let entries;
+      try { entries = fssync.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        let isDir = entry.isDirectory();
+        let isFile = entry.isFile();
+        // Resolve symlinks defensively (Dirent flags are false for symlinks).
+        if (!isDir && !isFile) {
+          try {
+            const st = fssync.statSync(full);
+            isDir = st.isDirectory();
+            isFile = st.isFile();
+          } catch { continue; }
+        }
+        if (isDir) walk(full);
+        else if (isFile && entry.name.endsWith(".jsonl")) files.push({ path: full, kind: "jsonl" });
       }
-      if (isDir) walk(full);
-      else if (isFile && entry.name.endsWith(".jsonl")) files.push(full);
-    }
-  };
-  walk(projectsDir);
-  files.sort((a, b) => a.localeCompare(b));
+    };
+    walk(projectsDir);
+  }
+
+  // 2. Trace JSON files under traces/<pid>/trace_*.json
+  //    Same format as ~/.codebuddy/traces — WorkBuddy is the renamed successor
+  //    of CodeBuddy and writes traces with the same { trace, spans } schema.
+  //    See codebuddy trace branch in parseCodebuddyIncremental for field docs.
+  const tracesDir = path.join(workbuddyHome, "traces");
+  if (fssync.existsSync(tracesDir)) {
+    const walkTraces = (dir) => {
+      let entries;
+      try { entries = fssync.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        let isDir = entry.isDirectory();
+        let isFile = entry.isFile();
+        if (!isDir && !isFile) {
+          try {
+            const st = fssync.statSync(full);
+            isDir = st.isDirectory();
+            isFile = st.isFile();
+          } catch { continue; }
+        }
+        if (isDir) walkTraces(full);
+        else if (isFile && entry.name.startsWith("trace_") && entry.name.endsWith(".json")) {
+          files.push({ path: full, kind: "trace" });
+        }
+      }
+    };
+    walkTraces(tracesDir);
+  }
+
+  files.sort((a, b) => a.path.localeCompare(b.path));
   return files;
 }
 
@@ -8434,6 +8667,10 @@ async function parseWorkbuddyIncremental({
     cursors.workbuddy && typeof cursors.workbuddy === "object" ? cursors.workbuddy : {};
   const seenIds = new Set(
     Array.isArray(workbuddyState.seenIds) ? workbuddyState.seenIds : [],
+  );
+  // Trace dedup — separate namespace from jsonl seenIds, keyed by traceId.
+  const seenTraceIds = new Set(
+    Array.isArray(workbuddyState.seenTraceIds) ? workbuddyState.seenTraceIds : [],
   );
   const fileOffsets =
     workbuddyState.fileOffsets && typeof workbuddyState.fileOffsets === "object"
@@ -8462,6 +8699,7 @@ async function parseWorkbuddyIncremental({
     cursors.workbuddy = {
       ...workbuddyState,
       seenIds: Array.from(seenIds),
+      seenTraceIds: Array.from(seenTraceIds),
       fileOffsets,
       sqliteSessions,
       detailedSessions,
@@ -8477,9 +8715,87 @@ async function parseWorkbuddyIncremental({
   let eventsAggregated = 0;
 
   for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
-    const filePath = files[fileIdx];
+    const fileEntry = files[fileIdx];
+    // Accept both new-style {path, kind} entries and legacy bare-string paths.
+    const filePath = typeof fileEntry === "string" ? fileEntry : fileEntry?.path;
+    const fileKind = typeof fileEntry === "string" ? "jsonl" : (fileEntry?.kind || "jsonl");
+    if (!filePath) continue;
     let stat;
     try { stat = fssync.statSync(filePath); } catch { continue; }
+
+    // ── Trace JSON branch (same schema as codebuddy traces) ─────────────
+    if (fileKind === "trace") {
+      const prevTraceEntry = fileOffsets[filePath] || {};
+      const prevTraceSize = Number(prevTraceEntry.size) || 0;
+      const prevTraceIno = prevTraceEntry.ino;
+      const traceInodeChanged = typeof prevTraceIno === "number" && prevTraceIno !== stat.ino;
+      if (stat.size === prevTraceSize && !traceInodeChanged && prevTraceSize > 0) continue;
+      if (stat.size === 0) continue;
+
+      let traceObj;
+      try {
+        const raw = fssync.readFileSync(filePath, "utf8");
+        traceObj = JSON.parse(raw);
+      } catch { continue; }
+
+      const trace = traceObj && typeof traceObj === "object" ? traceObj.trace : null;
+      if (!trace || typeof trace !== "object") continue;
+      const traceId = typeof trace.traceId === "string" ? trace.traceId : null;
+      if (!traceId) continue;
+      if (seenTraceIds.has(traceId)) continue;
+
+      const traceTotalTokens = toNonNegativeInt(trace.totalTokens);
+      if (traceTotalTokens === 0) {
+        seenTraceIds.add(traceId);
+        continue;
+      }
+
+      const mi = trace.modelInfo && typeof trace.modelInfo === "object" ? trace.modelInfo : {};
+      const miInput = toNonNegativeInt(mi.totalInputTokens);
+      const miOutput = toNonNegativeInt(mi.totalOutputTokens);
+      const miCached = toNonNegativeInt(mi.totalCachedTokens);
+      const traceInputTokens = Math.max(0, miInput - miCached);
+      const traceCachedTokens = miCached;
+      const traceOutputTokens = miOutput;
+
+      if (traceInputTokens === 0 && traceOutputTokens === 0 && traceCachedTokens === 0) {
+        seenTraceIds.add(traceId);
+        continue;
+      }
+
+      const startedAt = typeof trace.startedAt === "string" ? trace.startedAt : null;
+      if (!startedAt) { seenTraceIds.add(traceId); continue; }
+      const traceBucketStart = toUtcHalfHourStart(startedAt);
+      if (!traceBucketStart) { seenTraceIds.add(traceId); continue; }
+
+      const models = Array.isArray(mi.models) ? mi.models : [];
+      const traceModel = normalizeModelInput(models[0]) || fallbackModel;
+
+      const traceDelta = {
+        input_tokens: traceInputTokens,
+        cached_input_tokens: traceCachedTokens,
+        cache_creation_input_tokens: 0,
+        output_tokens: traceOutputTokens,
+        reasoning_output_tokens: 0,
+        total_tokens: traceInputTokens + traceOutputTokens + traceCachedTokens,
+        conversation_count: 1,
+      };
+
+      const traceBucket = getHourlyBucket(hourlyState, "workbuddy", traceModel, traceBucketStart);
+      addTotals(traceBucket.totals, traceDelta);
+      touchedBuckets.add(bucketKey("workbuddy", traceModel, traceBucketStart));
+      seenTraceIds.add(traceId);
+      recordsProcessed++;
+      eventsAggregated++;
+
+      fileOffsets[filePath] = { size: stat.size, mtimeMs: stat.mtimeMs, ino: stat.ino };
+
+      if (cb) {
+        cb({ index: fileIdx + 1, total: files.length, filePath, recordsProcessed, eventsAggregated, bucketsQueued: touchedBuckets.size });
+      }
+      continue;
+    }
+    // ── End trace JSON branch ────────────────────────────────────────────
 
     const prevEntry = fileOffsets[filePath] || {};
     const prevSize = Number(prevEntry.size) || 0;
@@ -8509,7 +8825,11 @@ async function parseWorkbuddyIncremental({
       // messages AND function_call records. Aggregate them all; dedup per id.
       const provider = entry.providerData;
       const rawUsage = provider && typeof provider === "object" ? provider.rawUsage : null;
-      if (!rawUsage || typeof rawUsage !== "object") continue;
+      // Fallback: older WorkBuddy sessions (pre-2026-05) only write
+      // providerData.model without rawUsage, and some carry the camelCase
+      // top-level `usage` field instead. Use it when rawUsage is absent.
+      const topUsage = !rawUsage && entry.usage && typeof entry.usage === "object" ? entry.usage : null;
+      if (!rawUsage && !topUsage) continue;
 
       const sessionId =
         typeof entry.sessionId === "string" && entry.sessionId
@@ -8537,30 +8857,42 @@ async function parseWorkbuddyIncremental({
 
       recordsProcessed++;
 
-      const promptTokens = toNonNegativeInt(rawUsage.prompt_tokens);
-      const completionTokens = toNonNegativeInt(rawUsage.completion_tokens);
-      const promptDetails =
-        rawUsage.prompt_tokens_details && typeof rawUsage.prompt_tokens_details === "object"
-          ? rawUsage.prompt_tokens_details
-          : {};
-      const completionDetails =
-        rawUsage.completion_tokens_details && typeof rawUsage.completion_tokens_details === "object"
-          ? rawUsage.completion_tokens_details
-          : {};
-
-      // Cache reads are mirrored across up to three fields depending on which
-      // upstream the auto-router used; take the largest non-zero mirror.
-      const cacheRead = Math.max(
-        toNonNegativeInt(rawUsage.cache_read_input_tokens),
-        toNonNegativeInt(promptDetails.cached_tokens),
-        toNonNegativeInt(rawUsage.prompt_cache_hit_tokens),
-      );
-      const cacheCreation = toNonNegativeInt(rawUsage.cache_creation_input_tokens);
+      let promptTokens, completionTokens, promptDetails, completionDetails, cacheRead, cacheCreation, reasoningTokens;
+      if (rawUsage) {
+        promptTokens = toNonNegativeInt(rawUsage.prompt_tokens);
+        completionTokens = toNonNegativeInt(rawUsage.completion_tokens);
+        promptDetails =
+          rawUsage.prompt_tokens_details && typeof rawUsage.prompt_tokens_details === "object"
+            ? rawUsage.prompt_tokens_details
+            : {};
+        completionDetails =
+          rawUsage.completion_tokens_details && typeof rawUsage.completion_tokens_details === "object"
+            ? rawUsage.completion_tokens_details
+            : {};
+        cacheRead = Math.max(
+          toNonNegativeInt(rawUsage.cache_read_input_tokens),
+          toNonNegativeInt(promptDetails.cached_tokens),
+          toNonNegativeInt(rawUsage.prompt_cache_hit_tokens),
+        );
+        cacheCreation = toNonNegativeInt(rawUsage.cache_creation_input_tokens);
+      } else {
+        // topUsage fallback (camelCase convention used by some WorkBuddy versions)
+        promptTokens = toNonNegativeInt(topUsage.inputTokens ?? topUsage.prompt_tokens);
+        completionTokens = toNonNegativeInt(topUsage.outputTokens ?? topUsage.completion_tokens);
+        const inputDetails = Array.isArray(topUsage.inputTokensDetails)
+          ? (topUsage.inputTokensDetails[0] || {})
+          : (topUsage.inputTokensDetails && typeof topUsage.inputTokensDetails === "object"
+            ? topUsage.inputTokensDetails : {});
+        promptDetails = inputDetails;
+        completionDetails = {};
+        cacheRead = toNonNegativeInt(inputDetails.cached_tokens);
+        cacheCreation = toNonNegativeInt(topUsage.cache_creation_input_tokens);
+      }
       // prompt_tokens is the FULL prompt: subtract BOTH reads and writes so
       // input_tokens is pure non-cached input (no double-counting cache writes).
       const inputTokens = Math.max(0, promptTokens - cacheRead - cacheCreation);
       // completion_tokens INCLUDES reasoning (verified: total == prompt+completion).
-      const reasoningTokens = Math.min(completionTokens, toNonNegativeInt(completionDetails.reasoning_tokens));
+      reasoningTokens = Math.min(completionTokens, toNonNegativeInt(completionDetails.reasoning_tokens));
       const outputTokens = Math.max(0, completionTokens - reasoningTokens);
 
       if (
@@ -8749,9 +9081,13 @@ async function parseWorkbuddyIncremental({
   const updatedAt = new Date().toISOString();
   hourlyState.updatedAt = updatedAt;
   cursors.hourly = hourlyState;
+  const seenTraceArr = Array.from(seenTraceIds);
+  const cappedSeenTraces =
+    seenTraceArr.length > 10_000 ? seenTraceArr.slice(seenTraceArr.length - 10_000) : seenTraceArr;
   cursors.workbuddy = {
     ...workbuddyState,
     seenIds: cappedSeen,
+    seenTraceIds: cappedSeenTraces,
     fileOffsets,
     sqliteSessions: cappedSqliteSessions,
     detailedSessions: cappedDetailedSessions,
