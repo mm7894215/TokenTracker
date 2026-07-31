@@ -7975,7 +7975,18 @@ function resolveCodebuddyProjectFiles(env = process.env) {
     }
   }
 
-  files.sort((a, b) => a.path.localeCompare(b.path));
+  // Sort: trace files first so tracedSessionIds is populated before jsonl
+  // parsing — this lets the jsonl branch skip sessions already covered by a
+  // trace and avoid double-counting.
+  files.sort((a, b) => {
+    const aKind = typeof a === "string" ? "jsonl" : (a?.kind || "jsonl");
+    const bKind = typeof b === "string" ? "jsonl" : (b?.kind || "jsonl");
+    if (aKind === "trace" && bKind !== "trace") return -1;
+    if (aKind !== "trace" && bKind === "trace") return 1;
+    const aPath = typeof a === "string" ? a : (a?.path || "");
+    const bPath = typeof b === "string" ? b : (b?.path || "");
+    return aPath.localeCompare(bPath);
+  });
   return files;
 }
 
@@ -8388,14 +8399,23 @@ async function parseCodebuddyIncremental({
         if (rawUsage) {
           promptTokens = toNonNegativeInt(rawUsage.prompt_tokens);
           completionTokens = toNonNegativeInt(rawUsage.completion_tokens);
-          const details =
+          const promptDetails =
             rawUsage.prompt_tokens_details && typeof rawUsage.prompt_tokens_details === "object"
               ? rawUsage.prompt_tokens_details
               : {};
-          cachedTokens = toNonNegativeInt(details.cached_tokens);
+          const completionDetails =
+            rawUsage.completion_tokens_details && typeof rawUsage.completion_tokens_details === "object"
+              ? rawUsage.completion_tokens_details
+              : {};
+          cachedTokens = toNonNegativeInt(promptDetails.cached_tokens);
           cacheReadAlt = toNonNegativeInt(rawUsage.cache_read_input_tokens);
           cacheCreation = toNonNegativeInt(rawUsage.cache_creation_input_tokens);
-          reasoningTokens = toNonNegativeInt(details.reasoning_tokens);
+          // reasoning_tokens lives in completion_tokens_details (verified on real
+          // CodeBuddy data: prompt_tokens_details.reasoning_tokens is always 0,
+          // completion_tokens_details.reasoning_tokens carries the actual value).
+          // completion_tokens INCLUDES reasoning, so subtract to avoid double-count.
+          reasoningTokens = Math.min(completionTokens, toNonNegativeInt(completionDetails.reasoning_tokens));
+          completionTokens = Math.max(0, completionTokens - reasoningTokens);
         } else {
           // topUsage fallback (camelCase)
           promptTokens = toNonNegativeInt(topUsage.inputTokens ?? topUsage.prompt_tokens);
@@ -8404,10 +8424,15 @@ async function parseCodebuddyIncremental({
             ? topUsage.inputTokensDetails[0]
             : (topUsage.inputTokensDetails && typeof topUsage.inputTokensDetails === "object"
               ? topUsage.inputTokensDetails : {});
+          const outputDetails = Array.isArray(topUsage.outputTokensDetails)
+            ? topUsage.outputTokensDetails[0]
+            : (topUsage.outputTokensDetails && typeof topUsage.outputTokensDetails === "object"
+              ? topUsage.outputTokensDetails : {});
           cachedTokens = toNonNegativeInt(inputDetails?.cached_tokens);
           cacheReadAlt = 0;
           cacheCreation = toNonNegativeInt(topUsage.cache_creation_input_tokens);
-          reasoningTokens = toNonNegativeInt(inputDetails?.reasoning_tokens);
+          reasoningTokens = Math.min(completionTokens, toNonNegativeInt(outputDetails?.reasoning_tokens));
+          completionTokens = Math.max(0, completionTokens - reasoningTokens);
         }
         const cacheRead = Math.max(cachedTokens, cacheReadAlt);
         const inputTokens = Math.max(0, promptTokens - cacheRead);
@@ -8650,7 +8675,16 @@ function resolveWorkbuddyProjectFiles(env = process.env) {
     walkTraces(tracesDir);
   }
 
-  files.sort((a, b) => a.path.localeCompare(b.path));
+  // Sort: trace files first (same rationale as codebuddy — see above).
+  files.sort((a, b) => {
+    const aKind = typeof a === "string" ? "jsonl" : (a?.kind || "jsonl");
+    const bKind = typeof b === "string" ? "jsonl" : (b?.kind || "jsonl");
+    if (aKind === "trace" && bKind !== "trace") return -1;
+    if (aKind !== "trace" && bKind === "trace") return 1;
+    const aPath = typeof a === "string" ? a : (a?.path || "");
+    const bPath = typeof b === "string" ? b : (b?.path || "");
+    return aPath.localeCompare(bPath);
+  });
   return files;
 }
 
@@ -8844,10 +8878,12 @@ async function parseWorkbuddyIncremental({
           : null;
       // One usage record per LLM round-trip; the response id is the most stable
       // dedup key, then providerData.messageId, then session+timestamp.
+      // Use optional chaining — provider (entry.providerData) may be null when
+      // only the top-level `usage` field is present (topUsage fallback path).
       const messageId =
         typeof entry.id === "string" && entry.id
           ? entry.id
-          : typeof provider.messageId === "string" && provider.messageId
+          : typeof provider?.messageId === "string" && provider.messageId
             ? provider.messageId
             : tsMs != null
               ? `${sessionId}:${tsMs}`
@@ -8884,7 +8920,10 @@ async function parseWorkbuddyIncremental({
           : (topUsage.inputTokensDetails && typeof topUsage.inputTokensDetails === "object"
             ? topUsage.inputTokensDetails : {});
         promptDetails = inputDetails;
-        completionDetails = {};
+        completionDetails = Array.isArray(topUsage.outputTokensDetails)
+          ? (topUsage.outputTokensDetails[0] || {})
+          : (topUsage.outputTokensDetails && typeof topUsage.outputTokensDetails === "object"
+            ? topUsage.outputTokensDetails : {});
         cacheRead = toNonNegativeInt(inputDetails.cached_tokens);
         cacheCreation = toNonNegativeInt(topUsage.cache_creation_input_tokens);
       }
