@@ -9073,7 +9073,7 @@ async function parseWorkbuddyIncremental({
           cache_creation_input_tokens: cacheCreation,
           output_tokens: completionTokens,
           reasoning_output_tokens: reasoningTokens,
-          total_tokens: inputTokens,
+          total_tokens: inputTokens + completionTokens + cacheRead + cacheCreation + reasoningTokens,
           conversation_count: prevUsed === 0 || isReset ? 1 : 0,
         };
 
