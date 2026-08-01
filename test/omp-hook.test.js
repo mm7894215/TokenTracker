@@ -166,6 +166,76 @@ test("upsertOmpHook does not clobber unmanaged extension without marker", async 
   }
 });
 
+test("upsertOmpHook rewrites an existing managed extension from byte zero", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-hook-repeat-"));
+  try {
+    const home = tmp;
+    const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+    const ompAgentDir = path.join(tmp, ".omp", "agent");
+    await fs.mkdir(path.join(ompAgentDir, "sessions"), { recursive: true });
+    const env = {
+      ...process.env,
+      HOME: home,
+      TOKENTRACKER_OMP_AGENT_DIR: ompAgentDir,
+    };
+
+    const first = await upsertOmpHook({ home, trackerDir, env });
+    assert.equal(first.written, true);
+    const firstBytes = await fs.readFile(first.extensionPath);
+
+    const second = await upsertOmpHook({ home, trackerDir, env });
+    assert.equal(second.written, true);
+    const secondBytes = await fs.readFile(second.extensionPath);
+
+    assert.deepEqual(secondBytes, firstBytes);
+    assert.equal(secondBytes.includes(0), false);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("upsertOmpHook returns a structured identity-check failure", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-hook-stat-failure-"));
+  const { _testHooks } = require("../src/lib/omp-hook");
+  const realStat = fs.stat;
+  try {
+    const home = tmp;
+    const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+    const ompAgentDir = path.join(tmp, ".omp", "agent");
+    await fs.mkdir(path.join(ompAgentDir, "sessions"), { recursive: true });
+    const env = {
+      ...process.env,
+      HOME: home,
+      TOKENTRACKER_OMP_AGENT_DIR: ompAgentDir,
+    };
+
+    const first = await upsertOmpHook({ home, trackerDir, env });
+    assert.equal(first.written, true);
+
+    let failIdentityCheck = false;
+    _testHooks.beforeManagedWrite = async () => {
+      failIdentityCheck = true;
+    };
+    fs.stat = async (...args) => {
+      if (failIdentityCheck && args[0] === first.extensionPath) {
+        const err = new Error("identity stat denied");
+        err.code = "EACCES";
+        throw err;
+      }
+      return realStat(...args);
+    };
+
+    const result = await upsertOmpHook({ home, trackerDir, env });
+    assert.equal(result.written, false);
+    assert.equal(result.skippedReason, "identity-check-failed");
+    assert.match(result.error, /identity stat denied/);
+  } finally {
+    fs.stat = realStat;
+    _testHooks.beforeManagedWrite = null;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("upsert and remove leave unmanaged tokentracker-mentioning extension untouched", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-hook-user-bridge-"));
   try {
@@ -500,8 +570,9 @@ test("formatOmpHookRemoveLine surfaces unlink/read failures with residual path",
       removed: false,
       skippedReason: "identity-changed",
       extensionPath: "/tmp/ext/tokentracker-notify.ts",
+      stagedPath: "/tmp/ext/.tokentracker-notify.ts.removing",
     }),
-    /file changed during uninstall.*left in place/,
+    /file changed during uninstall.*left in place: \/tmp\/ext\/\.tokentracker-notify\.ts\.removing/,
   );
   assert.match(
     formatOmpHookRemoveLine({

@@ -224,15 +224,54 @@ async function writeManagedThroughHandle(handle, extensionPath, source, openedId
     await _testHooks.beforeManagedWrite(extensionPath, openedIdentity);
   }
 
-  const pathIdBefore = await pathIdentity(extensionPath);
+  let pathIdBefore;
+  try {
+    pathIdBefore = await pathIdentity(extensionPath);
+  } catch (err) {
+    return {
+      written: false,
+      skippedReason: "identity-check-failed",
+      error: String(err?.message || err),
+    };
+  }
   if (!sameFileIdentity(pathIdBefore, openedIdentity)) {
     return { written: false, skippedReason: "identity-changed" };
   }
 
-  await handle.truncate(0);
-  await handle.writeFile(source, "utf8");
+  try {
+    await handle.truncate(0);
+    const sourceBytes = Buffer.from(source, "utf8");
+    let offset = 0;
+    while (offset < sourceBytes.length) {
+      const { bytesWritten } = await handle.write(
+        sourceBytes,
+        offset,
+        sourceBytes.length - offset,
+        offset,
+      );
+      if (bytesWritten <= 0) {
+        throw new Error("Failed to write managed oh-my-pi extension");
+      }
+      offset += bytesWritten;
+    }
+  } catch (err) {
+    return {
+      written: false,
+      skippedReason: "extension-write-failed",
+      error: String(err?.message || err),
+    };
+  }
 
-  const pathIdAfter = await pathIdentity(extensionPath);
+  let pathIdAfter;
+  try {
+    pathIdAfter = await pathIdentity(extensionPath);
+  } catch (err) {
+    return {
+      written: false,
+      skippedReason: "identity-check-failed",
+      error: String(err?.message || err),
+    };
+  }
   if (!sameFileIdentity(pathIdAfter, openedIdentity)) {
     // Path now points elsewhere (or is gone). The handle write hit the
     // original managed inode only; do not claim ownership of the path.
@@ -366,6 +405,7 @@ async function upsertOmpHook({ home = os.homedir(), trackerDir, env = process.en
       return {
         written: false,
         skippedReason: writeResult.skippedReason,
+        ...(writeResult.error ? { error: writeResult.error } : {}),
         extensionPath,
         notifyPath,
       };

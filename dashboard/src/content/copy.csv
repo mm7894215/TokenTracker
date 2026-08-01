@@ -732,6 +732,7 @@ limits.provider.grok,ui,LimitsPage,UsageLimitsPanel,provider_grok,"Grok Build",,
 limits.provider.copilot,ui,LimitsPage,UsageLimitsPanel,provider_copilot,"GitHub Copilot",,active
 limits.provider.antigravity,ui,LimitsPage,UsageLimitsPanel,provider_antigravity,"Antigravity",,active
 limits.provider.zcode,ui,LimitsPage,UsageLimitsPanel,provider_zcode,"ZCode",,active
+provider.display.omp,ui,*,ProviderDisplay,omp,"oh-my-pi",,active
 limits.label.zcode_glm52,ui,LimitsPage,UsageLimitsPanel,zcode_glm52,"GLM-5.2",,active
 limits.label.zcode_glm5t,ui,LimitsPage,UsageLimitsPanel,zcode_glm5t,"GLM-5-Turbo",,active
 limits.label.zcode_5h,ui,LimitsPage,UsageLimitsPanel,zcode_5h,"5h",,active

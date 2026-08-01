@@ -152,6 +152,7 @@
   "limits.provider.kiro": "Kiro",
   "limits.provider.grok": "Grok Build",
   "limits.provider.copilot": "GitHub Copilot",
+  "provider.display.omp": "oh-my-pi",
   "limits.provider.antigravity": "Antigravity",
   "limits.provider.zcode": "ZCode",
   "limits.provider.opencode_go": "OpenCode Go",

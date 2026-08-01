@@ -212,8 +212,9 @@ function formatOmpHookRemoveLine(ompHookRemove) {
     return `- oh-my-pi notify extension removed: ${ompHookRemove.extensionPath}`;
   }
   const reason = ompHookRemove?.skippedReason;
-  const residual = ompHookRemove?.extensionPath
-    ? ` (left in place: ${ompHookRemove.extensionPath})`
+  const residualPath = ompHookRemove?.stagedPath || ompHookRemove?.extensionPath;
+  const residual = residualPath
+    ? ` (left in place: ${residualPath})`
     : "";
   if (reason === "unmanaged") {
     return `- oh-my-pi notify extension: skipped (unmanaged file)${residual}`;
