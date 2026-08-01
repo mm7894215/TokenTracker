@@ -22,11 +22,13 @@ const MARKER = "// @tokentracker-managed-omp-extension";
  * - beforeExclusiveCreate(extensionPath)
  * - beforeManagedWrite(extensionPath, identity)
  * - beforeUnlink(extensionPath, identity)
+ * - afterStagingRename(extensionPath, stagingPath)
  */
 const _testHooks = {
   beforeExclusiveCreate: null,
   beforeManagedWrite: null,
   beforeUnlink: null,
+  afterStagingRename: null,
 };
 
 function resolveOmpExtensionsDir(env = process.env) {
@@ -381,6 +383,17 @@ async function upsertOmpHook({ home = os.homedir(), trackerDir, env = process.en
   }
 }
 
+// Restore without replacing a concurrent destination; keep staging on failure.
+async function restoreStagedExtension(stagingPath, extensionPath) {
+  try {
+    await fs.copyFile(stagingPath, extensionPath, fssync.constants.COPYFILE_EXCL);
+    await fs.unlink(stagingPath);
+    return { restored: true };
+  } catch (error) {
+    return { restored: false, error };
+  }
+}
+
 async function removeOmpHook({ home = os.homedir(), trackerDir, env = process.env } = {}) {
   const extensionsDir = resolveOmpExtensionsDir(env);
   if (!extensionsDir) {
@@ -410,10 +423,9 @@ async function removeOmpHook({ home = os.homedir(), trackerDir, env = process.en
     await _testHooks.beforeUnlink(extensionPath, null);
   }
 
-  // Atomically claim the directory entry via rename. Whatever inode was at the
-  // path at rename-time moves to a private temp name; a concurrent replacement
-  // either wins the rename (we then put it back if unmanaged) or lands at the
-  // original path after we moved our managed file aside.
+  // Atomically claim the directory entry via rename. The staged inode remains
+  // private until restoreStagedExtension copies it back without replacing a
+  // concurrent replacement at the original path.
   const stagingPath = path.join(
     extensionsDir,
     `.${EXTENSION_FILENAME}.tokentracker-removing-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -433,30 +445,34 @@ async function removeOmpHook({ home = os.homedir(), trackerDir, env = process.en
     };
   }
 
+  if (typeof _testHooks.afterStagingRename === "function") {
+    await _testHooks.afterStagingRename(extensionPath, stagingPath);
+  }
+
   let stagedContent;
   try {
     stagedContent = await fs.readFile(stagingPath, "utf8");
   } catch (err) {
     // Best-effort restore if we cannot inspect what we claimed.
-    await fs.rename(stagingPath, extensionPath).catch(() => {});
+    const restoreResult = await restoreStagedExtension(stagingPath, extensionPath);
     return {
       removed: false,
       skippedReason: "extension-read-failed",
       error: String(err?.message || err),
       extensionPath,
+      ...(restoreResult.restored ? {} : { stagedPath: stagingPath }),
     };
   }
 
   if (!isManagedOmpExtension(stagedContent)) {
     // Restored user/replacement file under the original path.
-    try {
-      await fs.rename(stagingPath, extensionPath);
-    } catch (restoreErr) {
+    const restoreResult = await restoreStagedExtension(stagingPath, extensionPath);
+    if (!restoreResult.restored) {
       // If the original path was recreated, leave the staged file for the user.
       return {
         removed: false,
         skippedReason: "identity-changed",
-        error: String(restoreErr?.message || restoreErr),
+        error: String(restoreResult.error?.message || restoreResult.error),
         extensionPath,
         stagedPath: stagingPath,
       };
@@ -472,12 +488,13 @@ async function removeOmpHook({ home = os.homedir(), trackerDir, env = process.en
     }
     // Restore the managed file so uninstall does not leave a silent orphan
     // under a temp name when the final delete is blocked.
-    await fs.rename(stagingPath, extensionPath).catch(() => {});
+    const restoreResult = await restoreStagedExtension(stagingPath, extensionPath);
     return {
       removed: false,
       skippedReason: "unlink-failed",
       error: String(err?.message || err),
       extensionPath,
+      ...(restoreResult.restored ? {} : { stagedPath: stagingPath }),
     };
   }
 

@@ -419,6 +419,56 @@ test("removeOmpHook does not delete a user replacement created between check and
   }
 });
 
+test("removeOmpHook preserves a user replacement during staging restore", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-hook-staging-race-"));
+  const { _testHooks } = require("../src/lib/omp-hook");
+  try {
+    const home = tmp;
+    const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+    const ompAgentDir = path.join(tmp, ".omp", "agent");
+    await fs.mkdir(path.join(trackerDir, "..", "bin"), { recursive: true });
+    await fs.mkdir(path.join(ompAgentDir, "sessions"), { recursive: true });
+    await fs.writeFile(
+      path.join(trackerDir, "..", "bin", "notify.cjs"),
+      "#!/usr/bin/env node\nconsole.log('notify');\n",
+      "utf8",
+    );
+
+    const env = {
+      ...process.env,
+      HOME: home,
+      TOKENTRACKER_OMP_AGENT_DIR: ompAgentDir,
+    };
+    const written = await upsertOmpHook({ home, trackerDir, env });
+    assert.equal(written.written, true);
+    const extensionPath = written.extensionPath;
+    const userSourceA = "// user file A\nexport default function () { return 'A'; }\n";
+    const userSourceB = "// user file B\nexport default function () { return 'B'; }\n";
+
+    _testHooks.beforeUnlink = async (targetPath) => {
+      await fs.unlink(targetPath);
+      await fs.writeFile(targetPath, userSourceA, "utf8");
+    };
+    _testHooks.afterStagingRename = async (targetPath, stagingPath) => {
+      assert.equal(await fs.readFile(stagingPath, "utf8"), userSourceA);
+      await fs.writeFile(targetPath, userSourceB, "utf8");
+    };
+
+    const removed = await removeOmpHook({ home, trackerDir, env });
+    assert.equal(removed.removed, false);
+    assert.equal(removed.skippedReason, "identity-changed");
+    assert.ok(fssync.existsSync(extensionPath));
+    assert.equal(await fs.readFile(extensionPath, "utf8"), userSourceB);
+    assert.ok(removed.stagedPath);
+    assert.ok(fssync.existsSync(removed.stagedPath));
+    assert.equal(await fs.readFile(removed.stagedPath, "utf8"), userSourceA);
+  } finally {
+    _testHooks.beforeUnlink = null;
+    _testHooks.afterStagingRename = null;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("formatOmpHookRemoveLine surfaces unlink/read failures with residual path", () => {
   const { formatOmpHookRemoveLine } = require("../src/commands/uninstall");
   assert.match(
