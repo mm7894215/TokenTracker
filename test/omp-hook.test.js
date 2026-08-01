@@ -245,7 +245,13 @@ test("removeOmpHook reports unlink-failed when deletion is blocked", async () =>
     const removed = await removeOmpHook({ home, trackerDir, env });
     assert.equal(removed.removed, false);
     assert.equal(removed.skippedReason, "unlink-failed");
+    assert.equal(removed.staleStaging, true);
+    assert.match(removed.stagingError, /permission denied/);
+    assert.ok(removed.stagedPath);
+    assert.ok(fssync.existsSync(removed.stagedPath));
     assert.ok(fssync.existsSync(written.extensionPath));
+    const restoredContent = await fs.readFile(written.extensionPath, "utf8");
+    assert.ok(isManagedOmpExtension(restoredContent));
   } finally {
     fs.unlink = realUnlink;
     await fs.rm(tmp, { recursive: true, force: true });

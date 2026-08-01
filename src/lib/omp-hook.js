@@ -387,11 +387,17 @@ async function upsertOmpHook({ home = os.homedir(), trackerDir, env = process.en
 async function restoreStagedExtension(stagingPath, extensionPath) {
   try {
     await fs.copyFile(stagingPath, extensionPath, fssync.constants.COPYFILE_EXCL);
-    await fs.unlink(stagingPath);
-    return { restored: true };
   } catch (error) {
     return { restored: false, error };
   }
+
+  try {
+    await fs.unlink(stagingPath);
+  } catch (error) {
+    return { restored: true, staleStaging: true, error };
+  }
+
+  return { restored: true };
 }
 
 async function removeOmpHook({ home = os.homedir(), trackerDir, env = process.env } = {}) {
@@ -460,7 +466,15 @@ async function removeOmpHook({ home = os.homedir(), trackerDir, env = process.en
       skippedReason: "extension-read-failed",
       error: String(err?.message || err),
       extensionPath,
-      ...(restoreResult.restored ? {} : { stagedPath: stagingPath }),
+      ...(restoreResult.staleStaging
+        ? {
+            staleStaging: true,
+            stagedPath: stagingPath,
+            stagingError: String(restoreResult.error?.message || restoreResult.error),
+          }
+        : restoreResult.restored
+          ? {}
+          : { stagedPath: stagingPath }),
     };
   }
 
@@ -477,7 +491,18 @@ async function removeOmpHook({ home = os.homedir(), trackerDir, env = process.en
         stagedPath: stagingPath,
       };
     }
-    return { removed: false, skippedReason: "identity-changed", extensionPath };
+    return {
+      removed: false,
+      skippedReason: "identity-changed",
+      extensionPath,
+      ...(restoreResult.staleStaging
+        ? {
+            staleStaging: true,
+            stagedPath: stagingPath,
+            stagingError: String(restoreResult.error?.message || restoreResult.error),
+          }
+        : {}),
+    };
   }
 
   try {
@@ -494,7 +519,15 @@ async function removeOmpHook({ home = os.homedir(), trackerDir, env = process.en
       skippedReason: "unlink-failed",
       error: String(err?.message || err),
       extensionPath,
-      ...(restoreResult.restored ? {} : { stagedPath: stagingPath }),
+      ...(restoreResult.staleStaging
+        ? {
+            staleStaging: true,
+            stagedPath: stagingPath,
+            stagingError: String(restoreResult.error?.message || restoreResult.error),
+          }
+        : restoreResult.restored
+          ? {}
+          : { stagedPath: stagingPath }),
     };
   }
 
