@@ -8179,9 +8179,15 @@ async function parseCodebuddyIncremental({
       } else {
         let entry;
         try { entry = JSON.parse(line); } catch { continue; }
+        if (!entry || typeof entry !== "object") continue;
 
-        if (!entry || entry.type !== "message" || entry.role !== "assistant") continue;
-
+        // Usage is carried on ANY record with providerData.rawUsage — assistant
+        // messages AND function_call records. Each LLM round-trip (whether it
+        // ends in a text reply or a tool call) carries its own usage; on real
+        // installs function_call records are ~93% of round-trips and ~14x the
+        // assistant-message token volume, so filtering by record type drops
+        // the majority of usage. Aggregate them all; dedup per round-trip.
+        // (Same convention as the WorkBuddy reader — same transcript format.)
         const provider = entry.providerData;
         const rawUsage = provider && typeof provider === "object" ? provider.rawUsage : null;
         if (!rawUsage || typeof rawUsage !== "object") continue;
@@ -8194,32 +8200,58 @@ async function parseCodebuddyIncremental({
           Number.isFinite(Number(entry.timestamp)) && Number(entry.timestamp) > 0
             ? Number(entry.timestamp)
             : null;
+        // One usage record per LLM round-trip; providerData.messageId is the
+        // response-level id shared by the function_call/message pair of the
+        // same round-trip, so it is the most stable dedup key. entry.id is the
+        // per-record append id (unique per line, NOT per round-trip) and must
+        // NOT be preferred — preferring it would count a round-trip once per
+        // record type instead of once total.
         const messageId =
-          typeof entry.uuid === "string" && entry.uuid
-            ? entry.uuid
-            : typeof entry.id === "string" && entry.id
-              ? entry.id
-              : tsMs != null
-                ? `${sessionId}:${tsMs}`
-                : null;
+          typeof provider?.messageId === "string" && provider?.messageId
+            ? provider.messageId
+            : typeof entry.uuid === "string" && entry.uuid
+              ? entry.uuid
+              : typeof entry.id === "string" && entry.id
+                ? entry.id
+                : tsMs != null
+                  ? `${sessionId}:${tsMs}`
+                  : null;
         if (!messageId) continue;
         if (seenIds.has(messageId)) continue;
 
         recordsProcessed++;
 
         const promptTokens = toNonNegativeInt(rawUsage.prompt_tokens);
-        const completionTokens = toNonNegativeInt(rawUsage.completion_tokens);
+        const completionTokensRaw = toNonNegativeInt(rawUsage.completion_tokens);
         const details =
           rawUsage.prompt_tokens_details && typeof rawUsage.prompt_tokens_details === "object"
             ? rawUsage.prompt_tokens_details
             : {};
-        const cachedTokens = toNonNegativeInt(details.cached_tokens);
+        const completionDetails =
+          rawUsage.completion_tokens_details && typeof rawUsage.completion_tokens_details === "object"
+            ? rawUsage.completion_tokens_details
+            : {};
+        // Cache-read mirrors three ways depending on upstream: Anthropic-style
+        // cache_read_input_tokens, OpenAI-style prompt_tokens_details.cached_tokens,
+        // DeepSeek-style prompt_cache_hit_tokens. Take the max (they mirror the
+        // same quantity; on real data exactly one is non-zero).
+        const cachedTokens = Math.max(
+          toNonNegativeInt(details.cached_tokens),
+          toNonNegativeInt(rawUsage.prompt_cache_hit_tokens),
+        );
         const cacheReadAlt = toNonNegativeInt(rawUsage.cache_read_input_tokens);
-        const cacheCreation = toNonNegativeInt(rawUsage.cache_creation_input_tokens);
-        const reasoningTokens = toNonNegativeInt(details.reasoning_tokens);
+        const cacheCreation = Math.max(
+          toNonNegativeInt(rawUsage.cache_creation_input_tokens),
+          toNonNegativeInt(rawUsage.prompt_cache_write_tokens),
+        );
+        // reasoning_tokens lives in completion_tokens_details (verified on real
+        // CodeBuddy data: prompt_tokens_details.reasoning_tokens is always 0).
+        // completion_tokens INCLUDES reasoning, so subtract to avoid double-count.
+        const reasoningTokens = Math.min(completionTokensRaw, toNonNegativeInt(completionDetails.reasoning_tokens));
+        const completionTokens = Math.max(0, completionTokensRaw - reasoningTokens);
 
         const cacheRead = Math.max(cachedTokens, cacheReadAlt);
-        const inputTokens = Math.max(0, promptTokens - cacheRead);
+        const inputTokens = Math.max(0, promptTokens - cacheRead - cacheCreation);
 
         if (
           inputTokens === 0 &&
