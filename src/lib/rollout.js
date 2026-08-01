@@ -8257,7 +8257,8 @@ async function parseCodebuddyIncremental({
           inputTokens === 0 &&
           completionTokens === 0 &&
           cacheRead === 0 &&
-          cacheCreation === 0
+          cacheCreation === 0 &&
+          reasoningTokens === 0
         ) {
           seenIds.add(messageId);
           continue;
