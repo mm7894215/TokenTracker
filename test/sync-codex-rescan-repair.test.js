@@ -427,7 +427,7 @@ describe("repairCodexRescanInflation (#187) — atomic guarded rebuild", () => {
       assert.equal(JSON.parse(await fs.readFile(projectQueueStatePath, "utf8")).offset, 0);
       assert.equal(cursors.files[codexFile].projectOffset, cursors.files[codexFile].offset);
       assert.equal(
-        cursors.files[codexFile].projectFileContext.configPath.endsWith(".git/config"),
+        cursors.files[codexFile].projectFileContext.configPath.endsWith(path.join(".git", "config")),
         true,
       );
       assert.equal(cursors.projectHourly.projects[projectKey].status, "public_verified");
