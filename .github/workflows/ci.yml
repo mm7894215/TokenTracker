@@ -78,6 +78,9 @@ jobs:
           npm ci
           node --test test/openclaw-parser.test.js
 
+      - name: Test macOS native pet limit reset interpolation
+        run: node --test test/native-pet-limit-reset.test.js
+
       - name: Install xcodegen
         run: brew install xcodegen
 
