@@ -164,6 +164,40 @@ function isUncPath(p) {
   return typeof p === "string" && (p.startsWith("\\\\") || p.startsWith("//"));
 }
 
+const WSL_UNC_ROOT_RE = /^[\\/]{2}(wsl\$|wsl\.localhost)[\\/]([^\\/]+)[\\/]/i;
+const WINDOWS_DRIVE_PREFIX_RE = /^\/[A-Za-z]:[\\/]/;
+
+// `\\wsl$\Ubuntu-24.04\home\u\...` -> `\\wsl$\Ubuntu-24.04\`. Returns null for
+// native and non-WSL UNC paths.
+function wslUncRoot(p) {
+  if (typeof p !== "string") return null;
+  const match = WSL_UNC_ROOT_RE.exec(p);
+  return match ? `\\\\${match[1]}\\${match[2]}\\` : null;
+}
+
+// A WSL session records its cwd as a POSIX path (`/home/u/dev/app`) while the
+// transcript itself is read over the distro's UNC bridge. Probing that raw
+// POSIX path from Windows resolves it against the current drive
+// (`C:\home\u\dev\app`), which never exists — so project attribution finds no
+// `.git`, and every WSL session ends up with a null projectKey (#374).
+// Re-anchor the cwd onto the UNC prefix the transcript came from.
+//
+// The prefix is taken from the transcript path rather than re-probed, which
+// also picks whichever of `\\wsl$` / `\\wsl.localhost` actually resolves on
+// this machine — they are not interchangeable everywhere. Anything that isn't
+// a POSIX cwd from a WSL-hosted file is returned untouched.
+function mapWslCwdToUnc(cwd, transcriptPath) {
+  if (typeof cwd !== "string" || !cwd.startsWith("/")) return cwd;
+  // `new URL("file:///C:/dev/app").pathname` is "/C:/dev/app" — a leading
+  // slash, but a Windows path rather than a POSIX one. Qoder feeds exactly
+  // that shape in via `project_uri`; re-anchoring it would invent
+  // `\\wsl$\Distro\C:\dev\app`.
+  if (WINDOWS_DRIVE_PREFIX_RE.test(cwd)) return cwd;
+  const root = wslUncRoot(transcriptPath);
+  if (!root) return cwd;
+  return root + cwd.slice(1).replaceAll("/", "\\");
+}
+
 function snapshotSqliteDb(dbPath) {
   const tmpRoot = fssync.mkdtempSync(
     path.join(require("node:os").tmpdir(), "tokentracker-wsl-snap-"),
@@ -191,6 +225,8 @@ module.exports = {
   resetWslProbeCache,
   discoverWslHome,
   isUncPath,
+  wslUncRoot,
+  mapWslCwdToUnc,
   snapshotSqliteDb,
   getWslMode,
   isInvalidWslMode,

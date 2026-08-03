@@ -165,6 +165,7 @@ do {
     const sources = [
       repoPath("TokenTrackerBar/Shared/WidgetSnapshot.swift"),
       repoPath("TokenTrackerBar/Shared/NativeLocalization.swift"),
+      repoPath("TokenTrackerBar/TokenTrackerBar/Models/MenuBarDisplayPreferences.swift"),
       repoPath("TokenTrackerBar/TokenTrackerBar/Models/UsageLimits.swift"),
       repoPath("TokenTrackerBar/TokenTrackerBar/Utilities/Strings.swift"),
       harnessPath,

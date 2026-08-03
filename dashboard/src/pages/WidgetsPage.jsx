@@ -7,6 +7,7 @@ import { isNativeEmbed, nativeAction } from "../lib/native-bridge.js";
 import { useNativeSettings } from "../hooks/use-native-settings.js";
 import {
   FALLBACK_MENU_BAR_ITEMS,
+  MENU_BAR_NONE_ID,
   normalizeMenuBarItems,
 } from "../lib/menu-bar-display.js";
 import { ToggleSwitch } from "../components/settings/Controls.jsx";
@@ -251,6 +252,8 @@ function UsageLimitsWidgetPreview() {
 
 function previewValueFor(item) {
   switch (item.category) {
+    case "none":
+      return "";
     case "cost":
       return "$8.42";
     case "limits":
@@ -262,6 +265,8 @@ function previewValueFor(item) {
 
 function metricLabel(id, fallback) {
   switch (id) {
+    case MENU_BAR_NONE_ID:
+      return copy("menubar.metric.none");
     case "todayTokens":
       return copy("menubar.metric.today_tokens");
     case "todayCost":
@@ -293,9 +298,11 @@ function metricLabel(id, fallback) {
 
 function fillTwoSlots(ids, availableItems) {
   const allowed = new Set(availableItems.map((item) => item.id));
-  const filled = ids.filter((id) => allowed.has(id));
+  // "none" is positional and may repeat — keep it as-is in either slot.
+  const filled = ids.filter((id) => id === MENU_BAR_NONE_ID || allowed.has(id));
   for (const item of availableItems) {
     if (filled.length >= 2) break;
+    if (item.id === MENU_BAR_NONE_ID) continue;
     if (!filled.includes(item.id)) filled.push(item.id);
   }
   return filled.slice(0, 2);
@@ -331,7 +338,9 @@ function MenuBarPreview({ slotConfigs, showStats }) {
           />
         </div>
         {showStats
-          ? slotConfigs.map(({ slot, item }, idx) => (
+          ? slotConfigs
+              .filter(({ item }) => item?.category !== "none")
+              .map(({ slot, item }, idx) => (
               <React.Fragment key={slot}>
                 {idx > 0 ? (
                   <span className="my-1 w-px bg-white/20" aria-hidden="true" />
@@ -441,7 +450,8 @@ function MenuBarDisplayCard() {
   const changeSlot = (slot, id) => {
     const next = [...slotIds];
     const otherSlot = slot === 0 ? 1 : 0;
-    if (next[otherSlot] === id) return;
+    // Both slots may be "none"; only real metrics must stay distinct.
+    if (id !== MENU_BAR_NONE_ID && next[otherSlot] === id) return;
     next[slot] = id;
     saveSelection(next);
   };
@@ -451,7 +461,10 @@ function MenuBarDisplayCard() {
     const otherSlot = slot === 0 ? 1 : 0;
     const otherValue = slotIds[otherSlot];
     const options = availableItems.filter(
-      (candidate) => candidate.id === currentValue || candidate.id !== otherValue,
+      (candidate) =>
+        candidate.id === MENU_BAR_NONE_ID ||
+        candidate.id === currentValue ||
+        candidate.id !== otherValue,
     );
     const item = availableItems.find((candidate) => candidate.id === currentValue);
     return { slot, currentValue, options, item };
@@ -572,7 +585,7 @@ function HeaderCta() {
   if (platform === "mac-web") {
     return (
       <a
-        href="https://github.com/mm7894215/TokenTracker/releases/latest"
+        href="https://github.com/xiufengsun/TokenTracker/releases/latest"
         target="_blank"
         rel="noopener noreferrer"
         className="inline-flex h-10 items-center gap-2 rounded-lg bg-oai-black px-4 text-sm font-medium text-white no-underline transition-colors hover:bg-oai-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 focus-visible:ring-offset-2 dark:bg-white dark:text-oai-black dark:hover:bg-oai-gray-200"

@@ -1,4 +1,11 @@
 const DEFAULT_BASE_URL = "https://srctyff5.us-east.insforge.app";
+// InsForge projects this product has retired. b46ug8xu was production until
+// the 2026-04-19 migration to srctyff5 (0.5.67, commit 73f461b8); init
+// preserves any persisted config.baseUrl, so installs initialized before the
+// migration stayed pinned to it and kept uploading there until the old
+// project's backend went dark on 2026-07-27 (HTTP 503 on every request).
+// Persisted values naming these hosts must fall back to the current default.
+const LEGACY_INSFORGE_HOSTS = new Set(["b46ug8xu.us-east.insforge.app"]);
 const DEFAULT_DASHBOARD_URL = "https://www.tokentracker.cc";
 const DEFAULT_HTTP_TIMEOUT_MS = 20_000;
 // Public InsForge anon key (JWT, role=anon). Mirrors dashboard/src/lib/insforge-config.ts
@@ -114,13 +121,25 @@ function normalizePersistedBaseUrl(value) {
   const normalized = normalizeString(value);
   if (normalized === undefined) return undefined;
   try {
-    if (new URL(normalized).hostname.toLowerCase() === "example.invalid") {
-      return undefined;
-    }
+    const hostname = new URL(normalized).hostname.toLowerCase();
+    if (hostname === "example.invalid") return undefined;
+    if (LEGACY_INSFORGE_HOSTS.has(hostname)) return undefined;
   } catch {
     // Preserve the existing resolver behavior for arbitrary custom values.
   }
   return normalized;
+}
+
+// True when the value points at a retired InsForge project (dead backend).
+// Callers use this to trigger the one-time config repair in sync.
+function isLegacyInsforgeBaseUrl(value) {
+  const normalized = normalizeString(value);
+  if (normalized === undefined) return false;
+  try {
+    return LEGACY_INSFORGE_HOSTS.has(new URL(normalized).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
 }
 
 function normalizeBoolean(value) {
@@ -155,4 +174,5 @@ module.exports = {
   DEFAULT_DASHBOARD_URL,
   DEFAULT_HTTP_TIMEOUT_MS,
   resolveRuntimeConfig,
+  isLegacyInsforgeBaseUrl,
 };

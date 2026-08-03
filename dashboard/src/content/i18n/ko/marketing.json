@@ -56,6 +56,7 @@
   "landing.v2.leaderboard.view_more": "전체 리더보드 보기",
   "landing.v2.footer.line": "Token Tracker — 개발자가 만든, 개발자를 위한.",
   "landing.v2.nav.status": "상태",
+  "landing.v2.nav.privacy": "개인정보",
   "landing.v2.nav.github": "GitHub",
   "landing.v2.models.agent.codex": "CODEX",
   "landing.v2.models.agent.claude_code": "CLAUDE CODE",

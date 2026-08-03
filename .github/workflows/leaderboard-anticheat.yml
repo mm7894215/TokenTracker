@@ -1,28 +1,15 @@
-name: leaderboard anti-cheat queue
+name: leaderboard anti-cheat health
 
-# Surfaces the automated anti-cheat detector's output so nobody has to remember
-# to go look at it.
-#
-# Every leaderboard ban so far was found by a human eyeballing an implausible
-# number and then hand-running forensic SQL. The detector
-# (scripts/ops/leaderboard-anomaly-detection.sql, hourly pg_cron) replaces the
-# eyeballing; this workflow replaces the remembering-to-look. It opens a GitHub
-# issue whenever the review queue is non-empty and closes it once the queue is
-# drained.
-#
-# Read-only and credential-free, like leaderboard-freshness.yml: it polls a
-# public GET on the refresh function that deliberately returns COUNTS ONLY. The
-# flagged user_ids are NOT exposed here — this issue is public, and naming an
-# account before a human has reviewed it would publicly accuse users the
-# detector may still clear. Pull identities from the flags table directly; the
-# queries are at the bottom of the ops SQL file.
+# The backend detector runs hourly and high-confidence anomalies are soft-
+# excluded automatically by leaderboard refresh. This workflow is deliberately
+# read-only: it verifies that the public counts-only health endpoint remains
+# reachable and records the current state in the run summary. It never publishes
+# account identities or opens an operator ticket.
 
-# Daily, not hourly. The DETECTOR runs hourly and auto-exclusion takes effect
-# within the hour — protection is fast. This is only the human ping, and an
-# hourly ping on a queue that takes a day to review is just noise.
+# Poll shortly after the detector's :41 pg_cron pass.
 on:
   schedule:
-    - cron: "23 1 * * *"
+    - cron: "53 * * * *"
   workflow_dispatch: {}
 
 concurrency:
@@ -31,70 +18,44 @@ concurrency:
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   poll:
     runs-on: ubuntu-latest
     env:
       API: https://srctyff5.us-east.insforge.app/functions/tokentracker-leaderboard-refresh
-      TITLE: "🚨 Leaderboard anti-cheat: accounts pending review"
     steps:
-      - name: Poll anomaly queue
-        id: poll
+      - name: Poll anomaly health
         run: |
           set -euo pipefail
           resp=$(curl -sS --max-time 30 "$API?anomalies=1")
           echo "raw: $resp"
-          # A failed poll must not read as an empty queue and auto-close a live
-          # alert, so bail loudly instead of defaulting the counts to zero.
-          if [ "$(jq -r '.ok // false' <<<"$resp")" != "true" ]; then
-            echo "::error::anomaly summary endpoint did not return ok=true"
+
+          if ! jq -e '
+            .ok == true and
+            (.auto_excluded | type == "number") and
+            (.review | type == "number") and
+            (.max_peak_tokens | type == "number")
+          ' >/dev/null <<<"$resp"; then
+            echo "::error::anomaly health endpoint returned an invalid payload"
             exit 1
           fi
+
           excluded=$(jq -r '.auto_excluded' <<<"$resp")
           review=$(jq -r '.review' <<<"$resp")
           peak=$(jq -r '.max_peak_tokens' <<<"$resp")
           latest=$(jq -r '.latest_detected_at // "n/a"' <<<"$resp")
+
           {
-            echo "excluded=$excluded"
-            echo "review=$review"
-            echo "peak=$peak"
-            echo "latest=$latest"
-            echo "pending=$(( excluded + review ))"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Open or update review issue
-        if: steps.poll.outputs.pending != '0'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          # No checkout step, so gh cannot infer the repo from a local git dir.
-          GH_REPO: ${{ github.repository }}
-          EXCLUDED: ${{ steps.poll.outputs.excluded }}
-          REVIEW: ${{ steps.poll.outputs.review }}
-          PEAK: ${{ steps.poll.outputs.peak }}
-          LATEST: ${{ steps.poll.outputs.latest }}
-        run: |
-          set -euo pipefail
-          body=$(printf 'The anti-cheat detector has entries awaiting review.\n\n| | count |\n|---|---|\n| auto-excluded from leaderboard (reversible) | **%s** |\n| flagged for review (no effect yet) | **%s** |\n\nLargest flagged half-hour bucket: `%s` tokens\nMost recent detection: `%s`\n\nIdentities are deliberately not published here. To review:\n\n```sql\nSELECT * FROM tokentracker_leaderboard_anomaly_flags\nWHERE status IN (%s) AND reviewed_at IS NULL\nORDER BY peak_tokens DESC;\n```\n\nThen either clear the flag (restores the account at the next refresh) or run the\nfull purge playbook. Both are documented at the bottom of\n`scripts/ops/leaderboard-anomaly-detection.sql`.\n\nRun: %s/%s/actions/runs/%s\n\n_Auto-generated. Closes itself once the queue is drained._' \
-            "$EXCLUDED" "$REVIEW" "$PEAK" "$LATEST" "'review', 'auto_excluded'" \
-            "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")
-          existing=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number // empty')
-          if [ -n "$existing" ]; then
-            # Rewrite the body rather than appending a comment: the queue can sit
-            # open for days and a daily comment thread would bury the numbers.
-            gh issue edit "$existing" --body "$body"
-          else
-            gh issue create --title "$TITLE" --body "$body"
-          fi
-
-      - name: Auto-close when queue drained
-        if: steps.poll.outputs.pending == '0'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          gh issue list --state open --search "$TITLE in:title" --json number --jq '.[].number' | while read -r n; do
-            [ -n "$n" ] && gh issue close "$n" --comment "Anti-cheat queue drained — no accounts pending review. Auto-closing."
-          done
+            echo "### Leaderboard anti-cheat health"
+            echo
+            echo "| state | count |"
+            echo "|---|---:|"
+            echo "| automatically excluded | $excluded |"
+            echo "| review-only flags | $review |"
+            echo
+            echo "- Largest flagged half-hour bucket: \`$peak\` tokens"
+            echo "- Latest detection: \`$latest\`"
+            echo
+            echo "High-confidence exclusions are enforced automatically by the backend."
+          } >> "$GITHUB_STEP_SUMMARY"

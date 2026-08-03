@@ -158,5 +158,26 @@ describe("local Codex pet API", () => {
     assert.equal(removed.status, 200);
     assert.equal(removed.body.ok, true);
     assert.equal(fs.existsSync(path.join(process.env.TOKENTRACKER_PETS_DIR, "api-v2-pet")), false);
+
+    const hidden = await call(handler, {
+      method: "POST",
+      pathname: "/functions/tokentracker-pets",
+      headers: { origin: "http://localhost:7680", "x-tokentracker-local-auth": token },
+      body: { action: "remove", id: "byte" },
+    });
+    assert.equal(hidden.status, 200);
+    assert.equal(hidden.body.hidden, true);
+
+    const listed = await call(handler, { pathname: "/functions/tokentracker-pets" });
+    assert.deepEqual(listed.body.hiddenBuiltinIds, ["byte"]);
+
+    const protectedClawd = await call(handler, {
+      method: "POST",
+      pathname: "/functions/tokentracker-pets",
+      headers: { origin: "http://localhost:7680", "x-tokentracker-local-auth": token },
+      body: { action: "remove", id: "clawd" },
+    });
+    assert.equal(protectedClawd.status, 400);
+    assert.match(protectedClawd.body.error, /Clawd cannot be removed/);
   });
 });

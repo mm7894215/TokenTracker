@@ -56,6 +56,7 @@
   "landing.v2.leaderboard.view_more": "Gesamte Rangliste anzeigen",
   "landing.v2.footer.line": "Token Tracker — von Entwicklern, für Entwickler.",
   "landing.v2.nav.status": "Status",
+  "landing.v2.nav.privacy": "Datenschutz",
   "landing.v2.nav.github": "GitHub",
   "landing.v2.models.agent.codex": "Codex",
   "landing.v2.models.agent.claude_code": "Claude Code",

@@ -187,6 +187,10 @@ export function setNativePetSetting(key, value) {
   return postPetMessage({ type: "setPetSetting", key, value });
 }
 
+export function refreshNativePetCatalog() {
+  return postPetMessage({ type: "refreshPetCatalog" });
+}
+
 export function onNativePetSettings(handler) {
   if (typeof window === "undefined") return () => {};
   const listener = (event) => {

@@ -40,29 +40,34 @@ function timingSafeEqualStr(a: string, b: string): boolean {
   return diff === 0;
 }
 
-// Verify HS256 JWT against JWT_SECRET; return {sub, role} or null. Mirrors the
-// account-* helper. NOTE: the PUBLIC anon key is itself a validly-signed JWT
-// (role="anon"), so callers must reject role==="anon" to require a real user.
+// Verify legacy HS256 and current RS256 InsForge JWTs; return claims or null.
+// NOTE: the PUBLIC anon key is itself a validly-signed JWT (role="anon"), so
+// callers must reject role==="anon" to require a real user.
 async function verifiedClaimsFromJwt(
   authHeader: string | null,
 ): Promise<{ sub: string; role: string } | null> {
   if (!authHeader) return null;
   const token = authHeader.replace(/^Bearer\s+/i, "").trim();
   if (!token) return null;
-  const secret = Deno.env.get("JWT_SECRET");
-  if (!secret) return null;
   const parts = token.split(".");
   if (parts.length !== 3) return null;
   try {
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(secret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["verify"],
-    );
+    const header = JSON.parse(new TextDecoder().decode(b64urlToBytes(parts[0]))) as Record<string, unknown>;
     const data = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
-    const ok = await crypto.subtle.verify("HMAC", key, b64urlToBytes(parts[2]), data);
+    const sig = b64urlToBytes(parts[2]);
+    let ok = false;
+    if (header.alg === "HS256") {
+      const secret = Deno.env.get("JWT_SECRET");
+      if (!secret) return null;
+      const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+      ok = await crypto.subtle.verify("HMAC", key, sig, data);
+    } else if (header.alg === "RS256") {
+      const publicKeyPem = Deno.env.get("JWT_PUBLIC_KEY");
+      if (!publicKeyPem) return null;
+      const publicKeyDer = Uint8Array.from(atob(publicKeyPem.replace(/-----[^-]+-----|\s/g, "")), (char) => char.charCodeAt(0));
+      const key = await crypto.subtle.importKey("spki", publicKeyDer, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+      ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, sig, data);
+    } else return null;
     if (!ok) return null;
     const payload = JSON.parse(new TextDecoder().decode(b64urlToBytes(parts[1]))) as Record<string, unknown>;
     if (typeof payload.exp === "number" && Date.now() / 1000 > payload.exp) return null;
@@ -739,6 +744,29 @@ export default async function (req: Request): Promise<Response> {
     }
 
     if (aggMap.size === 0) {
+      // The snapshot is a materialized replacement, not an append-only log.
+      // If every user disappeared (for example, all were soft-excluded), clear
+      // the previous window rather than leaving an old leaderboard visible.
+      const { error: deleteErr } = await client.database
+        .from("tokentracker_leaderboard_snapshots")
+        .delete()
+        .eq("period", period)
+        .eq("from_day", from_day)
+        .eq("to_day", to_day);
+      if (deleteErr) {
+        logRefreshEvent({
+          event: "period_error",
+          request_id: requestId,
+          source: requestSource,
+          period,
+          from_day,
+          to_day,
+          stage: "delete_empty_snapshot",
+          error: deleteErr.message,
+          duration_ms: Date.now() - periodStartedAt,
+        });
+        return json({ error: deleteErr.message }, 500);
+      }
       results[period] = { upserted: 0 };
       logRefreshEvent({
         event: "period_completed",
@@ -858,6 +886,38 @@ export default async function (req: Request): Promise<Response> {
         });
         return json({ error: upsertErr.message }, 500);
       }
+    }
+
+    // Reconcile the materialized snapshot only after every replacement row is
+    // durable. Upsert alone cannot remove users that disappeared from aggMap
+    // (blocked accounts, anti-cheat exclusions, or accounts with no remaining
+    // usage), which previously left stale ranks visible indefinitely. Using
+    // generated_at as the generation marker avoids a delete-before-insert gap:
+    // if any upsert fails, the old complete snapshot remains available.
+    const { error: staleDeleteErr } = await client.database
+      .from("tokentracker_leaderboard_snapshots")
+      .delete()
+      .eq("period", period)
+      .eq("from_day", from_day)
+      .eq("to_day", to_day)
+      .lt("generated_at", generatedAt);
+    if (staleDeleteErr) {
+      logRefreshEvent({
+        event: "period_error",
+        request_id: requestId,
+        source: requestSource,
+        period,
+        from_day,
+        to_day,
+        stage: "delete_stale_snapshot",
+        error: staleDeleteErr.message,
+        scanned_rows: scannedRows,
+        pages_fetched: pageCount,
+        deduped_buckets: grouped.length,
+        aggregated_users: aggMap.size,
+        duration_ms: Date.now() - periodStartedAt,
+      });
+      return json({ error: staleDeleteErr.message }, 500);
     }
 
     results[period] = { upserted: upsertRows.length };

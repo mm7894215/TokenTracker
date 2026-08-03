@@ -320,6 +320,23 @@ function buildDiagnosticsChecks(diagnostics) {
     meta: { last_error: uploadError ? uploadError.message || null : null },
   });
 
+  // Dual-install visibility (#306): surface resolved Kiro installs in the
+  // human-readable doctor output, not just the embedded diagnostics JSON.
+  const kiro = diagnostics?.kiro;
+  if (kiro && typeof kiro.wsl_mode === "string") {
+    const fmt = (present) => (present ? "yes" : "no");
+    const wslPart = kiro.wsl_installs
+      ? `wsl ide=${fmt(kiro.wsl_installs.ide_present)} cli=${fmt(kiro.wsl_installs.cli_present)}`
+      : "wsl not detected";
+    checks.push({
+      id: "kiro.installs",
+      status: "ok",
+      detail: `native ide=${fmt(kiro.ide_present)} cli=${fmt(kiro.cli_present)}; ${wslPart} (mode ${kiro.wsl_mode})`,
+      critical: false,
+      meta: { wsl_mode: kiro.wsl_mode, wsl_installs: kiro.wsl_installs || null },
+    });
+  }
+
   return checks;
 }
 

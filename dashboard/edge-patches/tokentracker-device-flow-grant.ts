@@ -43,21 +43,25 @@ async function verifyCallerUserId(req: Request): Promise<string | null> {
   const auth = req.headers.get("Authorization") ?? "";
   const token = auth.replace(/^Bearer\s+/i, "").trim();
   if (!token) return null;
-  const secret = Deno.env.get("JWT_SECRET");
-  if (!secret) return null;
   const parts = token.split(".");
   if (parts.length !== 3) return null;
   try {
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(secret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["verify"],
-    );
+    const header = JSON.parse(new TextDecoder().decode(b64urlToBytes(parts[0]))) as Record<string, unknown>;
     const data = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
     const sig = b64urlToBytes(parts[2]);
-    const ok = await crypto.subtle.verify("HMAC", key, sig, data);
+    let ok = false;
+    if (header.alg === "HS256") {
+      const secret = Deno.env.get("JWT_SECRET");
+      if (!secret) return null;
+      const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+      ok = await crypto.subtle.verify("HMAC", key, sig, data);
+    } else if (header.alg === "RS256") {
+      const publicKeyPem = Deno.env.get("JWT_PUBLIC_KEY");
+      if (!publicKeyPem) return null;
+      const publicKeyDer = Uint8Array.from(atob(publicKeyPem.replace(/-----[^-]+-----|\s/g, "")), (char) => char.charCodeAt(0));
+      const key = await crypto.subtle.importKey("spki", publicKeyDer, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+      ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, sig, data);
+    } else return null;
     if (!ok) return null;
     const payloadStr = new TextDecoder().decode(b64urlToBytes(parts[1]));
     const payload = JSON.parse(payloadStr) as Record<string, unknown>;

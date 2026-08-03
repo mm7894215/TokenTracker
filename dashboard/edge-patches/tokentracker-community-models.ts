@@ -144,7 +144,7 @@ export default async function (req: Request): Promise<Response> {
       200,
       cacheHeaders,
     );
-  } catch (e) {
-    return json({ error: String((e as Error).message || e) }, 500);
+  } catch (_e) {
+    return json({ error: "internal error" }, 500);
   }
 }

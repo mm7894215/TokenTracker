@@ -75,7 +75,7 @@ struct UsageLimitsView: View {
 
             switch id {
             case "claude" where limits.claude.configured && limits.claude.error == nil:
-                groups.append(AnyView(toolSection(id: id, title: planTitle("Claude", limits.claude.planLabel), assetName: "ClaudeLogo", toolName: "Claude", specs: claudeSpecs(limits.claude), updatedAtISO: limits.claude.cachedAt, isStale: limits.claude.stale ?? false, retryAtISO: limits.claude.retryAt)))
+                groups.append(AnyView(toolSection(id: id, title: planTitle("Claude", limits.claude.planLabel), assetName: "ClaudeLogo", toolName: "Claude", specs: claudeSpecs(limits.claude), updatedAtISO: limits.claude.cachedAt, isStale: limits.claude.stale ?? false, retryAtISO: limits.claude.retryAt, serviceStatus: limits.claude.serviceStatus)))
             case "codex" where limits.codex.configured && limits.codex.error == nil:
                 let resetState = codexResetBankViewData(limits.codex.resetCredits)
                 groups.append(AnyView(toolSection(id: id, title: planTitle("Codex", limits.codex.planLabel), assetName: "CodexLogo", toolName: "Codex", specs: codexSpecs(limits.codex), resetRows: resetState.rows, resetStatus: resetState.statusText, updatedAtISO: limits.codex.cachedAt, isStale: limits.codex.stale ?? false)))
@@ -107,6 +107,10 @@ struct UsageLimitsView: View {
                 if let opencodeGo = limits.opencodeGo, opencodeGo.configured, opencodeGo.error == nil {
                     groups.append(AnyView(toolSection(id: id, title: planTitle("OpenCode Go", opencodeGo.planLabel), assetName: "OpenCodeLogo", toolName: "OpenCode Go", specs: opencodeGoSpecs(opencodeGo))))
                 }
+            case "qoder":
+                if let qoder = limits.qoder, qoder.configured, qoder.error == nil {
+                    groups.append(AnyView(toolSection(id: id, title: planTitle("Qoder", qoder.planLabel), assetName: "QoderLogo", toolName: "Qoder", specs: qoderSpecs(qoder), updatedAtISO: qoder.cachedAt, isStale: qoder.stale ?? false)))
+                }
             default:
                 break
             }
@@ -134,7 +138,10 @@ struct UsageLimitsView: View {
         isStale: Bool = false,
         // Active 429 cool-down expiry (Claude), when one is in effect — shown as the
         // "retrying" instant next to stale bars.
-        retryAtISO: String? = nil
+        retryAtISO: String? = nil,
+        // Active status-page incident (Claude), rendered as a tappable row under the
+        // bars so upstream outages explain themselves instead of reading as app bugs.
+        serviceStatus: ProviderServiceStatus? = nil
     ) -> some View {
         let isOpen = Binding(
             get: { explainingProvider == id },
@@ -165,6 +172,9 @@ struct UsageLimitsView: View {
             if !resetRows.isEmpty || resetStatus != nil {
                 resetSection(rows: resetRows, status: resetStatus)
             }
+            if let serviceStatus {
+                serviceStatusRow(serviceStatus)
+            }
         }
         .modifier(ProviderClickableStyle(isActive: explainingProvider == id, isStale: isStale))
         .onTapGesture { explainingProvider = (explainingProvider == id) ? nil : id }
@@ -173,6 +183,41 @@ struct UsageLimitsView: View {
             // call shape to prove reset-bank rows never leak into the explanation.
             LimitsExplainContent(providerName: title, specs: specs, remainingMode: settings.displayMode == .remaining, updatedAt: updatedAt, isStale: isStale, retryAt: retryAt)
         }
+    }
+
+    // MARK: - Service status (status-page incident row)
+
+    /// Incident severity dot color; mirrors Statuspage.io indicator levels.
+    private func serviceStatusColor(_ indicator: String) -> Color {
+        switch indicator {
+        case "critical": return .red
+        case "major": return .orange
+        default: return .yellow // "minor" (server filters out "none")
+        }
+    }
+
+    /// One-line incident notice under a provider's bars. Tapping opens the
+    /// provider's public status page; a plain Button so the tap doesn't toggle
+    /// the section's explain popover.
+    private func serviceStatusRow(_ status: ProviderServiceStatus) -> some View {
+        Button {
+            if let urlString = status.url, let url = URL(string: urlString) {
+                NSWorkspace.shared.open(url)
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(serviceStatusColor(status.indicator))
+                    .frame(width: 6, height: 6)
+                Text(status.description ?? Strings.providerServiceIssue)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
+        .buttonStyle(.plain)
+        .help(Strings.providerStatusOpenPage)
     }
 
     // MARK: - Window specs (one source of truth for rows + the explain popover)
@@ -302,6 +347,17 @@ struct UsageLimitsView: View {
         if let w = o.secondaryWindow { s.append(makeSpec("Weekly", w.usedPercent, iso: w.resetAt)) }
         if let w = o.tertiaryWindow { s.append(makeSpec("Monthly", w.usedPercent, iso: w.resetAt)) }
         return s
+    }
+
+    private func qoderSpecs(_ q: QoderLimits) -> [LimitWindowSpec] {
+        var specs: [LimitWindowSpec] = []
+        if let window = q.primaryWindow {
+            specs.append(makeSpec("Plan", window.usedPercent, iso: window.resetAt))
+        }
+        if let window = q.secondaryWindow {
+            specs.append(makeSpec("Bonus", window.usedPercent, iso: window.resetAt))
+        }
+        return specs
     }
 
     private func copilotSpecs(_ c: CopilotLimits) -> [LimitWindowSpec] {
@@ -514,7 +570,7 @@ struct UsageLimitsView: View {
     @ViewBuilder
     private func brandIcon(_ name: String) -> some View {
         switch name {
-        case "CursorLogo", "KimiLogo", "KiroLogo", "GrokLogo", "CopilotLogo", "ZcodeLogo", "OpenCodeLogo":
+        case "CursorLogo", "KimiLogo", "KiroLogo", "GrokLogo", "CopilotLogo", "ZcodeLogo", "OpenCodeLogo", "QoderLogo":
             let filename: String = {
                 switch name {
                 case "CursorLogo": return "cursor.svg"
@@ -523,6 +579,7 @@ struct UsageLimitsView: View {
                 case "GrokLogo": return "grok.svg"
                 case "ZcodeLogo": return "zcode.svg"
                 case "OpenCodeLogo": return "opencode.svg"
+                case "QoderLogo": return "qoder.svg"
                 default: return "copilot.svg"
                 }
             }()
@@ -622,9 +679,12 @@ private struct SettingsGearButton<Popover: View>: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .pointingHandCursor()
         .onHover { isHovered = $0 }
         .popover(isPresented: $isPresented, arrowEdge: .trailing) {
             popover()
+                .preferredColorScheme(.dark)
+                .environment(\.colorScheme, .dark)
         }
     }
 }
@@ -729,9 +789,9 @@ private struct ProviderClickableStyle: ViewModifier {
                 .allowsHitTesting(false)
             }
             .contentShape(RoundedRectangle(cornerRadius: 8))
+            .pointingHandCursor()
             .onHover { hovering in
                 self.hovering = hovering
-                if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
             }
             .padding(.horizontal, -6)
     }
@@ -798,6 +858,8 @@ private struct LimitsExplainContent: View {
         }
         .padding(14)
         .frame(width: 256)
+        .preferredColorScheme(.dark)
+        .environment(\.colorScheme, .dark)
     }
 
     /// "Updated 2h ago · 7/7 10:26" — relative age (matches the reset rows' style)

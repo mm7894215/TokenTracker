@@ -37,6 +37,7 @@
   "landing.v2.leaderboard.view_more": "檢視完整排行榜",
   "landing.v2.footer.line": "Token Tracker —— 開發者打造，服務開發者。",
   "landing.v2.nav.status": "狀態",
+  "landing.v2.nav.privacy": "隱私",
   "landing.v2.nav.github": "GitHub",
   "landing.v2.cta.primary": "儀表板",
   "landing.v2.hero.subtagline": "自動監控 Claude Code、Cursor、Codex 等工具的 Token 用量。本地優先、注重隱私、零配置。",

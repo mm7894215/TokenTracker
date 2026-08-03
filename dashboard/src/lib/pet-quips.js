@@ -306,6 +306,7 @@ const PET_LIMIT_PROVIDER_NAMES = {
   antigravity: "Antigravity",
   zcode: "ZCode",
   opencodeGo: "OpenCode Go",
+  qoder: "Qoder",
 };
 
 // Unix timestamps are normally seconds; values above this order of magnitude
@@ -391,6 +392,7 @@ function collectPetLimitRows(limits) {
   ]);
   addGeneric("zcode", limits.zcode, [["GLM-5.2", limits.zcode?.primary_window], ["GLM-5 Turbo", limits.zcode?.secondary_window], ["Other", limits.zcode?.tertiary_window]]);
   addGeneric("opencodeGo", limits.opencodeGo, [["5h", limits.opencodeGo?.primary_window], ["Weekly", limits.opencodeGo?.secondary_window], ["Month", limits.opencodeGo?.tertiary_window]]);
+  addGeneric("qoder", limits.qoder, [["Credits", limits.qoder?.primary_window], ["Ultimate Free Calls", limits.qoder?.secondary_window]]);
 
   rows.sort((a, b) => {
     if (b.usedPercent !== a.usedPercent) return b.usedPercent - a.usedPercent;

@@ -34,6 +34,8 @@ enum Strings {
     static var noData: String { t("No data", "暂无数据", "暫無資料", "データなし", "데이터 없음") }
     static var retryButton: String { t("Retry", "重试", "重試", "再試行", "다시 시도") }
     static var openDashboard: String { t("Open Dashboard", "打开仪表盘", "開啟儀表盤", "ダッシュボードを開く", "대시보드 열기") }
+    static var menuDynamicIsland: String { t("Dynamic Island", "灵动岛", "靈動島", "ダイナミックアイランド", "다이나믹 아일랜드") }
+    static var menuIconStyle: String { t("Icon Style", "图标样式", "圖標樣式", "アイコンスタイル", "아이콘 스타일") }
     static var quitButton: String { t("Quit", "退出", "退出", "終了", "종료") }
     static var justNow: String { t("just now", "刚刚", "剛剛", "たった今", "방금") }
     static var activityTitle: String { t("Activity", "活跃度", "活躍度", "アクティビティ", "활동") }
@@ -57,6 +59,8 @@ enum Strings {
     }
 
     static var usageLimitsTitle: String { t("Limits", "限额", "限額", "上限", "한도") }
+    static var providerServiceIssue: String { t("Service issue reported", "服务异常", "服務異常", "サービス障害が報告されています", "서비스 장애가 보고됨") }
+    static var providerStatusOpenPage: String { t("Open status page", "打开状态页", "打開狀態頁", "ステータスページを開く", "상태 페이지 열기") }
     static var sessionExpired: String { t("Session expired", "会话已过期", "會話已過期", "セッションが期限切れです", "세션이 만료되었습니다") }
     static var allProvidersHidden: String { t("All providers hidden", "所有提供方均已隐藏", "所有提供方均已隱藏", "すべてのプロバイダーが非表示です", "모든 제공자가 숨겨졌습니다") }
     static var cursorPlanLabel: String { t("Plan", "套餐", "套餐", "プラン", "플랜") }
@@ -217,12 +221,23 @@ enum Strings {
 
     static var menuSyncNow: String { t("Sync Now", "立即同步", "立即同步", "今すぐ同期", "지금 동기화") }
     static var menuCheckForUpdates: String { t("Check for Updates…", "检查更新…", "檢查更新…", "アップデートを確認…", "업데이트 확인…") }
+
+    static var menuAbout: String { t("About TokenTracker", "关于 TokenTracker", "關於 TokenTracker", "TokenTracker について", "TokenTracker 정보") }
+
+    static var menuHelp: String { t("TokenTracker Help", "TokenTracker 帮助", "TokenTracker 說明", "TokenTracker ヘルプ", "TokenTracker 도움말") }
     static var menuLaunchAtLogin: String { t("Launch at Login", "登录时启动", "登入時啟動", "ログイン時に起動", "로그인 시 실행") }
     static var menuStarOnGitHub: String { t("★ Star on GitHub", "★ 在 GitHub 上标星", "★ 在 GitHub 上標星", "★ GitHub でスターを付ける", "★ GitHub에서 스타하기") }
-    static var menuShowStats: String { t("Show Stats in Menu Bar", "在菜单栏显示统计", "在選單欄顯示統計", "メニューバーに統計を表示", "메뉴 막대에 통계 표시") }
-    static var menuMenuBarDisplay: String { t("Menu Bar Display", "菜单栏显示", "選單欄顯示", "メニューバー表示", "메뉴 막대 표시") }
+    static var menuShowStats: String { t("Show Numeric Values", "显示数值", "顯示數值", "数値の表示", "수치 표시") }
+    static var menuDisplayMetrics: String { t("Display Metrics", "显示指标", "顯示指標", "表示メトリクス", "표시 메트릭") }
     static var menuPrimarySlot: String { t("Primary", "主指标", "主指標", "プライマリ", "기본") }
     static var menuSecondarySlot: String { t("Secondary", "副指标", "副指標", "セカンダリ", "보조") }
+    static var menuSlotNone: String { t("None", "不显示", "不顯示", "表示しない", "표시 안 함") }
+    static var alertHideIconTitle: String { t("Hide the menu bar icon?", "隐藏菜单栏图标？", "隱藏選單列圖示？", "メニューバーアイコンを隠しますか？", "메뉴바 아이콘을 숨길까요?") }
+    static var alertHideIconMessage: String { t("The Dynamic Island is now showing your stats. You can hide the menu bar icon to save space — the island's gear button and right-click menu keep everything reachable.", "灵动岛已经在展示你的统计数据。可以隐藏菜单栏图标以节省空间——通过灵动岛的齿轮按钮或右键菜单仍可访问全部功能。", "靈動島已經在展示你的統計資料。可以隱藏選單列圖示以節省空間——透過靈動島的齒輪按鈕或右鍵選單仍可存取全部功能。", "ダイナミックアイランドが統計を表示しています。メニューバーアイコンを非表示にしてスペースを節約できます。アイランドのギアボタンや右クリックメニューからすべての機能にアクセスできます。", "다이나믹 아일랜드가 통계를 표시하고 있습니다. 메뉴바 아이콘을 숨겨 공간을 절약할 수 있으며, 아일랜드의 기어 버튼과 우클릭 메뉴로 모든 기능에 접근할 수 있습니다.") }
+    static var alertHideIconConfirm: String { t("Hide Icon", "隐藏图标", "隱藏圖示", "アイコンを隠す", "아이콘 숨기기") }
+    static var alertHideIconKeep: String { t("Keep Both", "两者都保留", "兩者都保留", "両方表示する", "둘 다 유지") }
+    static var starButton: String { t("Star", "标星", "標星", "スター", "스타") }
+    static var openTokenTrackerWebsite: String { t("Open TokenTracker website", "打开 TokenTracker 官网", "開啟 TokenTracker 官網", "TokenTracker のサイトを開く", "TokenTracker 웹사이트 열기") }
     static var menuMenuBarIcon: String { t("Menu Bar Icon", "菜单栏图标", "選單欄圖示", "メニューバーアイコン", "메뉴 막대 아이콘") }
     static var iconStyleCat: String { t("Cat", "小猫", "小貓", "ネコ", "고양이") }
     static var iconStyleMyPet: String { t("My Pet", "我的宠物", "我的寵物", "マイペット", "내 펫") }
@@ -332,7 +347,7 @@ enum Strings {
     static var restarting: String { t("Restarting...", "正在重启...", "正在重啟...", "再起動中...", "재시작 중...") }
     static var installationFailedTitle: String { t("Installation Failed", "安装失败", "安裝失敗", "インストールに失敗", "설치 실패") }
     static var manualInstallHint: String {
-        t("Please drag TokenTrackerBar into Applications manually.", "请手动将 TokenTrackerBar 拖入“应用程序”。", "請手動將 TokenTrackerBar 拖入“應用程式”。", "TokenTrackerBar を手動で「アプリケーション」にドラッグしてください。", "TokenTrackerBar를 수동으로 응용 프로그램 폴더로 드래그하세요.")
+        t("Please drag TokenTracker into Applications manually.", "请手动将 TokenTracker 拖入“应用程序”。", "請手動將 TokenTracker 拖入“應用程式”。", "TokenTracker を手動で「アプリケーション」にドラッグしてください。", "TokenTracker를 수동으로 응용 프로그램 폴더로 드래그하세요.")
     }
     static var updateCompleteTitle: String { t("Update Complete", "更新完成", "更新完成", "アップデート完了", "업데이트 완료") }
     static var updateCompleteMessage: String {

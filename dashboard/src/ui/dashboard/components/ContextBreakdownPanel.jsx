@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ChevronRight, Info } from "lucide-react";
 import { copy } from "../../../lib/copy";
@@ -22,6 +22,7 @@ import { oklchColor } from "../../../lib/oklch-fallback";
 const SOURCE_HUE = {
   claude: 35, // orange (was 290 violet)
   codex: 250, // blue (was 165 emerald)
+  grok: 200, // cyan/teal for xAI Grok
 };
 
 // OKLCH ramp per bucket key. We vary chroma + lightness within the hue so
@@ -371,15 +372,21 @@ function isExecToolName(name) {
 }
 
 function sourceEmptyCopyKey(source) {
-  return source === "codex" ? "dashboard.context_breakdown.empty_codex" : "dashboard.context_breakdown.empty";
+  if (source === "codex") return "dashboard.context_breakdown.empty_codex";
+  if (source === "grok") return "dashboard.context_breakdown.empty_grok";
+  return "dashboard.context_breakdown.empty";
 }
 
 function sourceErrorCopyKey(source) {
-  return source === "codex" ? "dashboard.context_breakdown.error_codex" : "dashboard.context_breakdown.error";
+  if (source === "codex") return "dashboard.context_breakdown.error_codex";
+  if (source === "grok") return "dashboard.context_breakdown.error_grok";
+  return "dashboard.context_breakdown.error";
 }
 
 function sourceFootnoteCopyKey(source) {
-  return source === "codex" ? "dashboard.context_breakdown.footnote_codex" : "dashboard.context_breakdown.footnote";
+  if (source === "codex") return "dashboard.context_breakdown.footnote_codex";
+  if (source === "grok") return "dashboard.context_breakdown.footnote_grok";
+  return "dashboard.context_breakdown.footnote";
 }
 
 // Row — unified grid-aligned row primitive used at every level of the panel.
@@ -510,7 +517,7 @@ function ExecDrillDown({ execDetails, source = "claude" }) {
   const { formatTokens } = useTokenFormat();
   const [activeTab, setActiveTab] = useState("by_type");
   const rows = normalizeExecRows(selectedExecRows(execDetails, activeTab));
-  const showRuntime = source === "codex";
+  const showRuntime = source === "codex" || source === "grok";
   const gridCols = showRuntime
     ? "grid-cols-[minmax(0,1fr)_48px_48px_72px_72px_60px_60px]"
     : "grid-cols-[minmax(0,1fr)_56px_60px]";
@@ -683,6 +690,10 @@ export function ContextBreakdownPanel({ from, to, source = "claude", referenceTo
   const [error, setError] = useState(null);
   // Track which top-level disclosure rows are open
   const [openRows, setOpenRows] = useState({});
+  // Keep last successful payload per range+source so flipping provider tabs
+  // (Claude ↔ Codex ↔ Grok) does not flash the full "Scanning session logs…"
+  // skeleton when the server already has a warm cache.
+  const cacheRef = useRef({});
 
   function toggleRow(key) {
     setOpenRows((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -690,6 +701,11 @@ export function ContextBreakdownPanel({ from, to, source = "claude", referenceTo
 
   useEffect(() => {
     let cancelled = false;
+    const cacheKey = `${from || ""}|${to || ""}|${source || "claude"}`;
+    const cached = cacheRef.current[cacheKey];
+    // On a cache miss, reset data so the previous source's payload never
+    // renders under the new source's display branch while the fetch runs.
+    setData(cached || null);
     setLoading(true);
     onLoadingChange?.(true);
     setError(null);
@@ -701,7 +717,10 @@ export function ContextBreakdownPanel({ from, to, source = "claude", referenceTo
       tzOffsetMinutes: getBrowserTimeZoneOffsetMinutes(),
     })
       .then((res) => {
-        if (!cancelled) setData(res);
+        if (!cancelled) {
+          cacheRef.current[cacheKey] = res;
+          setData(res);
+        }
       })
       .catch((e) => {
         if (!cancelled) setError(e?.message || String(e));
@@ -761,7 +780,7 @@ export function ContextBreakdownPanel({ from, to, source = "claude", referenceTo
   const categories =
     source === "claude"
       ? buildDisplayCategories(data.categories || [], referenceTotalTokens)
-      : buildCodexDisplayCategories(data, referenceTotalTokens);
+      : buildCodexDisplayCategories(data, referenceTotalTokens); // codex + grok
   const toolDetails = data.tool_calls_breakdown || null;
   const skillsDetails = data.skills_breakdown || null;
   const messageDetails = data.message_breakdown || null;

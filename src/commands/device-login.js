@@ -6,18 +6,23 @@ const fs = require("node:fs/promises");
 
 const { readJson, writeJson } = require("../lib/fs");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
+const { resolveRuntimeConfig } = require("../lib/runtime-config");
 
-const DEFAULT_BASE_URL = "https://srctyff5.us-east.insforge.app";
 const POLL_INTERVAL_MS = 5_000;
 const ABSOLUTE_TIMEOUT_MS = 16 * 60 * 1000; // matches the 15-min server window with a small buffer
 
 function readBaseUrl(config) {
-  return (
-    process.env.TOKENTRACKER_BASE_URL ||
-    process.env.TOKENTRACKER_API_URL ||
-    config?.baseUrl ||
-    DEFAULT_BASE_URL
-  );
+  return resolveRuntimeConfig({
+    // Preserve device-login's explicit legacy override names and precedence,
+    // while routing persisted config through the shared retired-host filter.
+    cli: {
+      baseUrl:
+        process.env.TOKENTRACKER_BASE_URL ||
+        process.env.TOKENTRACKER_API_URL,
+    },
+    config: config || {},
+    env: {},
+  }).baseUrl;
 }
 
 async function authorize({ baseUrl, clientInfo, machineId }) {

@@ -52,6 +52,13 @@ enum WidgetSnapshotWriter {
     }
 
     static func update(from vm: DashboardViewModel) async {
+        // Monotonic ticket (main-actor serialized): if a newer update starts
+        // while we're suspended on the cost fetches below, this call is stale
+        // and must not write — otherwise its older snapshot could land after
+        // (and clobber) the newer one.
+        updateGeneration += 1
+        let ticket = updateGeneration
+
         // STEP 1 — synchronously freeze every VM field we will need. After
         // this point we never touch `vm` again. This is the fix for the
         // race where a second loadAll() could mutate the view model while
@@ -78,8 +85,18 @@ enum WidgetSnapshotWriter {
         async let last30dCost = fetchRangeCost(daysBack: 29)
         let (cost7d, cost30d) = await (last7dCost, last30dCost)
 
+        // Superseded while awaiting the cost fetches — drop this stale write.
+        guard ticket == updateGeneration else { return }
+
         let snapshot = buildSnapshot(from: inputs, cost7d: cost7d, cost30d: cost30d)
-        let ok = WidgetSnapshotStore.write(snapshot)
+        // Write off the main actor on a serial queue (no main-thread file IO,
+        // no torn concurrent writes); the generation guard above is what
+        // keeps stale snapshots from overwriting newer ones.
+        let ok = await withCheckedContinuation { continuation in
+            writeQueue.async {
+                continuation.resume(returning: WidgetSnapshotStore.write(snapshot))
+            }
+        }
         if ok {
             WidgetCenter.shared.reloadAllTimelines()
             logger.debug("Widget snapshot written and timelines reloaded")
@@ -87,6 +104,12 @@ enum WidgetSnapshotWriter {
             logger.warning("Failed to write widget snapshot")
         }
     }
+
+    /// Serializes snapshot writes off the main actor.
+    private static let writeQueue = DispatchQueue(label: "com.tokentracker.widget-snapshot-write", qos: .utility)
+
+    /// Bumped at the start of every `update`; stale calls bail before writing.
+    private static var updateGeneration = 0
 
     /// Fetches a `UsageSummaryResponse` for `[N days ago, today]` and pulls
     /// out the top-level `total_cost_usd`. Returns 0 on any failure so the

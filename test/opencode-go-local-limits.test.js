@@ -12,6 +12,7 @@ const {
   isOpencodeDbFilename,
   goDollarLimits,
   weekStartMs,
+  detectSubscriptionStatus,
 } = require("../src/lib/opencode-go-limits");
 
 // node:sqlite is the write path for building a fixture DB. It's available on the
@@ -114,6 +115,17 @@ describe("opencode-go local helpers (pure)", () => {
       monthly: 60,
     });
   });
+
+  it("recognizes the inactive Go page without treating generic pages as inactive", () => {
+    assert.equal(
+      detectSubscriptionStatus('<button data-slot="subscribe-button">Subscribe Go</button>'),
+      "inactive",
+    );
+    assert.equal(
+      detectSubscriptionStatus('<button data-slot="manage-subscription">Manage</button>'),
+      "unknown",
+    );
+  });
 });
 
 describe("collectOpencodeGoLocal (real fixture DB)", { skip: !sqlite }, () => {
@@ -199,7 +211,7 @@ describe("fetchOpencodeGoLimits source selection (real fixture DB)", { skip: !sq
     }
   });
 
-  it("zero-config: no cookie → local DB drives the result (the #225 fix)", async () => {
+  it("does not present local DB history as a verified subscription by default", async () => {
     const out = await fetchOpencodeGoLimits({
       env: { OPENCODE_HOME: tmpDir },
       nowMs: NOW_MS,
@@ -207,28 +219,60 @@ describe("fetchOpencodeGoLimits source selection (real fixture DB)", { skip: !sq
         throw new Error("network must not be touched without a cookie");
       },
     });
+    assert.deepEqual(out, { configured: false });
+  });
+
+  it("keeps the local estimate available only as an explicit opt-in", async () => {
+    const out = await fetchOpencodeGoLimits({
+      env: { OPENCODE_HOME: tmpDir, TOKENTRACKER_OPENCODE_GO_LOCAL_ESTIMATE: "1" },
+      nowMs: NOW_MS,
+      fetchImpl: async () => {
+        throw new Error("network must not be touched without a cookie");
+      },
+    });
     assert.equal(out.configured, true);
     assert.equal(out.error, null);
-    assert.equal(out.source, "local");
+    assert.equal(out.source, "local-estimate");
+    assert.equal(out.subscription_status, "unknown");
     assert.equal(out.primary_window.used_percent, 50);
   });
 
-  it("cookie present but scrape fails → falls back to local DB", async () => {
+  it("does not fall back to local history when the authenticated page says Go is inactive", async () => {
     const out = await fetchOpencodeGoLimits({
       env: { OPENCODE_HOME: tmpDir, OPENCODE_GO_WORKSPACE_ID: "wrk_1", OPENCODE_GO_AUTH_COOKIE: "cookie" },
       nowMs: NOW_MS,
-      // Authenticated 200 but page carries no parseable usage windows.
+      // This is the rendered inactive workspace page: it offers Subscribe Go
+      // instead of the active subscription's usage-item rows.
       fetchImpl: async () => ({
         status: 200,
         ok: true,
         async text() {
-          return "<html>auth.opencode.ai/authorize redirect shell</html>";
+          return '<html><button data-slot="subscribe-button">Subscribe Go</button></html>';
         },
       }),
     });
-    assert.equal(out.source, "local");
+    assert.equal(out.configured, true);
     assert.equal(out.error, null);
-    assert.equal(out.secondary_window.used_percent, 30);
+    assert.equal(out.subscription_status, "inactive");
+    assert.equal(out.primary_window, undefined);
+    assert.equal(out.source, undefined);
+  });
+
+  it("does not fall back to local history for an authenticated parse failure unless opted in", async () => {
+    const out = await fetchOpencodeGoLimits({
+      env: { OPENCODE_HOME: tmpDir, OPENCODE_GO_WORKSPACE_ID: "wrk_1", OPENCODE_GO_AUTH_COOKIE: "cookie" },
+      nowMs: NOW_MS,
+      fetchImpl: async () => ({
+        status: 200,
+        ok: true,
+        async text() {
+          return "<html>authenticated page with an unexpected layout</html>";
+        },
+      }),
+    });
+    assert.equal(out.configured, true);
+    assert.match(out.error, /Could not parse any known OpenCode Go dashboard usage windows/);
+    assert.equal(out.source, undefined);
   });
 
   it("cookie present and scrape succeeds → web wins over local", async () => {
@@ -242,6 +286,7 @@ describe("fetchOpencodeGoLimits source selection (real fixture DB)", { skip: !sq
       fetchImpl: async () => ({ status: 200, ok: true, async text() { return ssr; } }),
     });
     assert.equal(out.source, "web");
+    assert.equal(out.subscription_status, "active");
     // Exact server values, not the local estimate (which would be 50/30/35).
     assert.equal(out.primary_window.used_percent, 2);
     assert.equal(out.secondary_window.used_percent, 17);

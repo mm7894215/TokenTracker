@@ -11,7 +11,15 @@ async function multiInstallParse({ paths, parserFn, providerName, cursors, getPa
   const env = shared.env || process.env;
 
   if (installKeys.length === 1) {
-    ensureFlatCursor(cursors, providerName, env);
+    // Flatten toward the SURVIVING install's namespace, not the mode
+    // preference: under wsl-first a vanished WSL install (deleted distro,
+    // transient wsl.exe probe failure) must not donate its cursor to the
+    // remaining native install. Non-both modes park the pick in the `native`
+    // slot regardless of identity, so the slot name is unreliable — WSL
+    // installs are always addressed via UNC paths, which identifies the
+    // survivor directly.
+    const survivorKey = wsl.isUncPath(paths[installKeys[0]]) ? "wsl" : "native";
+    ensureFlatCursor(cursors, providerName, env, survivorKey);
     return await parserFn({
       ...getParams(paths[installKeys[0]], installKeys[0]),
       ...shared,

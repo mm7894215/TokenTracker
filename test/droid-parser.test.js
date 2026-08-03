@@ -203,6 +203,104 @@ test("parseDroidIncremental emits a queue row per session with delta tokens", as
   assert.equal(sessionTotals["sess-1"].thinking, 80);
 });
 
+test("parseDroidIncremental backfills project usage from the sidecar session cwd", async () => {
+  const root = makeSessionsRoot();
+  const sessionsRoot = path.join(root, "factory", "sessions");
+  const repoDir = path.join(root, "repo-with-dash");
+  const queuePath = path.join(root, "queue.jsonl");
+  const projectQueuePath = path.join(root, "project.queue.jsonl");
+  const t1 = Date.UTC(2026, 6, 31, 5, 30, 0);
+
+  fs.mkdirSync(path.join(repoDir, ".git"), { recursive: true });
+  fs.writeFileSync(
+    path.join(repoDir, ".git", "config"),
+    '[remote "origin"]\n\turl = https://github.com/acme/repo-with-dash.git\n',
+  );
+
+  const settingsPath = writeSettings(
+    sessionsRoot,
+    "-C-Users-Ricky-Desktop-repo-with-dash",
+    "sess-project",
+    {
+      model: "kimi-k3",
+      tokenUsage: {
+        inputTokens: 1000,
+        outputTokens: 200,
+        cacheCreationTokens: 50,
+        cacheReadTokens: 300,
+        thinkingTokens: 80,
+      },
+    },
+    t1,
+  );
+  fs.writeFileSync(
+    settingsPath.replace(/\.settings\.json$/, ".jsonl"),
+    `${JSON.stringify({ type: "session_start", id: "sess-project", cwd: repoDir })}\n`,
+  );
+
+  const cursors = {};
+  await parseDroidIncremental({
+    settingsFiles: [settingsPath],
+    cursors,
+    queuePath,
+  });
+  const globalRowsBefore = readQueue(queuePath).length;
+
+  const result = await parseDroidIncremental({
+    settingsFiles: [settingsPath],
+    cursors,
+    queuePath,
+    projectQueuePath,
+  });
+
+  assert.equal(readQueue(queuePath).length, globalRowsBefore, "project backfill must not re-emit global usage");
+  assert.equal(result.projectBucketsQueued, 1);
+  const projectRows = readQueue(projectQueuePath);
+  assert.equal(projectRows.length, 1);
+  assert.equal(projectRows[0].project_key, "acme/repo-with-dash");
+  assert.equal(projectRows[0].project_ref, "https://github.com/acme/repo-with-dash");
+  assert.equal(projectRows[0].source, "droid");
+  assert.equal(projectRows[0].total_tokens, 1630);
+
+  const unchanged = await parseDroidIncremental({
+    settingsFiles: [settingsPath],
+    cursors,
+    queuePath,
+    projectQueuePath,
+  });
+  assert.equal(unchanged.bucketsQueued, 0);
+  assert.equal(unchanged.projectBucketsQueued, 0);
+  assert.equal(readQueue(queuePath).length, globalRowsBefore);
+  assert.equal(readQueue(projectQueuePath).length, 1);
+
+  writeSettings(
+    sessionsRoot,
+    "-C-Users-Ricky-Desktop-repo-with-dash",
+    "sess-project",
+    {
+      model: "kimi-k3",
+      tokenUsage: {
+        inputTokens: 1100,
+        outputTokens: 220,
+        cacheCreationTokens: 50,
+        cacheReadTokens: 330,
+        thinkingTokens: 90,
+      },
+    },
+    t1 + 60_000,
+  );
+  const growth = await parseDroidIncremental({
+    settingsFiles: [settingsPath],
+    cursors,
+    queuePath,
+    projectQueuePath,
+  });
+  assert.equal(growth.bucketsQueued, 1);
+  assert.equal(growth.projectBucketsQueued, 1);
+  assert.equal(readQueue(queuePath).at(-1).total_tokens, 1790);
+  assert.equal(readQueue(projectQueuePath).at(-1).total_tokens, 1790);
+});
+
 test("parseDroidIncremental cumulative-delta: second sync emits only growth", async () => {
   const root = makeSessionsRoot();
   const queuePath = path.join(root, "queue.jsonl");

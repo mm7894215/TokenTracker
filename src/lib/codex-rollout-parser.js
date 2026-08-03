@@ -8,9 +8,14 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
-const readline = require("node:readline");
 
 const { listRolloutFiles } = require("./rollout");
+const {
+  consumeUsageDelta,
+  createUsageDeltaState,
+  snapshotUsageBaselines,
+  totalsReset,
+} = require("./codex-token-usage");
 const {
   emptyTotals,
   addInto,
@@ -434,42 +439,10 @@ function normalizeUsage(u) {
   return out;
 }
 
-function totalsReset(curr, prev) {
-  const a = Number(curr?.total_tokens);
-  const b = Number(prev?.total_tokens);
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
-  return a < b;
-}
-
 function pickDelta(lastUsage, totalUsage, prevTotals) {
-  const hasLast = lastUsage && typeof lastUsage === "object";
-  const hasTotal = totalUsage && typeof totalUsage === "object";
-  const hasPrev = prevTotals && typeof prevTotals === "object";
-
-  if (hasTotal && hasPrev) {
-    if (totalsReset(totalUsage, prevTotals)) {
-      const resetUsage = hasLast ? lastUsage : totalUsage;
-      return normalizeUsage(resetUsage);
-    }
-    const delta = {};
-    for (const k of [
-      "input_tokens",
-      "cached_input_tokens",
-      "cache_creation_input_tokens",
-      "output_tokens",
-      "reasoning_output_tokens",
-      "total_tokens",
-    ]) {
-      const a = Number(totalUsage[k]);
-      const b = Number(prevTotals[k]);
-      if (Number.isFinite(a) && Number.isFinite(b)) delta[k] = Math.max(0, a - b);
-    }
-    return normalizeUsage(delta);
-  }
-
-  if (hasLast) return normalizeUsage(lastUsage);
-  if (hasTotal) return normalizeUsage(totalUsage);
-  return null;
+  const state = createUsageDeltaState({ lastTotal: prevTotals });
+  const delta = consumeUsageDelta(state, lastUsage, totalUsage);
+  return delta ? normalizeUsage(delta) : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -596,7 +569,10 @@ async function parseCodexRolloutFile(filePath, {
   let provider = isResuming ? resumeState.provider || null : null;
   let cliVersion = isResuming ? resumeState.cliVersion || null : null;
 
-  let prevTotals = isResuming ? resumeState.prevTotals || null : null;
+  const usageDeltaState = createUsageDeltaState({
+    lastTotal: isResuming ? resumeState.prevTotals || null : null,
+    baselines: isResuming ? resumeState.tokenUsageBaselines || null : null,
+  });
   let pendingToolNames = isResuming
     ? Array.from(resumeState.pendingToolNames || [])
     : [];
@@ -875,8 +851,8 @@ async function parseCodexRolloutFile(filePath, {
       const info = tokenCount.info;
       const lastUsage = info?.last_token_usage;
       const totalUsage = info?.total_token_usage;
-      const delta = pickDelta(lastUsage, totalUsage, prevTotals);
-      if (totalUsage && typeof totalUsage === "object") prevTotals = totalUsage;
+      const rawDelta = consumeUsageDelta(usageDeltaState, lastUsage, totalUsage);
+      const delta = rawDelta ? normalizeUsage(rawDelta) : null;
       const isNewResumeEvent = noteTokenEvent(ts, lastUsage, totalUsage);
       if (inRequestedRange) {
         const eventSessionId = sessionId || rolloutSessionIdFromPath(primaryFilePath) || primaryFilePath;
@@ -927,7 +903,8 @@ async function parseCodexRolloutFile(filePath, {
       model,
       provider,
       cliVersion,
-      prevTotals,
+      prevTotals: usageDeltaState.lastTotal,
+      tokenUsageBaselines: snapshotUsageBaselines(usageDeltaState),
       pendingToolNames,
       pendingSkills,
       pendingExecDetails,
@@ -943,6 +920,8 @@ async function parseCodexRolloutFile(filePath, {
   return result;
 }
 
+const fatalUtf8Decoder = new TextDecoder("utf-8", { fatal: true });
+
 function parseCodexLine(lineBuffer, diagnostics) {
   let content = lineBuffer;
   if (content.length > 0 && content[content.length - 1] === 0x0d) {
@@ -951,7 +930,7 @@ function parseCodexLine(lineBuffer, diagnostics) {
   if (content.length === 0) return null;
   try {
     if (diagnostics) diagnostics.json_parse_calls += 1;
-    return JSON.parse(content.toString("utf8"));
+    return JSON.parse(fatalUtf8Decoder.decode(content));
   } catch {
     return null;
   }
@@ -1067,57 +1046,12 @@ async function* readCodexObjectsFull(filePath, diagnostics, fileIndex, {
   readProgress = null,
   contentHasher = null,
 } = {}) {
-  const start = Math.max(0, Number(startOffset) || 0);
-  const requestedEnd = Number(endOffset);
-  const hasBoundedEnd = endOffset !== null && endOffset !== undefined &&
-    Number.isFinite(requestedEnd) && requestedEnd >= 0;
-  if (hasBoundedEnd && requestedEnd <= start) {
-    if (readProgress) readProgress.endOffset = start;
-    return;
-  }
-
-  if (diagnostics) diagnostics.opened_files += 1;
-  const stream = fs.createReadStream(filePath, {
-    ...(contentHasher ? {} : { encoding: "utf8" }),
-    start,
-    ...(hasBoundedEnd ? { end: requestedEnd - 1 } : {}),
+  yield* readCodexObjectsIncremental(filePath, diagnostics, fileIndex, {
+    startOffset,
+    endOffset,
+    readProgress,
+    contentHasher,
   });
-  const trackChunk = contentHasher
-    ? (value) => {
-        const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
-        contentHasher.update(chunk);
-        if (readProgress && chunk.length > 0) {
-          readProgress.lastByte = chunk[chunk.length - 1];
-        }
-      }
-    : null;
-  if (trackChunk) stream.on("data", trackChunk);
-  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-  let lineIndex = 0;
-  try {
-    for await (const line of rl) {
-      if (!line) continue;
-      let obj;
-      try {
-        if (diagnostics) diagnostics.json_parse_calls += 1;
-        obj = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      yield { obj, fileIndex, lineIndex };
-      lineIndex += 1;
-    }
-  } finally {
-    const bytesRead = Number(stream.bytesRead || 0);
-    if (readProgress) readProgress.endOffset = start + bytesRead;
-    if (diagnostics) {
-      diagnostics.bytes_read = Number(diagnostics.bytes_read || 0) + bytesRead;
-      diagnostics.parsed_files += 1;
-    }
-    if (trackChunk) stream.off("data", trackChunk);
-    rl.close();
-    stream.close?.();
-  }
 }
 
 async function* readCodexObjects(filePath, diagnostics, fileIndex, options = {}) {

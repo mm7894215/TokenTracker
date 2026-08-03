@@ -21,7 +21,13 @@ export async function listPets() {
     cache: "no-store",
   });
   const data = await payload(response);
-  return [...BUILTIN_PETS, ...(Array.isArray(data.pets) ? data.pets : [])];
+  const hiddenBuiltinIds = new Set(
+    Array.isArray(data.hiddenBuiltinIds) ? data.hiddenBuiltinIds : [],
+  );
+  return [
+    ...BUILTIN_PETS.filter((pet) => pet.id === "clawd" || !hiddenBuiltinIds.has(pet.id)),
+    ...(Array.isArray(data.pets) ? data.pets : []),
+  ];
 }
 
 async function mutate(body) {

@@ -1,13 +1,20 @@
 const fs = require("node:fs/promises");
 const fssync = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const readline = require("node:readline");
 
 const crypto = require("node:crypto");
-const { ensureDir } = require("./fs");
+const { ensureDir, writeJson, chmod600IfPossible } = require("./fs");
+const { physicalJsonlRecords } = require("./jsonl-lines");
 const { readSqliteJsonRows, readSqliteJsonRowsAsync } = require("./sqlite-reader");
 const wsl = require("./wsl-probe");
 const { resolveInstallPaths } = require("./install-resolver");
+const {
+  consumeUsageDelta,
+  createUsageDeltaState,
+  snapshotUsageBaselines,
+} = require("./codex-token-usage");
 
 const DEFAULT_SOURCE = "codex";
 const DEFAULT_MODEL = "unknown";
@@ -174,7 +181,11 @@ async function parseRolloutIncremental({
   source,
   publicRepoResolver,
   diagnostics,
+  invalidRecordPolicy = "skip",
 }) {
+  if (invalidRecordPolicy !== "skip" && invalidRecordPolicy !== "throw") {
+    throw new TypeError(`unsupported invalidRecordPolicy: ${invalidRecordPolicy}`);
+  }
   await ensureDir(path.dirname(queuePath));
   let filesProcessed = 0;
   let eventsAggregated = 0;
@@ -360,6 +371,9 @@ async function parseRolloutIncremental({
     const lastTotal = sameInode && !truncated && !rebuildingCodexBaseline
       ? prev.lastTotal || null
       : null;
+    const tokenUsageBaselines = sameInode && !truncated && !rebuildingCodexBaseline
+      ? prev.tokenUsageBaselines || null
+      : null;
     const lastModel = sameInode && !truncated ? prev.lastModel || null : null;
 
     const codexProjectFastPath = projectEnabled && fileSource === DEFAULT_SOURCE;
@@ -430,18 +444,21 @@ async function parseRolloutIncremental({
           filePath,
           fileStat: st,
           lastTotal,
+          tokenUsageBaselines,
           lastModel,
           projectState,
           projectMetaCache,
           publicRepoCache,
           publicRepoResolver,
           projectContext,
+          invalidRecordPolicy,
         })
       : await parseRolloutFile({
           filePath,
           fileStat: st,
           startOffset,
           lastTotal,
+          tokenUsageBaselines,
           lastModel,
           hourlyState,
           touchedBuckets,
@@ -456,12 +473,14 @@ async function parseRolloutIncremental({
           projectContext,
           seenCodexEvents: codexEventTracker,
           sessionId: codexSessionIdFromPath(filePath),
+          invalidRecordPolicy,
         });
 
     const nextCursor = {
       inode,
       offset: result.endOffset,
       lastTotal: result.lastTotal,
+      tokenUsageBaselines: result.tokenUsageBaselines,
       lastModel: result.lastModel,
       updatedAt: new Date().toISOString(),
     };
@@ -702,6 +721,30 @@ function formatLocalDate(value) {
   return `${year}-${month}-${day}`;
 }
 
+// Identity hash for cross-environment duplicate session files (native and
+// \\wsl$ views of a synced ~/.claude). sha256 of the first 64KB plus the
+// file size: Claude session headers carry sessionId/cwd so the prefix is
+// discriminating, and folding in the size keeps a grown file distinct from
+// a stale copy. Deliberately excludes inode (unstable across the 9p bridge)
+// and mtime (rewritten by sync tools).
+const CLAUDE_FILE_ID_PREFIX_BYTES = 64 * 1024;
+async function claudeFileIdentityHash(filePath, st) {
+  const length = Math.min(CLAUDE_FILE_ID_PREFIX_BYTES, st.size);
+  if (length <= 0) return null;
+  let fh = null;
+  try {
+    fh = await fs.open(filePath, "r");
+    const buf = Buffer.alloc(length);
+    const { bytesRead } = await fh.read(buf, 0, length, 0);
+    const hash = crypto.createHash("sha256").update(buf.subarray(0, bytesRead)).digest("hex");
+    return `${hash}:${st.size}`;
+  } catch (_e) {
+    return null;
+  } finally {
+    if (fh) await fh.close().catch(() => { });
+  }
+}
+
 async function parseClaudeIncremental({
   projectFiles,
   cursors,
@@ -724,6 +767,11 @@ async function parseClaudeIncremental({
   const projectTouchedBuckets = projectEnabled ? new Set() : null;
   const projectMetaCache = projectEnabled ? new Map() : null;
   const publicRepoCache = projectEnabled ? new Map() : null;
+  // Sessions cluster into few repos, so the per-file freshness checks below
+  // keep stat-ing the same handful of .git/config paths. Share one stat per
+  // config per run, as the Codex path does — it matters most for WSL installs,
+  // where every stat crosses the \\wsl$ bridge (#374).
+  const projectFreshnessCache = projectEnabled ? new Map() : null;
   const touchedBuckets = new Set();
   // Persist seenMessageHashes across syncs to prevent cross-file duplicates
   // (e.g. subagent file created after main session was already parsed).
@@ -734,6 +782,22 @@ async function parseClaudeIncremental({
   if (!cursors.files || typeof cursors.files !== "object") {
     cursors.files = {};
   }
+
+  // Cross-environment file dedup (#307): when the scan list mixes native and
+  // \\wsl$ paths, a session file synced between the environments shows up
+  // twice under different paths. Identify never-parsed files by content hash
+  // and skip the duplicate wholesale — the message-hash layer alone is capped
+  // at 100k entries, and eviction would let bulk history double count.
+  let sawUncFile = false;
+  let sawLocalFile = false;
+  for (const entry of files) {
+    const p = typeof entry === "string" ? entry : entry?.path;
+    if (typeof p !== "string" || !p) continue;
+    if (isUncPath(p)) sawUncFile = true;
+    else sawLocalFile = true;
+    if (sawUncFile && sawLocalFile) break;
+  }
+  const seenFileIds = sawUncFile && sawLocalFile ? new Map() : null;
 
   for (let idx = 0; idx < files.length; idx++) {
     const entry = files[idx];
@@ -754,6 +818,59 @@ async function parseClaudeIncremental({
     const truncated = sameInode && prevOffset > st.size;
     const startOffset = sameInode && !truncated ? prevOffset : 0;
 
+    let fileId = null;
+    if (seenFileIds) {
+      const cachedFileId =
+        sameInode && typeof prev?.fileId === "string" && prev?.fileIdSize === st.size
+          ? prev.fileId
+          : null;
+      fileId = cachedFileId || (await claudeFileIdentityHash(filePath, st));
+      if (fileId) {
+        // Cache on the live cursor object so idle files don't re-hash on
+        // every sync (the idle short-circuit below never rewrites cursors).
+        if (prev && (prev.fileId !== fileId || prev.fileIdSize !== st.size)) {
+          prev.fileId = fileId;
+          prev.fileIdSize = st.size;
+        }
+        const primary = seenFileIds.get(fileId);
+        if (primary === undefined) {
+          seenFileIds.set(fileId, filePath);
+        } else if (!prev && primary !== filePath) {
+          // Never-parsed duplicate of a file already accounted this run (the
+          // native copy sorts first). Mark it caught-up so future syncs only
+          // look at genuinely new tail bytes — message hashes still guard the
+          // tail if the copies diverge later.
+          cursors.files[key] = {
+            inode,
+            offset: st.size,
+            updatedAt: new Date().toISOString(),
+            fileId,
+            fileIdSize: st.size,
+            duplicateOf: primary,
+            ...(projectEnabled
+              ? {
+                  claudeCwd: null,
+                  projectFileContext: buildProjectFileContext(null),
+                  projectRef: null,
+                  projectKey: null,
+                }
+              : {}),
+          };
+          if (cb) {
+            cb({
+              index: idx + 1,
+              total: totalFiles,
+              filePath,
+              filesProcessed,
+              eventsAggregated,
+              bucketsQueued: touchedBuckets.size,
+            });
+          }
+          continue;
+        }
+      }
+    }
+
     // Claude's launch cwd is fixed for a session file's lifetime, so once
     // resolved (found, or confirmed absent) from content it never needs
     // re-extracting. Cache it — and the resolved project's git-config
@@ -773,7 +890,9 @@ async function parseClaudeIncremental({
     const cachedContextAbsent = cachedProjectFileContext?.absent === true;
     const projectContextFresh =
       projectEnabled && cachedProjectFileContext && !cachedContextAbsent
-        ? await isProjectFileContextFresh(cachedProjectFileContext)
+        ? await isProjectFileContextFresh(cachedProjectFileContext, {
+            freshnessCache: projectFreshnessCache,
+          })
         : false;
     const projectKnownAbsent = cachedCwd === null || cachedContextAbsent;
     const projectSettled =
@@ -804,7 +923,7 @@ async function parseClaudeIncremental({
       }
       if (nextCwd) {
         const projectContext = await resolveProjectContextForPath({
-          startDir: nextCwd,
+          startDir: wsl.mapWslCwdToUnc(nextCwd, filePath),
           projectMetaCache,
           publicRepoCache,
           publicRepoResolver,
@@ -838,6 +957,7 @@ async function parseClaudeIncremental({
       inode,
       offset: result.endOffset,
       updatedAt: new Date().toISOString(),
+      ...(fileId ? { fileId, fileIdSize: st.size } : {}),
       ...(projectEnabled
         ? {
             claudeCwd: nextCwd === undefined ? null : nextCwd,
@@ -1193,6 +1313,85 @@ async function parseOpencodeIncremental({
   return { filesProcessed, eventsAggregated, bucketsQueued, projectBucketsQueued };
 }
 
+// Passive discovery of OpenClaw session transcripts (issue #264). OpenClaw was
+// previously counted ONLY when its session plugin fired an `agent_end` hook and
+// pointed sync at one specific <sessionId>.jsonl. That hook silently fails for a
+// whole class of real usage — messages arriving through a channel (e.g. the
+// WeChat ClawBot) whose sessionKey the plugin can't map back to a sessions.json
+// entry, gateways where the plugin never loaded, or newer installs that keep
+// runtime rows in SQLite and only leave archived transcripts on disk. In all of
+// those cases usage exists but shows as 0. Scanning the on-disk transcripts on
+// every full sync (like every other passive provider) closes that gap; the
+// event-identity dedup in parseOpenclawSessionFile makes a plugin trigger and a
+// passive scan of the same file idempotent, so the two paths never double-count.
+// Mirrors OpenClaw's own precedence (OPENCLAW_HOME > state dir override), but
+// deliberately keeps os.homedir() — NOT env.HOME — as the base. OpenClaw itself
+// prefers env.HOME, yet every OpenClaw cursor we have ever written was keyed off
+// an os.homedir()-derived path; switching the base would make Git Bash / MSYS
+// (HOME=/c/Users/x vs C:\Users\x) miss its own cursor and re-count the whole
+// transcript history.
+function resolveOpenclawHome(env = process.env) {
+  const override =
+    (typeof env.TOKENTRACKER_OPENCLAW_HOME === "string" && env.TOKENTRACKER_OPENCLAW_HOME.trim()) ||
+    (typeof env.OPENCLAW_HOME === "string" && env.OPENCLAW_HOME.trim()) ||
+    (typeof env.OPENCLAW_STATE_DIR === "string" && env.OPENCLAW_STATE_DIR.trim()) ||
+    "";
+  return override || path.join(os.homedir(), ".openclaw");
+}
+
+// On Windows the recommended OpenClaw install provisions an app-owned WSL
+// distro and runs the gateway inside it, so %USERPROFILE%\.openclaw is empty
+// while the real state dir sits on the distro's ext4 home (issue #264).
+function resolveOpenclawHomes(env = process.env, deps = {}) {
+  const roots = [resolveOpenclawHome(env)];
+  const platform = deps.platform || process.platform;
+  const overridden =
+    env.TOKENTRACKER_OPENCLAW_HOME || env.OPENCLAW_HOME || env.OPENCLAW_STATE_DIR;
+  if (platform === "win32" && !overridden) {
+    const discoverWslHome = deps.discoverWslHome || wsl.discoverWslHome;
+    const wslRoot = wsl.shouldProbeWsl(env) ? discoverWslHome(".openclaw", { ...deps, env }) : null;
+    if (wslRoot) roots.push(wslRoot);
+  }
+  return roots;
+}
+
+// Transcript artifacts are not always a bare `<sessionId>.jsonl`: resets and
+// deletes leave `<sessionId>.jsonl.reset.<iso>` / `.deleted.<ts>` siblings, and
+// the SQLite migration moves still-hot transcripts into
+// `session-sqlite-import-archive/`. Match the same `*.jsonl*` shape other
+// OpenClaw readers use so those are not silently dropped.
+const OPENCLAW_TRANSCRIPT_SUBDIRS = ["sessions", "session-sqlite-import-archive"];
+
+function isOpenclawTranscriptName(name) {
+  return typeof name === "string" && name.includes(".jsonl") && !name.endsWith(".json");
+}
+
+async function resolveOpenclawSessionFiles(env = process.env, deps = {}) {
+  const out = [];
+  const seen = new Set();
+  for (const openclawHome of resolveOpenclawHomes(env, deps)) {
+    const agentsDir = path.join(openclawHome, "agents");
+    const agents = await safeReadDir(agentsDir);
+    for (const agent of agents) {
+      if (!agent.isDirectory()) continue;
+      for (const subdir of OPENCLAW_TRANSCRIPT_SUBDIRS) {
+        const dir = path.join(agentsDir, agent.name, subdir);
+        const entries = await safeReadDir(dir);
+        for (const entry of entries) {
+          if (!entry.isFile() || !isOpenclawTranscriptName(entry.name)) continue;
+          const full = path.join(dir, entry.name);
+          const key = openclawCursorKey(full);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          out.push(full);
+        }
+      }
+    }
+  }
+  out.sort((a, b) => a.localeCompare(b));
+  return out;
+}
+
 async function parseOpenclawIncremental({
   sessionFiles,
   cursors,
@@ -1356,6 +1555,20 @@ async function parseOpenclawIncremental({
       usageFingerprint: accepted.usageFingerprint,
       updatedAt: new Date().toISOString(),
       usageEvents: accepted.usageEvents,
+      // Sticky: once a transcript has yielded real per-event usage, the
+      // sessions.json totals fallback must defer to it to avoid double
+      // counting the same tokens twice (see applyOpenclawTotalsFallback).
+      //
+      // The usageEvents check is what makes this work for EXISTING installs:
+      // cursors written before this flag existed carry no `hasRealUsage`, and a
+      // steady-state sync of an unchanged transcript aggregates 0 new events —
+      // so keying off eventsAggregated alone would leave the flag false forever
+      // and let the fallback keep double counting for exactly the users who
+      // already have OpenClaw history.
+      hasRealUsage:
+        Boolean(prev?.hasRealUsage) ||
+        accepted.result.eventsAggregated > 0 ||
+        Object.keys(accepted.usageEvents || {}).length > 0,
     };
     cursorKeys.set(key, key);
 
@@ -1731,6 +1944,7 @@ async function parseRolloutFile({
   fileStat,
   startOffset,
   lastTotal,
+  tokenUsageBaselines,
   lastModel,
   hourlyState,
   touchedBuckets,
@@ -1745,20 +1959,34 @@ async function parseRolloutFile({
   projectContext,
   seenCodexEvents,
   sessionId,
+  invalidRecordPolicy,
 }) {
   const st = fileStat || (await fs.stat(filePath));
   const endOffset = st.size;
   const projectFileContexts = [];
   addProjectFileContext(projectFileContexts, projectContext);
   if (startOffset >= endOffset) {
-    return { endOffset, lastTotal, lastModel, eventsAggregated: 0, projectFileContexts };
+    return {
+      endOffset,
+      lastTotal,
+      tokenUsageBaselines,
+      lastModel,
+      eventsAggregated: 0,
+      projectFileContexts,
+    };
   }
 
-  const stream = fssync.createReadStream(filePath, { encoding: "utf8", start: startOffset });
-  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  const stream = fssync.createReadStream(filePath, {
+    start: startOffset,
+    end: endOffset - 1,
+  });
 
   let model = typeof lastModel === "string" ? lastModel : null;
-  let totals = lastTotal && typeof lastTotal === "object" ? lastTotal : null;
+  const usageDeltaState = createUsageDeltaState({
+    lastTotal,
+    baselines: tokenUsageBaselines,
+  });
+  let latestTotal = lastTotal && typeof lastTotal === "object" ? lastTotal : null;
   let currentCwd = null;
   let currentDate = null;
   let isForkedRollout = false;
@@ -1776,8 +2004,19 @@ async function parseRolloutFile({
   let currentProjectRef = projectRef || null;
   let currentProjectKey = projectKey || null;
   let eventsAggregated = 0;
+  let scannedEndOffset = startOffset;
+  let committedEndOffset = startOffset;
 
-  for await (const line of rl) {
+  const invalidUtf8 = invalidRecordPolicy === "throw" ? "throw" : "record";
+  for await (const record of physicalJsonlRecords(stream, { invalidUtf8 })) {
+    scannedEndOffset += record.physicalBytes;
+    if (record.terminated) committedEndOffset = scannedEndOffset;
+    if (!record.utf8Valid) {
+      if (!record.terminated) break;
+      continue;
+    }
+
+    const { line } = record;
     if (!line) continue;
     const maybeTokenCount = line.includes('"token_count"');
     const maybeTurnContext =
@@ -1787,14 +2026,28 @@ async function parseRolloutFile({
         line.includes('"cwd"') ||
         line.includes('"current_date"') ||
         line.includes('"forked_from_id"'));
-    if (!maybeTokenCount && !maybeTurnContext) continue;
+    if (!maybeTokenCount && !maybeTurnContext) {
+      if (invalidRecordPolicy === "throw" || !record.terminated) {
+        try {
+          JSON.parse(line);
+          committedEndOffset = scannedEndOffset;
+        } catch (error) {
+          if (invalidRecordPolicy === "throw") throw error;
+          break;
+        }
+      }
+      continue;
+    }
 
     let obj;
     try {
       obj = JSON.parse(line);
-    } catch (_e) {
+    } catch (error) {
+      if (invalidRecordPolicy === "throw") throw error;
+      if (!record.terminated) break;
       continue;
     }
+    if (!record.terminated) committedEndOffset = scannedEndOffset;
 
     if (
       (obj?.type === "turn_context" || obj?.type === "session_meta") &&
@@ -1814,7 +2067,7 @@ async function parseRolloutFile({
         const nextCwd = obj.payload.cwd.trim();
         if (nextCwd && nextCwd !== currentCwd) {
           const context = await resolveProjectContextForPath({
-            startDir: nextCwd,
+            startDir: wsl.mapWslCwdToUnc(nextCwd, filePath),
             projectMetaCache,
             publicRepoCache,
             publicRepoResolver,
@@ -1840,14 +2093,12 @@ async function parseRolloutFile({
 
     const lastUsage = info.last_token_usage;
     const totalUsage = info.total_token_usage;
+    if (totalUsage && typeof totalUsage === "object") latestTotal = totalUsage;
 
-    const delta = pickDelta(lastUsage, totalUsage, totals);
-    if (!delta) continue;
+    const rawDelta = consumeUsageDelta(usageDeltaState, lastUsage, totalUsage);
+    const delta = rawDelta ? normalizeUsage(rawDelta) : null;
+    if (!delta || isAllZeroUsage(delta)) continue;
     delta.conversation_count = 1;
-
-    if (totalUsage && typeof totalUsage === "object") {
-      totals = totalUsage;
-    }
 
     // Forked Codex rollouts replay the parent session's entire token history
     // into the child file the moment the fork is created. The date guard below
@@ -1863,8 +2114,8 @@ async function parseRolloutFile({
     // flush spacing and well below genuine turn cadence (≥~4.6s observed). The
     // first replayed row cannot be identified without lookahead, so it is still
     // counted (a bounded, <1% residual over-count); dropping real usage is the
-    // worse failure, so we bias against it. `totals` is already advanced above,
-    // keeping the cumulative-delta baseline correct for the live turns we keep.
+    // worse failure, so we bias against it. `usageDeltaState` is already advanced above,
+    // keeping the cumulative lineage correct for the live turns we keep.
     // Scoped to forked codex rollouts. (issue #169 follow-up.)
     let forkedReplaySkip = false;
     if (isForkedRollout && source === DEFAULT_SOURCE && replayPrefixActive) {
@@ -1903,8 +2154,8 @@ async function parseRolloutFile({
     // buckets. External tools rewrite session files without changing the token
     // data — Codex-Manager atomically rewrites them (new inode) to patch the
     // provider on every account/channel switch — so without dedup each switch
-    // double-counts the rewritten sessions. `totals` is already advanced above,
-    // so skipping an already-seen event keeps the cumulative-delta chain intact
+    // double-counts the rewritten sessions. `usageDeltaState` is already advanced above,
+    // so skipping an already-seen event keeps the cumulative lineage intact
     // while preventing the re-add; genuinely new turns carry new timestamps and
     // are still counted. Key = sessionUUID:eventTimestamp (both stable across the
     // rewrite and across a sessions/ -> archived_sessions/ move).
@@ -1939,33 +2190,59 @@ async function parseRolloutFile({
     eventsAggregated += 1;
   }
 
-  return { endOffset, lastTotal: totals, lastModel: model, eventsAggregated, projectFileContexts };
+  return {
+    endOffset: committedEndOffset,
+    lastTotal: latestTotal,
+    tokenUsageBaselines: snapshotUsageBaselines(usageDeltaState),
+    lastModel: model,
+    eventsAggregated,
+    projectFileContexts,
+  };
 }
 
 async function scanRolloutProjectFileContexts({
   filePath,
   fileStat,
   lastTotal,
+  tokenUsageBaselines,
   lastModel,
   projectState,
   projectMetaCache,
   publicRepoCache,
   publicRepoResolver,
   projectContext,
+  invalidRecordPolicy,
 }) {
   const st = fileStat || (await fs.stat(filePath));
   const endOffset = st.size;
   const projectFileContexts = [];
   addProjectFileContext(projectFileContexts, projectContext);
   if (!projectState || endOffset <= 0) {
-    return { endOffset, lastTotal, lastModel, eventsAggregated: 0, projectFileContexts };
+    return {
+      endOffset,
+      lastTotal,
+      tokenUsageBaselines,
+      lastModel,
+      eventsAggregated: 0,
+      projectFileContexts,
+    };
   }
 
-  const stream = fssync.createReadStream(filePath, { encoding: "utf8", start: 0 });
-  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  const stream = fssync.createReadStream(filePath, { start: 0, end: endOffset - 1 });
   let currentCwd = null;
+  let scannedEndOffset = 0;
+  let committedEndOffset = 0;
 
-  for await (const line of rl) {
+  const invalidUtf8 = invalidRecordPolicy === "throw" ? "throw" : "record";
+  for await (const record of physicalJsonlRecords(stream, { invalidUtf8 })) {
+    scannedEndOffset += record.physicalBytes;
+    if (record.terminated) committedEndOffset = scannedEndOffset;
+    if (!record.utf8Valid) {
+      if (!record.terminated) break;
+      continue;
+    }
+
+    const { line } = record;
     if (
       !line ||
       !(
@@ -1974,15 +2251,27 @@ async function scanRolloutProjectFileContexts({
       ) ||
       !line.includes('"cwd"')
     ) {
+      if (line && (invalidRecordPolicy === "throw" || !record.terminated)) {
+        try {
+          JSON.parse(line);
+          committedEndOffset = scannedEndOffset;
+        } catch (error) {
+          if (invalidRecordPolicy === "throw") throw error;
+          break;
+        }
+      }
       continue;
     }
 
     let obj;
     try {
       obj = JSON.parse(line);
-    } catch (_e) {
+    } catch (error) {
+      if (invalidRecordPolicy === "throw") throw error;
+      if (!record.terminated) break;
       continue;
     }
+    if (!record.terminated) committedEndOffset = scannedEndOffset;
     if (
       (obj?.type !== "turn_context" && obj?.type !== "session_meta") ||
       !obj?.payload ||
@@ -1995,7 +2284,7 @@ async function scanRolloutProjectFileContexts({
     const nextCwd = obj.payload.cwd.trim();
     if (!nextCwd || nextCwd === currentCwd) continue;
     const context = await resolveProjectContextForPath({
-      startDir: nextCwd,
+      startDir: wsl.mapWslCwdToUnc(nextCwd, filePath),
       projectMetaCache,
       publicRepoCache,
       publicRepoResolver,
@@ -2005,7 +2294,14 @@ async function scanRolloutProjectFileContexts({
     addProjectFileContext(projectFileContexts, context);
   }
 
-  return { endOffset, lastTotal, lastModel, eventsAggregated: 0, projectFileContexts };
+  return {
+    endOffset: committedEndOffset,
+    lastTotal,
+    tokenUsageBaselines,
+    lastModel,
+    eventsAggregated: 0,
+    projectFileContexts,
+  };
 }
 
 async function parseClaudeFile({
@@ -2031,7 +2327,10 @@ async function parseClaudeFile({
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
 
   let eventsAggregated = 0;
-  const isMainSession = !filePath.includes("/subagents/");
+  // Separator-agnostic: WSL installs are scanned over \\wsl$ UNC paths where
+  // path.join produces backslashes, and a forward-slash-only check would
+  // misclassify subagent transcripts as main sessions (#307).
+  const isMainSession = !/[\\/]subagents[\\/]/.test(filePath);
   for await (const line of rl) {
     if (!line) continue;
 
@@ -2051,13 +2350,25 @@ async function parseClaudeFile({
           typeof content === "string" ||
           (Array.isArray(content) && content.some((b) => b?.type === "text"));
         if (hasText) {
-          const userTs = typeof userObj?.timestamp === "string" ? userObj.timestamp : null;
-          const userBucketStart = userTs ? toUtcHalfHourStart(userTs) : null;
-          if (userBucketStart) {
-            const userModel = DEFAULT_MODEL;
-            const userBucket = getHourlyBucket(hourlyState, source, userModel, userBucketStart);
-            userBucket.totals.conversation_count += 1;
-            touchedBuckets.add(bucketKey(source, userModel, userBucketStart));
+          // Dedup by the line's uuid so a synced copy of the session file
+          // (WSL mirror of a divergent native file, inode-reset re-read)
+          // cannot re-count the conversation. Usage rows get the same
+          // guarantee from claudeMessageDedupKey; user lines have no
+          // message.id, so the line uuid is the identity.
+          const userKey =
+            seenMessageHashes && typeof userObj?.uuid === "string" && userObj.uuid
+              ? `u:${userObj.uuid}`
+              : null;
+          if (!userKey || !seenMessageHashes.has(userKey)) {
+            if (userKey) seenMessageHashes.add(userKey);
+            const userTs = typeof userObj?.timestamp === "string" ? userObj.timestamp : null;
+            const userBucketStart = userTs ? toUtcHalfHourStart(userTs) : null;
+            if (userBucketStart) {
+              const userModel = DEFAULT_MODEL;
+              const userBucket = getHourlyBucket(hourlyState, source, userModel, userBucketStart);
+              userBucket.totals.conversation_count += 1;
+              touchedBuckets.add(bucketKey(source, userModel, userBucketStart));
+            }
           }
         }
       }
@@ -2861,6 +3172,15 @@ function normalizeOpencodeState(raw) {
   };
 }
 
+function normalizeQoderState(raw) {
+  const state = raw && typeof raw === "object" ? raw : {};
+  const messages = state.messages && typeof state.messages === "object" ? state.messages : {};
+  return {
+    messages,
+    updatedAt: typeof state.updatedAt === "string" ? state.updatedAt : null,
+  };
+}
+
 function normalizeMessageKeyPart(value) {
   if (typeof value !== "string") return "";
   return value.trim();
@@ -2952,6 +3272,33 @@ function addTotals(target, delta) {
   target.total_tokens += delta.total_tokens || 0;
   target.billable_total_tokens += delta.billable_total_tokens ?? delta.total_tokens ?? 0;
   target.conversation_count += delta.conversation_count || 0;
+}
+
+function subtractTotals(target, totals) {
+  target.input_tokens = Math.max(0, target.input_tokens - (totals.input_tokens || 0));
+  target.cached_input_tokens = Math.max(
+    0,
+    target.cached_input_tokens - (totals.cached_input_tokens || 0),
+  );
+  target.cache_creation_input_tokens = Math.max(
+    0,
+    target.cache_creation_input_tokens - (totals.cache_creation_input_tokens || 0),
+  );
+  target.output_tokens = Math.max(0, target.output_tokens - (totals.output_tokens || 0));
+  target.reasoning_output_tokens = Math.max(
+    0,
+    target.reasoning_output_tokens - (totals.reasoning_output_tokens || 0),
+  );
+  target.total_tokens = Math.max(0, target.total_tokens - (totals.total_tokens || 0));
+  target.billable_total_tokens = Math.max(
+    0,
+    target.billable_total_tokens -
+      (totals.billable_total_tokens ?? totals.total_tokens ?? 0),
+  );
+  target.conversation_count = Math.max(
+    0,
+    target.conversation_count - (totals.conversation_count || 0),
+  );
 }
 
 function totalsKey(totals) {
@@ -3570,48 +3917,6 @@ function extractTokenCount(obj) {
   return null;
 }
 
-function pickDelta(lastUsage, totalUsage, prevTotals) {
-  const hasLast = isNonEmptyObject(lastUsage);
-  const hasTotal = isNonEmptyObject(totalUsage);
-  const hasPrevTotals = isNonEmptyObject(prevTotals);
-
-  if (hasTotal && hasPrevTotals) {
-    if (totalsReset(totalUsage, prevTotals)) {
-      const resetUsage = hasLast ? lastUsage : totalUsage;
-      const normalized = normalizeUsage(resetUsage);
-      return isAllZeroUsage(normalized) ? null : normalized;
-    }
-
-    const delta = {};
-    for (const k of [
-      "input_tokens",
-      "cached_input_tokens",
-      "cache_creation_input_tokens",
-      "output_tokens",
-      "reasoning_output_tokens",
-      "total_tokens",
-    ]) {
-      const a = Number(totalUsage[k]);
-      const b = Number(prevTotals[k]);
-      if (Number.isFinite(a) && Number.isFinite(b)) delta[k] = Math.max(0, a - b);
-    }
-    const normalized = normalizeUsage(delta);
-    return isAllZeroUsage(normalized) ? null : normalized;
-  }
-
-  if (hasLast) {
-    const normalized = normalizeUsage(lastUsage);
-    return isAllZeroUsage(normalized) ? null : normalized;
-  }
-
-  if (hasTotal) {
-    const normalized = normalizeUsage(totalUsage);
-    return isAllZeroUsage(normalized) ? null : normalized;
-  }
-
-  return null;
-}
-
 function normalizeUsage(u) {
   const out = {};
   for (const k of [
@@ -3692,13 +3997,6 @@ function isAllZeroUsage(u) {
     if (Number(u[k] || 0) !== 0) return false;
   }
   return true;
-}
-
-function totalsReset(curr, prev) {
-  const currTotal = curr?.total_tokens;
-  const prevTotal = prev?.total_tokens;
-  if (!isFiniteNumber(currTotal) || !isFiniteNumber(prevTotal)) return false;
-  return currTotal < prevTotal;
 }
 
 function isFiniteNumber(v) {
@@ -3896,6 +4194,7 @@ function readZcodeDbMessages(dbPath, sqliteOptions = {}) {
 
 async function parseOpencodeDbIncremental({
   dbMessages,
+  dbPath,
   cursors,
   queuePath,
   projectQueuePath,
@@ -3992,6 +4291,7 @@ async function parseOpencodeDbIncremental({
     if (projectEnabled) {
       const projectContext = await resolveProjectContextForDb({
         msg,
+        dbPath,
         projectMetaCache,
         publicRepoCache,
         publicRepoResolver,
@@ -4046,9 +4346,704 @@ async function parseOpencodeDbIncremental({
   return { messagesProcessed, eventsAggregated, bucketsQueued, projectBucketsQueued };
 }
 
+const QODER_USAGE_SQL = `
+SELECT
+  cm.rowid AS row_id,
+  cm.id,
+  cm.session_id,
+  cm.request_id,
+  cm.token_info,
+  cm.model_info,
+  cm.gmt_create,
+  cr.extra AS record_extra,
+  cs.preferred_model_info,
+  cs.project_uri,
+  cs.project_name
+FROM chat_message AS cm
+LEFT JOIN chat_record AS cr ON cr.request_id = cm.request_id
+LEFT JOIN chat_session AS cs ON cs.session_id = cm.session_id
+WHERE cm.role = 'assistant'
+  AND cm.token_info IS NOT NULL
+  AND trim(cm.token_info) NOT IN ('', '{}')
+ORDER BY cm.gmt_create, cm.rowid
+`;
+
+function resolveQoderDbPath({
+  home = os.homedir(),
+  env = process.env,
+  platform = process.platform,
+} = {}) {
+  if (typeof env.QODER_DB_PATH === "string" && env.QODER_DB_PATH.trim()) {
+    return path.resolve(env.QODER_DB_PATH.trim());
+  }
+  let root;
+  if (typeof env.QODER_HOME === "string" && env.QODER_HOME.trim()) {
+    root = path.resolve(env.QODER_HOME.trim());
+  } else if (platform === "darwin") {
+    root = path.join(home, "Library", "Application Support", "Qoder");
+  } else if (platform === "win32") {
+    root = path.join(
+      env.APPDATA || path.join(home, "AppData", "Roaming"),
+      "Qoder",
+    );
+  } else {
+    root = path.join(home, ".config", "Qoder");
+  }
+  return path.join(root, "SharedClientCache", "cache", "db", "local.db");
+}
+
+function resolveQoderDbPaths({
+  home = os.homedir(),
+  env = process.env,
+  platform = process.platform,
+  deps = {},
+} = {}) {
+  const nativeValue = resolveQoderDbPath({ home, env, platform });
+  if (platform !== "win32" || env.QODER_DB_PATH || env.QODER_HOME) {
+    return { native: nativeValue, wsl: null };
+  }
+  const existsSync = deps.existsSync || fssync.existsSync;
+  const native = wsl.shouldProbeNative(env) && existsSync(nativeValue) ? nativeValue : null;
+  const discoverWslHome = deps.discoverWslHome || wsl.discoverWslHome;
+  const wslRoot = wsl.shouldProbeWsl(env)
+    ? discoverWslHome(".config/Qoder", { ...deps, env })
+    : null;
+  const wslValue = wslRoot
+    ? path.join(wslRoot, "SharedClientCache", "cache", "db", "local.db")
+    : null;
+  const wslDb = wslValue && existsSync(wslValue) ? wslValue : null;
+  return wsl.resolveAllWin32Paths({
+    nativeValue: native,
+    wslValue: wslDb,
+    env,
+    platform: "win32",
+  });
+}
+
+async function readQoderDbMessages(dbPath, sqliteOptions = {}) {
+  if (!dbPath || !fssync.existsSync(dbPath)) return [];
+  return readSqliteJsonRowsAsync(dbPath, QODER_USAGE_SQL, {
+    label: "Qoder",
+    ...sqliteOptions,
+  });
+}
+
+function parseJsonObject(value) {
+  if (!value) return null;
+  if (value && typeof value === "object" && !Buffer.isBuffer(value)) return value;
+  try {
+    const parsed = JSON.parse(String(value));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function normalizeQoderTokens(tokenInfo) {
+  const tokens = parseJsonObject(tokenInfo);
+  if (!tokens) return null;
+  const prompt = Number(tokens.prompt_tokens);
+  const cached = Number(tokens.cached_tokens || 0);
+  const completion = Number(tokens.completion_tokens);
+  if (
+    !Number.isFinite(prompt) ||
+    !Number.isFinite(cached) ||
+    !Number.isFinite(completion) ||
+    prompt < 0 ||
+    cached < 0 ||
+    completion < 0
+  ) {
+    return null;
+  }
+  // Qoder's prompt_tokens already includes cached_tokens. Keep cached input in
+  // its own column and report only the remainder as ordinary input, otherwise
+  // cached context is counted twice in dashboards and cost calculations.
+  const input = Math.max(0, Math.trunc(prompt) - Math.trunc(cached));
+  const cachedInput = Math.min(Math.trunc(prompt), Math.trunc(cached));
+  const output = Math.trunc(completion);
+  return {
+    input_tokens: input,
+    cached_input_tokens: cachedInput,
+    cache_creation_input_tokens: 0,
+    output_tokens: output,
+    reasoning_output_tokens: 0,
+    total_tokens: Math.trunc(prompt) + output,
+    billable_total_tokens: Math.trunc(prompt) + output,
+  };
+}
+
+function qoderModelFromRow(row) {
+  const direct = parseJsonObject(row?.model_info);
+  const recordExtra = parseJsonObject(row?.record_extra);
+  const preferred = parseJsonObject(row?.preferred_model_info);
+  return (
+    normalizeModelInput(direct?.model_key || direct?.modelKey) ||
+    normalizeModelInput(recordExtra?.modelConfig?.key || recordExtra?.model_config?.key) ||
+    normalizeModelInput(
+      preferred?.model_key ||
+      preferred?.modelKey ||
+      preferred?.preferred_model ||
+      preferred?.preferredModel,
+    ) ||
+    "qoder-agent"
+  );
+}
+
+function qoderMessageKey(row) {
+  const id = normalizeMessageKeyPart(row?.id);
+  const sessionId = normalizeMessageKeyPart(row?.session_id);
+  if (sessionId && id) return `${sessionId}|${id}`;
+  if (id) return id;
+  const rowId = row?.row_id;
+  return rowId === null || rowId === undefined ? null : `row:${rowId}`;
+}
+
+function qoderProjectPath(row) {
+  const raw = typeof row?.project_uri === "string" ? row.project_uri.trim() : "";
+  if (!raw) return null;
+  if (!raw.startsWith("file://")) return raw;
+  try {
+    return decodeURIComponent(new URL(raw).pathname);
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function parseQoderDbIncremental({
+  dbMessages,
+  dbPath,
+  cursors,
+  queuePath,
+  projectQueuePath,
+  onProgress,
+  publicRepoResolver,
+} = {}) {
+  await ensureDir(path.dirname(queuePath));
+  const rows = Array.isArray(dbMessages) ? dbMessages : [];
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const qoderState = normalizeQoderState(cursors?.qoder);
+  const touchedBuckets = new Set();
+  const projectEnabled = typeof projectQueuePath === "string" && projectQueuePath.length > 0;
+  const projectState = projectEnabled ? normalizeProjectState(cursors?.projectHourly) : null;
+  const projectTouchedBuckets = projectEnabled ? new Set() : null;
+  const projectMetaCache = projectEnabled ? new Map() : null;
+  const publicRepoCache = projectEnabled ? new Map() : null;
+  const requestOwners = new Map();
+  for (const row of rows) {
+    const messageKey = qoderMessageKey(row);
+    if (
+      !messageKey ||
+      !normalizeQoderTokens(row?.token_info) ||
+      !coerceEpochMs(row?.gmt_create)
+    ) {
+      continue;
+    }
+    const requestKey =
+      normalizeMessageKeyPart(row?.request_id) ||
+      normalizeMessageKeyPart(row?.session_id) ||
+      messageKey;
+    if (!requestOwners.has(requestKey)) requestOwners.set(requestKey, messageKey);
+  }
+  const cb = typeof onProgress === "function" ? onProgress : null;
+  let messagesProcessed = 0;
+  let eventsAggregated = 0;
+
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index];
+    const messageKey = qoderMessageKey(row);
+    const currentBase = normalizeQoderTokens(row?.token_info);
+    const timestampMs = coerceEpochMs(row?.gmt_create);
+    const bucketStart = timestampMs
+      ? toUtcHalfHourStart(new Date(timestampMs).toISOString())
+      : null;
+    if (!messageKey || !currentBase || !bucketStart) {
+      messagesProcessed += 1;
+      continue;
+    }
+
+    const requestKey =
+      normalizeMessageKeyPart(row?.request_id) ||
+      normalizeMessageKeyPart(row?.session_id) ||
+      messageKey;
+    const previous = qoderState.messages[messageKey];
+    // Recompute request ownership from the complete ordered DB snapshot on
+    // every pass. Qoder can attach token_info to an earlier assistant row only
+    // after a later row was already counted; retaining the old per-message
+    // owner in that case inflates one request to two conversations.
+    const conversationCount = requestOwners.get(requestKey) === messageKey ? 1 : 0;
+
+    const currentTotals = {
+      ...currentBase,
+      conversation_count: conversationCount,
+    };
+    const model = qoderModelFromRow(row);
+    let projectKey = null;
+    let projectRef = null;
+    if (projectEnabled) {
+      const projectPath = qoderProjectPath(row);
+      if (projectPath) {
+        const context = await resolveProjectContextForPath({
+          startDir: wsl.mapWslCwdToUnc(projectPath, dbPath),
+          projectMetaCache,
+          publicRepoCache,
+          publicRepoResolver,
+          projectState,
+        });
+        projectKey = context?.projectKey || null;
+        projectRef = context?.projectRef || null;
+      }
+    }
+
+    const previousTotals =
+      previous?.totals && typeof previous.totals === "object" ? previous.totals : null;
+    const unchanged =
+      previousTotals &&
+      totalsKey(previousTotals) === totalsKey(currentTotals) &&
+      previous.bucketStart === bucketStart &&
+      previous.model === model &&
+      (previous.projectKey || null) === projectKey;
+    if (!unchanged) {
+      if (previousTotals && previous.bucketStart && previous.model) {
+        const oldBucket = getHourlyBucket(
+          hourlyState,
+          "qoder",
+          previous.model,
+          previous.bucketStart,
+        );
+        subtractTotals(oldBucket.totals, previousTotals);
+        touchedBuckets.add(bucketKey("qoder", previous.model, previous.bucketStart));
+        if (projectEnabled && previous.projectKey) {
+          const oldProjectBucket = getProjectBucket(
+            projectState,
+            previous.projectKey,
+            "qoder",
+            previous.bucketStart,
+            previous.projectRef || null,
+          );
+          subtractTotals(oldProjectBucket.totals, previousTotals);
+          projectTouchedBuckets.add(
+            projectBucketKey(previous.projectKey, "qoder", previous.bucketStart),
+          );
+        }
+      }
+
+      const bucket = getHourlyBucket(hourlyState, "qoder", model, bucketStart);
+      addTotals(bucket.totals, currentTotals);
+      touchedBuckets.add(bucketKey("qoder", model, bucketStart));
+      if (projectEnabled && projectKey) {
+        const projectBucket = getProjectBucket(
+          projectState,
+          projectKey,
+          "qoder",
+          bucketStart,
+          projectRef,
+        );
+        addTotals(projectBucket.totals, currentTotals);
+        projectTouchedBuckets.add(projectBucketKey(projectKey, "qoder", bucketStart));
+      }
+      qoderState.messages[messageKey] = {
+        totals: currentTotals,
+        conversationCount,
+        requestKey,
+        bucketStart,
+        model,
+        projectKey,
+        projectRef,
+        updatedAt: new Date().toISOString(),
+      };
+      eventsAggregated += 1;
+    }
+
+    messagesProcessed += 1;
+    if (cb) {
+      cb({
+        index: index + 1,
+        total: rows.length,
+        messagesProcessed,
+        eventsAggregated,
+        bucketsQueued: touchedBuckets.size,
+      });
+    }
+  }
+
+  const bucketsQueued = await enqueueTouchedBuckets({
+    queuePath,
+    hourlyState,
+    touchedBuckets,
+  });
+  const projectBucketsQueued = projectEnabled
+    ? await enqueueTouchedProjectBuckets({
+        projectQueuePath,
+        projectState,
+        projectTouchedBuckets,
+      })
+    : 0;
+  const updatedAt = new Date().toISOString();
+  hourlyState.updatedAt = updatedAt;
+  qoderState.updatedAt = updatedAt;
+  cursors.hourly = hourlyState;
+  cursors.qoder = qoderState;
+  if (projectState) {
+    projectState.updatedAt = updatedAt;
+    cursors.projectHourly = projectState;
+  }
+  return { messagesProcessed, eventsAggregated, bucketsQueued, projectBucketsQueued };
+}
+
+// ── Claude Science (Anthropic's local research workbench, issue #246) ──
+//
+// Claude Science keeps all of its state in a SQLite database named
+// `operon-cli.db`. There is no native Windows build — on Windows the app runs
+// INSIDE WSL, so the DB lives on the distro's ext4 home, not under %USERPROFILE%
+// (see resolveClaudeScienceDbPaths).
+//
+// Per-frame token usage lives on the `frames` table. A row is one agent
+// session/sub-session and records its OWN counters; Claude Science's own
+// per-conversation rollup (`sumTokensForRoot`) plainly sums every row under a
+// root, so summing across frames never double-counts a parent's children.
+//
+// TWO load-bearing quirks, both verified against real frames by reproducing
+// Claude Science's own cost function to 6 significant figures:
+//
+//  1. `input_tokens` is OpenAI-style — it ALREADY INCLUDES cache reads and
+//     writes. Claude Science's accumulator adds `totalInputTokens`
+//     (= cacheRead + cacheWrite + uncached), not the Anthropic API's
+//     `input_tokens`. Treating the column as pure non-cached input prices cache
+//     reads at the full input rate and inflates cost ~5.6x, while also counting
+//     the cache columns twice in total_tokens (~1.97x). Subtract them back out.
+//  2. `aux_*` are real, billable usage from background helper calls (rolling
+//     compaction, compaction summaries, artifact provenance extraction,
+//     biosecurity screening, memory extraction). They are DISJOINT from the
+//     headline columns — the summarizer call is issued with
+//     `skip_cost_accumulation: true` so it bypasses the main accumulator — and
+//     Claude Science's own rollup adds them in. Dropping them under-counts by
+//     ~11.5%. `aux_input_tokens` carries the same cache-inclusive convention.
+//
+//     Known approximation: aux tokens get priced at the frame's headline model
+//     rate, but the helper calls actually run on a cheaper model, and Claude
+//     Science does not persist which one (nor a per-aux cache split — the
+//     aux_cache_* columns come back NULL even when aux_cost implies cache
+//     reads). Measured on real frames, that overprices the aux slice ~2.4x,
+//     i.e. ~20% high on the frame total. Counting the tokens and accepting a
+//     bounded cost skew beats dropping 11.5% of usage outright, but if Claude
+//     Science ever records the aux model, price that slice separately.
+//
+// `token_class_usage` is deliberately NOT read: it is an attribution *slice* of
+// the same tokens (assistant_prose / tool_calls / thinking / …), so its classes
+// sum back to the columns above and adding it would double count.
+// The cache and aux columns arrived in later drizzle migrations, so build the
+// SELECT from PRAGMA table_info rather than naming them blindly — an older
+// operon-cli.db must degrade to the columns it has instead of erroring the
+// whole provider out.
+//
+// The usage predicate doubles as the seed-frame filter: a fresh install ships
+// four Anthropic demo frames whose token columns are all NULL. Their
+// `context_data` JSON still carries the demo run's real numbers (~23.6M tokens
+// / $28.5), which is exactly why this parser reads columns and never that blob.
+const CLAUDE_SCIENCE_TOKEN_COLUMNS = [
+  "input_tokens",
+  "output_tokens",
+  "cache_read_tokens",
+  "cache_write_tokens",
+  "aux_input_tokens",
+  "aux_output_tokens",
+  "aux_cache_read_tokens",
+  "aux_cache_write_tokens",
+];
+
+function buildClaudeScienceFramesQuery(columnNames) {
+  const columns = new Set(columnNames);
+  const optional = (col) => (columns.has(col) ? col : `NULL AS ${col}`);
+  const present = CLAUDE_SCIENCE_TOKEN_COLUMNS.filter((col) => columns.has(col));
+  const where = present.length
+    ? `WHERE ${present.map((col) => `COALESCE(${col}, 0) <> 0`).join("\n   OR ")}`
+    : "WHERE 0";
+  return `
+SELECT
+  id,
+  parent_frame_id,
+  model,
+  ${CLAUDE_SCIENCE_TOKEN_COLUMNS.map(optional).join(",\n  ")},
+  created_at,
+  ${optional("updated_at")},
+  ${optional("completed_at")}
+FROM frames
+${where}
+ORDER BY created_at, id
+`;
+}
+
+// `operon.db` is the pre-rename filename; both are still probed.
+const CLAUDE_SCIENCE_DB_FILENAMES = ["operon-cli.db", "operon.db"];
+
+function resolveClaudeScienceRoot({ home = os.homedir(), env = process.env } = {}) {
+  const override =
+    typeof env.CLAUDE_SCIENCE_HOME === "string" && env.CLAUDE_SCIENCE_HOME.trim()
+      ? path.resolve(env.CLAUDE_SCIENCE_HOME.trim())
+      : null;
+  return override || path.join(home, ".claude-science");
+}
+
+function claudeScienceDbsUnderRoot(root) {
+  const out = [];
+  if (!root) return out;
+  for (const name of CLAUDE_SCIENCE_DB_FILENAMES) {
+    const candidate = path.join(root, name);
+    if (fssync.existsSync(candidate)) out.push(candidate);
+  }
+  // Multi-org installs keep one DB per org under orgs/<slug>/.
+  const orgsDir = path.join(root, "orgs");
+  let orgs = [];
+  try {
+    orgs = fssync.readdirSync(orgsDir, { withFileTypes: true });
+  } catch (_e) {
+    orgs = [];
+  }
+  for (const org of orgs) {
+    if (!org.isDirectory()) continue;
+    for (const name of CLAUDE_SCIENCE_DB_FILENAMES) {
+      const candidate = path.join(orgsDir, org.name, name);
+      if (fssync.existsSync(candidate)) out.push(candidate);
+    }
+  }
+  return out;
+}
+
+// Every Claude Science DB on this machine. There is no native Windows build —
+// Windows users run the app inside WSL, so on win32 the distro home is probed
+// too (same pattern as the other WSL-aware providers). Returns [] when nothing
+// is installed.
+function resolveClaudeScienceDbPaths({ home = os.homedir(), env = process.env, deps = {} } = {}) {
+  const explicit =
+    typeof env.CLAUDE_SCIENCE_DB_PATH === "string" && env.CLAUDE_SCIENCE_DB_PATH.trim()
+      ? path.resolve(env.CLAUDE_SCIENCE_DB_PATH.trim())
+      : null;
+  if (explicit) return fssync.existsSync(explicit) ? [explicit] : [];
+
+  const roots = [resolveClaudeScienceRoot({ home, env })];
+  const platform = deps.platform || process.platform;
+  if (platform === "win32" && !env.CLAUDE_SCIENCE_HOME) {
+    const discoverWslHome = deps.discoverWslHome || wsl.discoverWslHome;
+    const wslRoot = wsl.shouldProbeWsl(env)
+      ? discoverWslHome(".claude-science", { ...deps, env })
+      : null;
+    if (wslRoot) roots.push(wslRoot);
+  }
+
+  const seen = new Set();
+  const out = [];
+  for (const root of roots) {
+    for (const dbPath of claudeScienceDbsUnderRoot(root)) {
+      if (seen.has(dbPath)) continue;
+      seen.add(dbPath);
+      out.push(dbPath);
+    }
+  }
+  return out;
+}
+
+// Kept for the default single-install path (and its existing callers/tests):
+// the conventional location, whether or not it exists yet.
+function resolveClaudeScienceDbPath({ home = os.homedir(), env = process.env } = {}) {
+  const explicit =
+    typeof env.CLAUDE_SCIENCE_DB_PATH === "string" && env.CLAUDE_SCIENCE_DB_PATH.trim()
+      ? env.CLAUDE_SCIENCE_DB_PATH.trim()
+      : null;
+  if (explicit) return path.resolve(explicit);
+  return path.join(resolveClaudeScienceRoot({ home, env }), "operon-cli.db");
+}
+
+async function readClaudeScienceFrames(dbPath, sqliteOptions = {}) {
+  if (!dbPath || !fssync.existsSync(dbPath)) return [];
+  const options = { label: "Claude Science", readOnly: true, ...sqliteOptions };
+
+  // On Windows the DB lives inside WSL and is read over a \\wsl.localhost\ UNC
+  // path. operon-cli.db runs in WAL mode (its -wal/-shm sidecars must be read
+  // consistently with the main file), and SQLite over the 9p/UNC bridge can
+  // fail to open the WAL or read a torn state. Snapshot to a local temp copy
+  // first — same guard every other WSL-aware provider uses — and run BOTH the
+  // PRAGMA probe and the frames read against that one consistent copy.
+  let snapshot = null;
+  let effectiveDbPath = dbPath;
+  if (isUncPath(dbPath)) {
+    try {
+      snapshot = snapshotSqliteDb(dbPath);
+      effectiveDbPath = snapshot.path;
+    } catch (_e) {
+      // Snapshot failed (permissions, transient I/O) — fall through to a direct
+      // read so the non-UNC case never regresses.
+    }
+  }
+
+  try {
+    const pragmaRows = await readSqliteJsonRowsAsync(
+      effectiveDbPath,
+      "PRAGMA table_info(frames)",
+      options,
+    );
+    const columnNames = pragmaRows.map((row) => row?.name).filter(Boolean);
+    // No `frames` table at all (wrong DB / pre-frames build) — not an error.
+    if (columnNames.length === 0) return [];
+    return await readSqliteJsonRowsAsync(
+      effectiveDbPath,
+      buildClaudeScienceFramesQuery(columnNames),
+      options,
+    );
+  } finally {
+    if (snapshot) snapshot.cleanup();
+  }
+}
+
+// `input` here is cache-inclusive (see the header note), so peel the cache
+// columns back off to recover pure non-cached input. Main and aux counters are
+// clamped independently — mixing them before the subtraction would let one
+// group's cache mask the other's shortfall.
+function claudeScienceUncachedInput(input, cacheRead, cacheWrite) {
+  return Math.max(0, toNonNegativeInt(input) - toNonNegativeInt(cacheRead) - toNonNegativeInt(cacheWrite));
+}
+
+function normalizeClaudeScienceTokens(row) {
+  const uncachedInput =
+    claudeScienceUncachedInput(row?.input_tokens, row?.cache_read_tokens, row?.cache_write_tokens) +
+    claudeScienceUncachedInput(
+      row?.aux_input_tokens,
+      row?.aux_cache_read_tokens,
+      row?.aux_cache_write_tokens,
+    );
+  const output = toNonNegativeInt(row?.output_tokens) + toNonNegativeInt(row?.aux_output_tokens);
+  const cacheRead =
+    toNonNegativeInt(row?.cache_read_tokens) + toNonNegativeInt(row?.aux_cache_read_tokens);
+  const cacheWrite =
+    toNonNegativeInt(row?.cache_write_tokens) + toNonNegativeInt(row?.aux_cache_write_tokens);
+  const total = uncachedInput + output + cacheRead + cacheWrite;
+  if (total <= 0) return null;
+  return {
+    input_tokens: uncachedInput,
+    cached_input_tokens: cacheRead,
+    cache_creation_input_tokens: cacheWrite,
+    output_tokens: output,
+    reasoning_output_tokens: 0,
+    total_tokens: total,
+    billable_total_tokens: total,
+  };
+}
+
+function claudeScienceFrameTimestampMs(row) {
+  return (
+    coerceEpochMs(row?.completed_at) ||
+    coerceEpochMs(row?.updated_at) ||
+    coerceEpochMs(row?.created_at) ||
+    // Tolerate ISO-8601 text timestamps in case a build stores them as strings.
+    parseIsoTimestampMs(row?.completed_at) ||
+    parseIsoTimestampMs(row?.updated_at) ||
+    parseIsoTimestampMs(row?.created_at)
+  );
+}
+
+function parseIsoTimestampMs(value) {
+  if (typeof value !== "string" || !value.trim()) return 0;
+  const ms = Date.parse(value.trim());
+  return Number.isFinite(ms) && ms > 0 ? ms : 0;
+}
+
+// Idempotent, subtract-on-change aggregation keyed by frame id (mirrors the
+// Qoder DB parser): frames are re-read in full on every sync, and a frame whose
+// counters grew between syncs has its previous contribution removed from its old
+// bucket before the new totals are added, so repeated syncs never inflate.
+async function parseClaudeScienceIncremental({
+  dbRows,
+  cursors,
+  queuePath,
+  onProgress,
+} = {}) {
+  await ensureDir(path.dirname(queuePath));
+  const rows = Array.isArray(dbRows) ? dbRows : [];
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const state = normalizeQoderState(cursors?.claudeScience);
+  const touchedBuckets = new Set();
+  const cb = typeof onProgress === "function" ? onProgress : null;
+  let recordsProcessed = 0;
+  let eventsAggregated = 0;
+
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index];
+    const frameId = normalizeMessageKeyPart(row?.id == null ? "" : String(row.id));
+    const base = normalizeClaudeScienceTokens(row);
+    const timestampMs = claudeScienceFrameTimestampMs(row);
+    const bucketStart = timestampMs
+      ? toUtcHalfHourStart(new Date(timestampMs).toISOString())
+      : null;
+    if (!frameId || !base || !bucketStart) {
+      recordsProcessed += 1;
+      continue;
+    }
+
+    // A root frame (no parent) is one user-facing conversation; nested child
+    // frames are sub-agent turns of the same conversation and must not inflate
+    // the conversation count.
+    const isRoot = !normalizeMessageKeyPart(
+      row?.parent_frame_id == null ? "" : String(row.parent_frame_id),
+    );
+    const currentTotals = { ...base, conversation_count: isRoot ? 1 : 0 };
+    const model = normalizeModelInput(row?.model) || "claude-science";
+
+    const previous = state.messages[frameId];
+    const previousTotals =
+      previous?.totals && typeof previous.totals === "object" ? previous.totals : null;
+    const unchanged =
+      previousTotals &&
+      totalsKey(previousTotals) === totalsKey(currentTotals) &&
+      previous.bucketStart === bucketStart &&
+      previous.model === model;
+
+    if (!unchanged) {
+      if (previousTotals && previous.bucketStart && previous.model) {
+        const oldBucket = getHourlyBucket(
+          hourlyState,
+          "claude-science",
+          previous.model,
+          previous.bucketStart,
+        );
+        subtractTotals(oldBucket.totals, previousTotals);
+        touchedBuckets.add(bucketKey("claude-science", previous.model, previous.bucketStart));
+      }
+      const bucket = getHourlyBucket(hourlyState, "claude-science", model, bucketStart);
+      addTotals(bucket.totals, currentTotals);
+      touchedBuckets.add(bucketKey("claude-science", model, bucketStart));
+      state.messages[frameId] = {
+        totals: currentTotals,
+        bucketStart,
+        model,
+        updatedAt: new Date().toISOString(),
+      };
+      eventsAggregated += 1;
+    }
+
+    recordsProcessed += 1;
+    if (cb) {
+      cb({
+        index: index + 1,
+        total: rows.length,
+        recordsProcessed,
+        eventsAggregated,
+        bucketsQueued: touchedBuckets.size,
+      });
+    }
+  }
+
+  const bucketsQueued = await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets });
+  const updatedAt = new Date().toISOString();
+  hourlyState.updatedAt = updatedAt;
+  state.updatedAt = updatedAt;
+  cursors.hourly = hourlyState;
+  cursors.claudeScience = state;
+  return { recordsProcessed, eventsAggregated, bucketsQueued };
+}
+
 // Resolve project context from DB message (no file path available)
 async function resolveProjectContextForDb({
   msg,
+  dbPath,
   projectMetaCache,
   publicRepoCache,
   publicRepoResolver,
@@ -4057,7 +5052,9 @@ async function resolveProjectContextForDb({
   const cwd = msg?.path?.cwd;
   if (!cwd || typeof cwd !== "string") return null;
   return resolveProjectContextForPath({
-    startDir: cwd,
+    // The DB itself is read over the distro's UNC bridge on Windows, so its
+    // path carries the prefix the recorded POSIX cwd needs (#374).
+    startDir: wsl.mapWslCwdToUnc(cwd, dbPath),
     projectMetaCache,
     publicRepoCache,
     publicRepoResolver,
@@ -4180,37 +5177,60 @@ async function parseCursorApiIncremental({
 // Kiro token tracking (reads from devdata.sqlite or tokens_generated.jsonl)
 // ---------------------------------------------------------------------------
 
-function resolveKiroBasePath() {
+// Kiro IDE (VS Code fork) globalStorage lives under the editor config root,
+// which differs per platform: %APPDATA% on Windows, ~/.config on Linux/WSL,
+// ~/Library/Application Support on macOS.
+function resolveKiroBasePath(env = process.env) {
   const home = require("node:os").homedir();
-  return path.join(
-    home,
-    "Library",
-    "Application Support",
-    "Kiro",
-    "User",
-    "globalStorage",
-    "kiro.kiroagent",
-  );
+  const suffix = ["Kiro", "User", "globalStorage", "kiro.kiroagent"];
+  if (process.platform === "win32") {
+    const appData = typeof env.APPDATA === "string" && env.APPDATA.trim().length > 0
+      ? env.APPDATA.trim()
+      : path.join(home, "AppData", "Roaming");
+    return path.join(appData, ...suffix);
+  }
+  if (process.platform === "linux") {
+    const configHome = typeof env.XDG_CONFIG_HOME === "string" && env.XDG_CONFIG_HOME.trim().length > 0
+      ? env.XDG_CONFIG_HOME.trim()
+      : path.join(home, ".config");
+    return path.join(configHome, ...suffix);
+  }
+  return path.join(home, "Library", "Application Support", ...suffix);
 }
 
-function resolveKiroDbPath() {
-  return path.join(resolveKiroBasePath(), "dev_data", "devdata.sqlite");
+function resolveKiroDbPath(basePath) {
+  return path.join(basePath || resolveKiroBasePath(), "dev_data", "devdata.sqlite");
 }
 
-function resolveKiroJsonlPath() {
-  return path.join(resolveKiroBasePath(), "dev_data", "tokens_generated.jsonl");
+function resolveKiroJsonlPath(basePath) {
+  return path.join(basePath || resolveKiroBasePath(), "dev_data", "tokens_generated.jsonl");
 }
 
 function readKiroDbTokens(dbPath, sinceId, sqliteOptions = {}) {
   if (!dbPath || !fssync.existsSync(dbPath)) return [];
   const minId = Number.isFinite(sinceId) && sinceId > 0 ? sinceId : 0;
   const sql = `SELECT id, model, provider, tokens_prompt, tokens_generated, timestamp FROM tokens_generated WHERE id > ${minId} ORDER BY id ASC`;
-  return readSqliteJsonRows(dbPath, sql, {
-    label: "Kiro",
-    maxBuffer: 10 * 1024 * 1024,
-    timeout: 15_000,
-    ...sqliteOptions,
-  });
+
+  // WSL installs are read over the \\wsl$ UNC bridge; sqlite3 cannot safely
+  // open WAL databases there, so copy db (+ sidecars) to tmp first.
+  let snapshot = null;
+  let effectiveDbPath = dbPath;
+  if (isUncPath(dbPath)) {
+    try {
+      snapshot = snapshotSqliteDb(dbPath);
+      effectiveDbPath = snapshot.path;
+    } catch (_e) { }
+  }
+  try {
+    return readSqliteJsonRows(effectiveDbPath, sql, {
+      label: "Kiro",
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: 15_000,
+      ...sqliteOptions,
+    });
+  } finally {
+    if (snapshot) snapshot.cleanup();
+  }
 }
 
 // Read Kiro token data from JSONL fallback (tokens_generated.jsonl).
@@ -4352,7 +5372,7 @@ function normalizeKiroModelName(raw) {
   return name || null;
 }
 
-async function parseKiroIncremental({ dbPath, jsonlPath, cursors, queuePath, onProgress, sqliteOptions } = {}) {
+async function parseKiroIncremental({ basePath, dbPath, jsonlPath, cursors, queuePath, onProgress, sqliteOptions } = {}) {
   await ensureDir(path.dirname(queuePath));
   const kiroState = cursors.kiro && typeof cursors.kiro === "object" ? cursors.kiro : {};
   const lastDbId = typeof kiroState.lastDbId === "number"
@@ -4361,8 +5381,8 @@ async function parseKiroIncremental({ dbPath, jsonlPath, cursors, queuePath, onP
   const jsonlState = kiroState.jsonl && typeof kiroState.jsonl === "object" ? kiroState.jsonl : {};
   const lastJsonlLine = typeof jsonlState.lastLine === "number" ? jsonlState.lastLine : 0;
 
-  const resolvedDbPath = dbPath || resolveKiroDbPath();
-  const resolvedJsonlPath = jsonlPath || resolveKiroJsonlPath();
+  const resolvedDbPath = dbPath || resolveKiroDbPath(basePath);
+  const resolvedJsonlPath = jsonlPath || resolveKiroJsonlPath(basePath);
 
   // Try SQLite first, fall back to JSONL.
   let rows = [];
@@ -4410,9 +5430,12 @@ async function parseKiroIncremental({ dbPath, jsonlPath, cursors, queuePath, onP
     return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
   }
 
-  // Build model timeline from .chat files for model name resolution
-  const basePath = resolveKiroBasePath();
-  const modelTimeline = buildKiroModelTimeline(basePath);
+  // Build model timeline from .chat files for model name resolution.
+  // Must come from the SAME install as the rows being parsed (dual-install:
+  // a WSL install's rows must not be resolved against native .chat files).
+  const timelineBase = basePath
+    || (dbPath ? path.dirname(path.dirname(dbPath)) : resolveKiroBasePath());
+  const modelTimeline = buildKiroModelTimeline(timelineBase);
 
   const hourlyState = normalizeHourlyState(cursors?.hourly);
   const touchedBuckets = new Set();
@@ -4701,6 +5724,74 @@ function hermesInstallOwnsCursor(hermesPath, flatState, sqliteOptions) {
   return allDbs.some((db) => sqliteDbContainsIds(db, "sessions", sample, sqliteOptions));
 }
 
+function kiroInstallOwnsCursor(dbPath, flatState, sqliteOptions) {
+  // The flat cursor tracks the max AUTOINCREMENT id it consumed. An install
+  // whose tokens_generated table never reached that id cannot be the flat
+  // cursor's host. Both installs containing the id (short/equal histories)
+  // yields two hits upstream → caller seeds every namespace (safe).
+  const lastDbId = typeof flatState?.lastDbId === "number" && Number.isInteger(flatState.lastDbId) && flatState.lastDbId > 0
+    ? flatState.lastDbId
+    : (typeof flatState?.lastId === "number" && Number.isInteger(flatState.lastId) && flatState.lastId > 0
+      ? flatState.lastId
+      : 0);
+  if (!lastDbId) return false;
+  return sqliteDbContainsIds(dbPath, "tokens_generated", [String(lastDbId)], sqliteOptions);
+}
+
+// Kiro CLI request_ids live inside the conversations_v2 JSON payload, not in
+// an id column — probe via json_each instead of sqliteDbContainsIds.
+function kiroCliDbContainsRequestIds(dbPath, requestIds, sqliteOptions = {}) {
+  if (!dbPath || !Array.isArray(requestIds) || requestIds.length === 0) return false;
+  if (!fssync.existsSync(dbPath)) return false;
+  const inList = requestIds.map(sqliteStringLiteral).join(",");
+  // Alias both tables: conversations_v2.value and json_each's own `value`
+  // column collide — a bare `value` is "ambiguous column name" and sqlite
+  // errors out (which readSqliteJsonRows swallows into []).
+  const sql =
+    "SELECT 1 FROM conversations_v2 AS c, " +
+    "json_each(json_extract(c.value, '$.user_turn_metadata.requests')) AS je " +
+    `WHERE json_extract(je.value, '$.request_id') IN (${inList}) LIMIT 1`;
+
+  let snapshot = null;
+  let effectiveDbPath = dbPath;
+  if (isUncPath(dbPath)) {
+    try {
+      snapshot = snapshotSqliteDb(dbPath);
+      effectiveDbPath = snapshot.path;
+    } catch (_e) { }
+  }
+  try {
+    const rows = readSqliteJsonRows(effectiveDbPath, sql, {
+      label: "InstallProbe",
+      maxBuffer: 1024 * 1024,
+      timeout: 10_000,
+      ...sqliteOptions,
+    });
+    return Array.isArray(rows) && rows.length > 0;
+  } catch (_e) {
+    return false;
+  } finally {
+    if (snapshot) snapshot.cleanup();
+  }
+}
+
+function kiroCliInstallOwnsCursor(dbPath, flatState, sqliteOptions) {
+  // Only SQLite-origin request_id UUIDs are probe evidence: session-file
+  // entries synthesize `${sessionId}:${loopRand}` keys or carry a session_id
+  // tag, and neither appears in conversations_v2. Filter BEFORE sampling so
+  // recent session-file churn cannot blind the probe to older SQLite ids.
+  const requests =
+    flatState?.requests && typeof flatState.requests === "object" ? flatState.requests : {};
+  const sqliteKeyed = {};
+  for (const [k, v] of Object.entries(requests)) {
+    if (k.includes(":")) continue;
+    if (v && typeof v === "object" && typeof v.session_id === "string" && v.session_id) continue;
+    sqliteKeyed[k] = v;
+  }
+  const sample = sampleRecentKeys(sqliteKeyed);
+  return kiroCliDbContainsRequestIds(dbPath, sample, sqliteOptions);
+}
+
 function hasLegacyHermesDefaultState(hermesState) {
   return (
     typeof hermesState.lastStartedAt === "number" ||
@@ -4928,10 +6019,27 @@ function resolveKimiDefaultModel(env = process.env) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const KIRO_CLI_CHARS_PER_TOKEN = 4;
+const KIRO_CLI_CREDITS_SIDECAR = "kiro-credits.json";
 
 function resolveKiroCliDbPath(env = process.env) {
   if (env.KIRO_CLI_DB_PATH) return env.KIRO_CLI_DB_PATH;
   const home = env.HOME || require("node:os").homedir();
+  if (process.platform === "win32") {
+    // Speculative: Kiro CLI descends from Amazon Q CLI, which ships
+    // macOS/Linux only — Windows users run it inside WSL (handled by the
+    // dual-install path in sync). Kept as the conventional %LOCALAPPDATA%
+    // location so a future native build is picked up; harmless when absent.
+    const localAppData = typeof env.LOCALAPPDATA === "string" && env.LOCALAPPDATA.trim().length > 0
+      ? env.LOCALAPPDATA.trim()
+      : path.join(home, "AppData", "Local");
+    return path.join(localAppData, "kiro-cli", "data.sqlite3");
+  }
+  if (process.platform === "linux") {
+    const dataHome = typeof env.XDG_DATA_HOME === "string" && env.XDG_DATA_HOME.trim().length > 0
+      ? env.XDG_DATA_HOME.trim()
+      : path.join(home, ".local", "share");
+    return path.join(dataHome, "kiro-cli", "data.sqlite3");
+  }
   return path.join(home, "Library", "Application Support", "kiro-cli", "data.sqlite3");
 }
 
@@ -4940,32 +6048,77 @@ function resolveKiroCliDbPath(env = process.env) {
 // no hyphens. kiro-cli writes proper UUIDs; lock to the canonical shape.
 const KIRO_CLI_SESSION_FILE_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$/i;
+// The directory prefix and direct messages.jsonl child are the stable
+// contract. Do not assume the suffix will always remain a UUID: Kiro has
+// already changed this layout once, and an opaque non-empty session id is
+// sufficient to keep discovery both bounded and forward-compatible.
+const KIRO_CLI_V2_SESSION_DIR_RE = /^sess_.+$/;
 
-// Lists ~/.kiro/sessions/cli/{uuid}.json files. Includes files whose sibling
-// .lock is present — we read those as tail-only snapshots so a running
-// session's completed turns still land in the queue on the next sync. The
-// .json files are rewritten atomically by kiro-cli on each turn flush, so
-// a stale read just means we'll pick up the rest next time.
+// Lists both Kiro CLI session layouts:
+//   legacy: ~/.kiro/sessions/cli/{uuid}.json
+//   2.13+:  ~/.kiro/sessions/{workspaceHash}/sess_{uuid}/messages.jsonl
+//
+// Legacy .json files are rewritten atomically per turn. The 2.13+ JSONL is
+// append-only and may be read while a session is active. Only the direct
+// messages.jsonl child is accepted; sub-executions and arbitrary nested JSONL
+// files are intentionally excluded.
 //
 // TASK-014: env.HOME is honored (symmetric with resolveKiroCliDbPath) so
 // callers can redirect to a tmp home for hermetic tests/CI.
 function resolveKiroCliSessionFiles(env = process.env) {
   const home = env.HOME || require("node:os").homedir();
   const kiroHome = env.KIRO_HOME || path.join(home, ".kiro");
-  const sessionsDir = path.join(kiroHome, "sessions", "cli");
-  if (!fssync.existsSync(sessionsDir)) return [];
+  const sessionsRoot = path.join(kiroHome, "sessions");
+  if (!fssync.existsSync(sessionsRoot)) return [];
   const files = [];
+
+  const legacyDir = path.join(sessionsRoot, "cli");
   try {
-    for (const entry of fssync.readdirSync(sessionsDir)) {
+    for (const entry of fssync.readdirSync(legacyDir)) {
       // TASK-003: only canonical {uuid}.json files; backups, scratch,
       // typos are skipped so they don't feed JSON.parse garbage.
       if (!KIRO_CLI_SESSION_FILE_RE.test(entry)) continue;
-      files.push(path.join(sessionsDir, entry));
+      files.push(path.join(legacyDir, entry));
     }
   } catch {
     // ignore read errors
   }
-  return files;
+
+  try {
+    const workspaceDirs = fssync.readdirSync(sessionsRoot, {
+      withFileTypes: true,
+    });
+    for (const workspace of workspaceDirs) {
+      if (!workspace.isDirectory() || workspace.name === "cli") continue;
+      const workspacePath = path.join(sessionsRoot, workspace.name);
+      let sessionDirs;
+      try {
+        sessionDirs = fssync.readdirSync(workspacePath, {
+          withFileTypes: true,
+        });
+      } catch {
+        continue;
+      }
+      for (const session of sessionDirs) {
+        if (
+          !session.isDirectory() ||
+          !KIRO_CLI_V2_SESSION_DIR_RE.test(session.name)
+        ) {
+          continue;
+        }
+        const messagesPath = path.join(
+          workspacePath,
+          session.name,
+          "messages.jsonl",
+        );
+        if (fssync.existsSync(messagesPath)) files.push(messagesPath);
+      }
+    }
+  } catch {
+    // ignore read errors
+  }
+
+  return files.sort();
 }
 
 // Build char-count maps from a .jsonl sibling file. Lets us approximate
@@ -5183,6 +6336,352 @@ async function readKiroCliSessionTurns(jsonPath) {
   return flat;
 }
 
+function kiroCliV2ContentChars(value) {
+  if (typeof value === "string") return value.length;
+  if (Array.isArray(value)) {
+    return value.reduce(
+      (sum, item) => sum + kiroCliV2ContentChars(item),
+      0,
+    );
+  }
+  if (!value || typeof value !== "object") return 0;
+  for (const key of ["content", "text", "value", "parts", "entries"]) {
+    if (value[key] !== undefined) {
+      return kiroCliV2ContentChars(value[key]);
+    }
+  }
+  return 0;
+}
+
+function kiroCliV2UsageCredits(payload) {
+  const summaries = Array.isArray(payload?.promptTurnSummaries)
+    ? payload.promptTurnSummaries
+    : [];
+  let totalCredits = 0;
+  let hasCreditEntry = false;
+  for (const summary of summaries) {
+    if (!summary || typeof summary !== "object") continue;
+    const unit = String(summary.unit || "").trim().toLowerCase();
+    if (unit !== "credit" && unit !== "credits") continue;
+    const usage = Number(summary.usage);
+    if (!Number.isFinite(usage) || usage < 0) continue;
+    totalCredits += usage;
+    hasCreditEntry = true;
+  }
+  return {
+    totalCredits,
+    recordCount: hasCreditEntry ? 1 : 0,
+  };
+}
+
+// Kiro CLI 2.13+ writes event-sourced sessions under
+// ~/.kiro/sessions/<workspaceHash>/sess_<uuid>/messages.jsonl. The records do
+// not carry token counts, but user/assistant text, tool_result payloads, turn
+// boundaries, timestamps, and assistant reasoningModelId are sufficient for
+// the same 4 chars/token approximation used by the legacy CLI reader.
+// tool_result content counts as INPUT: tool output (file reads, command
+// output, search results) is fed back to the model as context on the next
+// request — skipping it undercounted tool-heavy sessions by ~67% (#366).
+async function readKiroCliV2SessionTurns(messagesPath) {
+  if (
+    !messagesPath ||
+    path.basename(messagesPath) !== "messages.jsonl" ||
+    !fssync.existsSync(messagesPath)
+  ) {
+    return {
+      turns: [],
+      credits: { totalCredits: 0, recordCount: 0, latestAt: null },
+    };
+  }
+
+  const sessionDir = path.dirname(messagesPath);
+  let sessionMeta = {};
+  try {
+    sessionMeta = JSON.parse(
+      fssync.readFileSync(path.join(sessionDir, "session.json"), "utf8"),
+    );
+  } catch {
+    // messages.jsonl is self-contained enough to parse without session.json.
+  }
+
+  const sessionId =
+    typeof sessionMeta?.id === "string" && sessionMeta.id
+      ? sessionMeta.id
+      : path.basename(sessionDir);
+  const fallbackModel =
+    typeof sessionMeta?.modelId === "string" ? sessionMeta.modelId : null;
+  const fallbackTimestamp = Date.parse(
+    sessionMeta?.createdAt || sessionMeta?.lastModifiedAt || "",
+  );
+
+  const flat = [];
+  let stream;
+  try {
+    stream = fssync.createReadStream(messagesPath, { encoding: "utf8" });
+  } catch {
+    return {
+      turns: flat,
+      credits: { totalCredits: 0, recordCount: 0, latestAt: null },
+    };
+  }
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+  let pendingUserChars = 0;
+  let pendingUserTimestampMs = NaN;
+  let turn = null;
+  let fallbackTurnIndex = 0;
+  const seenCreditEvents = new Set();
+  let totalCredits = 0;
+  let creditRecordCount = 0;
+  let latestCreditAt = null;
+
+  const flushTurn = () => {
+    if (!turn) return;
+    const hasUsage =
+      turn.outputChars > 0 ||
+      turn.reasoningChars > 0;
+    const tsMs = Number.isFinite(turn.timestampMs)
+      ? turn.timestampMs
+      : Number.isFinite(pendingUserTimestampMs)
+        ? pendingUserTimestampMs
+        : fallbackTimestamp;
+    if (hasUsage && Number.isFinite(tsMs) && tsMs > 0) {
+      const requestId =
+        turn.executionId ||
+        `${sessionId}:v2:${fallbackTurnIndex}`;
+      const messageIds = Array.from(turn.messageIds);
+      flat.push({
+        request_id: requestId,
+        message_id: messageIds[0] || turn.executionId || null,
+        all_message_ids: messageIds,
+        session_id: sessionId,
+        session_model_id: fallbackModel,
+        model_id: turn.modelId || fallbackModel,
+        request_start_timestamp_ms: tsMs,
+        user_prompt_length: turn.inputChars,
+        response_size: turn.outputChars,
+        reasoning_size: turn.reasoningChars,
+      });
+    }
+    fallbackTurnIndex++;
+    turn = null;
+  };
+
+  const startTurn = (payload, timestampMs) => {
+    flushTurn();
+    turn = {
+      executionId:
+        typeof payload?.executionId === "string" ? payload.executionId : null,
+      timestampMs:
+        Number.isFinite(timestampMs)
+          ? timestampMs
+          : pendingUserTimestampMs,
+      inputChars: pendingUserChars,
+      outputChars: 0,
+      reasoningChars: 0,
+      modelId: null,
+      messageIds: new Set(),
+    };
+    pendingUserChars = 0;
+    pendingUserTimestampMs = NaN;
+  };
+
+  try {
+    for await (const line of rl) {
+      if (!line || !line.trim()) continue;
+      let event;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const payload = event?.payload;
+      if (!payload || typeof payload !== "object") continue;
+      const type =
+        typeof payload.type === "string"
+          ? payload.type.toLowerCase()
+          : "";
+      const timestampMs = Date.parse(event.timestamp || "");
+
+      if (type === "user") {
+        if (turn) flushTurn();
+        pendingUserChars = kiroCliV2ContentChars(payload.content);
+        pendingUserTimestampMs = timestampMs;
+        continue;
+      }
+
+      if (type === "turn_start") {
+        startTurn(payload, timestampMs);
+        continue;
+      }
+
+      if (type === "usage_summary") {
+        const creditEventKey =
+          typeof event.id === "string" && event.id
+            ? event.id
+            : `${payload.executionId || ""}:${event.timestamp || ""}:${creditRecordCount}`;
+        if (!seenCreditEvents.has(creditEventKey)) {
+          seenCreditEvents.add(creditEventKey);
+          const usage = kiroCliV2UsageCredits(payload);
+          if (usage.recordCount > 0) {
+            totalCredits += usage.totalCredits;
+            creditRecordCount += usage.recordCount;
+            if (
+              Number.isFinite(timestampMs) &&
+              (
+                !latestCreditAt ||
+                timestampMs > Date.parse(latestCreditAt)
+              )
+            ) {
+              latestCreditAt = new Date(timestampMs).toISOString();
+            }
+          }
+        }
+        // Billing summaries are independent metadata. They can arrive after
+        // turn_end, so they must not create or mutate token turns.
+        continue;
+      }
+
+      if (
+        ["assistant", "tool_call", "tool_result"].includes(
+          type,
+        ) &&
+        !turn
+      ) {
+        startTurn(payload, timestampMs);
+      }
+      if (!turn) continue;
+
+      if (
+        typeof payload.executionId === "string" &&
+        payload.executionId &&
+        !turn.executionId
+      ) {
+        turn.executionId = payload.executionId;
+      }
+      if (typeof event.id === "string" && event.id) {
+        turn.messageIds.add(event.id);
+      }
+
+      if (type === "assistant") {
+        const chars = kiroCliV2ContentChars(payload.content);
+        if (
+          typeof payload.operationType === "string" &&
+          payload.operationType.toLowerCase() === "reasoning"
+        ) {
+          turn.reasoningChars += chars;
+        } else {
+          turn.outputChars += chars;
+        }
+        if (
+          typeof payload.reasoningModelId === "string" &&
+          payload.reasoningModelId
+        ) {
+          turn.modelId = payload.reasoningModelId;
+        }
+      } else if (type === "tool_result") {
+        // #366: tool output re-enters the model as input context on the
+        // next request within the turn. Same ÷4 heuristic as user text.
+        turn.inputChars += kiroCliV2ContentChars(payload.content);
+      } else if (type === "turn_end") {
+        flushTurn();
+      }
+    }
+  } catch {
+    // Return complete turns parsed before a concurrent truncate/delete.
+  }
+  flushTurn();
+  return {
+    turns: flat,
+    credits: {
+      totalCredits,
+      recordCount: creditRecordCount,
+      latestAt: latestCreditAt,
+    },
+  };
+}
+
+async function writeKiroCliCreditsSidecar({
+  queuePath,
+  installKey,
+  totalCredits,
+  recordCount,
+  sessionCount,
+  fileCount,
+  latestAt,
+} = {}) {
+  if (!queuePath || !(fileCount > 0)) return;
+  const sidecarPath = path.join(
+    path.dirname(queuePath),
+    KIRO_CLI_CREDITS_SIDECAR,
+  );
+  try {
+    // Dual-install (#306): keep one entry per install and aggregate at the
+    // top level, so a second install's write never clobbers the first. The
+    // top-level fields keep the v1 shape readKiroCreditsSummary consumes.
+    let installs = {};
+    try {
+      const prev = JSON.parse(await fs.readFile(sidecarPath, "utf8"));
+      if (prev?.version === 1 && prev.installs && typeof prev.installs === "object") {
+        installs = prev.installs;
+      }
+    } catch {
+      // first write or pre-dual-install sidecar — start fresh
+    }
+    // Expire entries whose install stopped syncing (deleted WSL distro,
+    // distro rename / UNC alias flip leaving a duplicate key, mode switched
+    // to *-only). Without this the read-modify-write merge would inflate the
+    // aggregate with phantom installs forever; a 30-day grace keeps entries
+    // alive across transient wsl.exe probe failures.
+    const staleMs = 30 * 24 * 60 * 60 * 1000;
+    for (const [k, entry] of Object.entries(installs)) {
+      const ts = Date.parse(entry?.updated_at || "");
+      if (!Number.isFinite(ts) || Date.now() - ts > staleMs) delete installs[k];
+    }
+    const key = typeof installKey === "string" && installKey ? installKey : "default";
+    installs[key] = {
+      total_credits: Number(totalCredits.toFixed(12)),
+      record_count: recordCount,
+      session_count: sessionCount,
+      file_count: fileCount,
+      latest_at: latestAt,
+      updated_at: new Date().toISOString(),
+    };
+    let aggCredits = 0;
+    let aggRecords = 0;
+    let aggSessions = 0;
+    let aggFiles = 0;
+    let aggLatestAt = null;
+    for (const entry of Object.values(installs)) {
+      aggCredits += Number(entry.total_credits) || 0;
+      aggRecords += Number(entry.record_count) || 0;
+      aggSessions += Number(entry.session_count) || 0;
+      aggFiles += Number(entry.file_count) || 0;
+      if (
+        typeof entry.latest_at === "string" &&
+        (!aggLatestAt || Date.parse(entry.latest_at) > Date.parse(aggLatestAt))
+      ) {
+        aggLatestAt = entry.latest_at;
+      }
+    }
+    await writeJson(sidecarPath, {
+      version: 1,
+      source: "kiro-cli-usage-summary",
+      total_credits: Number(aggCredits.toFixed(12)),
+      record_count: aggRecords,
+      session_count: aggSessions,
+      file_count: aggFiles,
+      latest_at: aggLatestAt,
+      updated_at: new Date().toISOString(),
+      installs,
+    });
+    await chmod600IfPossible(sidecarPath);
+  } catch {
+    // Credits are supplemental billing metadata. A sidecar write failure must
+    // never block the canonical token queue.
+  }
+}
+
 // Canonicalize a Kiro-CLI-emitted model id so IDE and CLI rows collapse when
 // they refer to the same underlying Bedrock model. Examples:
 //   anthropic.claude-sonnet-4-20250514-v1:0  -> claude-sonnet-4
@@ -5202,6 +6701,7 @@ function canonicalizeKiroCliModelId(raw) {
   if (!name) return null;
   name = name.toLowerCase();
   if (name === "auto") return null;
+  name = name.replace(/^(?:qdev|kiro)::/, "");
   // Strip provider prefix (anthropic., aws., openai., or a full Bedrock ARN).
   name = name.replace(
     /^(?:arn:aws:bedrock:[^:]*:[^:]*:(?:foundation-model\/)?|anthropic\.|openai\.|aws\.)/,
@@ -5236,13 +6736,29 @@ function readKiroCliRequests(dbPath, env = process.env, sqliteOptions = {}) {
     "json_extract(value, '$.user_turn_metadata.requests') AS requests_json " +
     "FROM conversations_v2 " +
     "WHERE json_extract(value, '$.user_turn_metadata.requests') IS NOT NULL";
-  const rows = readSqliteJsonRows(dbPath, sql, {
-    label: "Kiro CLI",
-    env,
-    maxBuffer: 128 * 1024 * 1024,
-    timeout: 120_000,
-    ...sqliteOptions,
-  });
+
+  // WSL installs are read over the \\wsl$ UNC bridge; snapshot to tmp so
+  // sqlite3 never opens a WAL database across the 9p bridge.
+  let snapshot = null;
+  let effectiveDbPath = dbPath;
+  if (isUncPath(dbPath)) {
+    try {
+      snapshot = snapshotSqliteDb(dbPath);
+      effectiveDbPath = snapshot.path;
+    } catch (_e) { }
+  }
+  let rows;
+  try {
+    rows = readSqliteJsonRows(effectiveDbPath, sql, {
+      label: "Kiro CLI",
+      env,
+      maxBuffer: 128 * 1024 * 1024,
+      timeout: 120_000,
+      ...sqliteOptions,
+    });
+  } finally {
+    if (snapshot) snapshot.cleanup();
+  }
   const flat = [];
   for (const row of rows) {
     let requests;
@@ -5294,10 +6810,11 @@ async function parseKiroCliIncremental({ sessionFiles, cursors, queuePath, onPro
   const resolvedEnv = env || process.env;
   const dbPath = resolveKiroCliDbPath(resolvedEnv);
 
-  // Combine two sources under the same (source='kiro', cursors.kiroCli)
-  // namespace: historical rows from the SQLite DB plus live session state
-  // from ~/.kiro/sessions/cli/{uuid}.json (covers turns from a running
-  // session that hasn't flushed to SQLite yet). Request ID shapes differ:
+  // Combine three sources under the same (source='kiro', cursors.kiroCli)
+  // namespace: historical rows from the SQLite DB, legacy live session state
+  // from ~/.kiro/sessions/cli/{uuid}.json, and Kiro CLI 2.13+ event logs at
+  // ~/.kiro/sessions/<workspaceHash>/sess_<uuid>/messages.jsonl. Request ID
+  // shapes differ:
   // SQLite carries a persisted request_id UUID; session files synthesize
   // `${sessionId}:${loop_id.rand}`. When kiro-cli migrates a live session
   // into SQLite the same turn lands under a new request_id — the cross-
@@ -5309,10 +6826,48 @@ async function parseKiroCliIncremental({ sessionFiles, cursors, queuePath, onPro
     : [];
   const sessionFilesList = resolveKiroCliSessionFiles(resolvedEnv);
   let flatSessions = [];
-  for (const jsonPath of sessionFilesList) {
-    const turns = await readKiroCliSessionTurns(jsonPath);
+  let kiroCreditTotal = 0;
+  let kiroCreditRecords = 0;
+  let kiroCreditSessions = 0;
+  let kiroCreditFiles = 0;
+  let latestKiroCreditAt = null;
+  for (const sessionPath of sessionFilesList) {
+    let turns;
+    if (path.basename(sessionPath) === "messages.jsonl") {
+      kiroCreditFiles++;
+      const parsed = await readKiroCliV2SessionTurns(sessionPath);
+      turns = parsed.turns;
+      const credits = parsed.credits;
+      kiroCreditTotal += credits.totalCredits;
+      kiroCreditRecords += credits.recordCount;
+      if (credits.recordCount > 0) kiroCreditSessions++;
+      if (
+        credits.latestAt &&
+        (
+          !latestKiroCreditAt ||
+          Date.parse(credits.latestAt) > Date.parse(latestKiroCreditAt)
+        )
+      ) {
+        latestKiroCreditAt = credits.latestAt;
+      }
+    } else {
+      turns = await readKiroCliSessionTurns(sessionPath);
+    }
     for (const turn of turns) flatSessions.push(turn);
   }
+  await writeKiroCliCreditsSidecar({
+    queuePath,
+    // Install identity mirrors resolveKiroCliSessionFiles' sessions home so
+    // dual installs keep separate sidecar entries.
+    installKey:
+      resolvedEnv.KIRO_HOME ||
+      path.join(resolvedEnv.HOME || require("node:os").homedir(), ".kiro"),
+    totalCredits: kiroCreditTotal,
+    recordCount: kiroCreditRecords,
+    sessionCount: kiroCreditSessions,
+    fileCount: kiroCreditFiles,
+    latestAt: latestKiroCreditAt,
+  });
   // Per-request state replaces the old seenIds set. Each entry captures
   // what we contributed for that request_id last time, so a later mutation
   // (same request_id, different fingerprint) can subtract-old/add-new
@@ -5382,7 +6937,14 @@ async function parseKiroCliIncremental({ sessionFiles, cursors, queuePath, onPro
       toRetract.push([reqId, prev, sid]);
     }
     for (const [reqId, prev, sid] of toRetract) {
-      if (prev.input_tokens || prev.output_tokens) {
+      if (
+        prev.input_tokens ||
+        prev.output_tokens ||
+        prev.reasoning_output_tokens
+      ) {
+        const prevReasoning = toNonNegativeInt(
+          prev.reasoning_output_tokens,
+        );
         const prevBucket = getHourlyBucket(
           hourlyState,
           "kiro",
@@ -5394,8 +6956,12 @@ async function parseKiroCliIncremental({ sessionFiles, cursors, queuePath, onPro
           cached_input_tokens: 0,
           cache_creation_input_tokens: 0,
           output_tokens: -prev.output_tokens,
-          reasoning_output_tokens: 0,
-          total_tokens: -(prev.input_tokens + prev.output_tokens),
+          reasoning_output_tokens: -prevReasoning,
+          total_tokens: -(
+            prev.input_tokens +
+            prev.output_tokens +
+            prevReasoning
+          ),
           conversation_count: -1,
         });
         touchedBuckets.add(bucketKey("kiro", prev.model, prev.bucketStart));
@@ -5488,8 +7054,12 @@ async function parseKiroCliIncremental({ sessionFiles, cursors, queuePath, onPro
 
     const promptChars = toNonNegativeInt(r.user_prompt_length);
     const responseChars = toNonNegativeInt(r.response_size);
+    const reasoningChars = toNonNegativeInt(r.reasoning_size);
     const approxInput = Math.floor(promptChars / KIRO_CLI_CHARS_PER_TOKEN);
     const approxOutput = Math.floor(responseChars / KIRO_CLI_CHARS_PER_TOKEN);
+    const approxReasoning = Math.floor(
+      reasoningChars / KIRO_CLI_CHARS_PER_TOKEN,
+    );
 
     const tsMs = Number(r.request_start_timestamp_ms);
     if (!Number.isFinite(tsMs) || tsMs <= 0) continue;
@@ -5502,37 +7072,52 @@ async function parseKiroCliIncremental({ sessionFiles, cursors, queuePath, onPro
     const model = canonical || "kiro-cli-agent";
 
     // Fingerprint captures every field whose change should cause a re-bucket.
-    const fingerprint = `${promptChars}:${responseChars}:${model}:${tsMs}`;
+    const fingerprint =
+      `${promptChars}:${responseChars}:${reasoningChars}:${model}:${tsMs}`;
     const prev = requestState[requestId];
     if (prev && prev.fingerprint === fingerprint) continue; // unchanged
 
     // Subtract the prior contribution (if any) from its prior bucket so the
     // bucket's absolute totals reflect the CURRENT truth, not the historical
     // truth. enqueueTouchedBuckets will emit the net delta at flush time.
-    if (prev && (prev.input_tokens || prev.output_tokens)) {
+    if (
+      prev &&
+      (
+        prev.input_tokens ||
+        prev.output_tokens ||
+        prev.reasoning_output_tokens
+      )
+    ) {
+      const prevReasoning = toNonNegativeInt(
+        prev.reasoning_output_tokens,
+      );
       const prevBucket = getHourlyBucket(hourlyState, "kiro", prev.model, prev.bucketStart);
       addTotals(prevBucket.totals, {
         input_tokens: -prev.input_tokens,
         cached_input_tokens: 0,
         cache_creation_input_tokens: 0,
         output_tokens: -prev.output_tokens,
-        reasoning_output_tokens: 0,
-        total_tokens: -(prev.input_tokens + prev.output_tokens),
+        reasoning_output_tokens: -prevReasoning,
+        total_tokens: -(
+          prev.input_tokens +
+          prev.output_tokens +
+          prevReasoning
+        ),
         conversation_count: -1,
       });
       touchedBuckets.add(bucketKey("kiro", prev.model, prev.bucketStart));
     }
 
     // Add the new contribution.
-    if (approxInput > 0 || approxOutput > 0) {
+    if (approxInput > 0 || approxOutput > 0 || approxReasoning > 0) {
       const bucket = getHourlyBucket(hourlyState, "kiro", model, bucketStart);
       addTotals(bucket.totals, {
         input_tokens: approxInput,
         cached_input_tokens: 0,
         cache_creation_input_tokens: 0,
         output_tokens: approxOutput,
-        reasoning_output_tokens: 0,
-        total_tokens: approxInput + approxOutput,
+        reasoning_output_tokens: approxReasoning,
+        total_tokens: approxInput + approxOutput + approxReasoning,
         conversation_count: 1,
       });
       touchedBuckets.add(bucketKey("kiro", model, bucketStart));
@@ -5551,6 +7136,7 @@ async function parseKiroCliIncremental({ sessionFiles, cursors, queuePath, onPro
       model,
       input_tokens: approxInput,
       output_tokens: approxOutput,
+      reasoning_output_tokens: approxReasoning,
       ...(r.session_id ? { session_id: r.session_id } : {}),
     };
 
@@ -6204,7 +7790,7 @@ async function parseKimiCodeIncremental({ wireFiles, cursors, queuePath, onProgr
 // each sync (passive scan only, same shape as Kimi's wire.jsonl reader).
 //
 // Per-line record types: message, reasoning, topic, file-history-snapshot.
-// Only `type=="message" && role=="assistant"` carry token usage. The shape:
+// Only `type=="message" and role=="assistant"` carry token usage. The shape:
 //
 //   providerData.rawUsage = {
 //     prompt_tokens: 22223,           // OpenAI-style — INCLUDES cached
@@ -6254,9 +7840,98 @@ function resolveCodebuddyDefaultModel(env = process.env) {
   return fallback;
 }
 
+// Modern CodeBuddy writes token usage into providerData.rawUsage on JSONL
+// records. Older IDE installs may have no usable JSONL usage and rely on the
+// extension log fallback below. Keep the sniff bounded: it is used by the
+// guarded historical migration to decide whether a JSONL rebuild is safe.
+function codebuddyJsonlHasUsage(filePath) {
+  let fd;
+  try {
+    fd = fssync.openSync(filePath, "r");
+    const buffer = Buffer.alloc(64 * 1024);
+    const bytesRead = fssync.readSync(fd, buffer, 0, buffer.length, 0);
+    const lines = buffer.toString("utf8", 0, bytesRead).split("\n");
+    const limit = Math.min(lines.length, 100);
+    for (let i = 0; i < limit; i += 1) {
+      const line = lines[i];
+      if (!line || (!line.includes("rawUsage") && !line.includes("\"usage\""))) continue;
+      let entry;
+      try { entry = JSON.parse(line); } catch { continue; }
+      if (!entry || typeof entry !== "object") continue;
+      const provider = entry.providerData;
+      if (provider && typeof provider === "object" && provider.rawUsage && typeof provider.rawUsage === "object") {
+        return true;
+      }
+      if (entry.usage && typeof entry.usage === "object") return true;
+    }
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) {
+      try { fssync.closeSync(fd); } catch {}
+    }
+  }
+  return false;
+}
+
+// Legacy IDE extension logs and modern JSONL records do not share an id. Keep
+// a bounded, source-neutral fingerprint ledger so a log line can be matched to
+// the JSONL round-trip it mirrors without collapsing legitimate same-second
+// requests. The ledger is persisted in the CodeBuddy cursor because the two
+// sources can arrive on different syncs.
+function codebuddyUsageFingerprint({ model, timestampMs, inputTokens, cacheRead, cacheCreation, outputTokens, reasoningTokens }) {
+  if (!Number.isFinite(Number(timestampMs)) || Number(timestampMs) <= 0) return null;
+  const second = Math.floor(Number(timestampMs) / 1000);
+  return [
+    second,
+    normalizeModelInput(model) || "unknown",
+    toNonNegativeInt(inputTokens),
+    toNonNegativeInt(cacheRead),
+    toNonNegativeInt(cacheCreation),
+    toNonNegativeInt(outputTokens),
+    toNonNegativeInt(reasoningTokens),
+  ].join(":");
+}
+
+function restoreCodebuddyUsageFingerprints(raw) {
+  const state = new Map();
+  if (!raw || typeof raw !== "object") return state;
+  for (const [key, value] of Object.entries(raw)) {
+    const jsonl = toNonNegativeInt(value?.jsonl);
+    const log = toNonNegativeInt(value?.log);
+    if (jsonl > 0 || log > 0) state.set(key, { jsonl, log });
+  }
+  return state;
+}
+
+function addCodebuddyJsonlFingerprint(state, fingerprint) {
+  if (!fingerprint) return false;
+  const current = state.get(fingerprint) || { jsonl: 0, log: 0 };
+  const mirrored = current.log > current.jsonl;
+  current.jsonl += 1;
+  state.set(fingerprint, current);
+  return mirrored;
+}
+
+function consumeCodebuddyLogFingerprint(state, fingerprint) {
+  if (!fingerprint) return false;
+  const current = state.get(fingerprint) || { jsonl: 0, log: 0 };
+  const mirrored = current.jsonl > current.log;
+  current.log += 1;
+  state.set(fingerprint, current);
+  return mirrored;
+}
+
+function capCodebuddyUsageFingerprints(state, maxEntries = 10_000) {
+  const entries = Array.from(state.entries());
+  if (entries.length <= maxEntries) return Object.fromEntries(entries);
+  return Object.fromEntries(entries.slice(entries.length - maxEntries));
+}
+
 function resolveCodebuddyProjectFiles(env = process.env) {
   const codebuddyHome = resolveCodebuddyHome(env);
-  const files = [];
+  const jsonlFiles = [];
+  const logFiles = [];
 
   // 1. Recursive JSONL scan in codebuddyHome/projects
   if (codebuddyHome) {
@@ -6277,7 +7952,7 @@ function resolveCodebuddyProjectFiles(env = process.env) {
             } catch { continue; }
           }
           if (isDir) walkJsonl(full);
-          else if (isFile && entry.name.endsWith(".jsonl")) files.push(full);
+          else if (isFile && entry.name.endsWith(".jsonl")) jsonlFiles.push(full);
         }
       };
       walkJsonl(projectsDir);
@@ -6330,10 +8005,10 @@ function resolveCodebuddyProjectFiles(env = process.env) {
           walkLogs(full);
         } else if (isFile && entry.name.endsWith(".log")) {
           if (root.pattern === "*.log") {
-            files.push(full);
+            logFiles.push(full);
           } else if (root.pattern === "codebuddy-extension-log") {
             if (full.toLowerCase().includes("tencent-cloud.coding-copilot")) {
-              files.push(full);
+              logFiles.push(full);
             }
           }
         }
@@ -6342,6 +8017,14 @@ function resolveCodebuddyProjectFiles(env = process.env) {
     walkLogs(root.dir);
   }
 
+  const fallbackMode = String(env.TOKENTRACKER_CODEBUDDY_LOG_FALLBACK || "").trim();
+  // Auto mode keeps both sources available. The parser performs bounded,
+  // count-aware cross-source fingerprint matching, so mixed histories retain
+  // legacy-only log sessions while mirrored rounds are counted once. Env=0 is
+  // still a supported escape hatch for users who want to suppress extension
+  // logs entirely; env=1 remains an explicit force-on value.
+  const includeLogs = fallbackMode !== "0";
+  const files = [...jsonlFiles, ...(includeLogs ? logFiles : [])];
   files.sort((a, b) => a.localeCompare(b));
   return files;
 }
@@ -6403,10 +8086,21 @@ async function parseCodebuddyIncremental({
     codebuddyState.logModelsByAgent && typeof codebuddyState.logModelsByAgent === "object"
       ? { ...codebuddyState.logModelsByAgent }
       : {};
+  const usageFingerprints = restoreCodebuddyUsageFingerprints(codebuddyState.usageFingerprints);
 
-  const files = Array.isArray(projectFiles)
+  const discoveredFiles = Array.isArray(projectFiles)
     ? projectFiles
     : resolveCodebuddyProjectFiles(env || process.env);
+  // JSONL must be parsed before extension logs so the fingerprint ledger can
+  // match mirrored rounds in the same sync. Keep the legacy bare-string API
+  // accepted for callers and tests.
+  const files = [...discoveredFiles].sort((a, b) => {
+    const aPath = typeof a === "string" ? a : a?.path || "";
+    const bPath = typeof b === "string" ? b : b?.path || "";
+    const aLog = aPath.endsWith(".log") ? 1 : 0;
+    const bLog = bPath.endsWith(".log") ? 1 : 0;
+    return aLog - bLog || aPath.localeCompare(bPath);
+  });
   const fallbackModel = defaultModel || resolveCodebuddyDefaultModel(env || process.env);
 
   if (files.length === 0) {
@@ -6414,6 +8108,7 @@ async function parseCodebuddyIncremental({
       ...codebuddyState,
       seenIds: Array.from(seenIds),
       fileOffsets,
+      usageFingerprints: capCodebuddyUsageFingerprints(usageFingerprints),
       updatedAt: new Date().toISOString(),
     };
     return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
@@ -6565,6 +8260,20 @@ async function parseCodebuddyIncremental({
           fallbackModel;
         const model = normalizeModelInput(rawModel);
 
+        const fingerprint = codebuddyUsageFingerprint({
+          model,
+          timestampMs: tsMs,
+          inputTokens,
+          cacheRead,
+          cacheCreation,
+          outputTokens: completionTokens,
+          reasoningTokens,
+        });
+        if (consumeCodebuddyLogFingerprint(usageFingerprints, fingerprint)) {
+          seenIds.add(messageId);
+          continue;
+        }
+
         const delta = {
           input_tokens: inputTokens,
           cached_input_tokens: cacheRead,
@@ -6593,9 +8302,15 @@ async function parseCodebuddyIncremental({
       } else {
         let entry;
         try { entry = JSON.parse(line); } catch { continue; }
+        if (!entry || typeof entry !== "object") continue;
 
-        if (!entry || entry.type !== "message" || entry.role !== "assistant") continue;
-
+        // Usage is carried on ANY record with providerData.rawUsage — assistant
+        // messages AND function_call records. Each LLM round-trip (whether it
+        // ends in a text reply or a tool call) carries its own usage; on real
+        // installs function_call records are ~93% of round-trips and ~14x the
+        // assistant-message token volume, so filtering by record type drops
+        // the majority of usage. Aggregate them all; dedup per round-trip.
+        // (Same convention as the WorkBuddy reader — same transcript format.)
         const provider = entry.providerData;
         const rawUsage = provider && typeof provider === "object" ? provider.rawUsage : null;
         if (!rawUsage || typeof rawUsage !== "object") continue;
@@ -6608,38 +8323,65 @@ async function parseCodebuddyIncremental({
           Number.isFinite(Number(entry.timestamp)) && Number(entry.timestamp) > 0
             ? Number(entry.timestamp)
             : null;
+        // One usage record per LLM round-trip; providerData.messageId is the
+        // response-level id shared by the function_call/message pair of the
+        // same round-trip, so it is the most stable dedup key. entry.id is the
+        // per-record append id (unique per line, NOT per round-trip) and must
+        // NOT be preferred — preferring it would count a round-trip once per
+        // record type instead of once total.
         const messageId =
-          typeof entry.uuid === "string" && entry.uuid
-            ? entry.uuid
-            : typeof entry.id === "string" && entry.id
-              ? entry.id
-              : tsMs != null
-                ? `${sessionId}:${tsMs}`
-                : null;
+          typeof provider?.messageId === "string" && provider?.messageId
+            ? provider.messageId
+            : typeof entry.uuid === "string" && entry.uuid
+              ? entry.uuid
+              : typeof entry.id === "string" && entry.id
+                ? entry.id
+                : tsMs != null
+                  ? `${sessionId}:${tsMs}`
+                  : null;
         if (!messageId) continue;
         if (seenIds.has(messageId)) continue;
 
         recordsProcessed++;
 
         const promptTokens = toNonNegativeInt(rawUsage.prompt_tokens);
-        const completionTokens = toNonNegativeInt(rawUsage.completion_tokens);
+        const completionTokensRaw = toNonNegativeInt(rawUsage.completion_tokens);
         const details =
           rawUsage.prompt_tokens_details && typeof rawUsage.prompt_tokens_details === "object"
             ? rawUsage.prompt_tokens_details
             : {};
-        const cachedTokens = toNonNegativeInt(details.cached_tokens);
+        const completionDetails =
+          rawUsage.completion_tokens_details && typeof rawUsage.completion_tokens_details === "object"
+            ? rawUsage.completion_tokens_details
+            : {};
+        // Cache-read mirrors three ways depending on upstream: Anthropic-style
+        // cache_read_input_tokens, OpenAI-style prompt_tokens_details.cached_tokens,
+        // DeepSeek-style prompt_cache_hit_tokens. Take the max (they mirror the
+        // same quantity; on real data exactly one is non-zero).
+        const cachedTokens = Math.max(
+          toNonNegativeInt(details.cached_tokens),
+          toNonNegativeInt(rawUsage.prompt_cache_hit_tokens),
+        );
         const cacheReadAlt = toNonNegativeInt(rawUsage.cache_read_input_tokens);
-        const cacheCreation = toNonNegativeInt(rawUsage.cache_creation_input_tokens);
-        const reasoningTokens = toNonNegativeInt(details.reasoning_tokens);
+        const cacheCreation = Math.max(
+          toNonNegativeInt(rawUsage.cache_creation_input_tokens),
+          toNonNegativeInt(rawUsage.prompt_cache_write_tokens),
+        );
+        // reasoning_tokens lives in completion_tokens_details (verified on real
+        // CodeBuddy data: prompt_tokens_details.reasoning_tokens is always 0).
+        // completion_tokens INCLUDES reasoning, so subtract to avoid double-count.
+        const reasoningTokens = Math.min(completionTokensRaw, toNonNegativeInt(completionDetails.reasoning_tokens));
+        const completionTokens = Math.max(0, completionTokensRaw - reasoningTokens);
 
         const cacheRead = Math.max(cachedTokens, cacheReadAlt);
-        const inputTokens = Math.max(0, promptTokens - cacheRead);
+        const inputTokens = Math.max(0, promptTokens - cacheRead - cacheCreation);
 
         if (
           inputTokens === 0 &&
           completionTokens === 0 &&
           cacheRead === 0 &&
-          cacheCreation === 0
+          cacheCreation === 0 &&
+          reasoningTokens === 0
         ) {
           seenIds.add(messageId);
           continue;
@@ -6658,6 +8400,20 @@ async function parseCodebuddyIncremental({
           normalizeModelInput(entry.model) ||
           fallbackModel;
 
+        const fingerprint = codebuddyUsageFingerprint({
+          model,
+          timestampMs: tsMs,
+          inputTokens,
+          cacheRead,
+          cacheCreation,
+          outputTokens: completionTokens,
+          reasoningTokens,
+        });
+        if (addCodebuddyJsonlFingerprint(usageFingerprints, fingerprint)) {
+          seenIds.add(messageId);
+          continue;
+        }
+
         const delta = {
           input_tokens: inputTokens,
           cached_input_tokens: cacheRead,
@@ -6673,6 +8429,13 @@ async function parseCodebuddyIncremental({
         addTotals(bucket.totals, delta);
         touchedBuckets.add(bucketKey("codebuddy", model, bucketStart));
         seenIds.add(messageId);
+        // Preserve the pre-fingerprint cursor key as well. Older releases
+        // keyed JSONL rows by entry.id; retaining it prevents the first
+        // post-upgrade sync from replaying an already-counted row when
+        // providerData.messageId is now preferred.
+        if (typeof entry.id === "string" && entry.id && entry.id !== messageId) {
+          seenIds.add(entry.id);
+        }
         eventsAggregated++;
 
         if (cb) {
@@ -6720,6 +8483,7 @@ async function parseCodebuddyIncremental({
     seenIds: cappedSeen,
     fileOffsets,
     logModelsByAgent: cappedLogModelsByAgent,
+    usageFingerprints: capCodebuddyUsageFingerprints(usageFingerprints),
     updatedAt,
   };
 
@@ -6734,7 +8498,7 @@ async function parseCodebuddyIncremental({
 // (each verified against real ~/.workbuddy logs, NOT assumed from CodeBuddy):
 //
 //   1. Usage lives on `function_call` records too — not only on
-//      `type=="message" && role=="assistant"`. Each LLM round-trip (whether it
+//      `type=="message" and role=="assistant"`. Each LLM round-trip (whether it
 //      ends in a tool call or a text reply) carries its own providerData.rawUsage.
 //      We therefore aggregate EVERY record that has providerData.rawUsage and
 //      dedup per response id, instead of filtering by record type.
@@ -6770,6 +8534,14 @@ async function parseCodebuddyIncremental({
 //
 //   model is the auto-router placeholder ("auto") — WorkBuddy does not expose
 //   the underlying model in the log, so we emit it verbatim.
+//
+//   4. Completed ~/.workbuddy/traces/**/trace_*.json summaries expose aggregate
+//      modelInfo input/output/cache totals. They are a fallback only when the
+//      session has no detailed JSONL usage. The current SQLite session_usage
+//      table exposes bounded context-window state (`used`/`size`) plus credits,
+//      not billable token columns, so SQLite-only rows are ignored rather than
+//      mislabelled as input usage. A future schema with explicit token columns
+//      is accepted by workbuddySqliteUsageSnapshot.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function resolveWorkbuddyHome(env = process.env) {
@@ -6804,14 +8576,16 @@ function resolveWorkbuddyDefaultModel(env = process.env) {
 
 // Recursively collect every *.jsonl under ~/.workbuddy/projects so that
 // per-session conversation logs AND their nested subagents/agent-*.jsonl files
-// are both discovered. Non-.jsonl artefacts (tool-results/*.txt) are ignored.
+// are both discovered. WorkBuddy also writes completed trace summaries under
+// ~/.workbuddy/traces/<pid>/trace_*.json. Those summaries are useful only when
+// the detailed JSONL for a session is absent, so they are returned as typed
+// entries and parsed after JSONL (JSONL remains authoritative when both exist).
 function resolveWorkbuddyProjectFiles(env = process.env) {
   const workbuddyHome = resolveWorkbuddyHome(env);
   if (!workbuddyHome) return [];
   const projectsDir = path.join(workbuddyHome, "projects");
-  if (!fssync.existsSync(projectsDir)) return [];
   const files = [];
-  const walk = (dir) => {
+  const walkJsonl = (dir) => {
     let entries;
     try { entries = fssync.readdirSync(dir, { withFileTypes: true }); } catch { return; }
     for (const entry of entries) {
@@ -6826,13 +8600,87 @@ function resolveWorkbuddyProjectFiles(env = process.env) {
           isFile = st.isFile();
         } catch { continue; }
       }
-      if (isDir) walk(full);
+      if (isDir) walkJsonl(full);
       else if (isFile && entry.name.endsWith(".jsonl")) files.push(full);
     }
   };
-  walk(projectsDir);
-  files.sort((a, b) => a.localeCompare(b));
+  if (fssync.existsSync(projectsDir)) walkJsonl(projectsDir);
+
+  const tracesDir = path.join(workbuddyHome, "traces");
+  const walkTraces = (dir) => {
+    let entries;
+    try { entries = fssync.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      let isDir = entry.isDirectory();
+      let isFile = entry.isFile();
+      if (!isDir && !isFile) {
+        try {
+          const st = fssync.statSync(full);
+          isDir = st.isDirectory();
+          isFile = st.isFile();
+        } catch { continue; }
+      }
+      if (isDir) walkTraces(full);
+      else if (isFile && /^trace_[^/]+\.json$/i.test(entry.name)) {
+        files.push({ path: full, kind: "trace" });
+      }
+    }
+  };
+  if (fssync.existsSync(tracesDir)) walkTraces(tracesDir);
+  files.sort((a, b) => {
+    const aPath = typeof a === "string" ? a : a?.path || "";
+    const bPath = typeof b === "string" ? b : b?.path || "";
+    // JSONL first is intentional: trace summaries are a lossy fallback and
+    // must not win over a detailed rawUsage record on the same session.
+    const aKind = typeof a === "string" ? 0 : 1;
+    const bKind = typeof b === "string" ? 0 : 1;
+    return aKind - bKind || aPath.localeCompare(bPath);
+  });
   return files;
+}
+
+// WorkBuddy's current session_usage table stores context-window state in
+// `used`/`size` and model credit dollars in `credit_json`; neither is a token
+// accounting breakdown. Only consume a SQLite row when a future schema (or a
+// newer installation) exposes explicit cumulative token columns. This keeps
+// the fallback forward-compatible without treating a context snapshot as
+// billable usage.
+function workbuddySqliteUsageSnapshot(row) {
+  if (!row || typeof row !== "object") return null;
+  const hasAny = (keys) => keys.some((key) => Object.prototype.hasOwnProperty.call(row, key));
+  const inputKeys = ["input_tokens", "inputTokens", "prompt_tokens", "promptTokens"];
+  const cacheReadKeys = [
+    "cached_input_tokens",
+    "cachedInputTokens",
+    "cache_read_input_tokens",
+    "cacheReadInputTokens",
+    "cache_read_tokens",
+    "cacheReadTokens",
+  ];
+  const cacheCreationKeys = [
+    "cache_creation_input_tokens",
+    "cacheCreationInputTokens",
+    "prompt_cache_write_tokens",
+    "promptCacheWriteTokens",
+  ];
+  const outputKeys = ["output_tokens", "outputTokens", "completion_tokens", "completionTokens"];
+  const reasoningKeys = [
+    "reasoning_output_tokens",
+    "reasoningOutputTokens",
+    "reasoning_tokens",
+    "reasoningTokens",
+  ];
+  if (!hasAny([...inputKeys, ...cacheReadKeys, ...cacheCreationKeys, ...outputKeys, ...reasoningKeys])) {
+    return null;
+  }
+  return {
+    input: firstPresentNonNegativeInt(inputKeys.map((key) => row[key])),
+    cacheRead: firstPresentNonNegativeInt(cacheReadKeys.map((key) => row[key])),
+    cacheCreation: firstPresentNonNegativeInt(cacheCreationKeys.map((key) => row[key])),
+    output: firstPresentNonNegativeInt(outputKeys.map((key) => row[key])),
+    reasoning: firstPresentNonNegativeInt(reasoningKeys.map((key) => row[key])),
+  };
 }
 
 async function parseWorkbuddyIncremental({
@@ -6861,11 +8709,22 @@ async function parseWorkbuddyIncremental({
     workbuddyState.detailedSessions && typeof workbuddyState.detailedSessions === "object"
       ? { ...workbuddyState.detailedSessions }
       : {};
+  const seenTraceIds = new Set(
+    Array.isArray(workbuddyState.seenTraceIds) ? workbuddyState.seenTraceIds : [],
+  );
+  const tracedSessionIds = new Set(
+    Array.isArray(workbuddyState.tracedSessionIds) ? workbuddyState.tracedSessionIds : [],
+  );
   const detailedSessionsWithUsage = new Set();
 
-  const files = Array.isArray(projectFiles)
+  const allFiles = Array.isArray(projectFiles)
     ? projectFiles
     : resolveWorkbuddyProjectFiles(env || process.env);
+  const jsonlFiles = allFiles.filter((entry) => typeof entry === "string");
+  const traceFiles = allFiles.filter(
+    (entry) => entry && typeof entry === "object" && typeof entry.path === "string" && entry.kind === "trace",
+  );
+  const files = [...jsonlFiles, ...traceFiles];
   const fallbackModel = defaultModel || resolveWorkbuddyDefaultModel(env || process.env);
 
   const workbuddyHome = resolveWorkbuddyHome(env || process.env);
@@ -6876,6 +8735,8 @@ async function parseWorkbuddyIncremental({
     cursors.workbuddy = {
       ...workbuddyState,
       seenIds: Array.from(seenIds),
+      seenTraceIds: Array.from(seenTraceIds),
+      tracedSessionIds: Array.from(tracedSessionIds),
       fileOffsets,
       sqliteSessions,
       detailedSessions,
@@ -6890,8 +8751,8 @@ async function parseWorkbuddyIncremental({
   let recordsProcessed = 0;
   let eventsAggregated = 0;
 
-  for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
-    const filePath = files[fileIdx];
+  for (let fileIdx = 0; fileIdx < jsonlFiles.length; fileIdx++) {
+    const filePath = jsonlFiles[fileIdx];
     let stat;
     try { stat = fssync.statSync(filePath); } catch { continue; }
 
@@ -6929,23 +8790,28 @@ async function parseWorkbuddyIncremental({
         typeof entry.sessionId === "string" && entry.sessionId
           ? entry.sessionId
           : path.basename(filePath, ".jsonl");
-      if (Object.prototype.hasOwnProperty.call(sqliteSessions, sessionId)) {
+      const sqliteSession = sqliteSessions[sessionId];
+      if (sqliteSession?.detailed || tracedSessionIds.has(sessionId)) {
         continue;
       }
       const tsMs =
         Number.isFinite(Number(entry.timestamp)) && Number(entry.timestamp) > 0
           ? Number(entry.timestamp)
           : null;
-      // One usage record per LLM round-trip; the response id is the most stable
-      // dedup key, then providerData.messageId, then session+timestamp.
+      // One usage record per LLM round-trip; providerData.messageId is the
+      // response-level id shared by function_call/message records and must win
+      // over the per-record append id. Fall back to entry.uuid/id only when the
+      // response-level id is absent.
       const messageId =
-        typeof entry.id === "string" && entry.id
-          ? entry.id
-          : typeof provider.messageId === "string" && provider.messageId
+        typeof provider?.messageId === "string" && provider.messageId
             ? provider.messageId
-            : tsMs != null
-              ? `${sessionId}:${tsMs}`
-              : null;
+            : typeof entry.uuid === "string" && entry.uuid
+              ? entry.uuid
+              : typeof entry.id === "string" && entry.id
+                ? entry.id
+                : tsMs != null
+                  ? `${sessionId}:${tsMs}`
+                  : null;
       if (!messageId) continue;
       if (seenIds.has(messageId)) continue;
 
@@ -7017,6 +8883,11 @@ async function parseWorkbuddyIncremental({
       addTotals(bucket.totals, delta);
       touchedBuckets.add(bucketKey("workbuddy", model, bucketStart));
       seenIds.add(messageId);
+      // Keep legacy entry-id keys alongside the response id so upgrading a
+      // cursor cannot replay a row that an older build already counted.
+      if (typeof entry.id === "string" && entry.id && entry.id !== messageId) {
+        seenIds.add(entry.id);
+      }
       detailedSessions[sessionId] = true;
       detailedSessionsWithUsage.add(sessionId);
       eventsAggregated++;
@@ -7041,14 +8912,105 @@ async function parseWorkbuddyIncremental({
     };
   }
 
+  // Trace summaries are a fallback for sessions whose JSONL has no detailed
+  // providerData.rawUsage. A trace's modelInfo totals include the cache read
+  // portion of input, so split input into uncached input + cached input. Do
+  // not merge a trace with the same session's JSONL (or SQLite) data: the
+  // JSONL path has per-round detail and the trace summary can be partial on
+  // older WorkBuddy versions.
+  for (let fileIdx = 0; fileIdx < traceFiles.length; fileIdx++) {
+    const entry = traceFiles[fileIdx];
+    const filePath = entry.path;
+    let stat;
+    try { stat = fssync.statSync(filePath); } catch { continue; }
+    const prevEntry = fileOffsets[filePath] || {};
+    const prevSize = Number(prevEntry.size) || 0;
+    const prevIno = prevEntry.ino;
+    const inodeChanged = typeof prevIno === "number" && prevIno !== stat.ino;
+    const startOffset = stat.size < prevSize || inodeChanged ? 0 : prevSize;
+    if (stat.size <= startOffset) continue;
+
+    let traceDoc;
+    try {
+      traceDoc = JSON.parse(fssync.readFileSync(filePath, "utf8"));
+    } catch {
+      continue;
+    }
+    const trace = traceDoc && typeof traceDoc === "object" && traceDoc.trace && typeof traceDoc.trace === "object"
+      ? traceDoc.trace
+      : null;
+    const traceId = typeof trace?.traceId === "string" && trace.traceId
+      ? trace.traceId
+      : path.basename(filePath, ".json");
+    const metadata = trace?.metadata && typeof trace.metadata === "object" ? trace.metadata : {};
+    const modelInfo = trace?.modelInfo && typeof trace.modelInfo === "object"
+      ? trace.modelInfo
+      : metadata.modelInfo && typeof metadata.modelInfo === "object"
+        ? metadata.modelInfo
+        : {};
+    const sessionId =
+      (typeof trace?.sessionId === "string" && trace.sessionId) ||
+      (typeof metadata.sessionId === "string" && metadata.sessionId) ||
+      traceId;
+    const startedAtRaw = trace?.startedAt || metadata.startedAt;
+    const tsMs = typeof startedAtRaw === "number" && Number.isFinite(startedAtRaw)
+      ? (startedAtRaw > 10000000000 ? startedAtRaw : startedAtRaw * 1000)
+      : Date.parse(String(startedAtRaw || ""));
+    const totalInput = toNonNegativeInt(modelInfo.totalInputTokens);
+    const totalOutput = toNonNegativeInt(modelInfo.totalOutputTokens);
+    const totalCached = Math.min(totalInput, toNonNegativeInt(modelInfo.totalCachedTokens));
+    if (seenTraceIds.has(traceId) || detailedSessions[sessionId] || detailedSessionsWithUsage.has(sessionId) || tracedSessionIds.has(sessionId)) {
+      seenTraceIds.add(traceId);
+      fileOffsets[filePath] = { size: stat.size, mtimeMs: stat.mtimeMs, ino: stat.ino };
+      continue;
+    }
+    if (!Number.isFinite(tsMs) || tsMs <= 0 || (totalInput <= 0 && totalOutput <= 0)) {
+      // Keep the file offset but do not permanently suppress a trace that may
+      // still be finalized in place by WorkBuddy.
+      fileOffsets[filePath] = { size: stat.size, mtimeMs: stat.mtimeMs, ino: stat.ino };
+      continue;
+    }
+
+    const bucketStart = toUtcHalfHourStart(new Date(tsMs).toISOString());
+    if (!bucketStart) continue;
+    const model =
+      normalizeModelInput(Array.isArray(modelInfo.models) ? modelInfo.models[0] : modelInfo.model) ||
+      fallbackModel;
+    const inputTokens = Math.max(0, totalInput - totalCached);
+    const delta = {
+      input_tokens: inputTokens,
+      cached_input_tokens: totalCached,
+      cache_creation_input_tokens: 0,
+      output_tokens: totalOutput,
+      reasoning_output_tokens: 0,
+      total_tokens: inputTokens + totalCached + totalOutput,
+      conversation_count: 1,
+    };
+    const bucket = getHourlyBucket(hourlyState, "workbuddy", model, bucketStart);
+    addTotals(bucket.totals, delta);
+    touchedBuckets.add(bucketKey("workbuddy", model, bucketStart));
+    seenTraceIds.add(traceId);
+    tracedSessionIds.add(sessionId);
+    recordsProcessed++;
+    eventsAggregated++;
+    fileOffsets[filePath] = { size: stat.size, mtimeMs: stat.mtimeMs, ino: stat.ino };
+    if (cb) {
+      cb({
+        index: jsonlFiles.length + fileIdx + 1,
+        total: files.length,
+        recordsProcessed,
+        eventsAggregated,
+        bucketsQueued: touchedBuckets.size,
+      });
+    }
+  }
+
   if (dbExists) {
     const query = `
       SELECT
-        su.session_id,
-        su.used,
-        su.updated_at,
-        s.model,
-        s.cwd
+        su.*,
+        s.model AS session_model,
+        s.cwd AS session_cwd
       FROM session_usage su
       LEFT JOIN sessions s ON s.id = su.session_id
       WHERE su.used IS NOT NULL
@@ -7073,35 +9035,74 @@ async function parseWorkbuddyIncremental({
         if (!row || typeof row !== "object") continue;
         const sessionId = typeof row.session_id === "string" ? row.session_id.trim() : "";
         if (!sessionId) continue;
-        if (detailedSessions[sessionId] || detailedSessionsWithUsage.has(sessionId)) continue;
+        if (
+          detailedSessions[sessionId] ||
+          detailedSessionsWithUsage.has(sessionId) ||
+          tracedSessionIds.has(sessionId)
+        ) continue;
 
-        const usedNow = toNonNegativeInt(row.used);
         const updatedAtRaw = toNonNegativeInt(row.updated_at);
-        const rawModel = typeof row.model === "string" ? row.model.trim() : "";
+        const rawModel = typeof row.session_model === "string"
+          ? row.session_model.trim()
+          : typeof row.model === "string" ? row.model.trim() : "";
 
-        if (usedNow <= 0 || updatedAtRaw <= 0) continue;
+        if (updatedAtRaw <= 0) continue;
 
-        const prev = sqliteSessions[sessionId] || { used: 0 };
-        const prevUsed = toNonNegativeInt(prev.used);
-        const isReset = usedNow > 0 && prevUsed > 0 && usedNow < prevUsed;
-        const inputDelta = isReset ? usedNow : Math.max(0, usedNow - prevUsed);
-        if (inputDelta === 0) {
+        const snapshot = workbuddySqliteUsageSnapshot(row);
+        const usedNow = toNonNegativeInt(row.used);
+        const prev = sqliteSessions[sessionId] || {};
+
+        // Current WorkBuddy releases expose only context state (`used` versus
+        // `size`) here. Do not turn that bounded snapshot into a fake usage
+        // delta; detailed JSONL/trace sources remain the authoritative path.
+        if (!snapshot) {
           sqliteSessions[sessionId] = {
             ...prev,
             used: usedNow,
             updatedAt: updatedAtRaw,
             model: rawModel || prev.model || fallbackModel,
+            detailed: false,
+          };
+          continue;
+        }
+
+        const previousTokens = prev.tokens && typeof prev.tokens === "object"
+          ? prev.tokens
+          : { input: 0, cacheRead: 0, cacheCreation: 0, output: 0, reasoning: 0 };
+        const isReset = ["input", "cacheRead", "cacheCreation", "output", "reasoning"]
+          .some((key) => snapshot[key] < toNonNegativeInt(previousTokens[key]));
+        const deltaTokens = {
+          input: isReset ? snapshot.input : Math.max(0, snapshot.input - toNonNegativeInt(previousTokens.input)),
+          cacheRead: isReset ? snapshot.cacheRead : Math.max(0, snapshot.cacheRead - toNonNegativeInt(previousTokens.cacheRead)),
+          cacheCreation: isReset ? snapshot.cacheCreation : Math.max(0, snapshot.cacheCreation - toNonNegativeInt(previousTokens.cacheCreation)),
+          output: isReset ? snapshot.output : Math.max(0, snapshot.output - toNonNegativeInt(previousTokens.output)),
+          reasoning: isReset ? snapshot.reasoning : Math.max(0, snapshot.reasoning - toNonNegativeInt(previousTokens.reasoning)),
+        };
+        if (
+          deltaTokens.input === 0 &&
+          deltaTokens.cacheRead === 0 &&
+          deltaTokens.cacheCreation === 0 &&
+          deltaTokens.output === 0 &&
+          deltaTokens.reasoning === 0
+        ) {
+          sqliteSessions[sessionId] = {
+            ...prev,
+            used: usedNow,
+            updatedAt: updatedAtRaw,
+            model: rawModel || prev.model || fallbackModel,
+            tokens: snapshot,
+            detailed: true,
           };
           continue;
         }
 
         recordsProcessed++;
 
-        const inputTokens = inputDelta;
-        const completionTokens = 0;
-        const cacheRead = 0;
-        const cacheCreation = 0;
-        const reasoningTokens = 0;
+        const inputTokens = deltaTokens.input;
+        const completionTokens = deltaTokens.output;
+        const cacheRead = deltaTokens.cacheRead;
+        const cacheCreation = deltaTokens.cacheCreation;
+        const reasoningTokens = deltaTokens.reasoning;
 
         const tsMs = updatedAtRaw > 10000000000 ? updatedAtRaw : updatedAtRaw * 1000;
         const tsIso = new Date(tsMs).toISOString();
@@ -7116,8 +9117,8 @@ async function parseWorkbuddyIncremental({
           cache_creation_input_tokens: cacheCreation,
           output_tokens: completionTokens,
           reasoning_output_tokens: reasoningTokens,
-          total_tokens: inputTokens,
-          conversation_count: prevUsed === 0 || isReset ? 1 : 0,
+        total_tokens: inputTokens + completionTokens + cacheRead + cacheCreation + reasoningTokens,
+          conversation_count: Object.keys(previousTokens).every((key) => toNonNegativeInt(previousTokens[key]) === 0) || isReset ? 1 : 0,
         };
 
         const bucket = getHourlyBucket(hourlyState, "workbuddy", model, bucketStart);
@@ -7127,6 +9128,8 @@ async function parseWorkbuddyIncremental({
           used: usedNow,
           updatedAt: updatedAtRaw,
           model,
+          tokens: snapshot,
+          detailed: true,
         };
         eventsAggregated++;
       }
@@ -7154,6 +9157,14 @@ async function parseWorkbuddyIncremental({
     detailedSessionEntries.length > 10_000
       ? Object.fromEntries(detailedSessionEntries.slice(detailedSessionEntries.length - 10_000))
       : detailedSessions;
+  const traceArr = Array.from(seenTraceIds);
+  const cappedSeenTraceIds =
+    traceArr.length > 10_000 ? traceArr.slice(traceArr.length - 10_000) : traceArr;
+  const tracedSessionArr = Array.from(tracedSessionIds);
+  const cappedTracedSessionIds =
+    tracedSessionArr.length > 10_000
+      ? tracedSessionArr.slice(tracedSessionArr.length - 10_000)
+      : tracedSessionArr;
 
   const bucketsQueued = await enqueueTouchedBuckets({
     queuePath,
@@ -7166,6 +9177,8 @@ async function parseWorkbuddyIncremental({
   cursors.workbuddy = {
     ...workbuddyState,
     seenIds: cappedSeen,
+    seenTraceIds: cappedSeenTraceIds,
+    tracedSessionIds: cappedTracedSessionIds,
     fileOffsets,
     sqliteSessions: cappedSqliteSessions,
     detailedSessions: cappedDetailedSessions,
@@ -8933,6 +10946,54 @@ function droidSessionIdFromPath(filePath) {
   return base.slice(0, -".settings.json".length);
 }
 
+// Droid's workspace directory slug is lossy: path separators become `-`, which
+// collides with literal dashes in directory names. The sibling transcript keeps
+// the launch cwd losslessly in its session_start record, so project attribution
+// must read that value instead of trying to decode the directory name.
+const DROID_CWD_SCAN_MAX_BYTES = 65536;
+
+async function resolveDroidFileCwd(settingsPath) {
+  if (typeof settingsPath !== "string" || !settingsPath.endsWith(".settings.json")) {
+    return null;
+  }
+  const sidecarPath = settingsPath.slice(0, -".settings.json".length) + ".jsonl";
+  let stream;
+  try {
+    stream = fssync.createReadStream(sidecarPath, {
+      encoding: "utf8",
+      start: 0,
+      end: DROID_CWD_SCAN_MAX_BYTES,
+    });
+  } catch {
+    return null;
+  }
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  try {
+    for await (const line of rl) {
+      if (!line || !line.includes('"cwd"')) continue;
+      let entry;
+      try {
+        entry = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (
+        (entry?.type === "session_start" || entry?.type === "session") &&
+        typeof entry.cwd === "string" &&
+        entry.cwd.trim()
+      ) {
+        return entry.cwd.trim();
+      }
+    }
+  } catch {
+    return null;
+  } finally {
+    rl.close();
+    stream.close?.();
+  }
+  return null;
+}
+
 // Resolve a Droid bucket model id. ccusage's chain: settings.model → sidecar
 // <id>.jsonl scrape → `<provider>-unknown` derived from providerLock or inferred
 // from the model fragment. Extracted so the dup-session repair migration can
@@ -9032,6 +11093,8 @@ async function parseDroidIncremental({
   settingsFiles,
   cursors,
   queuePath,
+  projectQueuePath,
+  publicRepoResolver,
   onProgress,
   env,
   // `prune: true` (the production default) drops cursor entries whose session
@@ -9042,11 +11105,16 @@ async function parseDroidIncremental({
   prune = true,
 } = {}) {
   await ensureDir(path.dirname(queuePath));
+  const projectEnabled = typeof projectQueuePath === "string" && projectQueuePath.length > 0;
   const droidState =
     cursors.droid && typeof cursors.droid === "object" ? cursors.droid : {};
   const sessionTotals =
     droidState.sessionTotals && typeof droidState.sessionTotals === "object"
       ? { ...droidState.sessionTotals }
+      : {};
+  const projectSessionTotals =
+    droidState.projectSessionTotals && typeof droidState.projectSessionTotals === "object"
+      ? { ...droidState.projectSessionTotals }
       : {};
 
   const files = dedupeDroidSettingsFilesBySession(
@@ -9059,13 +11127,24 @@ async function parseDroidIncremental({
     cursors.droid = {
       ...droidState,
       sessionTotals,
+      ...(projectEnabled ? { projectSessionTotals } : {}),
       updatedAt: new Date().toISOString(),
     };
-    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    return {
+      recordsProcessed: 0,
+      eventsAggregated: 0,
+      bucketsQueued: 0,
+      projectBucketsQueued: 0,
+    };
   }
 
   const hourlyState = normalizeHourlyState(cursors?.hourly);
   const touchedBuckets = new Set();
+  const projectState = projectEnabled ? normalizeProjectState(cursors?.projectHourly) : null;
+  const projectTouchedBuckets = projectEnabled ? new Set() : null;
+  const projectMetaCache = projectEnabled ? new Map() : null;
+  const publicRepoCache = projectEnabled ? new Map() : null;
+  const projectFreshnessCache = projectEnabled ? new Map() : null;
   const cb = typeof onProgress === "function" ? onProgress : null;
   let recordsProcessed = 0;
   let eventsAggregated = 0;
@@ -9104,8 +11183,33 @@ async function parseDroidIncremental({
       thinking: 0,
       mtimeMs: 0,
     };
+    const projectPrev = projectSessionTotals[sessionId] || {
+      input: 0,
+      output: 0,
+      cacheCreation: 0,
+      cacheRead: 0,
+      thinking: 0,
+      mtimeMs: 0,
+      filePath: null,
+      attributed: false,
+      projectFileContext: null,
+    };
     const isFirstSeenSession = !sessionTotals[sessionId];
-    if (mtimeMs && mtimeMs === prev.mtimeMs) continue;
+    const globalNeedsUpdate = !(mtimeMs && mtimeMs === prev.mtimeMs);
+    let projectNeedsUpdate = false;
+    if (projectEnabled) {
+      const projectFileChanged =
+        !mtimeMs || mtimeMs !== projectPrev.mtimeMs || projectPrev.filePath !== filePath;
+      if (!projectSessionTotals[sessionId] || projectFileChanged) {
+        projectNeedsUpdate = true;
+      } else if (projectPrev.attributed !== true) {
+        projectNeedsUpdate = !(await isProjectFileContextFresh(
+          projectPrev.projectFileContext,
+          { freshnessCache: projectFreshnessCache },
+        ));
+      }
+    }
+    if (!globalNeedsUpdate && !projectNeedsUpdate) continue;
 
     let raw;
     try {
@@ -9140,6 +11244,12 @@ async function parseDroidIncremental({
       inputNow + outputNow + cacheCreationNow + cacheReadNow + thinkingNow;
     const sumPrev =
       prev.input + prev.output + prev.cacheCreation + prev.cacheRead + prev.thinking;
+    const projectSumPrev =
+      projectPrev.input +
+      projectPrev.output +
+      projectPrev.cacheCreation +
+      projectPrev.cacheRead +
+      projectPrev.thinking;
 
     // Transient empty: settings.json was observed with zero tokens (mid-write
     // or a brief wipe before the next turn restores totals). Do NOT clobber
@@ -9147,48 +11257,36 @@ async function parseDroidIncremental({
     // the same empty payload next sync. If we overwrote prev with zeros, a
     // later non-empty read would emit the full cumulative as a fresh delta.
     if (sumNow === 0) {
-      if (sumPrev > 0) {
-        sessionTotals[sessionId] = { ...prev, mtimeMs };
-      } else {
-        sessionTotals[sessionId] = {
-          input: 0,
-          output: 0,
-          cacheCreation: 0,
-          cacheRead: 0,
-          thinking: 0,
-          mtimeMs,
-        };
+      if (globalNeedsUpdate) {
+        if (sumPrev > 0) {
+          sessionTotals[sessionId] = { ...prev, mtimeMs };
+        } else {
+          sessionTotals[sessionId] = {
+            input: 0,
+            output: 0,
+            cacheCreation: 0,
+            cacheRead: 0,
+            thinking: 0,
+            mtimeMs,
+          };
+        }
       }
-      continue;
-    }
-
-    // Reset only when the TOTAL shrinks — a real session reuse (Droid wiped
-    // tokenUsage and started over). A single field dropping while the sum
-    // grows is a schema change or cache eviction; clamping per-field deltas
-    // to >=0 is the right behavior for those.
-    const isReset = sumNow < sumPrev;
-
-    const dInput = isReset ? inputNow : Math.max(0, inputNow - prev.input);
-    const dOutput = isReset ? outputNow : Math.max(0, outputNow - prev.output);
-    const dCacheCreation = isReset
-      ? cacheCreationNow
-      : Math.max(0, cacheCreationNow - prev.cacheCreation);
-    const dCacheRead = isReset
-      ? cacheReadNow
-      : Math.max(0, cacheReadNow - prev.cacheRead);
-    const dThinking = isReset
-      ? thinkingNow
-      : Math.max(0, thinkingNow - prev.thinking);
-
-    if (dInput + dOutput + dCacheCreation + dCacheRead + dThinking === 0) {
-      sessionTotals[sessionId] = {
-        input: inputNow,
-        output: outputNow,
-        cacheCreation: cacheCreationNow,
-        cacheRead: cacheReadNow,
-        thinking: thinkingNow,
-        mtimeMs,
-      };
+      if (projectNeedsUpdate) {
+        projectSessionTotals[sessionId] =
+          projectSumPrev > 0
+            ? { ...projectPrev, mtimeMs, filePath }
+            : {
+                input: 0,
+                output: 0,
+                cacheCreation: 0,
+                cacheRead: 0,
+                thinking: 0,
+                mtimeMs,
+                filePath,
+                attributed: false,
+                projectFileContext: buildProjectFileContext(null),
+              };
+      }
       continue;
     }
 
@@ -9204,31 +11302,146 @@ async function parseDroidIncremental({
     // empty-model sessions bucket identically across both tools.
     const model = resolveDroidModel(settings, filePath);
 
-    // Token normalization: inputTokens already excludes cache reads (matches
-    // Anthropic API convention), so cache columns slot in directly. Thinking
-    // is reasoning_output_tokens — folded into cost via existing pricing path.
-    const bucketDelta = {
-      input_tokens: dInput,
-      cached_input_tokens: dCacheRead,
-      cache_creation_input_tokens: dCacheCreation,
-      output_tokens: dOutput,
-      reasoning_output_tokens: dThinking,
-      total_tokens: dInput + dOutput + dCacheCreation + dCacheRead + dThinking,
-      conversation_count: isFirstSeenSession || isReset ? 1 : 0,
-    };
-    const bucket = getHourlyBucket(hourlyState, "droid", model, bucketStart);
-    addTotals(bucket.totals, bucketDelta);
-    touchedBuckets.add(bucketKey("droid", model, bucketStart));
+    if (globalNeedsUpdate) {
+      // Reset only when the TOTAL shrinks — a real session reuse (Droid wiped
+      // tokenUsage and started over). A single field dropping while the sum
+      // grows is a schema change or cache eviction; clamping per-field deltas
+      // to >=0 is the right behavior for those.
+      const isReset = sumNow < sumPrev;
+      const dInput = isReset ? inputNow : Math.max(0, inputNow - prev.input);
+      const dOutput = isReset ? outputNow : Math.max(0, outputNow - prev.output);
+      const dCacheCreation = isReset
+        ? cacheCreationNow
+        : Math.max(0, cacheCreationNow - prev.cacheCreation);
+      const dCacheRead = isReset
+        ? cacheReadNow
+        : Math.max(0, cacheReadNow - prev.cacheRead);
+      const dThinking = isReset
+        ? thinkingNow
+        : Math.max(0, thinkingNow - prev.thinking);
 
-    sessionTotals[sessionId] = {
-      input: inputNow,
-      output: outputNow,
-      cacheCreation: cacheCreationNow,
-      cacheRead: cacheReadNow,
-      thinking: thinkingNow,
-      mtimeMs,
-    };
-    eventsAggregated++;
+      if (dInput + dOutput + dCacheCreation + dCacheRead + dThinking > 0) {
+        // Token normalization: inputTokens already excludes cache reads (matches
+        // Anthropic API convention), so cache columns slot in directly. Thinking
+        // is reasoning_output_tokens — folded into cost via existing pricing path.
+        const bucketDelta = {
+          input_tokens: dInput,
+          cached_input_tokens: dCacheRead,
+          cache_creation_input_tokens: dCacheCreation,
+          output_tokens: dOutput,
+          reasoning_output_tokens: dThinking,
+          total_tokens: dInput + dOutput + dCacheCreation + dCacheRead + dThinking,
+          conversation_count: isFirstSeenSession || isReset ? 1 : 0,
+        };
+        const bucket = getHourlyBucket(hourlyState, "droid", model, bucketStart);
+        addTotals(bucket.totals, bucketDelta);
+        touchedBuckets.add(bucketKey("droid", model, bucketStart));
+        eventsAggregated++;
+      }
+
+      sessionTotals[sessionId] = {
+        input: inputNow,
+        output: outputNow,
+        cacheCreation: cacheCreationNow,
+        cacheRead: cacheReadNow,
+        thinking: thinkingNow,
+        mtimeMs,
+      };
+    }
+
+    if (projectNeedsUpdate) {
+      const cwd = await resolveDroidFileCwd(filePath);
+      const projectContext = cwd
+        ? await resolveProjectContextForPath({
+            startDir: wsl.mapWslCwdToUnc(cwd, filePath),
+            projectMetaCache,
+            publicRepoCache,
+            publicRepoResolver,
+            projectState,
+          })
+        : null;
+      const projectRef = projectContext?.projectRef || null;
+      const projectKey = projectContext?.projectKey || null;
+      const projectFileContext = buildProjectFileContext(projectContext);
+
+      // Keep this baseline independent from the global cursor so project
+      // attribution can be backfilled once without replaying global usage.
+      // If the repo is not public/verified yet, leave it unadvanced so a later
+      // sync can retry after project metadata or network availability changes.
+      if (projectKey && projectRef) {
+        const projectReset = sumNow < projectSumPrev;
+        const projectDInput = projectReset
+          ? inputNow
+          : Math.max(0, inputNow - projectPrev.input);
+        const projectDOutput = projectReset
+          ? outputNow
+          : Math.max(0, outputNow - projectPrev.output);
+        const projectDCacheCreation = projectReset
+          ? cacheCreationNow
+          : Math.max(0, cacheCreationNow - projectPrev.cacheCreation);
+        const projectDCacheRead = projectReset
+          ? cacheReadNow
+          : Math.max(0, cacheReadNow - projectPrev.cacheRead);
+        const projectDThinking = projectReset
+          ? thinkingNow
+          : Math.max(0, thinkingNow - projectPrev.thinking);
+        const projectTotal =
+          projectDInput +
+          projectDOutput +
+          projectDCacheCreation +
+          projectDCacheRead +
+          projectDThinking;
+        if (projectTotal > 0) {
+          const projectDelta = {
+            input_tokens: projectDInput,
+            cached_input_tokens: projectDCacheRead,
+            cache_creation_input_tokens: projectDCacheCreation,
+            output_tokens: projectDOutput,
+            reasoning_output_tokens: projectDThinking,
+            total_tokens: projectTotal,
+            conversation_count: !projectSessionTotals[sessionId] || projectReset ? 1 : 0,
+          };
+          const projectBucket = getProjectBucket(
+            projectState,
+            projectKey,
+            "droid",
+            bucketStart,
+            projectRef,
+          );
+          addTotals(projectBucket.totals, projectDelta);
+          projectTouchedBuckets.add(
+            projectBucketKey(projectKey, "droid", bucketStart),
+          );
+        }
+        projectSessionTotals[sessionId] = {
+          input: inputNow,
+          output: outputNow,
+          cacheCreation: cacheCreationNow,
+          cacheRead: cacheReadNow,
+          thinking: thinkingNow,
+          mtimeMs,
+          filePath,
+          projectKey,
+          projectRef,
+          attributed: true,
+          projectFileContext,
+        };
+      } else {
+        projectSessionTotals[sessionId] = {
+          input: 0,
+          output: 0,
+          cacheCreation: 0,
+          cacheRead: 0,
+          thinking: 0,
+          mtimeMs,
+          filePath,
+          projectKey: null,
+          projectRef,
+          attributed: false,
+          projectFileContext,
+        };
+      }
+    }
 
     if (cb) {
       cb({
@@ -9250,6 +11463,9 @@ async function parseDroidIncremental({
     for (const id of Object.keys(sessionTotals)) {
       if (!seenSessionIds.has(id)) delete sessionTotals[id];
     }
+    for (const id of Object.keys(projectSessionTotals)) {
+      if (!seenSessionIds.has(id)) delete projectSessionTotals[id];
+    }
   }
 
   const bucketsQueued = await enqueueTouchedBuckets({
@@ -9257,16 +11473,28 @@ async function parseDroidIncremental({
     hourlyState,
     touchedBuckets,
   });
+  const projectBucketsQueued = projectEnabled
+    ? await enqueueTouchedProjectBuckets({
+        projectQueuePath,
+        projectState,
+        projectTouchedBuckets,
+      })
+    : 0;
   const updatedAt = new Date().toISOString();
   hourlyState.updatedAt = updatedAt;
   cursors.hourly = hourlyState;
+  if (projectState) {
+    projectState.updatedAt = updatedAt;
+    cursors.projectHourly = projectState;
+  }
   cursors.droid = {
     ...droidState,
     sessionTotals,
+    ...(projectEnabled ? { projectSessionTotals } : {}),
     updatedAt,
   };
 
-  return { recordsProcessed, eventsAggregated, bucketsQueued };
+  return { recordsProcessed, eventsAggregated, bucketsQueued, projectBucketsQueued };
 }
 
 async function parseKilocodeIncremental({
@@ -9626,7 +11854,7 @@ async function parseOmpIncremental({
       const cwd = await resolveOmpFileCwd(filePath);
       const projectContext = cwd
         ? await resolveProjectContextForPath({
-            startDir: cwd,
+            startDir: wsl.mapWslCwdToUnc(cwd, filePath),
             projectMetaCache,
             publicRepoCache,
             publicRepoResolver,
@@ -12387,7 +14615,8 @@ async function parseCopilotAppDbIncremental({
 // ─────────────────────────────────────────────────────────────────────────────
 
 const GROK_ESTIMATED_INPUT_RATIO = 0.8;
-const GROK_CURSOR_VERSION = 3;
+// v4: bill from turn_completed.usage (true cumulative API usage), not context-window totalTokens.
+const GROK_CURSOR_VERSION = 4;
 
 function resolveGrokBuildHome(env = process.env) {
   if (env.TOKENTRACKER_GROK_HOME) return env.TOKENTRACKER_GROK_HOME;
@@ -12540,6 +14769,9 @@ function grokMessageCountFromSignals(signals) {
   );
 }
 
+// Context-window telemetry only. Prefer turn_completed.usage when available —
+// signals.totalTokens / contextTokensUsed track the live window, not billable
+// cumulative spend across a session (especially after compaction).
 function grokEffectiveTotalFromSignals(signals) {
   if (!signals || typeof signals !== "object") return 0;
   const beforeCompaction = normalizeNonNegativeNumber(signals.totalTokensBeforeCompaction);
@@ -12612,28 +14844,135 @@ function grokFileEndsWithNewline(filePath, size) {
   }
 }
 
-async function readGrokUpdateTokenEvents(updatesPath, fallbackTimestamp, prevOffsetEntry) {
-  if (!updatesPath) return { events: [], offsetEntry: null };
+
+function canonicalizeGrokUsageModel(model) {
+  const raw = normalizeModelInput(model) || "grok-build";
+  const lower = raw.toLowerCase();
+  // Free Build SKU must not fuzzy-match paid grok-4.5 rates in native clients.
+  if (lower.includes("build-free") || lower.endsWith("-free") || lower.includes("free-tier")) {
+    return "grok-build-free";
+  }
+  if (lower === "grok-4.5-build" || lower === "grok-4-5-build") {
+    return "grok-4.5-build";
+  }
+  return raw;
+}
+
+function normalizeGrokTurnUsage(usage, model, timestamp, eventId) {
+  if (!usage || typeof usage !== "object") return null;
+  const inputRaw = normalizeNonNegativeNumber(
+    usage.inputTokens ?? usage.input_tokens,
+  );
+  const output = normalizeNonNegativeNumber(
+    usage.outputTokens ?? usage.output_tokens,
+  );
+  const cached = normalizeNonNegativeNumber(
+    usage.cachedReadTokens ??
+      usage.cache_read_input_tokens ??
+      usage.cached_input_tokens,
+  );
+  const reasoning = normalizeNonNegativeNumber(
+    usage.reasoningTokens ?? usage.reasoning_output_tokens,
+  );
+  // Grok reports inputTokens as the full prompt (including cache hits). Split
+  // so pricing can apply cache_read rates correctly.
+  const nonCachedInput = Math.max(0, inputRaw - cached);
+  let total = normalizeNonNegativeNumber(usage.totalTokens ?? usage.total_tokens);
+  if (total <= 0) {
+    total = inputRaw + output + reasoning;
+  }
+  if (total <= 0 && nonCachedInput <= 0 && cached <= 0 && output <= 0) return null;
+  return {
+    input_tokens: nonCachedInput,
+    cached_input_tokens: cached,
+    cache_creation_input_tokens: 0,
+    output_tokens: output,
+    reasoning_output_tokens: reasoning,
+    total_tokens: total > 0 ? total : nonCachedInput + cached + output + reasoning,
+    billable_total_tokens: total > 0 ? total : nonCachedInput + cached + output + reasoning,
+    conversation_count: 1,
+    model: canonicalizeGrokUsageModel(model),
+    timestamp,
+    eventId,
+  };
+}
+
+function extractGrokTurnUsageEvents(record, fallbackTimestamp, fallbackModel, lineIndex) {
+  const update = record?.params?.update;
+  if (!update || typeof update !== "object") return [];
+  if (update.sessionUpdate !== "turn_completed") return [];
+  const usage = update.usage;
+  if (!usage || typeof usage !== "object") return [];
+
+  const meta = record?.params?._meta || record?._meta || {};
+  const timestamp = grokTimestampFromUpdate(meta, record, fallbackTimestamp);
+  const baseEventId = grokEventId(
+    meta.eventId ?? record?.eventId ?? record?.id ?? update.prompt_id,
+    String(lineIndex),
+  );
+
+  const modelUsage =
+    usage.modelUsage && typeof usage.modelUsage === "object" ? usage.modelUsage : null;
+  const events = [];
+  if (modelUsage && Object.keys(modelUsage).length > 0) {
+    for (const [modelName, modelUsageEntry] of Object.entries(modelUsage)) {
+      if (!modelUsageEntry || typeof modelUsageEntry !== "object") continue;
+      const event = normalizeGrokTurnUsage(
+        modelUsageEntry,
+        modelName,
+        timestamp,
+        `${baseEventId}|${modelName}`,
+      );
+      if (event) events.push(event);
+    }
+  }
+  if (events.length === 0) {
+    const event = normalizeGrokTurnUsage(usage, fallbackModel, timestamp, baseEventId);
+    if (event) events.push(event);
+  }
+  return events;
+}
+
+// Context-window watermark events (legacy / fallback only).
+function extractGrokContextTokenEvent(record, fallbackTimestamp, lineIndex) {
+  const meta = record?.params?._meta || record?._meta;
+  if (!meta || typeof meta !== "object") return null;
+  const totalTokens = normalizeNonNegativeNumber(meta.totalTokens);
+  if (totalTokens <= 0) return null;
+  return {
+    totalTokens,
+    timestamp: grokTimestampFromUpdate(meta, record, fallbackTimestamp),
+    eventId: grokEventId(meta.eventId ?? record?.eventId ?? record?.id, String(lineIndex)),
+  };
+}
+
+async function readGrokUpdateTokenEvents(updatesPath, fallbackTimestamp, prevOffsetEntry, options = {}) {
+  const fallbackModel = options.fallbackModel || "grok-build";
+  if (!updatesPath) {
+    return { turnEvents: [], contextEvents: [], offsetEntry: null };
+  }
   let stat;
   try {
     stat = fssync.statSync(updatesPath);
-    if (!stat.isFile()) return { events: [], offsetEntry: null };
+    if (!stat.isFile()) return { turnEvents: [], contextEvents: [], offsetEntry: null };
   } catch {
-    return { events: [], offsetEntry: null };
+    return { turnEvents: [], contextEvents: [], offsetEntry: null };
   }
 
-  // updates.jsonl is append-only and carries cumulative totalTokens, deduped
-  // by the session high-watermark, so resuming from the last consumed byte is
-  // safe: re-read events stay below the watermark (no double count), and any
-  // bytes a write race leaves unparsed are covered by the next event's
-  // cumulative total. Re-read from 0 on truncation or inode change.
+  // updates.jsonl is append-only. Turn usage is additive per turn_completed, so
+  // resuming from the last consumed byte is safe. Re-read from 0 on truncation
+  // or inode change.
   const prevSize = Number(prevOffsetEntry?.size) || 0;
   const prevIno = prevOffsetEntry?.ino;
   const inodeChanged = typeof prevIno === "number" && prevIno !== stat.ino;
   const startOffset = stat.size < prevSize || inodeChanged ? 0 : prevSize;
   const baseOffset = { mtimeMs: stat.mtimeMs, ino: stat.ino };
   if (stat.size <= startOffset) {
-    return { events: [], offsetEntry: { size: startOffset, ...baseOffset } };
+    return {
+      turnEvents: [],
+      contextEvents: [],
+      offsetEntry: { size: startOffset, ...baseOffset },
+    };
   }
 
   // Only advance the stored offset to the end of the last newline-terminated
@@ -12642,7 +14981,8 @@ async function readGrokUpdateTokenEvents(updatesPath, fallbackTimestamp, prevOff
   // complete instead of skipping it forever (which would undercount tokens).
   const endsWithNewline = grokFileEndsWithNewline(updatesPath, stat.size);
 
-  const events = [];
+  const turnEvents = [];
+  const contextEvents = [];
   let lineIndex = 0;
   let lastLine = "";
   const input = fssync.createReadStream(updatesPath, {
@@ -12662,21 +15002,24 @@ async function readGrokUpdateTokenEvents(updatesPath, fallbackTimestamp, prevOff
       } catch {
         continue;
       }
-      const meta = record?.params?._meta || record?._meta;
-      if (!meta || typeof meta !== "object") continue;
-      const totalTokens = normalizeNonNegativeNumber(meta.totalTokens);
-      if (totalTokens <= 0) continue;
-      const timestamp = grokTimestampFromUpdate(meta, record, fallbackTimestamp);
-      events.push({
-        totalTokens,
-        timestamp,
-        eventId: grokEventId(meta.eventId ?? record?.eventId ?? record?.id, String(lineIndex)),
-      });
+      const turns = extractGrokTurnUsageEvents(
+        record,
+        fallbackTimestamp,
+        fallbackModel,
+        lineIndex,
+      );
+      if (turns.length > 0) {
+        turnEvents.push(...turns);
+        continue;
+      }
+      const contextEvent = extractGrokContextTokenEvent(record, fallbackTimestamp, lineIndex);
+      if (contextEvent) contextEvents.push(contextEvent);
     }
   } catch {
-    // Stream error mid-read: keep the events we got, but do not advance the
-    // offset so the next sync retries the same range (watermark-safe).
-    return { events, offsetEntry: prevOffsetEntry || null };
+    // Stream error mid-read: discard partial events and do not advance the
+    // offset, so the next sync re-extracts from the same range exactly once
+    // instead of double-counting already-parsed turn events.
+    return { turnEvents: [], contextEvents: [], offsetEntry: prevOffsetEntry || null };
   }
 
   // When the file does not end on a newline, the final emitted line is a
@@ -12684,7 +15027,11 @@ async function readGrokUpdateTokenEvents(updatesPath, fallbackTimestamp, prevOff
   // stays on a complete-line boundary and the line is re-read once finished.
   const trailingPartialBytes = endsWithNewline ? 0 : Buffer.byteLength(lastLine, "utf8");
   const committedSize = Math.max(startOffset, stat.size - trailingPartialBytes);
-  return { events, offsetEntry: { size: committedSize, ...baseOffset } };
+  return {
+    turnEvents,
+    contextEvents,
+    offsetEntry: { size: committedSize, ...baseOffset },
+  };
 }
 
 function estimateGrokTokenDelta(totalTokens, conversationCount, options = {}) {
@@ -12706,6 +15053,70 @@ function estimateGrokTokenDelta(totalTokens, conversationCount, options = {}) {
   };
 }
 
+function clearGrokHourlyBuckets(hourlyState) {
+  if (!hourlyState || typeof hourlyState !== "object") return;
+  const buckets = hourlyState.buckets && typeof hourlyState.buckets === "object" ? hourlyState.buckets : null;
+  if (buckets) {
+    for (const key of Object.keys(buckets)) {
+      if (key.startsWith("grok|")) delete buckets[key];
+    }
+  }
+  const groupQueued =
+    hourlyState.groupQueued && typeof hourlyState.groupQueued === "object"
+      ? hourlyState.groupQueued
+      : null;
+  if (groupQueued) {
+    for (const key of Object.keys(groupQueued)) {
+      if (key.startsWith("grok|")) delete groupQueued[key];
+    }
+  }
+}
+
+async function retractStaleGrokQueueRows(queuePath, keepKeys) {
+  if (!queuePath) return 0;
+  let raw = "";
+  try {
+    raw = fssync.readFileSync(queuePath, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") return 0;
+    throw error;
+  }
+
+  const latestGrok = new Map();
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    let row;
+    try {
+      row = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if ((row?.source || "") !== "grok") continue;
+    const model = normalizeModelInput(row.model) || DEFAULT_MODEL;
+    const hourStart = typeof row.hour_start === "string" ? row.hour_start : null;
+    if (!hourStart) continue;
+    latestGrok.set(bucketKey("grok", model, hourStart), { model, hour_start: hourStart, row });
+  }
+
+  const zero = initTotals();
+  const lines = [];
+  for (const [key, entry] of latestGrok.entries()) {
+    if (keepKeys.has(key)) continue;
+    if (totalsKey(entry.row) === totalsKey(zero)) continue;
+    lines.push(
+      JSON.stringify({
+        source: "grok",
+        model: entry.model,
+        hour_start: entry.hour_start,
+        ...zero,
+      }),
+    );
+  }
+  if (lines.length === 0) return 0;
+  await fs.appendFile(queuePath, `${lines.join("\n")}\n`, "utf8");
+  return lines.length;
+}
+
 async function parseGrokBuildIncremental({
   sessions,
   cursors = {},
@@ -12716,11 +15127,44 @@ async function parseGrokBuildIncremental({
   if (queuePath) await ensureDir(path.dirname(queuePath));
   const hourlyState = normalizeHourlyState(cursors?.hourly);
   const grokState = cursors.grok && typeof cursors.grok === "object" ? { ...cursors.grok } : {};
-  let sessionSnapshots = normalizeGrokSessionSnapshots(grokState);
+  const prevVersion = Number(grokState.version) || 0;
+  const needsTurnUsageMigration = prevVersion < GROK_CURSOR_VERSION;
+
+  // v3 and earlier treated context-window totalTokens as cumulative spend, which
+  // undercounts heavily (often 10-50x) and mis-splits input/output. Rebuild from
+  // turn_completed.usage when migrating to v4.
+  //
+  // Drop prior watermark totals / updateOffsets so files are re-read from byte 0,
+  // but keep legacySeen markers from seenSessions so the one-shot baseline
+  // (sessions already counted under the old scanner) still applies.
+  let sessionSnapshots;
+  if (needsTurnUsageMigration) {
+    const normalized = normalizeGrokSessionSnapshots(grokState);
+    sessionSnapshots = {};
+    for (const [sessionId, snapshot] of Object.entries(normalized)) {
+      if (!snapshot?.legacySeen) continue;
+      sessionSnapshots[sessionId] = {
+        totalTokens: 0,
+        messageCount: 0,
+        model: null,
+        source: null,
+        lastEventId: null,
+        lastEventTimestamp: null,
+        updatedAt: snapshot.updatedAt || null,
+        legacySeen: true,
+      };
+    }
+    clearGrokHourlyBuckets(hourlyState);
+  } else {
+    sessionSnapshots = normalizeGrokSessionSnapshots(grokState);
+  }
   const prevUpdateOffsets =
-    grokState.updateOffsets && typeof grokState.updateOffsets === "object"
+    !needsTurnUsageMigration &&
+    grokState.updateOffsets &&
+    typeof grokState.updateOffsets === "object"
       ? grokState.updateOffsets
       : {};
+
   // Rebuilt from the sessions seen this scan, so entries for deleted session
   // dirs are pruned and the cursor stays bounded by the on-disk session count.
   const updateOffsets = {};
@@ -12755,82 +15199,141 @@ async function parseGrokBuildIncremental({
     const model = grokModelFromSignals(safeSignals);
     const lastActive = grokLastActiveFromSignals(safeSignals, summary);
 
-    let highWatermark = previousTotal;
-    let observedTotal = previousTotal;
+    let cumulativeTotal = previousTotal;
     let tokenDeltaForSession = 0;
     let finalTouchedHourStart = null;
     let source = previous.source || null;
     let lastEventId = previous.lastEventId || null;
     let lastEventTimestamp = previous.lastEventTimestamp || null;
-    const pendingTokenDeltas = [];
-
-    const recordTokenDelta = (deltaTokens, timestamp, deltaSource) => {
-      const hourStartStr = toUtcHalfHourStart(timestamp) || toUtcHalfHourStart(Date.now());
-      if (!hourStartStr) return false;
-      pendingTokenDeltas.push({ deltaTokens, hourStartStr });
-      tokenDeltaForSession += deltaTokens;
-      finalTouchedHourStart = hourStartStr;
-      source = deltaSource;
-      lastEventTimestamp = timestamp || lastEventTimestamp;
-      return true;
-    };
+    let lastModel = previous.model || model;
+    let sawTurnUsage = source === "turn_usage" || previous.source === "turn_usage";
+    // Defer bucket writes until after we know whether this is a legacy baseline
+    // pass (first sighting of a session already counted under an older scanner).
+    const pendingBucketDeltas = [];
 
     const updatesPath = grokUpdatesPathForSession(sess);
     const updates = await readGrokUpdateTokenEvents(
       updatesPath,
       lastActive,
       updatesPath ? prevUpdateOffsets[updatesPath] : null,
+      { fallbackModel: model },
     );
     if (updatesPath && updates.offsetEntry) {
       updateOffsets[updatesPath] = updates.offsetEntry;
     }
-    for (const event of updates.events) {
-      observedTotal = Math.max(observedTotal, event.totalTokens);
+
+    // Preferred path: each turn_completed carries true cumulative API usage for
+    // that turn (input/output/cache/reasoning). Sum them.
+    for (const event of updates.turnEvents) {
+      sawTurnUsage = true;
+      const hourStartStr = toUtcHalfHourStart(event.timestamp) || toUtcHalfHourStart(lastActive) || toUtcHalfHourStart(Date.now());
+      if (!hourStartStr) continue;
+      const eventModel = event.model || model;
+      const delta = {
+        input_tokens: event.input_tokens,
+        cached_input_tokens: event.cached_input_tokens,
+        cache_creation_input_tokens: event.cache_creation_input_tokens,
+        output_tokens: event.output_tokens,
+        reasoning_output_tokens: event.reasoning_output_tokens,
+        total_tokens: event.total_tokens,
+        billable_total_tokens: event.billable_total_tokens,
+        conversation_count: event.conversation_count || 1,
+      };
+      pendingBucketDeltas.push({ model: eventModel, hourStartStr, delta });
+      cumulativeTotal += event.total_tokens;
+      tokenDeltaForSession += event.total_tokens;
+      finalTouchedHourStart = hourStartStr;
+      source = "turn_usage";
       lastEventId = event.eventId || lastEventId;
       lastEventTimestamp = event.timestamp || lastEventTimestamp;
-      if (event.totalTokens <= highWatermark) continue;
-      const deltaTokens = event.totalTokens - highWatermark;
-      highWatermark = event.totalTokens;
-      recordTokenDelta(deltaTokens, event.timestamp || lastActive, "updates");
+      lastModel = eventModel;
     }
 
-    const effectiveSignalTotal = grokEffectiveTotalFromSignals(safeSignals);
-    observedTotal = Math.max(observedTotal, effectiveSignalTotal);
-    if (effectiveSignalTotal > highWatermark) {
-      const deltaTokens = effectiveSignalTotal - highWatermark;
-      highWatermark = effectiveSignalTotal;
-      recordTokenDelta(deltaTokens, lastActive, "signals");
+    // Fallback only when this session never emitted turn_completed usage
+    // (older logs / partial sessions). Context watermark is a lower-bound
+    // estimate and must not run on top of turn usage.
+    if (!sawTurnUsage) {
+      let highWatermark = previousTotal;
+      for (const event of updates.contextEvents) {
+        lastEventId = event.eventId || lastEventId;
+        lastEventTimestamp = event.timestamp || lastEventTimestamp;
+        if (event.totalTokens <= highWatermark) continue;
+        const deltaTokens = event.totalTokens - highWatermark;
+        highWatermark = event.totalTokens;
+        const hourStartStr =
+          toUtcHalfHourStart(event.timestamp) ||
+          toUtcHalfHourStart(lastActive) ||
+          toUtcHalfHourStart(Date.now());
+        if (!hourStartStr) continue;
+        const delta = estimateGrokTokenDelta(deltaTokens, 0, { allowZeroConversationCount: true });
+        pendingBucketDeltas.push({ model, hourStartStr, delta });
+        tokenDeltaForSession += deltaTokens;
+        finalTouchedHourStart = hourStartStr;
+        source = "updates";
+      }
+
+      const effectiveSignalTotal = grokEffectiveTotalFromSignals(safeSignals);
+      if (effectiveSignalTotal > highWatermark) {
+        const deltaTokens = effectiveSignalTotal - highWatermark;
+        highWatermark = effectiveSignalTotal;
+        const hourStartStr = toUtcHalfHourStart(lastActive) || toUtcHalfHourStart(Date.now());
+        if (hourStartStr) {
+          const delta = estimateGrokTokenDelta(deltaTokens, 0, { allowZeroConversationCount: true });
+          pendingBucketDeltas.push({ model, hourStartStr, delta });
+          tokenDeltaForSession += deltaTokens;
+          finalTouchedHourStart = hourStartStr;
+          source = "signals";
+        }
+      }
+      cumulativeTotal = Math.max(previousTotal, highWatermark);
     }
 
-    const finalTotal = Math.max(previousTotal, highWatermark, observedTotal);
+    const finalTotal = Math.max(previousTotal, cumulativeTotal);
+    // Sessions already observed under an older scanner must establish a watermark
+    // without backfilling historical tokens as brand-new usage.
     const legacyBaselineOnly = previous.legacySeen && previousTotal === 0 && finalTotal > 0;
+
     if (!legacyBaselineOnly) {
-      for (const pending of pendingTokenDeltas) {
-        const delta = estimateGrokTokenDelta(pending.deltaTokens, 0, { allowZeroConversationCount: true });
-        const bucket = getHourlyBucket(hourlyState, "grok", model, pending.hourStartStr);
-        addTotals(bucket.totals, delta);
-        touchedBuckets.add(bucketKey("grok", model, pending.hourStartStr));
+      for (const pending of pendingBucketDeltas) {
+        const bucket = getHourlyBucket(hourlyState, "grok", pending.model, pending.hourStartStr);
+        addTotals(bucket.totals, pending.delta);
+        touchedBuckets.add(bucketKey("grok", pending.model, pending.hourStartStr));
         eventsAggregated++;
       }
-    }
 
-    if (!legacyBaselineOnly && tokenDeltaForSession > 0 && finalTouchedHourStart) {
-      const deltaMessageCount =
-        messageCount > previousMessageCount ? messageCount - previousMessageCount : 1;
-      const bucket = getHourlyBucket(hourlyState, "grok", model, finalTouchedHourStart);
-      addTotals(bucket.totals, { conversation_count: deltaMessageCount });
-      touchedBuckets.add(bucketKey("grok", model, finalTouchedHourStart));
+      // Message/conversation count for fallback-only sessions (turn path already
+      // counts each turn_completed as one conversation).
+      if (!sawTurnUsage && tokenDeltaForSession > 0 && finalTouchedHourStart) {
+        const deltaMessageCount =
+          messageCount > previousMessageCount ? messageCount - previousMessageCount : 1;
+        const bucket = getHourlyBucket(hourlyState, "grok", lastModel || model, finalTouchedHourStart);
+        addTotals(bucket.totals, { conversation_count: deltaMessageCount });
+        touchedBuckets.add(bucketKey("grok", lastModel || model, finalTouchedHourStart));
+      }
     }
 
     if (finalTotal > 0 && (tokenDeltaForSession > 0 || previousTotal > 0 || legacyBaselineOnly)) {
       sessionSnapshots[sessionId] = {
         totalTokens: finalTotal,
         messageCount: Math.max(previousMessageCount, messageCount),
-        model,
+        model: lastModel || model,
         source: source || previous.source || null,
         lastEventId,
         lastEventTimestamp,
         updatedAt: new Date().toISOString(),
+      };
+    } else if (previous.legacySeen && finalTotal === 0) {
+      // Keep the baseline marker across empty syncs so later growth is still
+      // baselined once instead of backfilled as brand-new usage.
+      sessionSnapshots[sessionId] = {
+        totalTokens: 0,
+        messageCount: Math.max(previousMessageCount, messageCount),
+        model: lastModel || model,
+        source: previous.source || null,
+        lastEventId: lastEventId || previous.lastEventId || null,
+        lastEventTimestamp: lastEventTimestamp || previous.lastEventTimestamp || null,
+        updatedAt: new Date().toISOString(),
+        legacySeen: true,
       };
     }
 
@@ -12839,12 +15342,37 @@ async function parseGrokBuildIncremental({
     }
   }
 
-  const bucketsQueued = queuePath
+  let bucketsQueued = queuePath
     ? await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
     : 0;
+
+  // After a semantics migration, retract stale grok queue keys that the full
+  // rescan no longer produces so dashboard "latest per key" no longer keeps
+  // the old undercounted rows.
+  if (needsTurnUsageMigration && queuePath) {
+    const keepKeys = new Set();
+    for (const [key, bucket] of Object.entries(hourlyState.buckets || {})) {
+      if (!key.startsWith("grok|") || !bucket?.totals) continue;
+      keepKeys.add(key);
+    }
+    const retracted = await retractStaleGrokQueueRows(queuePath, keepKeys);
+    bucketsQueued += retracted;
+  }
+
   hourlyState.updatedAt = new Date().toISOString();
   cursors.hourly = hourlyState;
   sessionSnapshots = capGrokSessionSnapshots(sessionSnapshots);
+
+  const migrations = grokState.migrations && typeof grokState.migrations === "object"
+    ? { ...grokState.migrations }
+    : {};
+  if (needsTurnUsageMigration) {
+    migrations.turnUsageV4 = {
+      appliedAt: new Date().toISOString(),
+      fromVersion: prevVersion,
+      toVersion: GROK_CURSOR_VERSION,
+    };
+  }
 
   cursors.grok = {
     ...grokState,
@@ -12852,6 +15380,7 @@ async function parseGrokBuildIncremental({
     sessionSnapshots,
     seenSessions: Object.keys(sessionSnapshots),
     updateOffsets,
+    migrations,
     updatedAt: new Date().toISOString()
   };
 
@@ -13285,6 +15814,10 @@ module.exports = {
   readOpencodeDbMessages,
   readMimoDbMessages,
   readZcodeDbMessages,
+  resolveQoderDbPath,
+  resolveQoderDbPaths,
+  readQoderDbMessages,
+  resolveKiroBasePath,
   resolveKiroDbPath,
   resolveKiroJsonlPath,
   resolveHermesPath,
@@ -13309,14 +15842,25 @@ module.exports = {
   parseGeminiIncremental,
   parseOpencodeIncremental,
   parseOpencodeDbIncremental,
+  parseQoderDbIncremental,
   openclawCursorKey,
   parseOpenclawIncremental,
+  resolveOpenclawHome,
+  resolveOpenclawHomes,
+  resolveOpenclawSessionFiles,
+  resolveClaudeScienceDbPath,
+  resolveClaudeScienceDbPaths,
+  buildClaudeScienceFramesQuery,
+  readClaudeScienceFrames,
+  parseClaudeScienceIncremental,
   parseCursorApiIncremental,
   parseKiroIncremental,
   parseHermesIncremental,
   gooseInstallOwnsCursor,
   zedInstallOwnsCursor,
   hermesInstallOwnsCursor,
+  kiroInstallOwnsCursor,
+  kiroCliInstallOwnsCursor,
   copilotOtelCursorHasLegacyCliUsage,
   pruneCopilotUsageClaims,
   parseCopilotIncremental,
@@ -13331,6 +15875,7 @@ module.exports = {
   resolveKimiCodeDefaultModel,
   parseKimiCodeIncremental,
   resolveCodebuddyHome,
+  codebuddyJsonlHasUsage,
   resolveCodebuddyProjectFiles,
   resolveCodebuddyDefaultModel,
   parseCodebuddyIncremental,
@@ -13396,6 +15941,7 @@ module.exports = {
   // Exposed for regression tests covering cache-token accounting.
   normalizeGeminiTokens,
   normalizeOpencodeTokens,
+  normalizeQoderTokens,
   sameGeminiTotals,
   diffGeminiTotals,
   // Exposed so the queue-repair migration can mutate cursors state in the

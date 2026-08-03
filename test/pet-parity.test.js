@@ -135,6 +135,82 @@ function swiftAtlasRows() {
   return rows;
 }
 
+// SwiftUI's Canvas does not clip, so anything drawn outside the companion's 60x64pt
+// frame silently paints over the popover around it (or lands under the speech bubble
+// and is never seen at all). These guards pin the statically checkable geometry —
+// literal rect rows and literal text baselines — inside the frame.
+const CANVAS_HEIGHT = 64;
+const PX = 4;
+const Y_BASE = 6;
+const Y_OFF = (CANVAS_HEIGHT - 10 * PX) / 2;
+const spriteToScreenY = (y) => (y - Y_BASE) * PX + Y_OFF;
+
+function drawingSection() {
+  const start = companionSource.indexOf("    // MARK: - Per-State Drawing Functions");
+  const end = companionSource.indexOf("    // MARK: - State Resolution");
+  assert.ok(start >= 0 && end > start, "the per-state drawing section must stay locatable");
+  return companionSource.slice(start, end);
+}
+
+test("every literal sprite rect stays inside the 60x64 companion canvas", () => {
+  const section = drawingSection();
+  // y and height literal; x and width may be expressions (the collapsed error pose
+  // deliberately spreads its shadow wider than the body).
+  const rects = [...section.matchAll(/ctx\.r\([^,]+,\s*(-?[\d.]+),\s*[^,]+,\s*(-?[\d.]+)\s*[,)]/g)];
+  assert.ok(rects.length >= 40, `expected the bulk of the rects to be checkable, got ${rects.length}`);
+  for (const [match, y, h] of rects) {
+    const top = spriteToScreenY(Number(y));
+    const bottom = spriteToScreenY(Number(y) + Number(h));
+    assert.ok(top >= 0, `${match.trim()} starts ${-top}pt above the canvas`);
+    assert.ok(
+      bottom <= CANVAS_HEIGHT,
+      `${match.trim()} ends ${bottom - CANVAS_HEIGHT}pt below the canvas`,
+    );
+  }
+});
+
+test("every literal text baseline stays inside the 60x64 companion canvas", () => {
+  const section = drawingSection();
+  const points = [...section.matchAll(/at: CGPoint\(x: [^,]+, y: (-?[\d.]+)\)/g)];
+  assert.ok(points.length >= 3, "the absolute-positioned labels must stay parsable");
+  for (const [match, y] of points) {
+    assert.ok(
+      Number(y) >= 0 && Number(y) <= CANVAS_HEIGHT,
+      `${match.trim()} is outside the canvas`,
+    );
+  }
+
+  // The ultrathink banner positions itself with a named constant instead.
+  const textY = Number(section.match(/let textY: CGFloat = ([\d.]+)/)?.[1]);
+  assert.ok(Number.isFinite(textY), "the ultrathink banner baseline must stay parsable");
+  assert.ok(textY - 9 / 2 >= 0, "the 9pt ultrathink banner must not clip off the top edge");
+});
+
+test("the macOS thinking pose keeps its thought indicator inside the 60x64 canvas", () => {
+  // Regression: the ported SVG speech cloud (10x9 sprite units) does not fit above the
+  // head — the canvas is 60x64pt and the torso starts at sprite y=6, leaving 12pt. The
+  // cloud clipped off the top and only its tail rendered, on top of Clawd's face.
+  const fn = companionSource.match(
+    /private static func drawWorkingThinking[\s\S]*?\n    \}/,
+  )?.[0];
+  assert.ok(fn, "drawWorkingThinking must stay source-inspectable");
+  assert.doesNotMatch(
+    fn,
+    /white\.opacity/,
+    "the thinking pose must not reintroduce the clipped white thought cloud",
+  );
+
+  const dotY = Number(fn.match(/let dotY: CGFloat = ([\d.]+)/)?.[1]);
+  const bob = Number(fn.match(/let dotY: CGFloat = [\d.]+ \+ sin\([^)]*\) \* ([\d.]+)/)?.[1]);
+  assert.ok(Number.isFinite(dotY) && Number.isFinite(bob), "dot baseline must stay parsable");
+
+  // ctx.r maps sprite y to screen y: (y - yBase) * px + yOff, with yBase 6, px 4,
+  // yOff (64 - 10 * 4) / 2 = 12. The dots are 1 sprite unit (4pt) tall.
+  const screenY = (y) => (y - 6) * 4 + 12;
+  assert.ok(screenY(dotY - bob) >= 0, "the thought dots must not clip off the top edge");
+  assert.ok(screenY(dotY + bob) + 4 <= 12, "the thought dots must stay above the torso");
+});
+
 test("atlas row timings match between PetAtlasAnimated.jsx and PetAtlasSpriteView.swift", () => {
   const js = jsAtlasRows();
   const swift = swiftAtlasRows();
@@ -161,6 +237,20 @@ test("V2 look directions use the same 16-cell row mapping on web, macOS, and Win
   assert.match(windowsPetSource, /degrees \/ 22\.5/);
   assert.match(windowsPetSource, /% 16/);
   assert.match(windowsPetSource, /pet:look/);
+});
+
+test("removed bundled pets disappear from both native character menus while Clawd remains", () => {
+  assert.match(macControllerSource, /hiddenBuiltinsFilename = "\.hidden-builtins\.json"/);
+  assert.match(
+    macControllerSource,
+    /\$0 == \.clawd \|\| !hiddenBuiltinIDs\.contains\(\$0\.rawValue\)/,
+  );
+  assert.match(windowsPetSource, /HiddenBuiltinsFilename = "\.hidden-builtins\.json"/);
+  assert.match(windowsPetSource, /IsBuiltinCharacterHidden\(normalized\)/);
+  assert.match(
+    windowsTraySource,
+    /_petCharacterSprout\.Visible = !PetWindow\.IsBuiltinCharacterHidden/,
+  );
 });
 
 test("Windows edge tuck keeps the sprite visible instead of hiding window padding", () => {

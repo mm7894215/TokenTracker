@@ -111,6 +111,7 @@ describe("useLimitsDisplayPrefs", () => {
         "kimi",
         "kiro",
         "opencodeGo",
+        "qoder",
         "zcode",
       ].sort(),
     );

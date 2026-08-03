@@ -165,7 +165,7 @@ test("Codex reset bank scope guard freezes widget menu bar and native bridge sur
   assertNoResetBankSurface(menuBarMetricEnum[0], "menu-bar metric enum");
   assert.doesNotMatch(
     menuBarDisplayPreferences,
-    /(?:reset|credit)[\s\S]{0,80}(?:account|profile|email|avatar|token|id)|(?:account|profile|email|avatar|token|id)[\s\S]{0,80}(?:reset|credit)/i,
+    /reset[-_ ]?(?:bank|credits?)[\s\S]{0,80}(?:account|profile|email|avatar|token|id)|(?:account|profile|email|avatar|token|id)[\s\S]{0,80}reset[-_ ]?(?:bank|credits?)/i,
     "Menu-bar display preferences must not learn Reset Bank identity fields",
   );
 

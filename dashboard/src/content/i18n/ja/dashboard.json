@@ -381,12 +381,12 @@
   "pet.import.subtitle": "codex-pets.net のリンクを貼るか、.zip を選択します。",
   "pet.import.add": "追加",
   "pet.import.zip": "パッケージを選択",
-  "pet.import.remove": "インポートしたペットを削除",
+  "pet.import.remove": "ペットを削除",
   "pet.import.success": "ペットをインポートして選択しました。",
   "pet.import.failed": "このペットをインポートできませんでした。",
   "pet.import.busy": "インポート中…",
   "pet.format.v2": "V2",
-  "pet.import.removed": "インポートしたペットを削除しました。",
+  "pet.import.removed": "ペットを削除しました。",
   "pet.import.url_label": "Codex Pets のURLまたはペットID",
   "dashboard.projects.detail.badge": "プロジェクト",
   "achievements.section.title": "実績",
@@ -441,5 +441,12 @@
   "achievements.signin.action": "サインイン",
   "achievements.scope.local": "ローカル",
   "achievements.page.suggest": "新しいバッジのアイデアがある?",
-  "achievements.page.suggest_link": "GitHub で提案する"
+  "achievements.page.suggest_link": "GitHub で提案する",
+  "dashboard.context_breakdown.empty_grok": "選択した期間に Grok Build のアクティビティがありません。",
+  "dashboard.context_breakdown.error_grok": "このビューに必要な Grok Build ログを読み取れませんでした。",
+  "dashboard.context_breakdown.footnote_grok": "Grok では重複しないトークン区分を使います。ツールと exec の詳細は同一ターンへのヒューリスティックな帰属で、turn_completed.usage を正とします。",
+  "dashboard.context_breakdown.heading": "コンテキスト内訳",
+  "dashboard.context_breakdown.heading_claude": "Claude コンテキスト内訳",
+  "dashboard.context_breakdown.heading_codex": "Codex コンテキスト内訳",
+  "dashboard.context_breakdown.heading_grok": "Grok コンテキスト内訳"
 }

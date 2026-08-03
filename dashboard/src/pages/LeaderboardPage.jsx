@@ -1207,7 +1207,7 @@ export function LeaderboardPage({
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 sm:px-6 text-sm text-oai-gray-400 dark:text-oai-gray-500">
           <p>{copy("landing.v2.footer.line")}</p>
           <a
-            href="https://github.com/mm7894215/TokenTracker"
+            href="https://github.com/xiufengsun/TokenTracker"
             className="text-oai-gray-400 dark:text-oai-gray-500 hover:text-oai-black dark:hover:text-white transition-colors"
             target="_blank"
             rel="noopener noreferrer"

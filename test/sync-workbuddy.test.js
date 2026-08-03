@@ -19,7 +19,7 @@ async function readJsonLines(filePath) {
     .map((line) => JSON.parse(line));
 }
 
-test("cmdSync ingests WorkBuddy SQLite-only installs without duplicate snapshots", async () => {
+test("cmdSync ignores WorkBuddy context-only SQLite snapshots instead of billing them", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-sync-workbuddy-"));
   const prevEnv = {
     CODEX_HOME: process.env.CODEX_HOME,
@@ -53,14 +53,11 @@ test("cmdSync ingests WorkBuddy SQLite-only installs without duplicate snapshots
     await cmdSync(["--auto", "--from-notify", "--source=workbuddy"]);
     const queuePath = path.join(tmp, ".tokentracker", "tracker", "queue.jsonl");
     let rows = await readJsonLines(queuePath);
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0].source, "workbuddy");
-    assert.equal(rows[0].input_tokens, 100);
-    assert.equal(rows[0].total_tokens, 100);
+    assert.equal(rows.length, 0);
 
     await cmdSync(["--auto", "--from-notify", "--source=workbuddy"]);
     rows = await readJsonLines(queuePath);
-    assert.equal(rows.length, 1, "unchanged cumulative DB snapshot must not append");
+    assert.equal(rows.length, 0, "unchanged context snapshot must remain non-billable");
 
     cp.execFileSync("sqlite3", [
       dbPath,
@@ -68,9 +65,7 @@ test("cmdSync ingests WorkBuddy SQLite-only installs without duplicate snapshots
     ]);
     await cmdSync(["--auto", "--from-notify", "--source=workbuddy"]);
     rows = await readJsonLines(queuePath);
-    assert.equal(rows.length, 2);
-    assert.equal(rows[1].input_tokens, 150);
-    assert.equal(rows[1].total_tokens, 150);
+    assert.equal(rows.length, 0, "context-window growth is not token usage");
   } finally {
     restoreHome();
     for (const [key, value] of Object.entries(prevEnv)) {

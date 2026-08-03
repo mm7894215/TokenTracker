@@ -8,7 +8,7 @@ import { useInsforgeAuth } from "../../contexts/InsforgeAuthContext.jsx";
 import { useLoginModal } from "../../contexts/LoginModalContext.jsx";
 import { STATUSPAGE_URL } from "../../lib/config";
 import { LV3_CSS_VARS } from "./v3/palette.js";
-import { REPO_URL } from "../../lib/config";
+import { PRIVACY_URL, REPO_URL } from "../../lib/config";
 import { useCommunityStats } from "../../hooks/use-community-stats.js";
 import { HeroSection } from "./v3/HeroSection.jsx";
 import { ToolsStrip } from "./v3/ToolsStrip.jsx";
@@ -195,6 +195,14 @@ export function MarketingLanding({
               rel="noopener noreferrer"
             >
               {copy("landing.v2.nav.github")}
+            </a>
+            <a
+              href={PRIVACY_URL}
+              className="font-medium text-oai-gray-400 transition-colors hover:text-white"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {copy("landing.v2.nav.privacy")}
             </a>
             {isLocalMode && (
               <Link

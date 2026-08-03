@@ -18,12 +18,43 @@ const { probeOpenclawHookState } = require("./openclaw-hook");
 const { probeOpenclawSessionPluginState } = require("./openclaw-session-plugin");
 const { probeGrokHookState } = require("./grok-hook");
 const { resolveTrackerPaths } = require("./tracker-paths");
-// TASK-011: Kiro CLI DB path inlined here to avoid pulling the ~4000-line
+const wsl = require("./wsl-probe");
+// TASK-011: Kiro paths inlined here to avoid pulling the ~4000-line
 // rollout module on every `tokentracker status` / `diagnostics` call.
-// rollout.js still exports resolveKiroCliDbPath for external callers.
+// rollout.js still exports resolveKiroCliDbPath / resolveKiroBasePath for
+// external callers; keep the platform branches in lockstep.
+function resolveKiroIdeBaseInline(env, home) {
+  const suffix = ["Kiro", "User", "globalStorage", "kiro.kiroagent"];
+  if (process.platform === "win32") {
+    const appData = typeof env.APPDATA === "string" && env.APPDATA.trim().length > 0
+      ? env.APPDATA.trim()
+      : path.join(home, "AppData", "Roaming");
+    return path.join(appData, ...suffix);
+  }
+  if (process.platform === "linux") {
+    const configHome = typeof env.XDG_CONFIG_HOME === "string" && env.XDG_CONFIG_HOME.trim().length > 0
+      ? env.XDG_CONFIG_HOME.trim()
+      : path.join(home, ".config");
+    return path.join(configHome, ...suffix);
+  }
+  return path.join(home, "Library", "Application Support", ...suffix);
+}
+
 function resolveKiroCliDbPathInline(env, home) {
   if (env.KIRO_CLI_DB_PATH) return env.KIRO_CLI_DB_PATH;
   const effectiveHome = env.HOME || home;
+  if (process.platform === "win32") {
+    const localAppData = typeof env.LOCALAPPDATA === "string" && env.LOCALAPPDATA.trim().length > 0
+      ? env.LOCALAPPDATA.trim()
+      : path.join(effectiveHome, "AppData", "Local");
+    return path.join(localAppData, "kiro-cli", "data.sqlite3");
+  }
+  if (process.platform === "linux") {
+    const dataHome = typeof env.XDG_DATA_HOME === "string" && env.XDG_DATA_HOME.trim().length > 0
+      ? env.XDG_DATA_HOME.trim()
+      : path.join(effectiveHome, ".local", "share");
+    return path.join(dataHome, "kiro-cli", "data.sqlite3");
+  }
   return path.join(
     effectiveHome,
     "Library",
@@ -106,21 +137,41 @@ async function collectTrackerDiagnostics({
   // Kiro IDE and Kiro CLI sub-path presence — merged under one "kiro" source
   // at token/cost aggregation level; operators need visibility of both
   // sub-paths here for debugging.
-  const kiroIdeDevDataDir = path.join(
-    home,
-    "Library",
-    "Application Support",
-    "Kiro",
-    "User",
-    "globalStorage",
-    "kiro.kiroagent",
-    "dev_data",
-  );
+  const kiroIdeDevDataDir = path.join(resolveKiroIdeBaseInline(process.env, home), "dev_data");
   const kiroIdePresent =
     (await safeStatSize(path.join(kiroIdeDevDataDir, "devdata.sqlite"))) > 0 ||
     (await safeStatSize(path.join(kiroIdeDevDataDir, "tokens_generated.jsonl"))) > 0;
   const kiroCliDbPath = resolveKiroCliDbPathInline(process.env, home);
   const kiroCliPresent = require("node:fs").existsSync(kiroCliDbPath);
+
+  // WSL installs (win32 only) — surfaced so `tracker doctor --json` can
+  // confirm dual-install discovery without running a sync.
+  let kiroWslInstalls = null;
+  let claudeWslProjects = null;
+  if (process.platform === "win32" && wsl.shouldProbeWsl(process.env)) {
+    const wslClaudeHome = wsl.discoverWslHome(".claude");
+    if (wslClaudeHome) claudeWslProjects = redactWslUser(path.join(wslClaudeHome, "projects"));
+    const wslIdeBase = wsl.discoverWslHome(".config/Kiro/User/globalStorage/kiro.kiroagent");
+    const wslKiroHomeDir = wsl.discoverWslHome(".kiro");
+    const wslCliDataDir = wsl.discoverWslHome(".local/share/kiro-cli");
+    const wslHomeRoot = wslKiroHomeDir
+      ? path.dirname(wslKiroHomeDir)
+      : (wslCliDataDir ? path.dirname(path.dirname(path.dirname(wslCliDataDir))) : null);
+    const wslCliDb = wslHomeRoot
+      ? path.join(wslHomeRoot, ".local", "share", "kiro-cli", "data.sqlite3")
+      : null;
+    if (wslIdeBase || wslHomeRoot) {
+      kiroWslInstalls = {
+        ide_dev_data: wslIdeBase ? redactWslUser(path.join(wslIdeBase, "dev_data")) : null,
+        ide_present: Boolean(wslIdeBase) && (
+          (await safeStatSize(path.join(wslIdeBase, "dev_data", "devdata.sqlite"))) > 0 ||
+          (await safeStatSize(path.join(wslIdeBase, "dev_data", "tokens_generated.jsonl"))) > 0
+        ),
+        cli_db: wslCliDb ? redactWslUser(wslCliDb) : null,
+        cli_present: Boolean(wslCliDb) && require("node:fs").existsSync(wslCliDb),
+      };
+    }
+  }
 
   const lastSuccessAt = uploadThrottle.lastSuccessMs
     ? new Date(uploadThrottle.lastSuccessMs).toISOString()
@@ -143,6 +194,8 @@ async function collectTrackerDiagnostics({
       code_home: redactValue(codeHome, home),
       code_config: redactValue(codeConfigPath, home),
       claude_config: redactValue(claudeConfigPath, home),
+      claude_projects: redactValue(path.join(home, ".claude", "projects"), home),
+      ...(process.platform === "win32" ? { claude_projects_wsl: claudeWslProjects } : {}),
       gemini_config: redactValue(geminiSettingsPath, home),
       opencode_config: redactValue(opencodeConfigDir, home),
       grok_home: redactValue(grokHome, home),
@@ -154,6 +207,9 @@ async function collectTrackerDiagnostics({
     kiro: {
       ide_present: kiroIdePresent,
       cli_present: kiroCliPresent,
+      ...(process.platform === "win32"
+        ? { wsl_mode: wsl.getWslMode(process.env), wsl_installs: kiroWslInstalls }
+        : {}),
       cli_approximation:
         "Kiro CLI does not persist explicit token counts (billing is credit-based on Bedrock). Tokens are approximated at 4 chars/token from user prompt chars and assistant response chars. Source rows that came through this path have model='kiro-cli-agent' when the underlying model is unknown (auto-routing); known Bedrock ARNs canonicalize to their short name (e.g. claude-sonnet-4).",
       merge_policy:
@@ -243,6 +299,17 @@ function redactValue(value, home) {
   return value.startsWith(homeNorm) ? `~${value.slice(homeNorm.length)}` : value;
 }
 
+// UNC WSL paths embed the distro name AND the Linux username; doctor reports
+// are shared for support, so mask the user segment the same way redactValue
+// masks $HOME (\\wsl$\Ubuntu\home\alice\... → \\wsl$\Ubuntu\home\~\...).
+function redactWslUser(value) {
+  if (typeof value !== "string") return value;
+  return value.replace(
+    /^([\\/]{2}wsl(?:\$|\.localhost)[\\/][^\\/]+[\\/]home[\\/])[^\\/]+/i,
+    "$1~",
+  );
+}
+
 function redactError(message, home) {
   if (typeof message !== "string") return message;
   if (typeof home !== "string" || home.length === 0) return message;
@@ -275,4 +342,10 @@ function parseEpochMsToIso(v) {
   return d.toISOString();
 }
 
-module.exports = { collectTrackerDiagnostics };
+module.exports = {
+  collectTrackerDiagnostics,
+  // Exported for the parity test that pins these inline copies to the
+  // canonical resolvers in rollout.js (see the lockstep note above).
+  resolveKiroIdeBaseInline,
+  resolveKiroCliDbPathInline,
+};

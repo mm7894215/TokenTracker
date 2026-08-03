@@ -595,6 +595,7 @@ struct PetCharacter: RawRepresentable, Hashable, Identifiable, CaseIterable {
 final class PetCatalog: ObservableObject {
     static let shared = PetCatalog()
     private static let builtins: [PetCharacter] = [.clawd, .sprout, .byte, .ember]
+    private static let hiddenBuiltinsFilename = ".hidden-builtins.json"
     private struct Metadata { let displayName: String; let spriteVersionNumber: Int; let atlasURL: URL }
 
     @Published private(set) var characters: [PetCharacter] = builtins
@@ -606,6 +607,14 @@ final class PetCatalog: ObservableObject {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let root = home
             .appendingPathComponent(".tokentracker/pets", isDirectory: true)
+        let hiddenBuiltinIDs: Set<String> = {
+            let url = root.appendingPathComponent(Self.hiddenBuiltinsFilename)
+            guard let data = try? Data(contentsOf: url),
+                  let ids = try? JSONSerialization.jsonObject(with: data) as? [String] else {
+                return []
+            }
+            return Set(ids)
+        }()
         let legacyRoot = home
             .appendingPathComponent(".codex/pets", isDirectory: true)
         let migrationComplete = FileManager.default.fileExists(
@@ -649,7 +658,9 @@ final class PetCatalog: ObservableObject {
         }
         discovered.sort { $0.1.displayName.localizedCaseInsensitiveCompare($1.1.displayName) == .orderedAscending }
         metadata = Dictionary(uniqueKeysWithValues: discovered.map { ($0.0.rawValue, $0.1) })
-        characters = Self.builtins + discovered.map(\.0)
+        characters = Self.builtins.filter {
+            $0 == .clawd || !hiddenBuiltinIDs.contains($0.rawValue)
+        } + discovered.map(\.0)
     }
 
     func contains(_ character: PetCharacter) -> Bool { characters.contains(character) }

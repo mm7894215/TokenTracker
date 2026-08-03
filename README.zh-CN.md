@@ -6,28 +6,28 @@
 
 ### 跨所有 CLI，看清你到底在 AI 上花了多少钱
 
-自动采集 **27 款 AI 编码工具** 的 token 用量，全程本地聚合，用一套漂亮的 Dashboard 看真实成本与趋势。不需要云账号、不需要 API Key、不需要任何配置 —— 一条命令搞定。
+自动采集 **29 款 AI 编码工具** 的 token 用量，全程本地聚合，用一套漂亮的 Dashboard 看真实成本与趋势。不需要云账号、不需要 API Key、不需要任何配置 —— 一条命令搞定。
 
 [![npm version](https://img.shields.io/npm/v/tokentracker-cli.svg?color=blue)](https://www.npmjs.com/package/tokentracker-cli)
 [![npm downloads](https://img.shields.io/npm/dm/tokentracker-cli.svg?color=brightgreen)](https://www.npmjs.com/package/tokentracker-cli)
-[![Homebrew](https://img.shields.io/github/v/release/mm7894215/TokenTracker?label=brew&color=F8B73E&logo=homebrew&logoColor=white)](https://github.com/mm7894215/homebrew-tokentracker)
+[![Homebrew](https://img.shields.io/github/v/release/xiufengsun/TokenTracker?label=brew&color=F8B73E&logo=homebrew&logoColor=white)](https://github.com/xiufengsun/homebrew-tokentracker)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/macOS-supported-lightgrey.svg)](https://www.apple.com/macos/)
-[![GitHub stars](https://img.shields.io/github/stars/mm7894215/TokenTracker?style=social)](https://github.com/mm7894215/TokenTracker/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/xiufengsun/TokenTracker?style=social)](https://github.com/xiufengsun/TokenTracker/stargazers)
 [![阮一峰周刊 #393 收录](https://img.shields.io/badge/%E6%94%B6%E5%BD%95-%E9%98%AE%E4%B8%80%E5%B3%B0%E5%91%A8%E5%88%8A%20%23393-FF6B35?logo=rss&logoColor=white)](https://github.com/ruanyf/weekly/blob/master/docs/issue-393.md)
-[![作者 tokens](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=0652839f-d19f-4f67-af85-6b7675875443&metric=tokens&compact=1&label=author%20tokens)](https://github.com/mm7894215/TokenTracker)
+[![作者 tokens](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=0652839f-d19f-4f67-af85-6b7675875443&metric=tokens&compact=1&label=author%20tokens)](https://github.com/xiufengsun/TokenTracker)
 
 <br/>
 
-<video src="https://github.com/user-attachments/assets/5e709422-5af8-4e4c-8109-f5bb711eb3f8" controls muted playsinline poster="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-dark.png" width="820">
-  <img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-dark.png" alt="Token Tracker Dashboard" width="820" />
+<video src="https://github.com/user-attachments/assets/5e709422-5af8-4e4c-8109-f5bb711eb3f8" controls muted playsinline poster="https://raw.githubusercontent.com/xiufengsun/tokentracker/main/docs/screenshots/dashboard-dark.png" width="820">
+  <img src="https://raw.githubusercontent.com/xiufengsun/tokentracker/main/docs/screenshots/dashboard-dark.png" alt="Token Tracker Dashboard" width="820" />
 </video>
 
-<video src="https://github.com/user-attachments/assets/3275979d-bbed-4639-83e2-8b7d83bed6af" controls muted playsinline poster="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-light.png" width="820"></video>
+<video src="https://github.com/user-attachments/assets/3275979d-bbed-4639-83e2-8b7d83bed6af" controls muted playsinline poster="https://raw.githubusercontent.com/xiufengsun/tokentracker/main/docs/screenshots/dashboard-light.png" width="820"></video>
 
 <br/><br/>
 
-⭐ **如果 TokenTracker 帮你省了时间，欢迎 [在 GitHub 上 Star](https://github.com/mm7894215/TokenTracker) —— 可以让更多开发者发现它。**
+⭐ **如果 TokenTracker 帮你省了时间，欢迎 [在 GitHub 上 Star](https://github.com/xiufengsun/TokenTracker) —— 可以让更多开发者发现它。**
 
 <br/>
 
@@ -54,8 +54,8 @@ npx tokentracker-cli
 - 🧩 *可选：* Skills 面板——浏览 250+ 公开 skill，并在 Claude · Codex · Grok · Antigravity · Gemini · OpenCode · Hermes 之间同步
 
 > **想要原生桌面 App？**
-> - **macOS** —— [下载 `TokenTrackerBar.dmg`](https://github.com/mm7894215/TokenTracker/releases/latest/download/TokenTrackerBar.dmg) → 拖入「应用程序」即可。包含桌面小组件、菜单栏状态图标，以及同一套 Dashboard（跑在 WKWebView 里）。
-> - **Windows** —— [下载 `TokenTracker-Setup.exe`](https://github.com/mm7894215/TokenTracker/releases/latest/download/TokenTracker-Setup.exe) → 运行免管理员的单用户安装包即可。系统托盘 App，Dashboard 跑在 WebView2 里。便携版 zip 见[发布页](https://github.com/mm7894215/TokenTracker/releases/latest)。
+> - **macOS** —— [下载 `TokenTrackerBar.dmg`](https://github.com/xiufengsun/TokenTracker/releases/latest/download/TokenTrackerBar.dmg) → 拖入「应用程序」即可。包含桌面小组件、菜单栏状态图标，以及同一套 Dashboard（跑在 WKWebView 里）。
+> - **Windows** —— [下载 `TokenTracker-Setup.exe`](https://github.com/xiufengsun/TokenTracker/releases/latest/download/TokenTracker-Setup.exe) → 运行免管理员的单用户安装包即可。系统托盘 App，Dashboard 跑在 WebView2 里。便携版 zip 见[发布页](https://github.com/xiufengsun/TokenTracker/releases/latest)。
 
 全局安装可以少敲字：
 
@@ -76,26 +76,27 @@ tokentracker doctor       # 健康检查
 
 ```bash
 # macOS 菜单栏 App（DMG）
-brew install --cask mm7894215/tokentracker/tokentracker
+brew install --cask xiufengsun/tokentracker/tokentracker
 
 # 只装 CLI
-brew install mm7894215/tokentracker/tokentracker
+brew install xiufengsun/tokentracker/tokentracker
 ```
 
-升级：`brew upgrade --cask mm7894215/tokentracker/tokentracker`。每次新版本发布后，tap 会在一小时内自动跟上。
+升级：`brew upgrade --cask xiufengsun/tokentracker/tokentracker`。每次新版本发布后，tap 会在一小时内自动跟上。
 
 ---
 
 
 ## ✨ 特性
 
-- 🔌 **开箱即用支持 27 款 AI 工具** —— Claude Code、Codex CLI、Cursor、Gemini CLI、Kiro、OpenCode、OpenClaw、Every Code、Hermes Agent、GitHub Copilot、Kimi Code、CodeBuddy、WorkBuddy、Grok Build、oh-my-pi、pi、Craft Agents、Kilo CLI、Kilo Code、Roo Code、Antigravity、Zed Agent、Goose、Droid、Mimo Code、ZCode、AnythingLLM Desktop
+- 🔌 **开箱即用支持 29 款 AI 工具** —— Claude Code、Codex CLI、Cursor、Gemini CLI、Kiro、OpenCode、OpenClaw、Every Code、Hermes Agent、GitHub Copilot、Kimi Code、CodeBuddy、WorkBuddy、Grok Build、oh-my-pi、pi、Craft Agents、Kilo CLI、Kilo Code、Roo Code、Antigravity、Zed Agent、Goose、Droid、Mimo Code、ZCode、Qoder、AnythingLLM Desktop、Claude Science
 - 🏠 **100% 本地** —— Token 数据绝不离开你的机器。无账号、无 API Key
 - 🚀 **零配置** —— 首次运行自动安装所有 hook。30 秒从零到 Dashboard
 - 📊 **漂亮的 Dashboard** —— 用量趋势、按模型的成本分解、GitHub 风格活跃度热力图、按项目归因
 - 🖥️ **原生桌面 App** —— macOS 菜单栏（含桌面小组件）与 Windows 系统托盘，各自内嵌服务 + 原生 WebView Dashboard
 - 🎨 **4 种桌面小组件** —— 用量 / 热力图 / 热门模型 / 使用限额 直接钉桌面
-- 📈 **实时限额追踪** —— Claude / Codex / Cursor / Gemini / Kiro / Copilot / Antigravity 的配额窗口与重置倒计时
+- 📈 **实时限额追踪** —— Claude / Codex / Cursor / Gemini / Kimi / Kiro / Grok / Copilot / Antigravity / ZCode / OpenCode Go / Qoder 的配额窗口；本地 provider App 暂时退出时保留 last-good 缓存
+- 🟢 **服务状态页** —— 直接汇总 8 家 provider 官方状态页的实时运行与事故状态
 - 💰 **成本引擎** —— 内置 70+ 模型定价表，精确到 USD
 - 🌐 **可选排行榜** —— 与全球开发者对比；列可拖拽排序，聚焦你关心的 provider（需登录参与）
 - 🔄 **跨设备账户视图** —— 开启云同步后，Dashboard 会把你在每台机器（笔记本 + 台式机 + 服务器）上的用量合并成一个视图——总量、趋势、热力图、模型明细全部跨设备聚合（可选，需登录；默认的纯本地体验依然即时、离线）
@@ -112,14 +113,14 @@ brew install mm7894215/tokentracker/tokentracker
 
 **Dashboard** —— 用量趋势、模型分布、成本分析
 
-<img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-light.png" alt="Dashboard" />
+<img src="https://raw.githubusercontent.com/xiufengsun/tokentracker/main/docs/screenshots/dashboard-light.png" alt="Dashboard" />
 
 </td>
 <td width="50%">
 
 **桌面小组件** —— 把用量钉在桌面
 
-<img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/widgets-overview.png" alt="Desktop Widgets" />
+<img src="https://raw.githubusercontent.com/xiufengsun/tokentracker/main/docs/screenshots/widgets-overview.png" alt="Desktop Widgets" />
 
 </td>
 </tr>
@@ -128,14 +129,14 @@ brew install mm7894215/tokentracker/tokentracker
 
 **菜单栏 App** —— 带动画的 Clawd 小伙伴 + 原生面板
 
-<img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/menubar.gif" alt="Menu Bar App" />
+<img src="https://raw.githubusercontent.com/xiufengsun/tokentracker/main/docs/screenshots/menubar.gif" alt="Menu Bar App" />
 
 </td>
 <td width="50%">
 
 **全球排行榜** —— 和世界各地开发者比一比
 
-<img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/leaderboard.png" alt="Leaderboard" />
+<img src="https://raw.githubusercontent.com/xiufengsun/tokentracker/main/docs/screenshots/leaderboard.png" alt="Leaderboard" />
 
 </td>
 </tr>
@@ -144,7 +145,7 @@ brew install mm7894215/tokentracker/tokentracker
 
 **Skills 管理器** —— 浏览 250+ 公开 skill（GitHub 仓库 & `skills.sh`），一次安装，同步到 Claude / Codex / Grok / Antigravity / Gemini / OpenCode / Hermes。每个 Agent 单独开关，一键撤销，再也不用手动复制文件夹。
 
-<img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/skills.png" alt="Skills Manager" />
+<img src="https://raw.githubusercontent.com/xiufengsun/tokentracker/main/docs/screenshots/skills.png" alt="Skills Manager" />
 
 </td>
 </tr>
@@ -153,7 +154,7 @@ brew install mm7894215/tokentracker/tokentracker
 
 **桌面宠物** —— 悬浮在桌面上的像素小伙伴，实时响应你的 token 消耗：你写代码它也写，连击时庆祝，休息时打盹。粘贴 [codex-pets.net](https://codex-pets.net) 链接或 `.codex-pet.zip` 即可导入社区宠物，V2 宠物还能 16 方向转头追随你的鼠标。macOS / Windows / Web 三端支持。
 
-<img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/pet.png" alt="Desktop Pet" />
+<img src="https://raw.githubusercontent.com/xiufengsun/tokentracker/main/docs/screenshots/pet.png" alt="Desktop Pet" />
 
 </td>
 </tr>
@@ -178,7 +179,7 @@ brew install mm7894215/tokentracker/tokentracker
 | **GitHub Copilot App / CLI** | ✅ 自动 | 统一逐请求 SQLite 用量（`~/.copilot/session-store.db`）；App DB 作为旧数据基线 |
 | **GitHub Copilot Chat 扩展 / 旧版 CLI** | ✅ 自动 | OpenTelemetry 文件导出（`COPILOT_OTEL_FILE_EXPORTER_PATH`） |
 | **Kimi Code** | ✅ 自动 | 被动读取 `wire.jsonl`（`~/.kimi/sessions/**/wire.jsonl`） |
-| **oh-my-pi (Pi Coding Agent)** | ✅ 自动 | 被动读取（`~/.omp/agent/sessions/**/*.jsonl`） |
+| **oh-my-pi (Pi Coding Agent)** | ✅ 自动 | 被动读取（`~/.omp/agent/sessions/**/*.jsonl`）+ `tokentracker init` 会写入托管的 notify 扩展（`~/.omp/agent/extensions/tokentracker-notify.ts`）用于近实时同步（若同名非托管文件已存在则跳过；`tokentracker uninstall` 仅在仍为托管时删除） |
 | **CodeBuddy** (腾讯) | ✅ 自动 | 写入 `~/.codebuddy/settings.json` 的 SessionEnd hook（Claude-Code fork） |
 | **WorkBuddy** (腾讯) | ✅ 自动 | 写入 `~/.workbuddy/settings.json` 的 SessionEnd hook（Claude-Code fork）+ 被动扫描 `projects/**/*.jsonl` |
 | **Grok Build** (xAI) | ✅ 自动 | SessionEnd hook + 被动扫描 `updates.jsonl` / `signals.json`（`~/.grok/sessions/**/`） |
@@ -192,19 +193,22 @@ brew install mm7894215/tokentracker/tokentracker
 | **Droid** (Factory) | ✅ 自动 | 被动读取 session（`~/.factory/sessions/**/settings.json`，累计量 delta） |
 | **Mimo Code** (mimocode) | ✅ 自动 | 被动 SQLite 读取（`~/.local/share/mimocode/mimocode.db`，OpenCode-fork schema；仅统计 mimo 原生轮次——镜像进来的 Claude/claude-mem 历史已排除） |
 | **ZCode** (Z.ai) | ✅ 自动 | 被动 SQLite 读取（`~/.zcode/cli/db/db.sqlite`，OpenCode-fork schema；仅统计 Z.ai/BigModel 的 GLM 轮次——内置的 Claude/Codex/Gemini 子 agent 已排除） |
+| **Qoder** | ✅ 自动 | 被动读取 SQLite（`Qoder/SharedClientCache/cache/db/local.db`；只读取 assistant 的 `token_info`，并单独统计缓存输入，不读取提示词或回复），并通过 Qoder 本地会话读取 Plan Credits 与 Ultimate 免费调用额度 |
 | **AnythingLLM Desktop** | ✅ 自动 | 被动 SQLite 读取（`anythingllm-desktop/storage/anythingllm.db`；只读取每条消息的 token 指标，不读取 prompt 或回复） |
+| **Claude Science** | ✅ 自动 | 被动 SQLite 读取（`~/.claude-science/operon-cli.db`；只读取 `frames` 表的 token 计数，不读取 prompt、产物或研究内容）。没有原生 Windows 版——Windows 上该应用运行在 WSL 内，从 WSL 中读取。 |
 
 > **需要手动装什么插件 / hook 吗？** 不需要。`tokentracker`（或 `tokentracker init`）第一次跑的时候会全部搞定：
 > - **基于 hook 的工具**（Claude Code、Codex、Gemini、Every Code、**CodeBuddy**、**WorkBuddy**、**Grok Build**）—— 我们把 SessionEnd hook 或 TOML notify 条目写入它们自己的配置文件
 > - **基于插件的工具**（OpenCode、**OpenClaw**）—— 插件随 npm 包一起分发。OpenClaw 的 session plugin 位于 `~/.tokentracker/tracker/openclaw-plugin/openclaw-session-sync/`；TokenTracker 会通过 OpenClaw 自己的 CLI 挂接并启用它，然后写入 `hooks.allowConversationAccess=true`，让 OpenClaw 放行触发同步的会话结束事件。无需下载、无需拖拽
-> - **被动读取类**（Cursor、Kiro、Hermes、Kimi Code、Copilot、**Grok Build**、**oh-my-pi**、**pi**、**Craft Agents**、**Kilo CLI**、**Kilo Code**、**Roo Code**、**Antigravity**、**Zed Agent**、**Goose**、**Droid**、**Mimo Code**、**ZCode**、**AnythingLLM Desktop**）—— 完全不往它们里面塞东西，只读取它们自己产生的文件（SQLite DB、JSONL、OTEL 导出、会话轨迹日志）。Copilot App / CLI 的用量按请求读取 `~/.copilot/session-store.db`；`data.db` 只提供一次旧数据迁移基线，并在 store 成为主源后保持仅观察，Chat 扩展和旧版 CLI 继续使用 OTEL。TokenTracker 会协调这些数据源，使重叠请求只统计一次。迁移前无法无损拆分模型的 App/CLI 混合历史会保留为 `github-copilot-legacy` 聚合量，而不会猜测请求模型
+> - **oh-my-pi** —— 被动会话扫描始终是计费/token 的事实来源（`~/.omp/agent/sessions/**/*.jsonl`）。检测到 OMP 时，`tokentracker init` 还会写入托管的 notify 扩展到 `~/.omp/agent/extensions/tokentracker-notify.ts`，以便回合结束后近实时触发同步。仅当文件带有 TokenTracker 托管标记时才视为我们拥有：同名用户自写扩展绝不会被覆盖或删除。`tokentracker uninstall` 也仅在文件仍为托管状态时删除它。
+> - **被动读取类**（Cursor、Kiro、Hermes、Kimi Code、Copilot、**Grok Build**、**pi**、**Craft Agents**、**Kilo CLI**、**Kilo Code**、**Roo Code**、**Antigravity**、**Zed Agent**、**Goose**、**Droid**、**Mimo Code**、**ZCode**、**AnythingLLM Desktop**、**Claude Science**）—— 完全不往它们里面塞东西，只读取它们自己产生的文件（SQLite DB、JSONL、OTEL 导出、会话轨迹日志）。Copilot App / CLI 的用量按请求读取 `~/.copilot/session-store.db`；`data.db` 只提供一次旧数据迁移基线，并在 store 成为主源后保持仅观察，Chat 扩展和旧版 CLI 继续使用 OTEL。TokenTracker 会协调这些数据源，使重叠请求只统计一次。迁移前无法无损拆分模型的 App/CLI 混合历史会保留为 `github-copilot-legacy` 聚合量，而不会猜测请求模型
 > - **Grok Build 估算说明** —— Grok 当前本地遥测提供 `updates.jsonl` 里的累计 `totalTokens`，但还没有稳定的输入/输出/cache 拆分；`signals.json` 仍作为 `contextTokensUsed` 快照兜底。所以在 Grok 提供按调用粒度的用量明细之前，TokenTracker 对 Grok 成本仍是估算值
 >
 > 任何时候都可以用 `tokentracker status` 查看每个集成的状态。如果显示 `skipped`，`detail` 列会解释原因（例如某工具 CLI 不在 `PATH` 上、config 不可读等）。
 >
 > 更深入的资料：[OpenClaw 集成与排障](docs/openclaw-integration.md)。
 
-工具没在列表里？[提个 Issue](https://github.com/mm7894215/TokenTracker/issues/new) —— 加一个新 provider 通常只是加一个 parser 文件的事。
+工具没在列表里？[提个 Issue](https://github.com/xiufengsun/TokenTracker/issues/new) —— 加一个新 provider 通常只是加一个 parser 文件的事。
 
 ---
 
@@ -212,11 +216,11 @@ brew install mm7894215/tokentracker/tokentracker
 
 |                          | **TokenTracker** | ccusage     | Cursor 自带统计 |
 |--------------------------|:---:|:---:|:---:|
-| **支持的 AI 工具数**     | **27**           | 1（Claude）  | 1（Cursor）   |
+| **支持的 AI 工具数**     | **29**           | 1（Claude）  | 1（Cursor）   |
 | **本地优先，无需账号**   | ✅               | ✅           | ❌            |
 | **原生桌面 App**         | ✅ macOS + Windows | ❌          | ❌            |
 | **桌面小组件**           | ✅ 4 个小组件    | ❌           | ❌            |
-| **限额追踪**             | ✅ 7 家 provider | ❌           | 只支持 Cursor |
+| **限额追踪**             | ✅ 12 家 provider | ❌           | 只支持 Cursor |
 
 ---
 
@@ -224,7 +228,7 @@ brew install mm7894215/tokentracker/tokentracker
 
 ```mermaid
 flowchart LR
-    A["AI 编码工具<br/>Claude Code · Codex · Cursor · Gemini · Kiro<br/>OpenCode · OpenClaw · Every Code · Hermes · Copilot<br/>Kimi · CodeBuddy · WorkBuddy · Grok · Kilo · Roo · Zed · Goose<br/>Antigravity · oh-my-pi · pi · Craft · Droid · Mimo · ZCode · AnythingLLM"]
+    A["AI 编码工具<br/>Claude Code · Codex · Cursor · Gemini · Kiro<br/>OpenCode · OpenClaw · Every Code · Hermes · Copilot<br/>Kimi · CodeBuddy · WorkBuddy · Grok · Kilo · Roo · Zed · Goose<br/>Antigravity · oh-my-pi · pi · Craft · Droid · Mimo · ZCode · Qoder · AnythingLLM"]
     A -->|hook 触发| B[Token Tracker]
     B -->|解析日志<br/>30 分钟 UTC 桶| C[(本地 SQLite)]
     C --> D[Web Dashboard]
@@ -242,6 +246,8 @@ flowchart LR
 ---
 
 ## 🛡️ 隐私
+
+> 📄 **[完整隐私政策](docs/PRIVACY.md)**（英文）—— 逐条列出本应用可能发起的每一个网络请求、各自发送了什么，以及如何关闭。
 
 | 承诺 | 说明 |
 |---|---|
@@ -274,7 +280,7 @@ flowchart LR
 ## 🛠️ 本地开发
 
 ```bash
-git clone https://github.com/mm7894215/TokenTracker.git
+git clone https://github.com/xiufengsun/TokenTracker.git
 cd TokenTracker
 npm install
 
@@ -359,7 +365,7 @@ tokentracker status
 tokentracker doctor
 ```
 
-如果你明明在用某个工具却显示未配置，跑一下 `tokentracker activate-if-needed` 重新探测。还不行的话 [提个 Issue](https://github.com/mm7894215/TokenTracker/issues/new)，把 `doctor` 的输出贴上。
+如果你明明在用某个工具却显示未配置，跑一下 `tokentracker activate-if-needed` 重新探测。还不行的话 [提个 Issue](https://github.com/xiufengsun/TokenTracker/issues/new)，把 `doctor` 的输出贴上。
 
 </details>
 
@@ -402,7 +408,7 @@ TokenTrackerBar 使用 **ad-hoc 签名**（没有用 Apple Developer ID 做公�
 其实不是真坏了 —— 这是 Gatekeeper 对 macOS 给下载文件自动贴的 `com.apple.quarantine` 属性做出的反应。清除一次即可：
 
 ```bash
-xattr -cr /Applications/TokenTrackerBar.app
+xattr -cr /Applications/TokenTracker.app
 ```
 
 之后就能正常打开了。
@@ -437,9 +443,9 @@ xattr -cr /Applications/TokenTrackerBar.app
 然后贴一段：
 
 ```markdown
-[![tokens](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=你的_USER_ID&metric=tokens)](https://github.com/mm7894215/TokenTracker)
-[![cost](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=你的_USER_ID&metric=cost)](https://github.com/mm7894215/TokenTracker)
-[![rank](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=你的_USER_ID&metric=rank)](https://github.com/mm7894215/TokenTracker)
+[![tokens](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=你的_USER_ID&metric=tokens)](https://github.com/xiufengsun/TokenTracker)
+[![cost](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=你的_USER_ID&metric=cost)](https://github.com/xiufengsun/TokenTracker)
+[![rank](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=你的_USER_ID&metric=rank)](https://github.com/xiufengsun/TokenTracker)
 ```
 
 > 链接默认指向 TokenTracker 仓库，每次点击都能帮其他开发者发现 TokenTracker。如果你想让点击跳到你自己的 leaderboard profile、个人主页或 `https://www.tokentracker.cc`，改 URL 即可。
@@ -460,11 +466,11 @@ xattr -cr /Applications/TokenTrackerBar.app
 
 ## ⭐ Star 历史
 
-<a href="https://www.star-history.com/?type=date&repos=mm7894215%2FTokenTracker">
+<a href="https://www.star-history.com/?repos=xiufengsun%2FTokenTracker&type=date&legend=top-left">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=mm7894215/TokenTracker&type=date&theme=dark&legend=top-left&sealed_token=Xb4biZj6WI7GnAYqiQdvOITTTMcqLjMHZTNJ2UzckXkd4FdNyLLNwz0K6wG1hDug6G3HxW4K4bmIETMQTXK74rD4Io0eTU6igxPnSeLgP-NkOnZz7rlCePm6aVMFVm2JCuPoi92rcR6OhEmdYqopiFIxHt4iwzOa-L1-YcLplRoLIdtjTyjUotxai-QH" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=mm7894215/TokenTracker&type=date&legend=top-left&sealed_token=Xb4biZj6WI7GnAYqiQdvOITTTMcqLjMHZTNJ2UzckXkd4FdNyLLNwz0K6wG1hDug6G3HxW4K4bmIETMQTXK74rD4Io0eTU6igxPnSeLgP-NkOnZz7rlCePm6aVMFVm2JCuPoi92rcR6OhEmdYqopiFIxHt4iwzOa-L1-YcLplRoLIdtjTyjUotxai-QH" />
-    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=mm7894215/TokenTracker&type=date&legend=top-left&sealed_token=Xb4biZj6WI7GnAYqiQdvOITTTMcqLjMHZTNJ2UzckXkd4FdNyLLNwz0K6wG1hDug6G3HxW4K4bmIETMQTXK74rD4Io0eTU6igxPnSeLgP-NkOnZz7rlCePm6aVMFVm2JCuPoi92rcR6OhEmdYqopiFIxHt4iwzOa-L1-YcLplRoLIdtjTyjUotxai-QH" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=xiufengsun/TokenTracker&type=date&theme=dark&legend=top-left&sealed_token=Vr7qbPNqOTtzQEdtkxS2yArAReX2QkBZKNJgs3n32Q5oJa1iXddLlrT201teNSnt7QnsXtDcHy_T387xvXJ_HXHrPtvH2QQ1xqQZ67N_HV45ulWrt3j6hziDW5eshRCmu8CAT_W31PY0-WVZpFv7NQD-acv1stVK8ndribTokIp9ukSYAedx3icuUrOu" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=xiufengsun/TokenTracker&type=date&legend=top-left&sealed_token=Vr7qbPNqOTtzQEdtkxS2yArAReX2QkBZKNJgs3n32Q5oJa1iXddLlrT201teNSnt7QnsXtDcHy_T387xvXJ_HXHrPtvH2QQ1xqQZ67N_HV45ulWrt3j6hziDW5eshRCmu8CAT_W31PY0-WVZpFv7NQD-acv1stVK8ndribTokIp9ukSYAedx3icuUrOu" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=xiufengsun/TokenTracker&type=date&legend=top-left&sealed_token=Vr7qbPNqOTtzQEdtkxS2yArAReX2QkBZKNJgs3n32Q5oJa1iXddLlrT201teNSnt7QnsXtDcHy_T387xvXJ_HXHrPtvH2QQ1xqQZ67N_HV45ulWrt3j6hziDW5eshRCmu8CAT_W31PY0-WVZpFv7NQD-acv1stVK8ndribTokIp9ukSYAedx3icuUrOu" />
   </picture>
 </a>
 
@@ -472,10 +478,10 @@ xattr -cr /Applications/TokenTrackerBar.app
 
 ## 🤝 贡献与支持
 
-- **Bug / 功能建议**：[提个 Issue](https://github.com/mm7894215/TokenTracker/issues/new)
+- **Bug / 功能建议**：[提个 Issue](https://github.com/xiufengsun/TokenTracker/issues/new)
 - **安全问题**：见 [SECURITY.md](SECURITY.md) —— 请不要在公开 Issue 里提交安全报告
 - **Pull Request**：见 [CONTRIBUTING.md](CONTRIBUTING.md)，里面有开发环境搭建、测试流程和新增 AI 工具集成的指南
-- **提问 / 展示作品**：[GitHub Discussions](https://github.com/mm7894215/TokenTracker/discussions)
+- **提问 / 展示作品**：[GitHub Discussions](https://github.com/xiufengsun/TokenTracker/discussions)
 
 ## 🙏 致谢
 
@@ -495,6 +501,6 @@ Clawd 角色设计归属 Anthropic。本项目是社区项目，和 Anthropic �
 
 **Token Tracker** —— 把你的 AI 产出量化。
 
-<a href="https://www.tokentracker.cc">tokentracker.cc</a>  ·  <a href="https://www.npmjs.com/package/tokentracker-cli">npm</a>  ·  <a href="https://github.com/mm7894215/TokenTracker">GitHub</a>
+<a href="https://www.tokentracker.cc">tokentracker.cc</a>  ·  <a href="https://www.npmjs.com/package/tokentracker-cli">npm</a>  ·  <a href="https://github.com/xiufengsun/TokenTracker">GitHub</a>
 
 </div>

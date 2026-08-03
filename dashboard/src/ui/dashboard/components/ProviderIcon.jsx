@@ -313,14 +313,22 @@ const PROVIDER_LOGO_MAP = {
   ANTIGRAVITY: "/brand-logos/antigravity.svg",
   ANYTHINGLLM: "/brand-logos/anythingllm.svg",
   CLAUDE: "/brand-logos/claude-code.svg",
+  "CLAUDE-SCIENCE": "/brand-logos/claude-code.svg",
   CODEX: "/brand-logos/codex.svg",
   DEEPSEEK: "/brand-logos/deepseek.svg",
   GEMINI: "/brand-logos/gemini.svg",
   "KILO-CLI": "/brand-logos/kilo.svg",
   "KILO-CODE": "/brand-logos/kilo.svg",
   MIMO: "/brand-logos/mimo.svg",
+  // oh-my-pi / pi: multi-color brand marks (pi letterform + plugin connector).
+  OMP: "/brand-logos/omp.svg",
   OPENCLAW: "/brand-logos/openclaw.svg",
   OPENCODE: "/brand-logos/opencode.svg",
+  PI: "/brand-logos/pi.svg",
+  "PI-ANTHROPIC": "/brand-logos/pi.svg",
+  "PI-GITHUB-COPILOT": "/brand-logos/pi.svg",
+  "PI-COPILOT": "/brand-logos/pi.svg",
+  QODER: "/brand-logos/qoder.svg",
 };
 
 // AnythingLLM publishes this compact mark in white. Keep the official asset
@@ -328,6 +336,7 @@ const PROVIDER_LOGO_MAP = {
 // (which may differ from the OS preference) always has sufficient contrast.
 const PROVIDER_LOGO_CLASS_MAP = {
   ANYTHINGLLM: "brightness-0 dark:brightness-100",
+  QODER: "dark:invert",
 };
 
 function PlaceholderIcon({ size = 16, className = "" }) {

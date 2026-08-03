@@ -10,7 +10,7 @@ Only the **latest minor release** is supported with security fixes. This is a sm
 
 Instead, use one of these private channels:
 
-- **GitHub Private Vulnerability Reporting**: [Report a vulnerability](https://github.com/mm7894215/TokenTracker/security/advisories/new)
+- **GitHub Private Vulnerability Reporting**: [Report a vulnerability](https://github.com/xiufengsun/TokenTracker/security/advisories/new)
 - **Email**: open a GitHub issue asking the maintainer to enable an alternative private channel if you can't use GitHub Security Advisories
 
 When reporting, please include:

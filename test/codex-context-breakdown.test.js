@@ -182,6 +182,63 @@ test("computeCodexContextBreakdown returns non-overlapping totals plus exec dril
   }
 });
 
+test("computeCodexContextBreakdown does not inflate interleaved SessionState counters", async () => {
+  const dir = await makeTmpDir("tt-codex-interleaved");
+  try {
+    const day = "2026-07-24";
+    const usage = (totalTokens) => ({
+      input_tokens: totalTokens,
+      cached_input_tokens: 0,
+      cache_write_input_tokens: 0,
+      output_tokens: 0,
+      reasoning_output_tokens: 0,
+      total_tokens: totalTokens,
+    });
+    const tokenCount = (timestamp, last, total) => ({
+      timestamp,
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          last_token_usage: last,
+          total_token_usage: total,
+          model_context_window: 258400,
+        },
+      },
+    });
+    await writeRollout(dir, day, "rollout-interleaved.jsonl", [
+      {
+        timestamp: `${day}T04:45:00.000Z`,
+        type: "session_meta",
+        payload: { id: "interleaved", cwd: "/tmp/project", model_provider: "openai" },
+      },
+      {
+        timestamp: `${day}T04:45:01.000Z`,
+        type: "turn_context",
+        payload: { cwd: "/tmp/project", model: "gpt-5.6-sol" },
+      },
+      tokenCount(`${day}T04:45:39.000Z`, usage(100), usage(100)),
+      tokenCount(`${day}T04:45:45.000Z`, usage(200), usage(200)),
+      tokenCount(`${day}T04:46:02.000Z`, usage(100), usage(100)),
+      tokenCount(`${day}T04:46:05.000Z`, usage(50), usage(250)),
+      tokenCount(`${day}T04:46:10.000Z`, usage(30), usage(130)),
+    ]);
+
+    const result = await computeCodexContextBreakdown({
+      from: day,
+      to: day,
+      codexDir: dir,
+      timeZoneContext: { timeZone: "UTC", offsetMinutes: 0 },
+    });
+
+    assert.equal(result.totals.total_tokens, 100 + 200 + 50 + 30);
+    assert.equal(result.totals.input_tokens, result.totals.total_tokens);
+    assert.equal(result.message_count, 4);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("computeCodexContextBreakdown preserves exec stats on a zero-token turn", async () => {
   const dir = await makeTmpDir("tt-codex-breakdown-zero-token-exec");
   try {

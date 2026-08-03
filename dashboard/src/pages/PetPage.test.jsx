@@ -97,14 +97,50 @@ describe("PetPage", () => {
     });
 
     expect(await screen.findByRole("switch", { name: copy("pet.controls.show") })).toBeChecked();
-    expect(screen.getByRole("button", { name: new RegExp(copy("pet.character.sprout")) })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", {
+      name: copy("pet.character.sprout"),
+    })).toHaveAttribute("aria-pressed", "true");
 
     await act(async () => {
-      await user.click(screen.getByRole("button", { name: new RegExp(copy("pet.character.byte")) }));
+      await user.click(screen.getByRole("button", { name: copy("pet.character.byte") }));
     });
     await waitFor(() => {
       expect(messages).toContainEqual({ type: "setPetSetting", key: "character", value: "byte" });
     });
+  });
+
+  it("removes bundled companions but always protects Clawd", async () => {
+    const user = userEvent.setup();
+    const messages = installNativeBridge();
+    petApiMocks.removePet.mockResolvedValue({ ok: true, id: "sprout", hidden: true });
+    render(<PetPage />);
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("native:petSettings", {
+        detail: { visible: true, character: "sprout", size: "medium" },
+      }));
+    });
+
+    expect(screen.getByRole("button", {
+      name: `${copy("pet.import.remove")} · ${copy("pet.character.sprout")}`,
+    })).toHaveClass("opacity-0", "group-hover:opacity-100");
+    expect(screen.queryByRole("button", {
+      name: `${copy("pet.import.remove")} · ${copy("pet.character.clawd")}`,
+    })).not.toBeInTheDocument();
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", {
+        name: `${copy("pet.import.remove")} · ${copy("pet.character.sprout")}`,
+      }));
+    });
+
+    expect(petApiMocks.removePet).toHaveBeenCalledWith("sprout");
+    expect(messages).toContainEqual({
+      type: "setPetSetting",
+      key: "character",
+      value: "clawd",
+    });
+    expect(messages).toContainEqual({ type: "refreshPetCatalog" });
   });
 
   it("lets browser users preview every data state without a native host", async () => {
@@ -131,12 +167,12 @@ describe("PetPage", () => {
     });
 
     const ember = await screen.findByRole("button", {
-      name: new RegExp(copy("pet.character.ember")),
+      name: copy("pet.character.ember"),
     });
     expect(ember).toHaveAttribute("aria-pressed", "true");
     await act(async () => {
       await user.click(screen.getByRole("button", {
-        name: new RegExp(copy("pet.character.sprout")),
+        name: copy("pet.character.sprout"),
       }));
     });
     expect(messages).toContainEqual({ type: "setPetSetting", key: "character", value: "sprout" });

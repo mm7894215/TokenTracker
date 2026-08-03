@@ -189,6 +189,25 @@ test("buildGrokSessionEndHookJson quotes handler paths for shell command", () =>
   );
 });
 
+test("buildGrokSessionEndHookJson uses the Node executable on Windows", () => {
+  const hookJson = buildGrokSessionEndHookJson(
+    {
+      notifyGrokHandlerPath: "C:\\Users\\Ricky\\Token Tracker\\grok-session-end-hook.cjs",
+    },
+    {
+      platform: "win32",
+      execPath: "C:\\Program Files\\nodejs\\node.exe",
+    },
+  );
+
+  const command = hookJson.hooks.SessionEnd[0].hooks[0].command;
+  assert.equal(
+    command,
+    '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\Ricky\\Token Tracker\\grok-session-end-hook.cjs"',
+  );
+  assert.ok(!command.includes("/usr/bin/env"));
+});
+
 test("upsertGrokHook writes handler to canonical tokentracker bin dir", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-grok-hook-"));
   try {

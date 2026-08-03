@@ -23,6 +23,29 @@ const ACCOUNT_FUNCTIONS = [
   "tokentracker-account-model-breakdown.ts",
 ];
 
+const USER_JWT_FUNCTIONS = [
+  ...ACCOUNT_FUNCTIONS,
+  "tokentracker-account-devices.ts",
+  "tokentracker-device-flow-grant.ts",
+  "tokentracker-device-rename.ts",
+  "tokentracker-device-token-issue.ts",
+  "tokentracker-leaderboard-profile.ts",
+  "tokentracker-leaderboard-refresh.ts",
+  "tokentracker-profile-likes.ts",
+  "tokentracker-public-visibility.ts",
+];
+
+test("user-authenticated edge functions verify current RS256 and legacy HS256 tokens", () => {
+  for (const file of USER_JWT_FUNCTIONS) {
+    const source = read(`dashboard/edge-patches/${file}`);
+    assert.match(source, /header\.alg === "RS256"/u, `${file} must accept current RS256 access tokens`);
+    assert.match(source, /Deno\.env\.get\("JWT_PUBLIC_KEY"\)/u, `${file} must verify RS256 with the managed public key`);
+    assert.match(source, /RSASSA-PKCS1-v1_5/u, `${file} must use the RS256 Web Crypto algorithm`);
+    assert.match(source, /header\.alg === "HS256"/u, `${file} must preserve legacy sessions during migration`);
+    assert.match(source, /Deno\.env\.get\("JWT_SECRET"\)/u, `${file} must verify legacy HS256 signatures`);
+  }
+});
+
 test("cloud account reads use the shared cached RPC instead of a device lookup plus aggregation", () => {
   for (const file of ACCOUNT_FUNCTIONS) {
     const source = read(`dashboard/edge-patches/${file}`);
@@ -126,6 +149,47 @@ test("the unauthenticated anomaly summary cannot reach any refresh write path", 
     summaryBody,
     /user_id/u,
     "anomaly summary must expose counts only, never flagged user ids",
+  );
+});
+
+test("leaderboard refresh reconciles stale rows after the replacement snapshot is durable", () => {
+  const source = read("dashboard/edge-patches/tokentracker-leaderboard-refresh.ts");
+  const upsertStart = source.indexOf("// Upsert in batches of 200");
+  const staleDelete = source.indexOf('.lt("generated_at", generatedAt)');
+  const completion = source.indexOf("results[period] = { upserted: upsertRows.length }");
+
+  assert.ok(upsertStart > 0, "snapshot upsert must exist");
+  assert.ok(
+    staleDelete > upsertStart,
+    "stale snapshot cleanup must run only after every replacement row is upserted",
+  );
+  assert.ok(
+    completion > staleDelete,
+    "the period must not report success before stale snapshot cleanup finishes",
+  );
+  assert.match(
+    source.slice(upsertStart, completion),
+    /\.from\("tokentracker_leaderboard_snapshots"\)\s*\.delete\(\)\s*\.eq\("period", period\)\s*\.eq\("from_day", from_day\)\s*\.eq\("to_day", to_day\)\s*\.lt\("generated_at", generatedAt\)/u,
+    "refresh must delete rows left behind by excluded or otherwise removed users in the same snapshot window",
+  );
+});
+
+test("leaderboard anti-cheat health poll is hourly and never files public issues", () => {
+  const workflow = read(".github/workflows/leaderboard-anticheat.yml");
+  assert.match(
+    workflow,
+    /cron: "53 \* \* \* \*"/u,
+    "a daily poll can miss a flag created after that day's run for nearly 24 hours",
+  );
+  assert.doesNotMatch(
+    workflow,
+    /issues:\s*write|gh issue (?:create|edit|close|list)/u,
+    "automatic soft exclusion must not depend on or create a public GitHub issue",
+  );
+  assert.match(
+    workflow,
+    /GITHUB_STEP_SUMMARY/u,
+    "the health check should retain private run-level observability",
   );
 });
 

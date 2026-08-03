@@ -5,7 +5,7 @@ Thanks for considering a contribution! TokenTracker is a small project, so the p
 ## Setup
 
 ```bash
-git clone https://github.com/mm7894215/TokenTracker.git
+git clone https://github.com/xiufengsun/TokenTracker.git
 cd TokenTracker
 npm install
 

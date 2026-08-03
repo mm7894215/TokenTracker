@@ -855,6 +855,7 @@ internal sealed class PetWindow : Window
     public const string CharacterSprout = "sprout";
     public const string CharacterByte = "byte";
     public const string CharacterEmber = "ember";
+    private const string HiddenBuiltinsFilename = ".hidden-builtins.json";
 
     public static string NormalizeSize(string? value)
     {
@@ -869,6 +870,11 @@ internal sealed class PetWindow : Window
     public static string NormalizeCharacter(string? value)
     {
         var normalized = (value ?? "").Trim().ToLowerInvariant();
+        if (normalized is CharacterSprout or CharacterByte or CharacterEmber
+            && IsBuiltinCharacterHidden(normalized))
+        {
+            return CharacterClawd;
+        }
         return normalized switch
         {
             CharacterSprout => CharacterSprout,
@@ -879,6 +885,22 @@ internal sealed class PetWindow : Window
                 => normalized,
             _ => CharacterClawd,
         };
+    }
+
+    internal static bool IsBuiltinCharacterHidden(string character)
+    {
+        if (character is not (CharacterSprout or CharacterByte or CharacterEmber)) return false;
+        try
+        {
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var file = Path.Combine(home, ".tokentracker", "pets", HiddenBuiltinsFilename);
+            if (JsonNode.Parse(File.ReadAllText(file)) is not JsonArray ids) return false;
+            return ids.Any(id => string.Equals(
+                id?.GetValue<string>()?.Trim(),
+                character,
+                StringComparison.OrdinalIgnoreCase));
+        }
+        catch { return false; }
     }
 
     // The bubble starts at the macOS-parity compact height, then expands upward when

@@ -8,7 +8,14 @@ const readline = require("node:readline");
 const { resolveInstallPaths, ensureFlatCursor } = require("../lib/install-resolver");
 const { multiInstallParse, mergeBothFileSources } = require("../lib/multi-install-parser");
 const wsl = require("../lib/wsl-probe");
-const { ensureDir, readJson, writeJson, openLock } = require("../lib/fs");
+const {
+  ensureDir,
+  readJson,
+  writeJson,
+  chmod600IfPossible,
+  openLock,
+} = require("../lib/fs");
+const { physicalJsonlRecords } = require("../lib/jsonl-lines");
 const {
   listRolloutFiles,
   listRolloutFilesDeep,
@@ -20,8 +27,11 @@ const {
   readOpencodeDbMessages,
   readMimoDbMessages,
   readZcodeDbMessages,
+  resolveQoderDbPaths,
+  readQoderDbMessages,
   resolveKiroDbPath,
   resolveKiroJsonlPath,
+  resolveKiroBasePath,
   resolveHermesPath,
   resolveCopilotOtelPaths,
   normalizeCopilotDbPath,
@@ -35,13 +45,22 @@ const {
   parseGeminiIncremental,
   parseOpencodeIncremental,
   parseOpencodeDbIncremental,
+  parseQoderDbIncremental,
   parseOpenclawIncremental,
+  resolveOpenclawSessionFiles,
+  resolveOpenclawHome,
+  openclawCursorKey,
+  resolveClaudeScienceDbPaths,
+  readClaudeScienceFrames,
+  parseClaudeScienceIncremental,
   parseCursorApiIncremental,
   parseKiroIncremental,
   parseHermesIncremental,
   gooseInstallOwnsCursor,
   zedInstallOwnsCursor,
   hermesInstallOwnsCursor,
+  kiroInstallOwnsCursor,
+  kiroCliInstallOwnsCursor,
   copilotOtelCursorHasLegacyCliUsage,
   pruneCopilotUsageClaims,
   parseCopilotIncremental,
@@ -64,6 +83,7 @@ const {
   listAntigravityTranscripts,
   parseAntigravityIncremental,
   resolveCodebuddyProjectFiles,
+  codebuddyJsonlHasUsage,
   parseCodebuddyIncremental,
   resolveWorkbuddyProjectFiles,
   parseWorkbuddyIncremental,
@@ -112,12 +132,19 @@ const {
   openCursorStore,
 } = require("../lib/cursor-store");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
-const { resolveRuntimeConfig } = require("../lib/runtime-config");
+const { resolveRuntimeConfig, isLegacyInsforgeBaseUrl } = require("../lib/runtime-config");
+const { extractTokenCount } = require("../lib/codex-rollout-parser");
+const {
+  consumeUsageDelta,
+  createUsageDeltaState,
+} = require("../lib/codex-token-usage");
 
 const CURSOR_UNKNOWN_MIGRATION_KEY = "cursorUnknownPurge_2026_04";
 const ROLLOUT_CUMULATIVE_DELTA_MIGRATION_KEY = "rolloutCumulativeDeltaReparse_2026_05";
 const CLAUDE_MEM_OBSERVER_REINCLUDE_KEY = "claudeMemObserverReinclude_2026_05_v3";
 const GROK_APPEND_ONLY_REPAIR_MIGRATION_KEY = "grokAppendOnlyRepair_2026_05_v4";
+const CODEBUDDY_LOG_JSONL_REPAIR_KEY = "codebuddyLogJsonlOverlapRepair_2026_08";
+const WORKBUDDY_CONTEXT_USAGE_REPAIR_KEY = "workbuddyContextUsageRepair_2026_08";
 const CLAUDE_MEM_OBSERVER_PATH_SEGMENT = "--claude-mem-observer-sessions";
 // v1 had a cursor-format bug (wrote plain integer instead of {inode, offset,
 // updatedAt}), which made parseClaudeIncremental reread every jsonl from
@@ -189,6 +216,18 @@ const CODEX_RESCAN_DEDUP_REPAIR_KEY = "codexRescanDedupRepair_2026_06";
 // offset reset for the cloud overwrite). Pre-gated: installs with no forked
 // rollout on disk carry no fork phantom and mark done without the rebuild.
 const CODEX_FORK_REPLAY_REPAIR_KEY = "codexForkReplayRepair_2026_07";
+// One-time repair for Codex rollouts that contain token counters from multiple
+// interleaved SessionState instances. Older parsers subtracted each cumulative
+// total from the most recently observed total, even when it belonged to another
+// state, which could turn an ordinary turn into a multi-billion-token delta.
+// v2 removes the unreliable multi_agent_version pre-gate and validates every
+// contributing rollout before committing the rebuild. The new key is required
+// so installs that finalized the original migration on a false negative retry.
+const CODEX_USAGE_LINEAGE_REPAIR_KEY = "codexUsageLineageRepair_2026_07_v2";
+const LEGACY_BASE_URL_MIGRATION_NOTE = "reset_after_legacy_baseurl_migration_2026_07";
+// Keep the one escalated desktop refresh bounded; explicit full syncs can retry
+// the same migration without this ceiling when the history needs a deeper scan.
+const CODEX_BACKGROUND_LINEAGE_SCAN_MAX_BYTES = 1024 * 1024;
 const DROID_DUP_SESSION_REPAIR_KEY = "droidDupSessionInflationRepair_2026_06";
 const CODEX_COLD_SCAN_AUDIT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const NOTIFY_LOCK_WAIT_MS = 130_000;
@@ -215,6 +254,7 @@ const AUTO_SYNC_SOURCES = new Set([
   "antigravity",
   "anythingllm",
   "claude",
+  "claude-science",
   "codebuddy",
   "codex",
   "copilot",
@@ -236,6 +276,7 @@ const AUTO_SYNC_SOURCES = new Set([
   "opencode",
   "openclaw",
   "pi",
+  "qoder",
   "roocode",
   "workbuddy",
   "zcode",
@@ -399,6 +440,53 @@ async function cmdSync(argv, context = {}) {
     }
 
     const config = await readJson(configPath);
+    let legacyBaseUrlMigration = null;
+    // One-time repair for installs initialized before the 2026-04-19 InsForge
+    // project migration (0.5.67): init preserved any persisted config.baseUrl,
+    // so those installs kept uploading to the retired b46ug8xu project until
+    // its backend went dark on 2026-07-27 — every upload since 503s while the
+    // dashboard shows no error (silent cloud outage). Reset the upload offset
+    // so the whole local queue replays into the current project, clear the 503
+    // backoff, then remove the retired URL as the final commit step. Keeping the
+    // URL until every prerequisite succeeds makes an interrupted migration
+    // retryable on the next sync. Device tokens are opaque random values looked
+    // up by SHA-256 hash in tokentracker_device_tokens (not JWT_SECRET-signed);
+    // the database was restored into the current project, so preserve the old
+    // token unless the local API has already minted a replacement from the
+    // user's current login session and passed it through the environment.
+    // Ingest is a whole-row upsert per bucket key, making replay idempotent.
+    if (config && isLegacyInsforgeBaseUrl(config.baseUrl)) {
+      const priorQueueState = (await readJson(queueStatePath)) || {};
+      // Prepare the replay exactly once. The note survives successful batches,
+      // so retryable failures retain both their committed offset and backoff
+      // instead of restarting history and hammering the backend on every hook.
+      if (priorQueueState.note !== LEGACY_BASE_URL_MIGRATION_NOTE) {
+        await writeJson(queueStatePath, {
+          ...priorQueueState,
+          offset: 0,
+          updatedAt: new Date().toISOString(),
+          note: LEGACY_BASE_URL_MIGRATION_NOTE,
+        });
+        try {
+          await fs.unlink(uploadThrottlePath);
+        } catch (error) {
+          if (error?.code !== "ENOENT") throw error;
+        }
+      }
+      const replacementDeviceToken =
+        typeof process.env.TOKENTRACKER_DEVICE_TOKEN === "string"
+          ? process.env.TOKENTRACKER_DEVICE_TOKEN.trim()
+          : "";
+      const previousDeviceToken =
+        typeof config.deviceToken === "string" ? config.deviceToken.trim() : "";
+      // Do not commit either the replacement token or URL removal yet. The
+      // current backend must accept a token first; otherwise a stale environment
+      // token could destroy a valid restored credential and make recovery worse.
+      legacyBaseUrlMigration = {
+        previousDeviceToken,
+        replacementDeviceToken,
+      };
+    }
     const codexCursorRoots = [process.env.CODEX_HOME || path.join(home, ".codex")];
     const cursorStore = await openCursorStore({
       trackerDir,
@@ -423,7 +511,25 @@ async function cmdSync(argv, context = {}) {
     }
     let grokHookSignalConsumed = false;
 
-    const claudeProjectsDir = path.join(home, ".claude", "projects");
+    // Claude Code home — dual-install aware (#307): a Windows host may carry
+    // a native ~/.claude plus a WSL install reachable over \\wsl$. Unlike the
+    // SQLite providers, Claude UNIONS every allowed install instead of taking
+    // resolveAllWin32Paths' single pick: under the default wsl-first mode a
+    // WSL ~/.claude would otherwise silently evict the native one from
+    // collection — and from the "disk is truth" ground-truth repair below,
+    // which would then erase the native history. The file-hash and
+    // message-hash dedup layers make the union safe. Native is listed first
+    // so the cross-environment file dedup keeps the native copy as primary.
+    const claudeNativeHome = path.join(home, ".claude");
+    const wslClaudeHome = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
+      ? wsl.discoverWslHome(".claude")
+      : null;
+    const claudeInstallHomes = [];
+    if (process.platform !== "win32" || wsl.shouldProbeNative(process.env)) {
+      claudeInstallHomes.push(claudeNativeHome);
+    }
+    if (wslClaudeHome) claudeInstallHomes.push(wslClaudeHome);
+    const claudeProjectsDirs = claudeInstallHomes.map((h) => path.join(h, "projects"));
     const xdgDataHome = process.env.XDG_DATA_HOME || path.join(home, ".local", "share");
     const kiloHome = process.env.KILO_HOME || path.join(xdgDataHome, "kilo");
     const mimoHome = process.env.MIMO_HOME || path.join(xdgDataHome, "mimocode");
@@ -432,7 +538,7 @@ async function cmdSync(argv, context = {}) {
     // OpenClaw session plugin integration: lifecycle hooks request an
     // OpenClaw-only auto sync so unrelated providers do not get walked.
     const openclawSignal = opts.fromOpenclaw
-      ? resolveOpenclawSignal({ home, env: process.env })
+      ? resolveOpenclawSignal({ env: process.env })
       : null;
 
     const autoSourceScope = resolveAutoSourceScope(opts);
@@ -457,6 +563,28 @@ async function cmdSync(argv, context = {}) {
       if (autoSourceScope) return sources.includes(autoSourceScope);
       return true;
     };
+    // Desktop refreshes are deliberately lightweight, but that also means a
+    // migration wired only to full sync would never repair an existing native
+    // install. Escalate exactly the first eligible background run: fresh
+    // installs have no persisted Codex buckets to repair, while retryable
+    // failures remain reserved for an explicit full sync instead of turning
+    // every five-minute refresh into a deep historical scan.
+    const backgroundCodexUsageMigrationEligible = Boolean(
+      isBackgroundLightweightSync &&
+      sourceAllowed("codex") &&
+      !cursors.migrations?.[CODEX_USAGE_LINEAGE_REPAIR_KEY]
+    );
+    const hasPersistedCodexUsage = Object.keys(cursors.hourly?.buckets || {})
+      .some((key) => key.startsWith("codex|"));
+    const backgroundCodexUsageRepair =
+      backgroundCodexUsageMigrationEligible && hasPersistedCodexUsage;
+    if (backgroundCodexUsageMigrationEligible && !hasPersistedCodexUsage) {
+      // A fresh install has no old-parser buckets to repair. Mark it complete
+      // before the first bounded parse so the next refresh does not mistake
+      // newly parsed, already-correct data for legacy history.
+      (cursors.migrations ||= {})[CODEX_USAGE_LINEAGE_REPAIR_KEY] =
+        new Date().toISOString();
+    }
 
     const sources = [];
     if (sourceAllowed("codex")) {
@@ -464,16 +592,25 @@ async function cmdSync(argv, context = {}) {
       const wslCodexDir = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
         ? wsl.discoverWslHome(".codex")
         : null;
-      const codexPaths = resolveInstallPaths({ nativeValue: codexNativeValue, wslValue: wslCodexDir });
+      // resolveInstallPaths stays the single authority for wsl-first /
+      // native-first / wsl-only / native-only / both selection; requireAnyChild
+      // makes it validate that a candidate actually holds sessions/ or
+      // archived_sessions/ so an empty WSL ~/.codex shell cannot shadow the
+      // native install (issue #codex-wsl-shadow).
+      const codexPaths = resolveInstallPaths({
+        nativeValue: codexNativeValue,
+        wslValue: wslCodexDir,
+        requireAnyChild: ["sessions", "archived_sessions"],
+      });
       if (codexPaths.native) {
         sources.push({ source: "codex", sessionsDir: path.join(codexPaths.native, "sessions"), codexInventoryCache: true });
-        if (!isBackgroundLightweightSync) {
+        if (!isBackgroundLightweightSync || backgroundCodexUsageRepair) {
           sources.push({ source: "codex", sessionsDir: path.join(codexPaths.native, "archived_sessions"), deep: true });
         }
       }
       if (codexPaths.wsl) {
         sources.push({ source: "codex", sessionsDir: path.join(codexPaths.wsl, "sessions"), codexInventoryCache: true });
-        if (!isBackgroundLightweightSync) {
+        if (!isBackgroundLightweightSync || backgroundCodexUsageRepair) {
           sources.push({ source: "codex", sessionsDir: path.join(codexPaths.wsl, "archived_sessions"), deep: true });
         }
       }
@@ -523,7 +660,7 @@ async function cmdSync(argv, context = {}) {
         projectQueueStatePath,
         rolloutFiles,
       });
-      await repairCodexForkReplayInflation({
+      const codexForkRepairRan = await repairCodexForkReplayInflation({
         cursors,
         queuePath,
         queueStatePath,
@@ -531,6 +668,15 @@ async function cmdSync(argv, context = {}) {
         projectQueueStatePath,
         rolloutFiles,
         legacyRepairRan: codexRescanRepairRan,
+      });
+      await repairCodexInterleavedUsageInflation({
+        cursors,
+        queuePath,
+        queueStatePath,
+        projectQueuePath,
+        projectQueueStatePath,
+        rolloutFiles,
+        legacyRepairRan: codexRescanRepairRan || codexForkRepairRan,
       });
       await repairDroidDuplicateSessionInflation({ cursors, queuePath, queueStatePath });
       await repairMimoClaudeMislabel({
@@ -540,6 +686,33 @@ async function cmdSync(argv, context = {}) {
         projectQueuePath,
         projectQueueStatePath,
       });
+    } else if (backgroundCodexUsageRepair) {
+      await cursorStore.materializeAllCodexState(cursors);
+      try {
+        await repairCodexInterleavedUsageInflation({
+          cursors,
+          queuePath,
+          queueStatePath,
+          projectQueuePath,
+          projectQueueStatePath,
+          rolloutFiles,
+          maxLineageScanBytes: CODEX_BACKGROUND_LINEAGE_SCAN_MAX_BYTES,
+        });
+      } catch (err) {
+        warnProviderParseFailure("Codex usage lineage repair", err, opts);
+      } finally {
+        // Rebuild failures intentionally leave the migration key unset so a
+        // future full sync can retry. Record a retryable sentinel here to keep
+        // routine native background refreshes bounded after that first attempt.
+        const migrations = (cursors.migrations ||= {});
+        if (!migrations[CODEX_USAGE_LINEAGE_REPAIR_KEY]) {
+          migrations[CODEX_USAGE_LINEAGE_REPAIR_KEY] = {
+            skipped: true,
+            reason: "background_repair_requires_full_sync",
+            at: new Date().toISOString(),
+          };
+        }
+      }
     }
 
     const codexColdSkipEnabled = opts.auto && sourceAllowed("codex");
@@ -569,9 +742,38 @@ async function cmdSync(argv, context = {}) {
       codexCursorLoadRestarted = Boolean(loadResult?.restarted);
     }
 
-    const openclawFiles = openclawSignal?.sessionFile
-      ? [{ path: openclawSignal.sessionFile, source: "openclaw" }]
-      : [];
+    // Plugin-triggered sync points at one specific session file; a normal full
+    // sync also passively scans every on-disk OpenClaw transcript so usage is
+    // captured even when the session plugin never fires (issue #264). The scan
+    // is gated to full syncs so a scoped `--from-openclaw` hook still only
+    // touches its own file and the 5-minute background tick stays cheap. The
+    // event-identity dedup makes the plugin and passive paths idempotent, so
+    // overlap on the same file is safe.
+    //
+    // Keyed by openclawCursorKey, not the raw path: that is the same identity
+    // the parser assigns cursors by, so a plugin-supplied path and a scanned
+    // path that differ only in Windows casing collapse to one entry instead of
+    // being parsed twice.
+    const openclawSessionFiles = new Map();
+    if (openclawSignal?.sessionFile) {
+      openclawSessionFiles.set(openclawCursorKey(openclawSignal.sessionFile), {
+        path: openclawSignal.sessionFile,
+        source: "openclaw",
+      });
+    }
+    if (isFullSourceScan && sourceAllowed("openclaw")) {
+      try {
+        for (const f of await resolveOpenclawSessionFiles(process.env)) {
+          const key = openclawCursorKey(f);
+          if (!openclawSessionFiles.has(key)) {
+            openclawSessionFiles.set(key, { path: f, source: "openclaw" });
+          }
+        }
+      } catch (err) {
+        warnProviderParseFailure("OpenClaw", err, opts);
+      }
+    }
+    const openclawFiles = Array.from(openclawSessionFiles.values());
 
     if (progress?.enabled) {
       progress.start(
@@ -641,7 +843,7 @@ async function cmdSync(argv, context = {}) {
 
     let openclawResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (sourceAllowed("openclaw") && openclawFiles.length > 0) {
-      // Only runs when explicitly triggered by the OpenClaw session plugin.
+      // Parses plugin-triggered and/or passively discovered session files.
       try {
         openclawResult = await parseOpenclawIncremental({
           sessionFiles: openclawFiles,
@@ -673,7 +875,18 @@ async function cmdSync(argv, context = {}) {
     openclawResult.eventsAggregated += openclawFallback.eventsAggregated;
     openclawResult.bucketsQueued += openclawFallback.bucketsQueued;
 
-    const claudeFiles = sourceAllowed("claude") ? await listClaudeProjectFiles(claudeProjectsDir) : [];
+    let claudeFiles = [];
+    if (sourceAllowed("claude")) {
+      const seenClaudeFiles = new Set();
+      for (const dir of claudeProjectsDirs) {
+        for (const f of await listClaudeProjectFiles(dir)) {
+          if (!seenClaudeFiles.has(f)) {
+            seenClaudeFiles.add(f);
+            claudeFiles.push(f);
+          }
+        }
+      }
+    }
     if (isFullSourceScan) {
       await reincludeClaudeMemObserverFiles({ cursors, claudeFiles, queuePath, queueStatePath });
       await repairClaudeQueueFromGroundTruth({
@@ -682,6 +895,7 @@ async function cmdSync(argv, context = {}) {
         queueStatePath,
         projectQueuePath,
         projectQueueStatePath,
+        rootDirs: claudeProjectsDirs,
       });
     }
     let claudeResult = { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
@@ -860,6 +1074,7 @@ async function cmdSync(argv, context = {}) {
             dbResult = await parseOpencodeDbIncremental({
               ...options,
               dbMessages,
+              dbPath,
             });
           }
         }
@@ -903,13 +1118,93 @@ async function cmdSync(argv, context = {}) {
       };
     }
 
+    let qoderResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    if (sourceAllowed("qoder")) {
+      const qoderPaths = resolveQoderDbPaths({
+        home,
+        env: process.env,
+        platform: process.platform,
+      });
+      if (qoderPaths.native || qoderPaths.wsl) {
+        if (progress?.enabled) {
+          progress.start(`Parsing Qoder ${renderBar(0)} | buckets 0`);
+        }
+        try {
+          const result = await multiInstallParse({
+            paths: qoderPaths,
+            parserFn: async ({ dbPath, ...rest }) => {
+              const dbMessages = await readQoderDbMessages(dbPath);
+              const parsed = await parseQoderDbIncremental({ dbMessages, dbPath, ...rest });
+              return {
+                recordsProcessed: parsed.messagesProcessed || 0,
+                eventsAggregated: parsed.eventsAggregated || 0,
+                bucketsQueued: parsed.bucketsQueued || 0,
+              };
+            },
+            providerName: "qoder",
+            cursors,
+            queuePath,
+            projectQueuePath,
+            getParams: (dbPath) => ({ dbPath }),
+            onProgress: makeProviderProgress("Qoder"),
+          });
+          qoderResult = {
+            recordsProcessed: result.recordsProcessed || 0,
+            eventsAggregated: result.eventsAggregated || 0,
+            bucketsQueued: result.bucketsQueued || 0,
+          };
+        } catch (err) {
+          warnProviderParseFailure("Qoder", err, opts);
+        }
+      }
+    }
+
+    // ── Claude Science (Anthropic's local research workbench, issue #246) ──
+    // Per-frame token usage lives on the `frames` table of operon-cli.db.
+    // Passive, incremental, subtract-on-change. There can be more than one DB:
+    // multi-org installs keep one per org, and on Windows the app runs inside
+    // WSL so the DB is on the distro home.
+    let claudeScienceResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    if (sourceAllowed("claude-science")) {
+      // Resolution is inside the error isolation too: it touches the filesystem
+      // and (on Windows) probes WSL, and a throw here would abort cmdSync before
+      // any provider's buckets are written, not just this one's.
+      let claudeScienceDbPaths = [];
+      try {
+        claudeScienceDbPaths = resolveClaudeScienceDbPaths({ home, env: process.env });
+      } catch (err) {
+        warnProviderParseFailure("Claude Science", err, opts);
+      }
+      if (claudeScienceDbPaths.length > 0 && progress?.enabled) {
+        progress.start(`Parsing Claude Science ${renderBar(0)} | buckets 0`);
+      }
+      for (const claudeScienceDbPath of claudeScienceDbPaths) {
+        try {
+          const dbRows = await readClaudeScienceFrames(claudeScienceDbPath);
+          const parsed = await parseClaudeScienceIncremental({
+            dbRows,
+            cursors,
+            queuePath,
+            onProgress: makeProviderProgress("Claude Science"),
+          });
+          claudeScienceResult = mergeParseResult(claudeScienceResult, {
+            recordsProcessed: parsed.recordsProcessed || 0,
+            eventsAggregated: parsed.eventsAggregated || 0,
+            bucketsQueued: parsed.bucketsQueued || 0,
+          });
+        } catch (err) {
+          warnProviderParseFailure("Claude Science", err, opts);
+        }
+      }
+    }
+
     async function parseOpencodeDbForInstall({ dbPath, readFn, source, cursorKey, ...rest }) {
       if (!dbPath || !fssync.existsSync(dbPath)) {
         return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
       }
       const dbMessages = readFn(dbPath);
       if (dbMessages.length === 0) return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-      const result = await parseOpencodeDbIncremental({ dbMessages, source, cursorKey, ...rest });
+      const result = await parseOpencodeDbIncremental({ dbMessages, dbPath, source, cursorKey, ...rest });
       return {
         recordsProcessed: result.messagesProcessed || 0,
         eventsAggregated: result.eventsAggregated || 0,
@@ -1094,6 +1389,7 @@ async function cmdSync(argv, context = {}) {
           settingsFiles: droidSettingsFiles,
           cursors,
           queuePath,
+          projectQueuePath,
           // Full-scan sync: drop cursor entries for any session whose
           // settings.json has disappeared off disk so cursors.droid stays
           // bounded by the actual on-disk session count.
@@ -1225,30 +1521,44 @@ async function cmdSync(argv, context = {}) {
       }
     }
 
-    // ── Kiro (SQLite-based, with JSONL fallback) ──
+    // ── Kiro (SQLite-based, with JSONL fallback; dual-install aware) ──
     let kiroResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const kiroDbPath = resolveKiroDbPath();
-    const kiroJsonlPath = resolveKiroJsonlPath();
-    if (sourceAllowed("kiro") && (fssync.existsSync(kiroDbPath) || fssync.existsSync(kiroJsonlPath))) {
-      if (progress?.enabled) {
-        progress.start(`Parsing Kiro ${renderBar(0)} | buckets 0`);
-      }
-      try {
-        kiroResult = await parseKiroIncremental({
-          dbPath: kiroDbPath,
-          jsonlPath: kiroJsonlPath,
-          cursors,
-          queuePath,
-          onProgress: (p) => {
-            if (!progress?.enabled) return;
-            const pct = p.total > 0 ? p.index / p.total : 1;
-            progress.update(
-              `Parsing Kiro ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} records | buckets ${formatNumber(p.bucketsQueued)}`,
-            );
-          },
-        });
-      } catch (err) {
-        warnProviderParseFailure("Kiro", err, opts);
+    if (sourceAllowed("kiro")) {
+      const kiroNativeBase = resolveKiroBasePath(process.env);
+      const wslKiroBase = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
+        ? wsl.discoverWslHome(".config/Kiro/User/globalStorage/kiro.kiroagent")
+        : null;
+      const kiroPaths = resolveInstallPaths({ nativeValue: kiroNativeBase, wslValue: wslKiroBase });
+      // resolveInstallPaths only checks the base dir (and skips the check off
+      // win32); keep the original per-install db/jsonl presence gate so empty
+      // installs never spin up a parse or seed a cursor namespace.
+      const kiroHasData = (base) => Boolean(base)
+        && (fssync.existsSync(resolveKiroDbPath(base)) || fssync.existsSync(resolveKiroJsonlPath(base)));
+      if (!kiroHasData(kiroPaths.native)) kiroPaths.native = null;
+      if (!kiroHasData(kiroPaths.wsl)) kiroPaths.wsl = null;
+      if (kiroPaths.native || kiroPaths.wsl) {
+        if (progress?.enabled) {
+          progress.start(`Parsing Kiro ${renderBar(0)} | buckets 0`);
+        }
+        try {
+          kiroResult = await multiInstallParse({
+            paths: kiroPaths,
+            parserFn: parseKiroIncremental,
+            providerName: "kiro",
+            cursors,
+            getParams: (base) => ({
+              basePath: base,
+              dbPath: resolveKiroDbPath(base),
+              jsonlPath: resolveKiroJsonlPath(base),
+            }),
+            queuePath,
+            onProgress: makeProviderProgress("Kiro"),
+            detectInstall: (base, flatState) =>
+              kiroInstallOwnsCursor(resolveKiroDbPath(base), flatState),
+          });
+        } catch (err) {
+          warnProviderParseFailure("Kiro", err, opts);
+        }
       }
     }
 
@@ -1326,36 +1636,88 @@ async function cmdSync(argv, context = {}) {
       );
     }
 
-    // ── Kiro CLI (reads ~/Library/Application Support/kiro-cli/data.sqlite3
-    //    AND live sessions under ~/.kiro/sessions/cli/{uuid}.json) ──
+    // ── Kiro CLI (reads ~/Library/Application Support/kiro-cli/data.sqlite3,
+    //    legacy ~/.kiro/sessions/cli/{uuid}.json, and Kiro CLI 2.13+
+    //    ~/.kiro/sessions/{workspace}/sess_{uuid}/messages.jsonl) ──
     // Runs IN PARALLEL with the Kiro IDE branch above — NOT instead of it.
     // Both emit source='kiro' so totals merge transparently; cursor state
     // is isolated in cursors.kiroCli. Kiro CLI does not persist explicit
     // token counts (billing is credit-based on Bedrock); we approximate at
     // 4 chars/token from user prompt chars and assistant response chars.
     let kiroCliResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const kiroCliDb = resolveKiroCliDbPath(process.env);
-    const kiroCliSessionFiles = sourceAllowed("kiro") ? resolveKiroCliSessionFiles(process.env) : [];
-    if (sourceAllowed("kiro") && (fssync.existsSync(kiroCliDb) || kiroCliSessionFiles.length > 0)) {
-      if (progress?.enabled) {
-        progress.start(`Parsing Kiro CLI ${renderBar(0)} | buckets 0`);
+    if (sourceAllowed("kiro")) {
+      const kiroCliDb = resolveKiroCliDbPath(process.env);
+      const kiroCliSessionFiles = resolveKiroCliSessionFiles(process.env);
+      const nativeCliPresent = fssync.existsSync(kiroCliDb) || kiroCliSessionFiles.length > 0;
+
+      // Explicit overrides pin a single install — never mix them with WSL
+      // auto-discovery (mirrors the Hermes TOKENTRACKER_HERMES_HOME branch).
+      const kiroCliOverride = Boolean(process.env.KIRO_CLI_DB_PATH || process.env.KIRO_HOME);
+      let wslKiroCliEnv = null;
+      let wslKiroCliMarker = null;
+      if (!kiroCliOverride && process.platform === "win32" && wsl.shouldProbeWsl(process.env)) {
+        // A WSL install owns BOTH a data dir (~/.local/share/kiro-cli) and a
+        // sessions home (~/.kiro). Derive both from whichever probe hits so
+        // the per-install env never falls back to native paths.
+        const wslKiroHomeDir = wsl.discoverWslHome(".kiro");
+        const wslCliDataDir = wsl.discoverWslHome(".local/share/kiro-cli");
+        const wslHomeRoot = wslKiroHomeDir
+          ? path.dirname(wslKiroHomeDir)
+          : (wslCliDataDir ? path.dirname(path.dirname(path.dirname(wslCliDataDir))) : null);
+        if (wslHomeRoot) {
+          const wslCliDb = path.join(wslHomeRoot, ".local", "share", "kiro-cli", "data.sqlite3");
+          wslKiroCliEnv = {
+            ...process.env,
+            KIRO_CLI_DB_PATH: wslCliDb,
+            KIRO_HOME: path.join(wslHomeRoot, ".kiro"),
+          };
+          const wslCliPresent = fssync.existsSync(wslCliDb)
+            || resolveKiroCliSessionFiles(wslKiroCliEnv).length > 0;
+          if (wslCliPresent) wslKiroCliMarker = wslCliDb;
+        }
       }
-      try {
-        kiroCliResult = await parseKiroCliIncremental({
-          cursors,
-          queuePath,
+
+      // Paths here are install markers only — the parser resolves its DB and
+      // session files from the per-install env (KIRO_CLI_DB_PATH/KIRO_HOME).
+      const kiroCliPaths = process.platform === "win32"
+        ? wsl.resolveAllWin32Paths({
+          nativeValue: nativeCliPresent ? kiroCliDb : null,
+          wslValue: wslKiroCliMarker,
           env: process.env,
-          onProgress: (p) => {
-            if (!progress?.enabled) return;
-            const pct = p.total > 0 ? p.index / p.total : 1;
-            progress.update(
-              `Parsing Kiro CLI ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} sessions | buckets ${formatNumber(p.bucketsQueued)}`,
-            );
-          },
-        });
-      } catch (err) {
-        if (!opts.auto) {
-          process.stderr.write(`Kiro CLI sync: ${err.message}\n`);
+          platform: "win32",
+        })
+        : { native: nativeCliPresent ? kiroCliDb : null, wsl: null };
+      const kiroCliEnvFor = (p) =>
+        wslKiroCliEnv && p === wslKiroCliMarker ? wslKiroCliEnv : process.env;
+      if (kiroCliPaths.native || kiroCliPaths.wsl) {
+        if (progress?.enabled) {
+          progress.start(`Parsing Kiro CLI ${renderBar(0)} | buckets 0`);
+        }
+        try {
+          kiroCliResult = await multiInstallParse({
+            paths: kiroCliPaths,
+            parserFn: parseKiroCliIncremental,
+            providerName: "kiroCli",
+            cursors,
+            // Per-install env MUST come from getParams: multiInstallParse
+            // spreads shared params over it, so a top-level env would clobber
+            // the per-install one.
+            getParams: (p) => ({ env: kiroCliEnvFor(p) }),
+            queuePath,
+            onProgress: (p) => {
+              if (!progress?.enabled) return;
+              const pct = p.total > 0 ? p.index / p.total : 1;
+              progress.update(
+                `Parsing Kiro CLI ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} sessions | buckets ${formatNumber(p.bucketsQueued)}`,
+              );
+            },
+            detectInstall: (p, flatState) =>
+              kiroCliInstallOwnsCursor(kiroCliEnvFor(p).KIRO_CLI_DB_PATH || kiroCliDb, flatState),
+          });
+        } catch (err) {
+          if (!opts.auto) {
+            process.stderr.write(`Kiro CLI sync: ${err.message}\n`);
+          }
         }
       }
     }
@@ -1420,6 +1782,26 @@ async function cmdSync(argv, context = {}) {
     // Tencent's CodeBuddy CLI is a Claude Code clone; no hook system, so we
     // tail the per-session JSONL conversation logs incrementally on each sync.
     let codebuddyResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    if (isFullSourceScan && sourceAllowed("codebuddy")) {
+      const repairCodebuddyFiles = mergeBothFileSources({
+        resolveFiles: (env) => resolveCodebuddyProjectFiles({
+          ...env,
+          TOKENTRACKER_CODEBUDDY_LOG_FALLBACK: "1",
+        }),
+        env: process.env,
+      });
+      try {
+        await repairCodebuddyLogJsonlOverlap({
+          cursors,
+          queuePath,
+          queueStatePath,
+          codebuddyFiles: repairCodebuddyFiles,
+          env: process.env,
+        });
+      } catch (err) {
+        warnProviderParseFailure("CodeBuddy log/JSONL repair", err, opts);
+      }
+    }
     const codebuddyFiles = sourceAllowed("codebuddy")
       ? mergeBothFileSources({ resolveFiles: resolveCodebuddyProjectFiles, env: process.env })
       : [];
@@ -1456,6 +1838,19 @@ async function cmdSync(argv, context = {}) {
       ? mergeBothFileSources({ resolveFiles: resolveWorkbuddyProjectFiles, env: process.env })
       : [];
     if (sourceAllowed("workbuddy")) {
+      if (isFullSourceScan) {
+        try {
+          await repairWorkbuddyContextUsage({
+            cursors,
+            queuePath,
+            queueStatePath,
+            workbuddyFiles,
+            env: process.env,
+          });
+        } catch (err) {
+          warnProviderParseFailure("WorkBuddy context-usage repair", err, opts);
+        }
+      }
       if (progress?.enabled) {
         progress.start(`Parsing WorkBuddy ${renderBar(0)} | buckets 0`);
       }
@@ -1996,6 +2391,8 @@ async function cmdSync(argv, context = {}) {
       geminiResult.filesProcessed +
       antigravityResult.filesProcessed +
       opencodeResult.filesProcessed +
+      qoderResult.recordsProcessed +
+      claudeScienceResult.recordsProcessed +
       cursorResult.recordsProcessed +
       kiroResult.recordsProcessed +
       kiroCliResult.recordsProcessed +
@@ -2025,6 +2422,8 @@ async function cmdSync(argv, context = {}) {
       geminiResult.bucketsQueued +
       antigravityResult.bucketsQueued +
       opencodeResult.bucketsQueued +
+      qoderResult.bucketsQueued +
+      claudeScienceResult.bucketsQueued +
       cursorResult.bucketsQueued +
       kiroResult.bucketsQueued +
       kiroCliResult.bucketsQueued +
@@ -2087,24 +2486,28 @@ async function cmdSync(argv, context = {}) {
 
     progress?.stop();
 
-    const runtime = resolveRuntimeConfig({ config: config || {}, env: process.env });
+    const runtimeConfig = config ? { ...config } : {};
+    if (legacyBaseUrlMigration?.replacementDeviceToken) {
+      runtimeConfig.deviceToken = legacyBaseUrlMigration.replacementDeviceToken;
+    }
+    const runtime = resolveRuntimeConfig({ config: runtimeConfig, env: process.env });
 
     let uploadResult = { inserted: 0, skipped: 0 };
     let uploadAttempted = false;
-    let backgroundUploadDecision = null;
+    let autoUploadDecision = null;
 
-    if (opts.publishAccount) {
+    if (opts.publishAccount || (legacyBaseUrlMigration && opts.auto)) {
       const uploadStateBefore = (await readJson(queueStatePath)) || { offset: 0 };
       const queueSizeBefore = await safeStatSize(queuePath);
       const pendingBytesBefore = Math.max(
         0,
         queueSizeBefore - Number(uploadStateBefore.offset || 0),
       );
-      // The native five-minute loop is already the success cadence. Reuse the
-      // shared decision helper for pending/backoff handling, but intentionally
-      // ignore the legacy 30-minute success throttle so account publication
-      // does not become stale again. Failure backoff remains authoritative.
-      backgroundUploadDecision = decideAutoUpload({
+      // Native publication and every auto-triggered legacy migration share the
+      // failure-backoff gate. Intentionally ignore the 30-minute success
+      // throttle: native refresh owns its own cadence, while a pending migration
+      // should complete as soon as a credential becomes usable.
+      autoUploadDecision = decideAutoUpload({
         nowMs: Date.now(),
         pendingBytes: pendingBytesBefore,
         state: {
@@ -2121,7 +2524,7 @@ async function cmdSync(argv, context = {}) {
 
     if (runtime.deviceToken && runtime.baseUrl &&
         (!isBackgroundLightweightSync || opts.publishAccount) &&
-        (!backgroundUploadDecision || backgroundUploadDecision.allowed)) {
+        (!autoUploadDecision || autoUploadDecision.allowed)) {
       uploadAttempted = true;
       // Mirror the machine identity into the purge-surviving seed file so a
       // future `uninstall --purge` + reinstall recovers the same cloud device
@@ -2133,14 +2536,49 @@ async function cmdSync(argv, context = {}) {
         // best effort — upload below must not be blocked by identity mirroring
       }
       try {
-        uploadResult = await drainQueueToCloud({
-          baseUrl: runtime.baseUrl,
-          deviceToken: runtime.deviceToken,
-          queuePath,
-          queueStatePath,
-          maxBatches: opts.drain ? 100 : (backgroundUploadDecision?.maxBatches || 5),
-          batchSize: backgroundUploadDecision?.batchSize || 200,
-        });
+        let successfulDeviceToken = runtime.deviceToken;
+        const drainWithToken = (deviceToken) =>
+          drainQueueToCloud({
+            baseUrl: runtime.baseUrl,
+            deviceToken,
+            queuePath,
+            queueStatePath,
+            maxBatches: opts.drain ? 100 : (autoUploadDecision?.maxBatches || 5),
+            batchSize: autoUploadDecision?.batchSize || 200,
+          });
+        try {
+          uploadResult = await drainWithToken(successfulDeviceToken);
+        } catch (error) {
+          const fallbackDeviceToken = legacyBaseUrlMigration?.previousDeviceToken;
+          const replacementDeviceToken = legacyBaseUrlMigration?.replacementDeviceToken;
+          const stateAfterFailure = (await readJson(queueStatePath)) || { offset: 0 };
+          const canFallbackWithoutSplittingHistory =
+            (error?.status === 401 || error?.status === 403) &&
+            replacementDeviceToken &&
+            fallbackDeviceToken &&
+            fallbackDeviceToken !== replacementDeviceToken &&
+            Number(stateAfterFailure.offset || 0) === 0;
+          if (!canFallbackWithoutSplittingHistory) throw error;
+          successfulDeviceToken = fallbackDeviceToken;
+          uploadResult = await drainWithToken(successfulDeviceToken);
+        }
+        // A successful ingest response proves which credential belongs to the
+        // current backend. Only now commit the token and remove the retry marker.
+        // Empty queues make no request, so keep the marker until future data can
+        // validate a credential instead of persisting an unverified token.
+        if (legacyBaseUrlMigration && uploadResult.batches > 0) {
+          // device-login does not share the sync lock and may have written a
+          // fresh current-backend config while the scan/upload was running.
+          // Re-read before committing, merge only while the legacy marker still
+          // exists, and never clobber a concurrently completed login.
+          const latestConfig = (await readJson(configPath)) || config;
+          if (isLegacyInsforgeBaseUrl(latestConfig.baseUrl)) {
+            latestConfig.deviceToken = successfulDeviceToken;
+            delete latestConfig.baseUrl;
+            await writeJson(configPath, latestConfig);
+            await chmod600IfPossible(configPath);
+          }
+        }
         // Record success so the exponential backoff step resets — otherwise
         // a single past failure keeps us pessimistically throttled forever.
         uploadThrottleState = recordUploadSuccess({
@@ -2337,8 +2775,12 @@ module.exports = {
   acquireSyncLock,
   migrateCursorUnknownBuckets,
   migrateRolloutCumulativeDeltaBuckets,
+  repairCodebuddyLogJsonlOverlap,
+  repairWorkbuddyContextUsage,
+  WORKBUDDY_CONTEXT_USAGE_REPAIR_KEY,
   repairCodexRescanInflation,
   repairCodexForkReplayInflation,
+  repairCodexInterleavedUsageInflation,
   repairDroidDuplicateSessionInflation,
   repairMimoClaudeMislabel,
   reincludeClaudeMemObserverFiles,
@@ -2350,8 +2792,10 @@ module.exports = {
   recordCodexColdScanAudit,
   CURSOR_UNKNOWN_MIGRATION_KEY,
   ROLLOUT_CUMULATIVE_DELTA_MIGRATION_KEY,
+  CODEBUDDY_LOG_JSONL_REPAIR_KEY,
   CODEX_RESCAN_DEDUP_REPAIR_KEY,
   CODEX_FORK_REPLAY_REPAIR_KEY,
+  CODEX_USAGE_LINEAGE_REPAIR_KEY,
   DROID_DUP_SESSION_REPAIR_KEY,
   CLAUDE_MEM_OBSERVER_REINCLUDE_KEY,
   GROK_APPEND_ONLY_REPAIR_MIGRATION_KEY,
@@ -2364,15 +2808,18 @@ function normalizeString(value) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function resolveOpenclawSignal({ home, env } = {}) {
+function resolveOpenclawSignal({ env } = {}) {
   if (!env) return null;
 
   const agentId = normalizeString(env.TOKENTRACKER_OPENCLAW_AGENT_ID);
   const sessionId = normalizeString(env.TOKENTRACKER_OPENCLAW_PREV_SESSION_ID);
   if (!agentId || !sessionId) return null;
 
-  const openclawHome =
-    normalizeString(env.TOKENTRACKER_OPENCLAW_HOME) || path.join(home || os.homedir(), ".openclaw");
+  // Resolve the OpenClaw home identically to the passive scanner so the
+  // plugin-triggered file and passively discovered files share one path
+  // spelling — otherwise the same transcript could get two cursors and be
+  // counted twice (issue #264 review).
+  const openclawHome = resolveOpenclawHome(env);
   const sessionFile = path.join(openclawHome, "agents", agentId, "sessions", `${sessionId}.jsonl`);
 
   const prevTotals = {
@@ -2405,6 +2852,16 @@ async function applyOpenclawTotalsFallback({
     return { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
   }
 
+  // The passive/plugin transcript parse is authoritative: if this session's
+  // transcript has ever yielded real per-event usage, synthesizing sessions.json
+  // totals on top would count the same tokens twice (issue #264 review). Defer
+  // to the real events and advance the fallback baseline so no stale delta lingers.
+  const transcriptCursor =
+    signal.sessionFile && cursors?.files
+      ? cursors.files[openclawCursorKey(signal.sessionFile)]
+      : null;
+  const transcriptHasRealUsage = Boolean(transcriptCursor?.hasRealUsage);
+
   const sessionKey = `${signal.agentId}:${signal.sessionId}`;
   const statePath = path.join(trackerDir, "openclaw.fallback.state.json");
   const fallbackFilePath = path.join(trackerDir, "openclaw.fallback.jsonl");
@@ -2412,6 +2869,22 @@ async function applyOpenclawTotalsFallback({
   const sessions = state.sessions && typeof state.sessions === "object" ? state.sessions : {};
   const prev =
     sessions[sessionKey] && typeof sessions[sessionKey] === "object" ? sessions[sessionKey] : null;
+
+  if (transcriptHasRealUsage) {
+    sessions[sessionKey] = {
+      totalTokens: normalizeNonNegativeInt(signal?.prevTotals?.totalTokens) || 0,
+      inputTokens: normalizeNonNegativeInt(signal?.prevTotals?.inputTokens) || 0,
+      outputTokens: normalizeNonNegativeInt(signal?.prevTotals?.outputTokens) || 0,
+      model: normalizeString(signal?.prevTotals?.model) || "unknown",
+      updatedAt: normalizeIsoOrEpoch(signal?.prevTotals?.updatedAt) || new Date().toISOString(),
+      seenAt: new Date().toISOString(),
+      coveredByEvents: true,
+    };
+    state.version = 1;
+    state.sessions = sessions;
+    await writeJson(statePath, state);
+    return { filesProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
 
   const current = {
     totalTokens: normalizeNonNegativeInt(signal?.prevTotals?.totalTokens) || 0,
@@ -2675,6 +3148,7 @@ async function drainQueueToCloud({ baseUrl, deviceToken, queuePath, queueStatePa
   let offset = Number(state.offset || 0);
   let inserted = 0;
   let skipped = 0;
+  let batches = 0;
 
   const queueSize = await safeStatSize(queuePath);
   const limit = Math.min(Math.max(1, Math.floor(Number(batchSize || 200))), MAX_INGEST_BUCKETS);
@@ -2712,6 +3186,7 @@ async function drainQueueToCloud({ baseUrl, deviceToken, queuePath, queueStatePa
 
     inserted += Number(data?.inserted || 0);
     skipped += Number(data?.skipped || 0);
+    batches += 1;
 
     offset = result.nextOffset;
     state.offset = offset;
@@ -2719,7 +3194,7 @@ async function drainQueueToCloud({ baseUrl, deviceToken, queuePath, queueStatePa
     await writeJson(queueStatePath, state);
   }
 
-  return { inserted, skipped };
+  return { inserted, skipped, batches };
 }
 
 async function readQueueBatch(queuePath, startOffset, maxBuckets) {
@@ -3383,6 +3858,386 @@ async function migrateRolloutCumulativeDeltaBuckets({ cursors, queuePath, rollou
   cursors.migrations[ROLLOUT_CUMULATIVE_DELTA_MIGRATION_KEY] = new Date().toISOString();
 }
 
+function codebuddyUsageRowKey(row) {
+  if (!row || row.source !== "codebuddy") return null;
+  const model = typeof row.model === "string" && row.model ? row.model : "unknown";
+  const hourStart = typeof row.hour_start === "string" && row.hour_start ? row.hour_start : null;
+  return hourStart ? bucketKey("codebuddy", model, hourStart) : null;
+}
+
+function codebuddyZeroUsageRow(model, hourStart) {
+  return {
+    source: "codebuddy",
+    model: model || "unknown",
+    hour_start: hourStart,
+    input_tokens: 0,
+    cached_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+    output_tokens: 0,
+    reasoning_output_tokens: 0,
+    total_tokens: 0,
+    billable_total_tokens: 0,
+    conversation_count: 0,
+  };
+}
+
+// Issue #403 historical repair. Before the JSONL usage fix, CodeBuddy could
+// ingest the same round-trip once from ~/.codebuddy/projects and once from the
+// IDE extension log. The forward resolver now disables logs whenever any JSONL
+// has usable rawUsage, but existing queues/hourly state need one guarded,
+// atomic rebuild so the old double-count is not left visible forever.
+async function repairCodebuddyLogJsonlOverlap({
+  cursors,
+  queuePath,
+  queueStatePath,
+  codebuddyFiles,
+  env = process.env,
+} = {}) {
+  if (!cursors || typeof cursors !== "object") return false;
+  const migrations = (cursors.migrations ||= {});
+  const prior = migrations[CODEBUDDY_LOG_JSONL_REPAIR_KEY];
+  if (prior && !(typeof prior === "object" && prior.skipped)) return false;
+
+  const files = Array.isArray(codebuddyFiles) ? codebuddyFiles : [];
+  const jsonlFiles = files.filter((filePath) => typeof filePath === "string" && filePath.endsWith(".jsonl"));
+  const logFiles = files.filter((filePath) => typeof filePath === "string" && filePath.endsWith(".log"));
+  const hasDetailedJsonl = jsonlFiles.some((filePath) => codebuddyJsonlHasUsage(filePath));
+
+  const hourly = cursors.hourly && typeof cursors.hourly === "object" ? cursors.hourly : {};
+  const liveHourlyKeys = new Set(
+    Object.keys(hourly.buckets || {}).filter((key) => key.startsWith("codebuddy|")),
+  );
+  let queueRaw = "";
+  try {
+    queueRaw = await fs.readFile(queuePath, "utf8");
+  } catch (e) {
+    if (e?.code !== "ENOENT") throw e;
+  }
+  const queueCodebuddyKeys = new Set();
+  const keptQueueLines = [];
+  for (const line of queueRaw.split("\n")) {
+    if (!line.trim()) continue;
+    let row;
+    try {
+      row = JSON.parse(line);
+    } catch (_e) {
+      keptQueueLines.push(line);
+      continue;
+    }
+    const key = codebuddyUsageRowKey(row);
+    if (!key) {
+      keptQueueLines.push(line);
+      continue;
+    }
+    queueCodebuddyKeys.add(key);
+  }
+  const liveKeys = new Set([...liveHourlyKeys, ...queueCodebuddyKeys]);
+  if (liveKeys.size === 0) {
+    migrations[CODEBUDDY_LOG_JSONL_REPAIR_KEY] = {
+      status: "noop",
+      appliedAt: new Date().toISOString(),
+      reason: "no-codebuddy-history",
+    };
+    return false;
+  }
+
+  // Keep this condition retryable when old CodeBuddy history exists but the
+  // extension log is temporarily rotated/missing. A permanent no-op here
+  // would close the repair window before a later full scan can rediscover it.
+  if (jsonlFiles.length === 0 || logFiles.length === 0 || !hasDetailedJsonl) {
+    migrations[CODEBUDDY_LOG_JSONL_REPAIR_KEY] = {
+      skipped: true,
+      reason: "no-mixed-detailed-sources",
+      at: new Date().toISOString(),
+    };
+    return false;
+  }
+
+  // A rebuild from the currently discoverable JSONL is safe only if every
+  // file previously tailed by CodeBuddy is still available in this scan. If a
+  // rotated/deleted log is missing, retain the user's history and retry later
+  // rather than silently erasing an unreproducible bucket.
+  const discovered = new Set(files);
+  const priorFiles = cursors.codebuddy?.fileOffsets && typeof cursors.codebuddy.fileOffsets === "object"
+    ? Object.keys(cursors.codebuddy.fileOffsets)
+    : [];
+  const missingPriorFile = priorFiles.find((filePath) => !discovered.has(filePath));
+  if (missingPriorFile) {
+    migrations[CODEBUDDY_LOG_JSONL_REPAIR_KEY] = {
+      skipped: true,
+      reason: "codebuddy_file_unreproducible",
+      filePath: missingPriorFile,
+      at: new Date().toISOString(),
+    };
+    return false;
+  }
+
+  const tmpQueue = `${queuePath}.codebuddyrebuild.${process.pid}.${Date.now()}`;
+  const tmpCursors = {
+    version: 1,
+    hourly: { buckets: {}, groupQueued: {} },
+    codebuddy: {},
+  };
+  let rebuiltRows = [];
+  try {
+    await parseCodebuddyIncremental({
+      // Rebuild from both sources. The parser now preserves legacy-only log
+      // sessions while consuming mirrored log fingerprints against JSONL, so
+      // rebuilding JSONL alone would silently discard valid pre-rawUsage data.
+      projectFiles: files,
+      cursors: tmpCursors,
+      queuePath: tmpQueue,
+      env,
+    });
+    let rebuiltRaw = "";
+    try {
+      rebuiltRaw = await fs.readFile(tmpQueue, "utf8");
+    } catch (e) {
+      if (e?.code !== "ENOENT") throw e;
+    }
+    rebuiltRows = rebuiltRaw.split("\n").filter((line) => line.trim());
+  } catch (e) {
+    console.error("[sync] CodeBuddy log/JSONL repair: rebuild failed, leaving history untouched:", e?.message || e);
+    return false;
+  } finally {
+    await fs.rm(tmpQueue, { force: true }).catch(() => {});
+  }
+
+  const rebuiltKeys = new Set();
+  const validRebuiltRows = [];
+  for (const line of rebuiltRows) {
+    let row;
+    try { row = JSON.parse(line); } catch (_e) { continue; }
+    const key = codebuddyUsageRowKey(row);
+    if (!key) continue;
+    rebuiltKeys.add(key);
+    validRebuiltRows.push(line);
+  }
+  if (rebuiltKeys.size === 0) {
+    migrations[CODEBUDDY_LOG_JSONL_REPAIR_KEY] = {
+      skipped: true,
+      reason: "jsonl_rebuild_empty",
+      at: new Date().toISOString(),
+    };
+    return false;
+  }
+
+  const staleRetractions = [];
+  for (const key of liveKeys) {
+    if (rebuiltKeys.has(key)) continue;
+    const [, model, ...hourParts] = key.split("|");
+    staleRetractions.push(JSON.stringify(codebuddyZeroUsageRow(model, hourParts.join("|"))));
+  }
+
+  const nextQueueLines = keptQueueLines.concat(staleRetractions, validRebuiltRows);
+  await ensureDir(path.dirname(queuePath));
+  const queueTmp = `${queuePath}.tmp.${process.pid}.${Date.now()}`;
+  await fs.writeFile(queueTmp, nextQueueLines.length ? `${nextQueueLines.join("\n")}\n` : "", "utf8");
+  await fs.rename(queueTmp, queuePath);
+
+  const nextHourly = (cursors.hourly ||= { buckets: {}, groupQueued: {} });
+  nextHourly.buckets ||= {};
+  nextHourly.groupQueued ||= {};
+  for (const key of Object.keys(nextHourly.buckets)) {
+    if (key.startsWith("codebuddy|")) delete nextHourly.buckets[key];
+  }
+  for (const key of Object.keys(nextHourly.groupQueued)) {
+    if (key.startsWith("codebuddy|")) delete nextHourly.groupQueued[key];
+  }
+  for (const [key, bucket] of Object.entries(tmpCursors.hourly.buckets || {})) {
+    if (key.startsWith("codebuddy|")) nextHourly.buckets[key] = bucket;
+  }
+  for (const [key, value] of Object.entries(tmpCursors.hourly.groupQueued || {})) {
+    if (key.startsWith("codebuddy|")) nextHourly.groupQueued[key] = value;
+  }
+  cursors.codebuddy = tmpCursors.codebuddy || {};
+
+  let uploadState = {};
+  try { uploadState = JSON.parse(await fs.readFile(queueStatePath, "utf8")); } catch (_e) {}
+  uploadState.offset = 0;
+  uploadState.updatedAt = new Date().toISOString();
+  uploadState.note = "reset_after_codebuddy_log_jsonl_repair_2026_08";
+  await ensureDir(path.dirname(queueStatePath));
+  await fs.writeFile(queueStatePath, JSON.stringify(uploadState, null, 2) + "\n", "utf8");
+
+  migrations[CODEBUDDY_LOG_JSONL_REPAIR_KEY] = {
+    status: "applied",
+    appliedAt: new Date().toISOString(),
+    jsonlFiles: jsonlFiles.length,
+    logFiles: logFiles.length,
+    previousBuckets: liveKeys.size,
+    rebuiltBuckets: rebuiltKeys.size,
+    retractedBuckets: staleRetractions.length,
+  };
+  return true;
+}
+
+// WorkBuddy's 0.87.9 SQLite fallback treated the bounded session_usage.used
+// context snapshot as cumulative input tokens. A current database proves that
+// assumption false (`size` is a 192k context limit while trace input totals can
+// exceed it), so rebuild historical WorkBuddy buckets from JSONL/trace sources
+// once the new parser is available. The same missing-source guard used by the
+// other data migrations keeps this recoverable: if a previously contributing
+// file is gone, leave history untouched and stop adding new context snapshots.
+async function repairWorkbuddyContextUsage({
+  cursors,
+  queuePath,
+  queueStatePath,
+  workbuddyFiles,
+  env = process.env,
+} = {}) {
+  if (!cursors || typeof cursors !== "object") return false;
+  const migrations = (cursors.migrations ||= {});
+  const prior = migrations[WORKBUDDY_CONTEXT_USAGE_REPAIR_KEY];
+  if (prior && !(typeof prior === "object" && prior.skipped)) return false;
+
+  const hourly = cursors.hourly && typeof cursors.hourly === "object" ? cursors.hourly : {};
+  const liveHourlyKeys = new Set(
+    Object.keys(hourly.buckets || {}).filter((key) => key.startsWith("workbuddy|")),
+  );
+  let queueRaw = "";
+  try {
+    queueRaw = await fs.readFile(queuePath, "utf8");
+  } catch (e) {
+    if (e?.code !== "ENOENT") throw e;
+  }
+  const queueWorkbuddyKeys = new Set();
+  const keptQueueLines = [];
+  for (const line of queueRaw.split("\n")) {
+    if (!line.trim()) continue;
+    let row;
+    try { row = JSON.parse(line); } catch (_e) {
+      keptQueueLines.push(line);
+      continue;
+    }
+    if (row && row.source === "workbuddy" && typeof row.model === "string" && typeof row.hour_start === "string") {
+      queueWorkbuddyKeys.add(bucketKey("workbuddy", row.model || "unknown", row.hour_start));
+    } else {
+      keptQueueLines.push(line);
+    }
+  }
+  const liveKeys = new Set([...liveHourlyKeys, ...queueWorkbuddyKeys]);
+  if (liveKeys.size === 0) {
+    migrations[WORKBUDDY_CONTEXT_USAGE_REPAIR_KEY] = {
+      status: "noop",
+      appliedAt: new Date().toISOString(),
+      reason: "no-workbuddy-history",
+    };
+    return false;
+  }
+
+  const files = Array.isArray(workbuddyFiles) ? workbuddyFiles : [];
+  const discoveredPaths = new Set(
+    files.map((entry) => typeof entry === "string" ? entry : entry?.path).filter(Boolean),
+  );
+  const priorFiles = cursors.workbuddy?.fileOffsets && typeof cursors.workbuddy.fileOffsets === "object"
+    ? Object.keys(cursors.workbuddy.fileOffsets)
+    : [];
+  if (files.length === 0 || priorFiles.some((filePath) => !discoveredPaths.has(filePath))) {
+    migrations[WORKBUDDY_CONTEXT_USAGE_REPAIR_KEY] = {
+      skipped: true,
+      reason: files.length === 0 ? "no-rebuild-sources" : "workbuddy_file_unreproducible",
+      at: new Date().toISOString(),
+    };
+    return false;
+  }
+
+  const tmpQueue = `${queuePath}.workbuddyrebuild.${process.pid}.${Date.now()}`;
+  const tmpCursors = {
+    version: 1,
+    hourly: { buckets: {}, groupQueued: {} },
+    workbuddy: {},
+  };
+  let rebuiltRows = [];
+  try {
+    await parseWorkbuddyIncremental({
+      projectFiles: files,
+      cursors: tmpCursors,
+      queuePath: tmpQueue,
+      env,
+    });
+    let rebuiltRaw = "";
+    try { rebuiltRaw = await fs.readFile(tmpQueue, "utf8"); } catch (e) {
+      if (e?.code !== "ENOENT") throw e;
+    }
+    rebuiltRows = rebuiltRaw.split("\n").filter((line) => line.trim());
+  } catch (e) {
+    console.error("[sync] WorkBuddy context-usage repair: rebuild failed, leaving history untouched:", e?.message || e);
+    return false;
+  } finally {
+    await fs.rm(tmpQueue, { force: true }).catch(() => {});
+  }
+
+  const rebuiltKeys = new Set();
+  const validRebuiltRows = [];
+  for (const line of rebuiltRows) {
+    let row;
+    try { row = JSON.parse(line); } catch (_e) { continue; }
+    if (!row || row.source !== "workbuddy" || typeof row.model !== "string" || typeof row.hour_start !== "string") continue;
+    rebuiltKeys.add(bucketKey("workbuddy", row.model || "unknown", row.hour_start));
+    validRebuiltRows.push(line);
+  }
+
+  const staleRetractions = [];
+  for (const key of liveKeys) {
+    if (rebuiltKeys.has(key)) continue;
+    const [, model, ...hourParts] = key.split("|");
+    staleRetractions.push(JSON.stringify({
+      source: "workbuddy",
+      model: model || "unknown",
+      hour_start: hourParts.join("|"),
+      input_tokens: 0,
+      cached_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      output_tokens: 0,
+      reasoning_output_tokens: 0,
+      total_tokens: 0,
+      billable_total_tokens: 0,
+      conversation_count: 0,
+    }));
+  }
+
+  const nextQueueLines = keptQueueLines.concat(staleRetractions, validRebuiltRows);
+  await ensureDir(path.dirname(queuePath));
+  const queueTmp = `${queuePath}.tmp.${process.pid}.${Date.now()}`;
+  await fs.writeFile(queueTmp, nextQueueLines.length ? `${nextQueueLines.join("\n")}\n` : "", "utf8");
+  await fs.rename(queueTmp, queuePath);
+
+  const nextHourly = (cursors.hourly ||= { buckets: {}, groupQueued: {} });
+  nextHourly.buckets ||= {};
+  nextHourly.groupQueued ||= {};
+  for (const key of Object.keys(nextHourly.buckets)) {
+    if (key.startsWith("workbuddy|")) delete nextHourly.buckets[key];
+  }
+  for (const key of Object.keys(nextHourly.groupQueued)) {
+    if (key.startsWith("workbuddy|")) delete nextHourly.groupQueued[key];
+  }
+  for (const [key, bucket] of Object.entries(tmpCursors.hourly.buckets || {})) {
+    if (key.startsWith("workbuddy|")) nextHourly.buckets[key] = bucket;
+  }
+  for (const [key, value] of Object.entries(tmpCursors.hourly.groupQueued || {})) {
+    if (key.startsWith("workbuddy|")) nextHourly.groupQueued[key] = value;
+  }
+  cursors.workbuddy = tmpCursors.workbuddy || {};
+
+  let uploadState = {};
+  try { uploadState = JSON.parse(await fs.readFile(queueStatePath, "utf8")); } catch (_e) {}
+  uploadState.offset = 0;
+  uploadState.updatedAt = new Date().toISOString();
+  uploadState.note = "reset_after_workbuddy_context_usage_repair_2026_08";
+  await ensureDir(path.dirname(queueStatePath));
+  await fs.writeFile(queueStatePath, JSON.stringify(uploadState, null, 2) + "\n", "utf8");
+
+  migrations[WORKBUDDY_CONTEXT_USAGE_REPAIR_KEY] = {
+    status: "applied",
+    appliedAt: new Date().toISOString(),
+    previousBuckets: liveKeys.size,
+    rebuiltBuckets: rebuiltKeys.size,
+    retractedBuckets: staleRetractions.length,
+  };
+  return true;
+}
+
 // One-time repair (#187): rebuild codex hourly buckets that the inode-keyed
 // re-scan double-counted before the codexHashes event-dedup landed, and push
 // the corrected values to the cloud. Runs BEFORE the codex parse in the same
@@ -3405,6 +4260,7 @@ async function repairCodexRescanInflation({
   projectQueuePath,
   projectQueueStatePath,
   rolloutFiles,
+  expectedCodexFileSnapshots = null,
   // The fork-replay repair (#169 follow-up) re-runs this exact rebuild under
   // its own key: the rebuild always uses the CURRENT parser, so any parser fix
   // shipped since the last run is applied to the rebuilt history.
@@ -3489,6 +4345,7 @@ async function repairCodexRescanInflation({
       cursors: tmpCursors,
       queuePath: tmpQueue,
       projectQueuePath: tmpProjectQueue,
+      invalidRecordPolicy: "throw",
     });
     let tmpRaw = "";
     try {
@@ -3591,6 +4448,16 @@ async function repairCodexRescanInflation({
       );
       return false;
     }
+  }
+
+  const rebuildValidation = expectedCodexFileSnapshots instanceof Map
+    ? await validateCodexRebuildFileSnapshots(rebuilt.files, expectedCodexFileSnapshots)
+    : { ok: true };
+  if (!rebuildValidation.ok) {
+    console.error(
+      `[sync] codex rescan repair: ${rebuildValidation.reason} — skipping to avoid data loss`,
+    );
+    return false;
   }
 
   // COMMIT (only after a verified rebuild). A crash partway just leaves the
@@ -3826,6 +4693,216 @@ async function repairCodexForkReplayInflation({
     migrationKey: CODEX_FORK_REPLAY_REPAIR_KEY,
     uploadNote: "reset_after_codex_fork_replay_2026_07",
   });
+}
+
+// Rebuild historical Codex usage only when a rollout proves that the old
+// single-baseline parser crossed cumulative SessionState lineages. Detection is
+// based on the token counter stream itself, not multi_agent_version metadata:
+// affected legacy rollouts can predate that marker or carry it only in the
+// middle of a large file. Every contributing rollout must also be valid and
+// stable before the atomic rebuild can replace live history.
+async function repairCodexInterleavedUsageInflation({
+  cursors,
+  queuePath,
+  queueStatePath,
+  projectQueuePath,
+  projectQueueStatePath,
+  rolloutFiles,
+  // Either older guarded repair rebuilt every Codex file with the current
+  // parser earlier in this sync, so a second full rebuild is unnecessary.
+  legacyRepairRan = false,
+  maxLineageScanBytes = Infinity,
+}) {
+  if (!cursors || typeof cursors !== "object") return false;
+  const migrations = (cursors.migrations ||= {});
+  const prior = migrations[CODEX_USAGE_LINEAGE_REPAIR_KEY];
+  if (prior && !(typeof prior === "object" && prior.skipped)) return false;
+
+  if (legacyRepairRan) {
+    migrations[CODEX_USAGE_LINEAGE_REPAIR_KEY] = new Date().toISOString();
+    return false;
+  }
+
+  const scan = await scanForInterleavedCodexUsage(rolloutFiles, {
+    maxLineageScanBytes,
+  });
+  if (scan.indeterminate) {
+    migrations[CODEX_USAGE_LINEAGE_REPAIR_KEY] = {
+      skipped: true,
+      reason: "usage_lineage_scan_indeterminate",
+      at: new Date().toISOString(),
+    };
+    return false;
+  }
+
+  if (!scan.affected) {
+    if (!isCodexHistoryCovered(cursors, rolloutFiles)) {
+      migrations[CODEX_USAGE_LINEAGE_REPAIR_KEY] = {
+        skipped: true,
+        reason: "codex_history_not_covered",
+        at: new Date().toISOString(),
+      };
+      return false;
+    }
+    migrations[CODEX_USAGE_LINEAGE_REPAIR_KEY] = new Date().toISOString();
+    return false;
+  }
+
+  return repairCodexRescanInflation({
+    cursors,
+    queuePath,
+    queueStatePath,
+    projectQueuePath,
+    projectQueueStatePath,
+    rolloutFiles,
+    expectedCodexFileSnapshots: scan.fileSnapshots,
+    migrationKey: CODEX_USAGE_LINEAGE_REPAIR_KEY,
+    uploadNote: "reset_after_codex_usage_lineage_2026_07_v2",
+  });
+}
+
+async function scanForInterleavedCodexUsage(
+  rolloutFiles,
+  { maxLineageScanBytes = Infinity } = {},
+) {
+  let affected = false;
+  let remainingBytes = Number.isFinite(maxLineageScanBytes)
+    ? Math.max(0, maxLineageScanBytes)
+    : Infinity;
+  const fileSnapshots = new Map();
+  const seenPaths = new Set();
+
+  for (const entry of Array.isArray(rolloutFiles) ? rolloutFiles : []) {
+    const fp = typeof entry === "string" ? entry : entry?.path;
+    const src = typeof entry === "string" ? "codex" : String(entry?.source || "codex");
+    if (!fp || src !== "codex" || seenPaths.has(fp)) continue;
+    seenPaths.add(fp);
+
+    const lineage = await scanCodexUsageLineages(fp, remainingBytes);
+    if (lineage.indeterminate) {
+      return { affected: false, indeterminate: true, fileSnapshots: new Map() };
+    }
+    affected ||= lineage.affected;
+    fileSnapshots.set(fp, lineage.fileSnapshot);
+    if (Number.isFinite(remainingBytes)) {
+      remainingBytes = Math.max(0, remainingBytes - lineage.bytesRead);
+    }
+  }
+  return { affected, indeterminate: false, fileSnapshots };
+}
+
+async function scanCodexUsageLineages(filePath, maxBytes = Infinity) {
+  let stream = null;
+  try {
+    const before = await readCodexFileSnapshot(filePath);
+    const state = createUsageDeltaState();
+    const byteLimit = Number.isFinite(maxBytes) ? Math.max(0, maxBytes) : Infinity;
+    let bytesRead = 0;
+    let affected = false;
+    stream = fssync.createReadStream(filePath, { highWaterMark: 32 * 1024 });
+    for await (const record of physicalJsonlRecords(stream, {
+      maxPhysicalBytes: byteLimit,
+    })) {
+      const { line } = record;
+      bytesRead += record.physicalBytes;
+      if (bytesRead > byteLimit) return { affected: false, indeterminate: true };
+      if (!line.trim()) continue;
+      let obj;
+      try {
+        obj = JSON.parse(line);
+      } catch (_e) {
+        return { affected: false, indeterminate: true };
+      }
+      const token = extractTokenCount(obj);
+      const info = token?.info;
+      if (!info || typeof info !== "object") continue;
+      consumeUsageDelta(state, info.last_token_usage, info.total_token_usage);
+      if (state.sawInterleaved || state.sawDivergentCumulative) {
+        affected = true;
+      }
+    }
+    const after = await readCodexFileSnapshot(filePath);
+    if (!sameCodexFileSnapshot(before, after)) {
+      return { affected: false, indeterminate: true };
+    }
+    return {
+      affected,
+      indeterminate: false,
+      bytesRead,
+      fileSnapshot: after,
+    };
+  } catch (_e) {
+    return { affected: false, indeterminate: true };
+  } finally {
+    if (stream) stream.destroy();
+  }
+}
+
+async function readCodexFileSnapshot(filePath) {
+  const stat = await fs.stat(filePath);
+  return {
+    size: Number(stat.size),
+    mtimeMs: Number(stat.mtimeMs),
+    ctimeMs: Number(stat.ctimeMs),
+    ino: Number(stat.ino),
+    dev: Number(stat.dev),
+  };
+}
+
+function sameCodexFileSnapshot(left, right) {
+  return Boolean(
+    left &&
+      right &&
+      left.size === right.size &&
+      left.mtimeMs === right.mtimeMs &&
+      left.ctimeMs === right.ctimeMs &&
+      left.ino === right.ino &&
+      left.dev === right.dev
+  );
+}
+
+async function validateCodexRebuildFileSnapshots(rebuiltFiles, expectedSnapshots) {
+  for (const [filePath, expected] of expectedSnapshots) {
+    let actual;
+    try {
+      actual = await readCodexFileSnapshot(filePath);
+    } catch (_e) {
+      return { ok: false, reason: "a scanned rollout became unreadable during rebuild" };
+    }
+    if (!sameCodexFileSnapshot(expected, actual)) {
+      return { ok: false, reason: "a scanned rollout changed during rebuild" };
+    }
+    const rebuiltCursor = rebuiltFiles?.[filePath];
+    if (!rebuiltCursor) {
+      return { ok: false, reason: "the rebuild omitted a scanned rollout cursor" };
+    }
+    if (Number(rebuiltCursor.offset) !== expected.size) {
+      return { ok: false, reason: "the rebuild did not consume a scanned rollout through EOF" };
+    }
+  }
+  return { ok: true };
+}
+
+function isCodexHistoryCovered(cursors, rolloutFiles) {
+  const scannedPaths = new Set();
+  const scannedSessionIds = new Set();
+  for (const entry of Array.isArray(rolloutFiles) ? rolloutFiles : []) {
+    const fp = typeof entry === "string" ? entry : entry?.path;
+    const src = typeof entry === "string" ? "codex" : String(entry?.source || "codex");
+    if (!fp || src !== "codex") continue;
+    scannedPaths.add(fp);
+    const id = codexSessionIdFromPath(fp);
+    if (id) scannedSessionIds.add(id);
+  }
+  if (!cursors.files || typeof cursors.files !== "object") return true;
+  for (const fp of Object.keys(cursors.files)) {
+    if (!isCodexSessionCursorPath(fp)) continue;
+    if (scannedPaths.has(fp)) continue;
+    const id = codexSessionIdFromPath(fp);
+    if (id && scannedSessionIds.has(id)) continue;
+    return false;
+  }
+  return true;
 }
 
 // Scans codex rollout heads for the fork marker. The child session_meta (with
@@ -4340,6 +5417,7 @@ async function repairClaudeQueueFromGroundTruth({
   queueStatePath = null,
   projectQueuePath = null,
   projectQueueStatePath = null,
+  rootDirs = null,
 }) {
   if (!cursors || typeof cursors !== "object") return false;
   const migrations = (cursors.migrations ||= {});
@@ -4347,7 +5425,13 @@ async function repairClaudeQueueFromGroundTruth({
 
   let result;
   try {
-    result = await computeClaudeGroundTruthBuckets();
+    // rootDirs must cover every install the incremental parser scans (native
+    // AND WSL): this repair's semantics are "disk is truth" — it clears all
+    // claude buckets and replaces claudeHashes wholesale, so scanning fewer
+    // roots than sync would silently drop the missing install's history.
+    result = await computeClaudeGroundTruthBuckets(
+      Array.isArray(rootDirs) && rootDirs.length > 0 ? { rootDirs } : {},
+    );
   } catch (e) {
     console.error("[sync] claude ground-truth repair: scan failed:", e?.message || e);
     return false;

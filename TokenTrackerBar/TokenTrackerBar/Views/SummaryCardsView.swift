@@ -47,29 +47,28 @@ private struct StatCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title)
-                .font(.caption2)
+                .font(.system(size: 10, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.system(.title3, design: .monospaced).weight(.bold))
+                .font(.system(.title3, design: .rounded).weight(.bold))
+                .foregroundStyle(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
                 .modifier(NumericTextTransitionModifier(value: value))
             Text(subtitle)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 9)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // Flat fill + hairline instead of .regularMaterial: on macOS 26 the popover
-        // chrome is already Liquid Glass, and material-on-glass reads muddy.
         .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.primary.opacity(0.05))
+            RoundedRectangle(cornerRadius: 9)
+                .fill(Color.primary.opacity(0.065))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+                    RoundedRectangle(cornerRadius: 9)
+                        .strokeBorder(Color.primary.opacity(0.09), lineWidth: 0.5)
                 )
         )
         .accessibilityElement(children: .combine)

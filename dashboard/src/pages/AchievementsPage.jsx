@@ -183,7 +183,7 @@ export default function AchievementsPage() {
               <p className="mt-10 text-center text-xs text-oai-gray-400 dark:text-oai-gray-500">
                 {copy("achievements.page.suggest")}{" "}
                 <a
-                  href="https://github.com/mm7894215/TokenTracker/issues"
+                  href="https://github.com/xiufengsun/TokenTracker/issues"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="underline decoration-oai-gray-300 underline-offset-2 transition-colors hover:text-oai-gray-700 hover:decoration-oai-gray-500 dark:decoration-oai-gray-600 dark:hover:text-oai-gray-300"

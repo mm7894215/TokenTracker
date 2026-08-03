@@ -5,111 +5,546 @@
     "deepseek_v4_pro_pricing_note": "The 2026-05-31 promotional-expiry warning is obsolete: api-docs.deepseek.com/quick_start/pricing verified on 2026-06-10 still lists input $0.435/M, output $0.87/M, cache_read $0.003625/M as the official v4-pro rates (the discount became the list price). Do NOT 'restore' the old 4x rates; re-verify against the official page before any change."
   },
   "exact": {
-    "claude-fable-5":   { "input": 10,   "output": 50,   "cache_read": 1,     "cache_write": 12.5, "note": "Fable 5 — Anthropic's top tier above Opus. Not yet in LiteLLM. $10/$50 per MTok; cache_read 0.1x, cache_write 1.25x. Remove once LiteLLM carries it." },
-    "claude-opus-5":     { "input": 5,    "output": 25,   "cache_read": 0.5,   "cache_write": 6.25, "note": "Opus 5 (public 2026-07). Standard Opus tier, unchanged from 4.6/4.7/4.8: $5/$25 per MTok, cache_read 0.1x, cache_write 1.25x. Not yet in LiteLLM. Fast mode is billed at $10/$50 — see claude-opus-5-fast. Remove once LiteLLM carries it." },
-    "claude-opus-5-fast":{ "input": 10,   "output": 50,   "cache_read": 1,     "cache_write": 12.5, "note": "Opus 5 fast mode (speed=\"fast\", beta fast-mode-2026-02-01) is priced at $10/$50 per MTok — 2x standard Opus. Kept separate so a -fast model id is not silently priced at the standard tier. See claude-opus-5." },
-    "claude-opus-4-8":  { "input": 5,    "output": 25,   "cache_read": 0.5,   "cache_write": 6.25, "note": "Opus 4.8 not yet in LiteLLM. Pin to the standard Opus tier (same as 4.6/4.7); remove once LiteLLM carries it." },
-    "claude-sonnet-5":  { "input": 3,    "output": 15,   "cache_read": 0.3,   "cache_write": 3.75, "note": "Sonnet 5. LiteLLM added this model on ~2026-06-30 with matching rates, but pin explicitly so pricing is correct immediately rather than depending on the 24h local pricing-cache refresh cycle." },
-    "claude-haiku-4-5": { "input": 1,    "output": 5,    "cache_read": 0.1,   "cache_write": 1.25, "note": "Canonical undated alias emitted by Cursor. Pin to the same rates as claude-haiku-4-5-20251001 so local cost does not depend on which dated LiteLLM aliases are present in the current cache." },
-    "gpt-5.6-sol":      { "input": 5,    "output": 30,   "cache_read": 0.5,   "cache_write": 6.25,  "note": "GPT-5.6 family (public 2026-07-09). Flagship tier. Not yet in LiteLLM. developers.openai.com/api/docs/pricing: $5/$30 per MTok, cached input 0.1x, cache write 1.25x. Codex emits gpt-5.6-sol (+ reasoning-effort variants like gpt-5.6-solhigh, caught by fuzzy). Remove once LiteLLM carries it." },
-    "gpt-5.6-terra":    { "input": 2.5,  "output": 15,   "cache_read": 0.25,  "cache_write": 3.125, "note": "GPT-5.6 balanced default tier. See gpt-5.6-sol." },
-    "gpt-5.6-luna":     { "input": 1,    "output": 6,    "cache_read": 0.1,   "cache_write": 1.25,  "note": "GPT-5.6 lightweight/cost-efficient tier. See gpt-5.6-sol." },
-    "kiro-agent":       { "input": 3,    "output": 15,   "cache_read": 0.3,   "cache_write": 3.75 },
-    "kiro-cli-agent":   { "input": 3,    "output": 15,   "cache_read": 0.3,   "cache_write": 3.75 },
-    "hy3-preview-agent":{ "input": 0.167, "output": 0.556, "cache_read": 0.056, "cache_write": 0.167, "note": "Tencent Hunyuan Hy3 preview (CodeBuddy/WorkBuddy backend). Official TokenHub rate: 1.2 / 0.4 (cache hit) / 4.0 RMB per MTok in/read/out, converted at ~7.2 RMB/USD. DeepSeek-style cache: no write surcharge, so cache_write = input." },
-    "hy3-preview":      { "input": 0.167, "output": 0.556, "cache_read": 0.056, "cache_write": 0.167, "note": "See hy3-preview-agent." },
-    "composer-1":       { "input": 1.25, "output": 10,   "cache_read": 0.125 },
-    "composer-1.5":     { "input": 3.5,  "output": 17.5, "cache_read": 0.35 },
-    "composer-2":       { "input": 0.5,  "output": 2.5,  "cache_read": 0.2 },
-    "composer-2-fast":  { "input": 1.5,  "output": 7.5,  "cache_read": 0.15 },
-    "MiniMax-M2.7":     { "input": 0.3,  "output": 1.2,  "cache_read": 0.06,  "cache_write": 0.375 },
-    "MiniMax-M2.7-highspeed":{ "input": 0.6, "output": 2.4, "cache_read": 0.06, "cache_write": 0.375 },
-    "minimax-m3":       { "input": 0.3,  "output": 1.2,  "cache_read": 0.06,  "cache_write": 0 },
-    "deepseek-v4-flash":{ "input": 0.14, "output": 0.28, "cache_read": 0.0028, "cache_write": 0.14 },
-    "deepseek-v4-pro":  { "input": 0.435,"output": 0.87, "cache_read": 0.003625, "cache_write": 0.435 },
-    "deepseek-chat":    { "input": 0.14, "output": 0.28, "cache_read": 0.0028, "cache_write": 0.14 },
-    "grok-build":       { "input": 1.25, "output": 2.50, "cache_read": 0.20, "note": "Grok Build TUI estimate. Local telemetry currently exposes totalTokens without a stable prompt/output/cache split, so TokenTracker estimates input/output split until Grok exposes per-call usage details." },
-    "cursor-grok-4.5":  { "input": 2.00, "output": 6.00, "cache_read": 0.50, "cache_write": 0, "note": "Cursor Grok 4.5 base rate. Cursor Models & Pricing: $2/M input, $0.50/M cached input, $6/M output; no cache-write rate is published." },
-    "cursor-grok-4.5-fast": { "input": 4.00, "output": 18.00, "cache_read": 1.00, "cache_write": 0, "note": "Cursor Grok 4.5 Fast rate. Cursor publishes $4/M input and $18/M output; the Cursor usage breakdown reports $1/M cached input. Kept separate from the cheaper base SKU." },
-    "grok-4-0709":      { "input": 3.00, "output": 15.00, "cache_read": 0.75 },
-    "grok-4":           { "input": 3.00, "output": 15.00, "cache_read": 0.75 },
-    "grok-4-latest":    { "input": 3.00, "output": 15.00, "cache_read": 0.75 },
-    "grok-4-fast":      { "input": 0.20, "output": 0.50, "cache_read": 0.05 },
-    "grok-4-fast-reasoning": { "input": 0.20, "output": 0.50, "cache_read": 0.05 },
-    "grok-4-fast-non-reasoning": { "input": 0.20, "output": 0.50, "cache_read": 0.05 },
-    "grok-4-1-fast-non-reasoning": { "input": 0.20, "output": 0.50, "cache_read": 0.05 },
-    "deepseek-reasoner":{ "input": 0.14, "output": 0.28, "cache_read": 0.0028, "cache_write": 0.14 },
-    "kimi-for-coding":  { "input": 0.6,  "output": 2,    "cache_read": 0.15 },
-    "kimi-k2.5":        { "input": 0.6,  "output": 2,    "cache_read": 0.15 },
-    "kimi-k2.5-free":   { "input": 0,    "output": 0,    "cache_read": 0 },
-    "kimi-k2.6":        { "input": 0.95, "output": 4,    "cache_read": 0.16 },
-    "kimi-k2.7-code":   { "input": 0.95, "output": 4,    "cache_read": 0.19 },
-    "kimi-k3":          { "input": 3,    "output": 15,   "cache_read": 0.3,  "note": "Kimi K3 (released 2026-07-16). Reported API rates: $3/M input, $15/M output, $0.30/M cached input (0.1x). Not yet in LiteLLM; remove once it carries k3. Kimi Code records the alias as bare \"k3\" (kimi-code/k3), hence the separate exact key below." },
-    "k3":               { "input": 3,    "output": 15,   "cache_read": 0.3,  "note": "Bare alias emitted by Kimi Code (modelAlias \"kimi-code/k3\" -> \"k3\"). Same rates as kimi-k3." },
-    "glm-5.2":          { "input": 1.4,  "output": 4.4,  "cache_read": 0.26 },
-    "glm-5.1":          { "input": 1.4,  "output": 4.4,  "cache_read": 0.26 },
-    "glm-5":            { "input": 1.0,  "output": 3.2,  "cache_read": 0.2 },
-    "glm-5-turbo":      { "input": 1.2,  "output": 4.0,  "cache_read": 0.24 },
-    "glm-4.7":          { "input": 0.6,  "output": 2.2,  "cache_read": 0.11 },
-    "glm-4.7-flashx":   { "input": 0.07, "output": 0.4,  "cache_read": 0.01 },
-    "glm-4.7-flash":    { "input": 0,    "output": 0,    "cache_read": 0 },
-    "glm-4.6":          { "input": 0.6,  "output": 2.2,  "cache_read": 0.11 },
-    "glm-4.5":          { "input": 0.6,  "output": 2.2,  "cache_read": 0.11 },
-    "glm-4.5-x":        { "input": 2.2,  "output": 8.9,  "cache_read": 0.45 },
-    "glm-4.5-air":      { "input": 0.2,  "output": 1.1,  "cache_read": 0.03 },
-    "glm-4.5-airx":     { "input": 1.1,  "output": 4.5,  "cache_read": 0.22 },
-    "glm-4.5-flash":    { "input": 0,    "output": 0,    "cache_read": 0 },
-    "glm-4.7-free":     { "input": 0,    "output": 0,    "cache_read": 0 },
-    "nemotron-3-super-free":{ "input": 0, "output": 0,   "cache_read": 0 },
-    "mimo-v2-pro-free": { "input": 0,    "output": 0,    "cache_read": 0 },
-    "minimax-m2.1-free":{ "input": 0,    "output": 0,    "cache_read": 0 },
-    "MiniMax-M2.1":     { "input": 0.5,  "output": 3,    "cache_read": 0.05 },
-    "antigravity-gpt-oss-120b": { "input": 2.5, "output": 10, "cache_read": 0, "note": "Antigravity bridge alias. Approximate with GPT-4o-class pricing until Google exposes route-specific billing metadata." },
-    "sakana/fugu-ultra": { "input": 5,    "output": 30,   "cache_read": 0.5,   "cache_write": 5,    "note": "Sakana Fugu Ultra — multi-agent orchestration via an OpenAI-compatible API (sakana.ai PAYG + OpenRouter), used through Codex/Cursor/Cline/ZCode etc. OpenRouter rates: $5/$30 per MTok in/out, cache_read $0.5/M; no published cache-write surcharge, so cache_write = input. Subscriptions ($20/$100/$200) bill against this token-equivalent rate." },
-    "longcat-2.0":      { "input": 0.278, "output": 1.111, "cache_read": 0.00556, "cache_write": 0.278, "note": "Meituan LongCat-2.0, seen via ZCode custom-provider routing (issue #276). Official longcat.chat/platform launch-promo rate: RMB 2 / 0.04 (cache hit) / 8 per MTok in/read/out, converted at ~7.2 RMB/USD. Standard list price is RMB 5/0.10/20 (2.5x) once the promo ends — re-verify against longcat.chat/platform/docs/zh/Pricing/LongCat-2.0.html before assuming either is permanent. DeepSeek-style cache: no write surcharge, so cache_write = input." },
-    "step-3.7-flash":   { "input": 0.2,  "output": 1.15, "cache_read": 0.04, "cache_write": 0.2, "note": "StepFun Step 3.7 Flash (issue #283). Official platform.stepfun.ai pricing: $0.20 / $0.04 (cache hit) / $1.15 per MTok in/read/out. No published cache-write surcharge, so cache_write = input." },
-    "step-3.5-flash":   { "input": 0.1,  "output": 0.3,  "cache_read": 0.02, "cache_write": 0.1, "note": "StepFun Step 3.5 Flash incl. dated snapshots like step-3.5-flash-2603 (issue #283). Official platform.stepfun.ai pricing: $0.10 / $0.02 (cache hit) / $0.30 per MTok in/read/out. No published cache-write surcharge, so cache_write = input." }
+    "claude-fable-5": {
+      "input": 10,
+      "output": 50,
+      "cache_read": 1,
+      "cache_write": 12.5,
+      "note": "Fable 5 \u2014 Anthropic's top tier above Opus. Not yet in LiteLLM. $10/$50 per MTok; cache_read 0.1x, cache_write 1.25x. Remove once LiteLLM carries it."
+    },
+    "claude-opus-5": {
+      "input": 5,
+      "output": 25,
+      "cache_read": 0.5,
+      "cache_write": 6.25,
+      "note": "Opus 5 (public 2026-07). Standard Opus tier, unchanged from 4.6/4.7/4.8: $5/$25 per MTok, cache_read 0.1x, cache_write 1.25x. Not yet in LiteLLM. Fast mode is billed at $10/$50 \u2014 see claude-opus-5-fast. Remove once LiteLLM carries it."
+    },
+    "claude-opus-5-fast": {
+      "input": 10,
+      "output": 50,
+      "cache_read": 1,
+      "cache_write": 12.5,
+      "note": "Opus 5 fast mode (speed=\"fast\", beta fast-mode-2026-02-01) is priced at $10/$50 per MTok \u2014 2x standard Opus. Kept separate so a -fast model id is not silently priced at the standard tier. See claude-opus-5."
+    },
+    "claude-opus-4-8": {
+      "input": 5,
+      "output": 25,
+      "cache_read": 0.5,
+      "cache_write": 6.25,
+      "note": "Opus 4.8 not yet in LiteLLM. Pin to the standard Opus tier (same as 4.6/4.7); remove once LiteLLM carries it."
+    },
+    "claude-sonnet-5": {
+      "input": 3,
+      "output": 15,
+      "cache_read": 0.3,
+      "cache_write": 3.75,
+      "note": "Sonnet 5. LiteLLM added this model on ~2026-06-30 with matching rates, but pin explicitly so pricing is correct immediately rather than depending on the 24h local pricing-cache refresh cycle."
+    },
+    "claude-haiku-4-5": {
+      "input": 1,
+      "output": 5,
+      "cache_read": 0.1,
+      "cache_write": 1.25,
+      "note": "Canonical undated alias emitted by Cursor. Pin to the same rates as claude-haiku-4-5-20251001 so local cost does not depend on which dated LiteLLM aliases are present in the current cache."
+    },
+    "gpt-5.6-sol": {
+      "input": 5,
+      "output": 30,
+      "cache_read": 0.5,
+      "cache_write": 6.25,
+      "note": "GPT-5.6 family (public 2026-07-09). Flagship tier. Not yet in LiteLLM. developers.openai.com/api/docs/pricing: $5/$30 per MTok, cached input 0.1x, cache write 1.25x. Codex emits gpt-5.6-sol (+ reasoning-effort variants like gpt-5.6-solhigh, caught by fuzzy). Remove once LiteLLM carries it."
+    },
+    "gpt-5.6-terra": {
+      "input": 2.5,
+      "output": 15,
+      "cache_read": 0.25,
+      "cache_write": 3.125,
+      "note": "GPT-5.6 balanced default tier. See gpt-5.6-sol."
+    },
+    "gpt-5.6-luna": {
+      "input": 1,
+      "output": 6,
+      "cache_read": 0.1,
+      "cache_write": 1.25,
+      "note": "GPT-5.6 lightweight/cost-efficient tier. See gpt-5.6-sol."
+    },
+    "kiro-agent": {
+      "input": 3,
+      "output": 15,
+      "cache_read": 0.3,
+      "cache_write": 3.75
+    },
+    "kiro-cli-agent": {
+      "input": 3,
+      "output": 15,
+      "cache_read": 0.3,
+      "cache_write": 3.75
+    },
+    "hy3-preview-agent": {
+      "input": 0.167,
+      "output": 0.556,
+      "cache_read": 0.056,
+      "cache_write": 0.167,
+      "note": "Tencent Hunyuan Hy3 preview (CodeBuddy/WorkBuddy backend). Official TokenHub rate: 1.2 / 0.4 (cache hit) / 4.0 RMB per MTok in/read/out, converted at ~7.2 RMB/USD. DeepSeek-style cache: no write surcharge, so cache_write = input."
+    },
+    "hy3-preview": {
+      "input": 0.167,
+      "output": 0.556,
+      "cache_read": 0.056,
+      "cache_write": 0.167,
+      "note": "See hy3-preview-agent."
+    },
+    "composer-1": {
+      "input": 1.25,
+      "output": 10,
+      "cache_read": 0.125
+    },
+    "composer-1.5": {
+      "input": 3.5,
+      "output": 17.5,
+      "cache_read": 0.35
+    },
+    "composer-2": {
+      "input": 0.5,
+      "output": 2.5,
+      "cache_read": 0.2
+    },
+    "composer-2-fast": {
+      "input": 1.5,
+      "output": 7.5,
+      "cache_read": 0.15
+    },
+    "MiniMax-M2.7": {
+      "input": 0.3,
+      "output": 1.2,
+      "cache_read": 0.06,
+      "cache_write": 0.375
+    },
+    "MiniMax-M2.7-highspeed": {
+      "input": 0.6,
+      "output": 2.4,
+      "cache_read": 0.06,
+      "cache_write": 0.375
+    },
+    "minimax-m3": {
+      "input": 0.3,
+      "output": 1.2,
+      "cache_read": 0.06,
+      "cache_write": 0
+    },
+    "deepseek-v4-flash": {
+      "input": 0.14,
+      "output": 0.28,
+      "cache_read": 0.0028,
+      "cache_write": 0.14
+    },
+    "deepseek-v4-pro": {
+      "input": 0.435,
+      "output": 0.87,
+      "cache_read": 0.003625,
+      "cache_write": 0.435
+    },
+    "deepseek-chat": {
+      "input": 0.14,
+      "output": 0.28,
+      "cache_read": 0.0028,
+      "cache_write": 0.14
+    },
+    "grok-build": {
+      "input": 1.25,
+      "output": 2.5,
+      "cache_read": 0.2,
+      "note": "Grok Build TUI fallback estimate for sessions without turn_completed.usage. Preferred path is turn_completed usage with per-model modelUsage splits."
+    },
+    "cursor-grok-4.5": {
+      "input": 2.0,
+      "output": 6.0,
+      "cache_read": 0.5,
+      "cache_write": 0,
+      "note": "Cursor Grok 4.5 base rate. Cursor Models & Pricing: $2/M input, $0.50/M cached input, $6/M output; no cache-write rate is published."
+    },
+    "cursor-grok-4.5-fast": {
+      "input": 4.0,
+      "output": 18.0,
+      "cache_read": 1.0,
+      "cache_write": 0,
+      "note": "Cursor Grok 4.5 Fast rate. Cursor publishes $4/M input and $18/M output; the Cursor usage breakdown reports $1/M cached input. Kept separate from the cheaper base SKU."
+    },
+    "grok-4-0709": {
+      "input": 3.0,
+      "output": 15.0,
+      "cache_read": 0.75
+    },
+    "grok-4": {
+      "input": 3.0,
+      "output": 15.0,
+      "cache_read": 0.75
+    },
+    "grok-4-latest": {
+      "input": 3.0,
+      "output": 15.0,
+      "cache_read": 0.75
+    },
+    "grok-4-fast": {
+      "input": 0.2,
+      "output": 0.5,
+      "cache_read": 0.05
+    },
+    "grok-4-fast-reasoning": {
+      "input": 0.2,
+      "output": 0.5,
+      "cache_read": 0.05
+    },
+    "grok-4-fast-non-reasoning": {
+      "input": 0.2,
+      "output": 0.5,
+      "cache_read": 0.05
+    },
+    "grok-4-1-fast-non-reasoning": {
+      "input": 0.2,
+      "output": 0.5,
+      "cache_read": 0.05
+    },
+    "deepseek-reasoner": {
+      "input": 0.14,
+      "output": 0.28,
+      "cache_read": 0.0028,
+      "cache_write": 0.14
+    },
+    "kimi-for-coding": {
+      "input": 0.6,
+      "output": 2,
+      "cache_read": 0.15
+    },
+    "kimi-k2.5": {
+      "input": 0.6,
+      "output": 2,
+      "cache_read": 0.15
+    },
+    "kimi-k2.5-free": {
+      "input": 0,
+      "output": 0,
+      "cache_read": 0
+    },
+    "kimi-k2.6": {
+      "input": 0.95,
+      "output": 4,
+      "cache_read": 0.16
+    },
+    "kimi-k2.7-code": {
+      "input": 0.95,
+      "output": 4,
+      "cache_read": 0.19
+    },
+    "kimi-k3": {
+      "input": 3,
+      "output": 15,
+      "cache_read": 0.3,
+      "note": "Kimi K3 (released 2026-07-16). Reported API rates: $3/M input, $15/M output, $0.30/M cached input (0.1x). Not yet in LiteLLM; remove once it carries k3. Kimi Code records the alias as bare \"k3\" (kimi-code/k3), hence the separate exact key below."
+    },
+    "k3": {
+      "input": 3,
+      "output": 15,
+      "cache_read": 0.3,
+      "note": "Bare alias emitted by Kimi Code (modelAlias \"kimi-code/k3\" -> \"k3\"). Same rates as kimi-k3."
+    },
+    "glm-5.2": {
+      "input": 1.4,
+      "output": 4.4,
+      "cache_read": 0.26
+    },
+    "glm-5.1": {
+      "input": 1.4,
+      "output": 4.4,
+      "cache_read": 0.26
+    },
+    "glm-5": {
+      "input": 1.0,
+      "output": 3.2,
+      "cache_read": 0.2
+    },
+    "glm-5-turbo": {
+      "input": 1.2,
+      "output": 4.0,
+      "cache_read": 0.24
+    },
+    "glm-4.7": {
+      "input": 0.6,
+      "output": 2.2,
+      "cache_read": 0.11
+    },
+    "glm-4.7-flashx": {
+      "input": 0.07,
+      "output": 0.4,
+      "cache_read": 0.01
+    },
+    "glm-4.7-flash": {
+      "input": 0,
+      "output": 0,
+      "cache_read": 0
+    },
+    "glm-4.6": {
+      "input": 0.6,
+      "output": 2.2,
+      "cache_read": 0.11
+    },
+    "glm-4.5": {
+      "input": 0.6,
+      "output": 2.2,
+      "cache_read": 0.11
+    },
+    "glm-4.5-x": {
+      "input": 2.2,
+      "output": 8.9,
+      "cache_read": 0.45
+    },
+    "glm-4.5-air": {
+      "input": 0.2,
+      "output": 1.1,
+      "cache_read": 0.03
+    },
+    "glm-4.5-airx": {
+      "input": 1.1,
+      "output": 4.5,
+      "cache_read": 0.22
+    },
+    "glm-4.5-flash": {
+      "input": 0,
+      "output": 0,
+      "cache_read": 0
+    },
+    "glm-4.7-free": {
+      "input": 0,
+      "output": 0,
+      "cache_read": 0
+    },
+    "nemotron-3-super-free": {
+      "input": 0,
+      "output": 0,
+      "cache_read": 0
+    },
+    "mimo-v2-pro-free": {
+      "input": 0,
+      "output": 0,
+      "cache_read": 0
+    },
+    "minimax-m2.1-free": {
+      "input": 0,
+      "output": 0,
+      "cache_read": 0
+    },
+    "MiniMax-M2.1": {
+      "input": 0.5,
+      "output": 3,
+      "cache_read": 0.05
+    },
+    "antigravity-gpt-oss-120b": {
+      "input": 2.5,
+      "output": 10,
+      "cache_read": 0,
+      "note": "Antigravity bridge alias. Approximate with GPT-4o-class pricing until Google exposes route-specific billing metadata."
+    },
+    "sakana/fugu-ultra": {
+      "input": 5,
+      "output": 30,
+      "cache_read": 0.5,
+      "cache_write": 5,
+      "note": "Sakana Fugu Ultra \u2014 multi-agent orchestration via an OpenAI-compatible API (sakana.ai PAYG + OpenRouter), used through Codex/Cursor/Cline/ZCode etc. OpenRouter rates: $5/$30 per MTok in/out, cache_read $0.5/M; no published cache-write surcharge, so cache_write = input. Subscriptions ($20/$100/$200) bill against this token-equivalent rate."
+    },
+    "longcat-2.0": {
+      "input": 0.278,
+      "output": 1.111,
+      "cache_read": 0.00556,
+      "cache_write": 0.278,
+      "note": "Meituan LongCat-2.0, seen via ZCode custom-provider routing (issue #276). Official longcat.chat/platform launch-promo rate: RMB 2 / 0.04 (cache hit) / 8 per MTok in/read/out, converted at ~7.2 RMB/USD. Standard list price is RMB 5/0.10/20 (2.5x) once the promo ends \u2014 re-verify against longcat.chat/platform/docs/zh/Pricing/LongCat-2.0.html before assuming either is permanent. DeepSeek-style cache: no write surcharge, so cache_write = input."
+    },
+    "step-3.7-flash": {
+      "input": 0.2,
+      "output": 1.15,
+      "cache_read": 0.04,
+      "cache_write": 0.2,
+      "note": "StepFun Step 3.7 Flash (issue #283). Official platform.stepfun.ai pricing: $0.20 / $0.04 (cache hit) / $1.15 per MTok in/read/out. No published cache-write surcharge, so cache_write = input."
+    },
+    "step-3.5-flash": {
+      "input": 0.1,
+      "output": 0.3,
+      "cache_read": 0.02,
+      "cache_write": 0.1,
+      "note": "StepFun Step 3.5 Flash incl. dated snapshots like step-3.5-flash-2603 (issue #283). Official platform.stepfun.ai pricing: $0.10 / $0.02 (cache hit) / $0.30 per MTok in/read/out. No published cache-write surcharge, so cache_write = input."
+    },
+    "grok-4.5-build": {
+      "input": 2.0,
+      "output": 6.0,
+      "cache_read": 0.5,
+      "cache_write": 0,
+      "note": "Grok Build paid SKU (grok-4.5-build from turn_completed.modelUsage). Rates aligned with xAI/Cursor Grok 4.5 until a dedicated Build price list is published."
+    },
+    "grok-build-free": {
+      "input": 0,
+      "output": 0,
+      "cache_read": 0,
+      "cache_write": 0,
+      "note": "Grok Build free tier (canonical model id). $0 marginal cost. Prefer this over grok-4.5-build-free so pricing lookup cannot fuzzy-match paid grok-4.5."
+    },
+    "grok-4.5-build-free": {
+      "input": 0,
+      "output": 0,
+      "cache_read": 0,
+      "cache_write": 0,
+      "note": "Alias for free Build SKU as labeled in Grok updates.jsonl modelUsage. Canonical storage id is grok-build-free."
+    }
   },
   "alias": {
     "auto": "composer-1"
   },
   "fuzzy": [
-    { "match": "gpt-5.6-sol",            "ref": "gpt-5.6-sol" },
-    { "match": "gpt-5.6-terra",          "ref": "gpt-5.6-terra" },
-    { "match": "gpt-5.6-luna",           "ref": "gpt-5.6-luna" },
-    { "match": "gpt-5.6",                "ref": "gpt-5.6-terra" },
-    { "match": "kiro",                   "ref": "kiro-cli-agent" },
-    { "match": "hy3",                    "ref": "hy3-preview-agent" },
-    { "match": "composer",               "ref": "composer-1" },
-    { "match": "claude-opus-5-fast",      "ref": "claude-opus-5-fast" },
-    { "match": "claude-opus-5",           "ref": "claude-opus-5" },
-    { "match": "claude-opus-4-8",         "ref": "claude-opus-4-8" },
-    { "match": "minimax-m3",            "ref": "minimax-m3" },
-    { "match": "minimax-m2.7-highspeed", "ref": "MiniMax-M2.7-highspeed" },
-    { "match": "minimax-m2.7",           "ref": "MiniMax-M2.7" },
-    { "match": "deepseek-v4-flash",      "ref": "deepseek-v4-flash" },
-    { "match": "deepseek-v4-pro",        "ref": "deepseek-v4-pro" },
-    { "match": "kimi-k2.7-code",        "ref": "kimi-k2.7-code" },
-    { "match": "kimi-k3",                "ref": "kimi-k3" },
-    { "match": "kimi-k2.6",              "ref": "kimi-k2.6" },
-    { "match": "kimi",                   "ref": "kimi-k2.5" },
-    { "match": "glm-4.5-airx",           "ref": "glm-4.5-airx" },
-    { "match": "glm-4.5-air",            "ref": "glm-4.5-air" },
-    { "match": "glm-4.5-x",              "ref": "glm-4.5-x" },
-    { "match": "glm-4.5-flash",          "ref": "glm-4.5-flash" },
-    { "match": "glm-4.5",                "ref": "glm-4.5" },
-    { "match": "glm-4.7-flashx",         "ref": "glm-4.7-flashx" },
-    { "match": "glm-4.7-flash",          "ref": "glm-4.7-flash" },
-    { "match": "glm-4.7",                "ref": "glm-4.7" },
-    { "match": "glm-4.6",                "ref": "glm-4.6" },
-    { "match": "glm-5-turbo",            "ref": "glm-5-turbo" },
-    { "match": "glm-5.2",                "ref": "glm-5.2" },
-    { "match": "glm-5.1",                "ref": "glm-5.1" },
-    { "match": "glm-5",                  "ref": "glm-5" },
-    { "match": "fugu",                   "ref": "sakana/fugu-ultra" },
-    { "match": "longcat",                "ref": "longcat-2.0" },
-    { "match": "step-3.7-flash",         "ref": "step-3.7-flash" },
-    { "match": "step-3.5-flash",         "ref": "step-3.5-flash" },
-    { "match": "stepfun",                "ref": "step-3.7-flash" }
+    {
+      "match": "gpt-5.6-sol",
+      "ref": "gpt-5.6-sol"
+    },
+    {
+      "match": "gpt-5.6-terra",
+      "ref": "gpt-5.6-terra"
+    },
+    {
+      "match": "gpt-5.6-luna",
+      "ref": "gpt-5.6-luna"
+    },
+    {
+      "match": "gpt-5.6",
+      "ref": "gpt-5.6-terra"
+    },
+    {
+      "match": "kiro",
+      "ref": "kiro-cli-agent"
+    },
+    {
+      "match": "hy3",
+      "ref": "hy3-preview-agent"
+    },
+    {
+      "match": "composer",
+      "ref": "composer-1"
+    },
+    {
+      "match": "claude-opus-5-fast",
+      "ref": "claude-opus-5-fast"
+    },
+    {
+      "match": "claude-opus-5",
+      "ref": "claude-opus-5"
+    },
+    {
+      "match": "claude-opus-4-8",
+      "ref": "claude-opus-4-8"
+    },
+    {
+      "match": "minimax-m3",
+      "ref": "minimax-m3"
+    },
+    {
+      "match": "minimax-m2.7-highspeed",
+      "ref": "MiniMax-M2.7-highspeed"
+    },
+    {
+      "match": "minimax-m2.7",
+      "ref": "MiniMax-M2.7"
+    },
+    {
+      "match": "deepseek-v4-flash",
+      "ref": "deepseek-v4-flash"
+    },
+    {
+      "match": "deepseek-v4-pro",
+      "ref": "deepseek-v4-pro"
+    },
+    {
+      "match": "kimi-k2.7-code",
+      "ref": "kimi-k2.7-code"
+    },
+    {
+      "match": "kimi-k3",
+      "ref": "kimi-k3"
+    },
+    {
+      "match": "kimi-k2.6",
+      "ref": "kimi-k2.6"
+    },
+    {
+      "match": "kimi",
+      "ref": "kimi-k2.5"
+    },
+    {
+      "match": "glm-4.5-airx",
+      "ref": "glm-4.5-airx"
+    },
+    {
+      "match": "glm-4.5-air",
+      "ref": "glm-4.5-air"
+    },
+    {
+      "match": "glm-4.5-x",
+      "ref": "glm-4.5-x"
+    },
+    {
+      "match": "glm-4.5-flash",
+      "ref": "glm-4.5-flash"
+    },
+    {
+      "match": "glm-4.5",
+      "ref": "glm-4.5"
+    },
+    {
+      "match": "glm-4.7-flashx",
+      "ref": "glm-4.7-flashx"
+    },
+    {
+      "match": "glm-4.7-flash",
+      "ref": "glm-4.7-flash"
+    },
+    {
+      "match": "glm-4.7",
+      "ref": "glm-4.7"
+    },
+    {
+      "match": "glm-4.6",
+      "ref": "glm-4.6"
+    },
+    {
+      "match": "glm-5-turbo",
+      "ref": "glm-5-turbo"
+    },
+    {
+      "match": "glm-5.2",
+      "ref": "glm-5.2"
+    },
+    {
+      "match": "glm-5.1",
+      "ref": "glm-5.1"
+    },
+    {
+      "match": "glm-5",
+      "ref": "glm-5"
+    },
+    {
+      "match": "fugu",
+      "ref": "sakana/fugu-ultra"
+    },
+    {
+      "match": "longcat",
+      "ref": "longcat-2.0"
+    },
+    {
+      "match": "step-3.7-flash",
+      "ref": "step-3.7-flash"
+    },
+    {
+      "match": "step-3.5-flash",
+      "ref": "step-3.5-flash"
+    },
+    {
+      "match": "stepfun",
+      "ref": "step-3.7-flash"
+    }
   ]
 }

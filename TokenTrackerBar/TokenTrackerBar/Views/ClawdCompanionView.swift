@@ -744,7 +744,7 @@ struct ClawdCompanionView: View {
     }
 
     private static func drawSleeping(ctx: DrawCtx, context: inout GraphicsContext) {
-        let t = ctx.t, s = ctx.s, yOff = ctx.yOff
+        let t = ctx.t
         let bodyColor = ctx.bodyColor, eyeColor = ctx.eyeColor
 
         let breathPhase = sin(t / 4.5 * .pi * 2)
@@ -766,21 +766,22 @@ struct ClawdCompanionView: View {
         context.fill(Path(ctx.r(4, 9, 1, 0.35, dy: dy)), with: .color(eyeColor))
         context.fill(Path(ctx.r(10, 9, 1, 0.35, dy: dy)), with: .color(eyeColor))
 
+        // Absolute canvas coordinates: in sprite space the Zs drifted to x 52-60 and
+        // y -20, i.e. out of the frame and straight into the speech bubble's corner.
         for i in 0..<3 {
             let zT = (t + Double(i) * 2.0).truncatingRemainder(dividingBy: 6.0) / 6.0
-            let rise = zT * 8
             let sway = sin(zT * .pi * 3) * 2
             let alpha: Double = {
                 if zT < 0.1 { return zT * 10 }
                 if zT > 0.9 { return (1.0 - zT) * 10 }
                 return 0.8
             }()
-            let fontSize: CGFloat = 8 + CGFloat(zT) * 4
+            let fontSize: CGFloat = 6.5 + CGFloat(zT) * 3
             context.draw(
                 Text("Z")
                     .font(.system(size: fontSize, weight: .bold, design: .monospaced))
-                    .foregroundColor(.secondary.opacity(alpha * 0.5)),
-                at: CGPoint(x: (13 + CGFloat(sway)) * s, y: (4 - rise) * s + yOff)
+                    .foregroundColor(.secondary.opacity(alpha * 0.7)),
+                at: CGPoint(x: 45 + CGFloat(sway) * 2, y: 14 - CGFloat(zT) * 9)
             )
         }
     }
@@ -816,15 +817,18 @@ struct ClawdCompanionView: View {
             context.fill(Path(ctx.r(10 + eyeShift, 8, 1, 2, dx: dx, dy: dy)), with: .color(eyeColor))
         }
 
+        // Data particles rising off the keyboard. They used to be 1.6-2.8pt at 0.8
+        // alpha and to fade out above the canvas, which made the effect effectively
+        // invisible; they now top out at the frame edge and stay large enough to read.
         let particleColor = Color(red: 0.25, green: 0.77, blue: 1.0)
         for i in 0..<7 {
             let pT = (t * 1.2 + Double(i) * 0.14).truncatingRemainder(dividingBy: 1.0)
-            let pY = 14.0 - pT * 14.0
+            let pY = 13.0 - pT * 9.6
             let pX = 7.5 + sin(Double(i) * 2.1) * 3.5
             let alpha = pT < 0.15 ? pT / 0.15 : (pT > 0.75 ? (1.0 - pT) / 0.25 : 1.0)
-            let pSize: CGFloat = 0.4 + CGFloat(pT) * 0.3
+            let pSize: CGFloat = 0.7 + CGFloat(pT) * 0.4
             context.fill(Path(ctx.r(CGFloat(pX), CGFloat(pY), pSize, pSize)),
-                         with: .color(particleColor.opacity(alpha * 0.8)))
+                         with: .color(particleColor.opacity(alpha * 0.95)))
         }
     }
 
@@ -860,21 +864,18 @@ struct ClawdCompanionView: View {
             context.fill(Path(ctx.r(10, 7, 1, 2, dx: dx)), with: .color(eyeColor))
         }
 
+        // Thought indicator above the head. The web SVG's 10x9 speech cloud can't be
+        // ported literally: this canvas is 60x64pt and the torso starts at y=6, so only
+        // 12pt (3 sprite units) of clear space exists above the head. The cloud's body
+        // clipped off the top edge and its down-right tail was the only part left
+        // on-screen — landing squarely on Clawd's face. Sequential dots read the same
+        // and stay inside the frame.
         let dotColor = Color(red: 0, green: 0.51, blue: 0.99)
-        let bubbleX: CGFloat = -3, bubbleY: CGFloat = -1
-        context.fill(Path(ctx.r(bubbleX + 1, bubbleY, 10, 7)), with: .color(.white.opacity(0.85)))
-        context.fill(Path(ctx.r(bubbleX + 8, bubbleY + 7, 2, 2)), with: .color(.white.opacity(0.85)))
-        context.fill(Path(ctx.r(bubbleX + 10, bubbleY + 9, 1, 1)), with: .color(.white.opacity(0.85)))
-
         let dotT = (t / 2.0).truncatingRemainder(dividingBy: 1.0)
-        if dotT > 0.2 {
-            context.fill(Path(ctx.r(bubbleX + 2.5, bubbleY + 3, 1, 1)), with: .color(dotColor))
-        }
-        if dotT > 0.4 {
-            context.fill(Path(ctx.r(bubbleX + 5.5, bubbleY + 3, 1, 1)), with: .color(dotColor))
-        }
-        if dotT > 0.6 {
-            context.fill(Path(ctx.r(bubbleX + 8.5, bubbleY + 3, 1, 1)), with: .color(dotColor))
+        let dotY: CGFloat = 3.6 + sin(t / 1.6 * .pi * 2) * 0.2
+        for (index, dotX) in [CGFloat(5), 7, 9].enumerated() {
+            guard dotT > 0.2 + Double(index) * 0.2 else { continue }
+            context.fill(Path(ctx.r(dotX, dotY, 1, 1, dx: dx * 0.5)), with: .color(dotColor))
         }
     }
 
@@ -944,7 +945,8 @@ struct ClawdCompanionView: View {
             Color(red: 0.13, green: 0.59, blue: 0.95),
         ]
         let letters = Array("ultrathink")
-        let textY: CGFloat = 1.5
+        // 9pt glyphs centered at 1.5 lost their top third off the frame.
+        let textY: CGFloat = 4.5
         let charW: CGFloat = 5.8
         let totalW = CGFloat(letters.count) * charW
         let startX = (ctx.size.width - totalW) / 2
@@ -966,11 +968,15 @@ struct ClawdCompanionView: View {
         let bounce = -abs(sin(t * 3.2)) * 0.5
         drawBaseCharacterStatic(ctx: ctx, context: &context, dx: 0, dy: bounce, eyeShift: 0, breathPhase: 0)
 
+        // A circular toss needs ~5 sprite units of vertical travel; the headroom is 3,
+        // so a third of the old orbit spent its time off-canvas and the balls appeared
+        // to blink out of existence. A flattened arc keeps all three in frame for the
+        // whole cycle while the horizontal sweep still carries the juggling read.
         let colors: [Color] = [.red, ctx.accentColor, .green]
         for index in 0..<3 {
             let phase = t * 2.4 + Double(index) * (2 * .pi / 3)
-            let x = 7.0 + CGFloat(cos(phase)) * 5.0
-            let y = 4.0 + CGFloat(sin(phase)) * 2.5
+            let x = 7.0 + CGFloat(cos(phase)) * 4.5
+            let y = 3.9 + CGFloat(sin(phase)) * 0.85
             context.fill(Path(ctx.r(x, y, 1.2, 1.2)), with: .color(colors[index]))
         }
     }
@@ -980,13 +986,18 @@ struct ClawdCompanionView: View {
         drawBaseCharacterStatic(ctx: ctx, context: &context, dx: 0, dy: 0, eyeShift: 0, breathPhase: CGFloat(sin(t * 2)) * 0.2)
 
         let hat = Color(red: 0.25, green: 0.19, blue: 0.55)
-        context.fill(Path(ctx.r(3, 5, 9, 1)), with: .color(hat))
-        context.fill(Path(ctx.r(5, 3, 5, 2)), with: .color(hat))
-        context.fill(Path(ctx.r(7, 1, 2, 2)), with: .color(hat))
-        context.fill(Path(ctx.r(13, 7, 1, 5)), with: .color(.brown))
+        // A full-height cone needs 5 sprite units but only 3 (12pt) exist above the
+        // head, so the hat is a 3-step silhouette: it still reads as pointed instead
+        // of losing its tip off the top edge.
+        context.fill(Path(ctx.r(3, 5.2, 9, 0.8)), with: .color(hat))
+        context.fill(Path(ctx.r(4.5, 4, 6, 1.2)), with: .color(hat))
+        context.fill(Path(ctx.r(6.5, 3.1, 2, 0.9)), with: .color(hat))
 
+        // The staff sits just outside the right arm (x 13...15) so it reads as a
+        // separate prop rather than a stripe painted onto the sleeve.
+        context.fill(Path(ctx.r(14, 6.5, 0.8, 5.5)), with: .color(.brown))
         let sparkle = 0.35 + 0.65 * abs(sin(t * 4))
-        context.fill(Path(ctx.r(12, 5, 1.2, 1.2)), with: .color(ctx.accentColor.opacity(sparkle)))
+        context.fill(Path(ctx.r(13.6, 5.2, 1.4, 1.4)), with: .color(ctx.accentColor.opacity(sparkle)))
     }
 
     private static func drawWorkingOverheated(ctx: DrawCtx, context: inout GraphicsContext) {
@@ -1012,7 +1023,7 @@ struct ClawdCompanionView: View {
     }
 
     private static func drawDisconnected(ctx: DrawCtx, context: inout GraphicsContext) {
-        let t = ctx.t, s = ctx.s, yBase = ctx.yBase, yOff = ctx.yOff
+        let t = ctx.t, s = ctx.s
         let bodyColor = ctx.bodyColor, eyeColor = ctx.eyeColor
 
         let bodyT = (t / 6.0).truncatingRemainder(dividingBy: 1.0)
@@ -1052,28 +1063,33 @@ struct ClawdCompanionView: View {
             context.fill(Path(ctx.r(10 + eyeShift, 8, 1, 2, dx: dx)), with: .color(eyeColor))
         }
 
+        // Both marks live in the 12pt headroom, in absolute canvas coordinates: the
+        // sprite-space originals (x -2 and x 16) fell outside the 60x64 canvas
+        // entirely, so the "?" only grazed the left edge and the "!" was never
+        // visible at all. White also disappeared against a light popover — the
+        // question mark now uses a semantic color that adapts to the appearance.
         if bodyT < 0.50 {
             let qAlpha: Double = bodyT < 0.12 ? 0 : (bodyT < 0.46 ? 1 : (1.0 - (bodyT - 0.46) / 0.04))
             context.draw(
                 Text("?")
-                    .font(.system(size: 14, weight: .bold, design: .monospaced))
-                    .foregroundColor(.white.opacity(qAlpha)),
-                at: CGPoint(x: (-2 + dx) * s, y: (2 - yBase) * s + yOff)
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundColor(.secondary.opacity(qAlpha)),
+                at: CGPoint(x: (4 + dx) * s, y: 6)
             )
         }
         if bodyT >= 0.50 {
             let eAlpha: Double = bodyT < 0.56 ? 0 : (bodyT < 0.85 ? 1 : (1.0 - (bodyT - 0.85) / 0.10))
             context.draw(
                 Text("!")
-                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundColor(Color(red: 0, green: 0.51, blue: 0.99).opacity(eAlpha)),
-                at: CGPoint(x: (16 + dx) * s, y: (0 - yBase) * s + yOff)
+                at: CGPoint(x: (11 + dx) * s, y: 6)
             )
         }
     }
 
     private static func drawError(ctx: DrawCtx, context: inout GraphicsContext) {
-        let t = ctx.t, s = ctx.s, yBase = ctx.yBase, yOff = ctx.yOff
+        let t = ctx.t, s = ctx.s
         let bodyColor = ctx.bodyColor, eyeColor = ctx.eyeColor
 
         let breathPhase = sin(t / 2.5 * .pi * 2)
@@ -1103,21 +1119,25 @@ struct ClawdCompanionView: View {
                          with: .color(xColor))
         }
 
+        // The collapsed pose puts the torso at y 34-54pt, so the smoke and the label
+        // have the whole upper half of the canvas. Both used to overshoot it: the
+        // smoke rose to -48pt and the label was centered at -12pt, entirely above
+        // the frame, only visible because Canvas doesn't clip.
         for i in 0..<3 {
             let smT = (t + Double(i) * 1.0).truncatingRemainder(dividingBy: 3.0) / 3.0
-            let rise = smT * 15
+            let rise = smT * 5.5
             let alpha = smT < 0.2 ? smT * 3 : (smT > 0.6 ? (1.0 - smT) / 0.4 : 0.6)
             let smX: CGFloat = 5 + CGFloat(i) * 2 + sin(smT * .pi) * 2
-            context.fill(Path(ctx.r(smX, 6 - CGFloat(rise), 2, 1)),
+            context.fill(Path(ctx.r(smX, 9 - CGFloat(rise), 2, 1)),
                          with: .color(.gray.opacity(alpha * 0.3)))
         }
 
         let flashAlpha = 0.15 + sin(t / 0.8 * .pi * 2) * 0.85
         context.draw(
             Text("ERROR")
-                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .font(.system(size: 11, weight: .bold, design: .rounded))
                 .foregroundColor(Color.red.opacity(max(0, flashAlpha))),
-            at: CGPoint(x: 7.5 * s, y: (0 - yBase) * s + yOff)
+            at: CGPoint(x: 7.5 * s, y: 9)
         )
     }
 
@@ -1168,8 +1188,9 @@ struct ClawdCompanionView: View {
 
         let flash = sin(ctx.t * 8.0) > 0
         if flash {
-            context.fill(Path(ctx.r(7, 2, 1, 2.5)), with: .color(.red))
-            context.fill(Path(ctx.r(7, 5.2, 1, 0.8)), with: .color(.red))
+            // Kept inside the 12pt headroom — the stem used to start 4pt above it.
+            context.fill(Path(ctx.r(7, 3.1, 1, 2)), with: .color(.red))
+            context.fill(Path(ctx.r(7, 5.4, 1, 0.8)), with: .color(.red))
         }
     }
 
@@ -1202,13 +1223,12 @@ struct ClawdCompanionView: View {
         context.fill(Path(ctx.r(10, 9, 1, 0.35)), with: .color(eyeColor))
 
         let zT = ctx.t.truncatingRemainder(dividingBy: 4.0) / 4.0
-        let rise = zT * 6.0
         let alpha = zT < 0.15 ? zT * 6 : (zT > 0.85 ? (1.0 - zT) * 6 : 0.7)
         context.draw(
             Text("z")
-                .font(.system(size: 8, weight: .bold, design: .monospaced))
-                .foregroundColor(.secondary.opacity(alpha * 0.5)),
-            at: CGPoint(x: (ctx.isRightEdgeMini ? 4 : 11) * ctx.s, y: (4 - rise) * ctx.s + ctx.yOff)
+                .font(.system(size: 7, weight: .bold, design: .monospaced))
+                .foregroundColor(.secondary.opacity(alpha * 0.85)),
+            at: CGPoint(x: (ctx.isRightEdgeMini ? 4 : 11) * ctx.s, y: 13 - CGFloat(zT) * 8)
         )
     }
 
@@ -1540,6 +1560,12 @@ struct ClawdCompanionView: View {
         if let opencodeGo = limits.opencodeGo {
             generic("opencodeGo", configured: opencodeGo.configured, error: opencodeGo.error, windows: [
                 ("5h", opencodeGo.primaryWindow), ("Weekly", opencodeGo.secondaryWindow), ("Month", opencodeGo.tertiaryWindow)
+            ])
+        }
+        if let qoder = limits.qoder {
+            generic("qoder", configured: qoder.configured, error: qoder.error, windows: [
+                ("Credits", qoder.primaryWindow),
+                ("Ultimate Free Calls", qoder.secondaryWindow)
             ])
         }
 

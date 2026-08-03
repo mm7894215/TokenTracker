@@ -1,5 +1,9 @@
 export const DEFAULT_MENU_BAR_ITEMS = ["todayTokens", "todayCost"];
 
+// Sentinel slot id meaning "show nothing in this slot" (issue 379). Always a
+// legal value, allowed in both slots, and exempt from de-duplication.
+export const MENU_BAR_NONE_ID = "none";
+
 export const FALLBACK_MENU_BAR_ITEMS = [
   { id: "todayTokens", label: "Today Tokens", shortLabel: "Tokens", category: "tokens" },
   { id: "todayCost", label: "Today Cost", shortLabel: "Cost", category: "cost" },
@@ -37,6 +41,7 @@ export function normalizeMenuBarItems(ids, availableItems = FALLBACK_MENU_BAR_IT
   const seen = new Set();
   const normalized = Array.isArray(ids)
     ? ids.filter((id) => {
+        if (id === MENU_BAR_NONE_ID) return true;
         if (!allowed.has(id) || seen.has(id)) return false;
         seen.add(id);
         return true;

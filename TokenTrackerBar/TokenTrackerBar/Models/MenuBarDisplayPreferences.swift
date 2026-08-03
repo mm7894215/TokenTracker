@@ -34,6 +34,8 @@ enum MenuBarDisplayMetric: String, CaseIterable {
     case antigravityGemini5h
     case zcodeGlm52
     case zcodeGlm5Turbo
+    case qoderQuota
+    case qoderUltimate
 
     var menuLabel: String {
         switch self {
@@ -72,6 +74,8 @@ enum MenuBarDisplayMetric: String, CaseIterable {
         case .antigravityGemini5h: return "Ag Gm 5h"
         case .zcodeGlm52: return "ZC Pri"
         case .zcodeGlm5Turbo: return "ZC Sec"
+        case .qoderQuota: return "Qd Cred"
+        case .qoderUltimate: return "Qd Ult"
         }
     }
 
@@ -110,6 +114,8 @@ enum MenuBarDisplayMetric: String, CaseIterable {
         case .antigravityGemini5h: return "Antigravity Gemini 5h Limit"
         case .zcodeGlm52: return "ZCode Primary Limit"
         case .zcodeGlm5Turbo: return "ZCode Secondary Limit"
+        case .qoderQuota: return "Qoder Credits Limit"
+        case .qoderUltimate: return "Qoder Ultimate Free Calls"
         }
     }
 
@@ -127,7 +133,8 @@ enum MenuBarDisplayMetric: String, CaseIterable {
              .grokMonth, .grokOndemand,
              .copilotPremium, .copilotChat,
              .antigravityClaudeWeekly, .antigravityClaude5h, .antigravityGeminiWeekly, .antigravityGemini5h,
-             .zcodeGlm52, .zcodeGlm5Turbo:
+             .zcodeGlm52, .zcodeGlm5Turbo,
+             .qoderQuota, .qoderUltimate:
             return "limits"
         }
     }
@@ -149,6 +156,7 @@ enum MenuBarDisplayMetric: String, CaseIterable {
         case .copilotPremium, .copilotChat: return "copilot"
         case .antigravityClaudeWeekly, .antigravityClaude5h, .antigravityGeminiWeekly, .antigravityGemini5h: return "antigravity"
         case .zcodeGlm52, .zcodeGlm5Turbo: return "zcode"
+        case .qoderQuota, .qoderUltimate: return "qoder"
         }
     }
 }
@@ -177,6 +185,7 @@ private extension UsageLimitsResponse {
         case "copilot": return (copilot?.configured == true) && (copilot?.error == nil)
         case "antigravity": return antigravity.configured && antigravity.error == nil
         case "zcode": return (zcode?.configured == true) && (zcode?.error == nil)
+        case "qoder": return (qoder?.configured == true) && (qoder?.error == nil)
         default: return false
         }
     }
@@ -213,6 +222,8 @@ private extension UsageLimitsResponse {
         case .antigravityGemini5h: return antigravity.quaternaryWindow != nil
         case .zcodeGlm52: return zcode?.primaryWindow != nil
         case .zcodeGlm5Turbo: return zcode?.secondaryWindow != nil
+        case .qoderQuota: return qoder?.primaryWindow != nil
+        case .qoderUltimate: return qoder?.secondaryWindow != nil
         }
     }
 }
@@ -221,6 +232,11 @@ enum MenuBarDisplayPreferences {
     static let key = "MenuBarDisplayItems"
     static let defaultIDs = [MenuBarDisplayMetric.todayTokens.rawValue, MenuBarDisplayMetric.todayCost.rawValue]
     static let maxVisibleItems = 2
+    /// Sentinel slot id meaning "show nothing in this slot" (issue #379:
+    /// laptops are tight on menu-bar space; users want a single metric).
+    /// Deliberately not a `MenuBarDisplayMetric` case — every consumer that
+    /// does `MenuBarDisplayMetric(rawValue:)` naturally skips it.
+    static let noneID = "none"
 
     /// Selectable metric ids for the dashboard dropdown.
     /// Token/cost metrics are always included. Limit slots require a healthy
@@ -251,13 +267,20 @@ enum MenuBarDisplayPreferences {
             .map(\.rawValue)
     }
 
-    /// Payload of selectable metrics for the dashboard dropdown.
+    /// Payload of selectable metrics for the dashboard dropdown. Starts with
+    /// the "None" sentinel so either slot can be emptied.
     static func availableItemsPayload(
         for limits: UsageLimitsResponse? = nil,
         keepingSelected selected: [String] = [],
         hiddenProviders: Set<String> = []
     ) -> [[String: String]] {
-        availableItemIDs(for: limits, keepingSelected: selected, hiddenProviders: hiddenProviders)
+        let noneEntry: [String: String] = [
+            "id": noneID,
+            "label": Strings.menuSlotNone,
+            "shortLabel": "",
+            "category": "none",
+        ]
+        return [noneEntry] + availableItemIDs(for: limits, keepingSelected: selected, hiddenProviders: hiddenProviders)
             .compactMap { MenuBarDisplayMetric(rawValue: $0) }
             .map {
                 [
@@ -307,7 +330,8 @@ enum MenuBarDisplayPreferences {
                  .copilotPremium, .copilotChat,
                  .antigravityClaudeWeekly, .antigravityClaude5h,
                  .antigravityGeminiWeekly, .antigravityGemini5h,
-                 .zcodeGlm52, .zcodeGlm5Turbo:
+                 .zcodeGlm52, .zcodeGlm5Turbo,
+                 .qoderQuota, .qoderUltimate:
                 break
             }
         }
@@ -320,6 +344,10 @@ enum MenuBarDisplayPreferences {
     static func normalize(_ ids: [String], allowedIDs: Set<String>) -> [String] {
         var seen = Set<String>()
         var normalized = ids.compactMap { raw -> String? in
+            // "none" is always a legal slot value and may appear in BOTH
+            // slots (a user hiding everything), so it is exempt from the
+            // allowed-set filter and from de-duplication.
+            if raw == noneID { return raw }
             guard allowedIDs.contains(raw), !seen.contains(raw) else { return nil }
             seen.insert(raw)
             return raw
@@ -333,5 +361,23 @@ enum MenuBarDisplayPreferences {
             seen.insert(fallbackID)
         }
         return Array(normalized.prefix(maxVisibleItems))
+    }
+}
+
+/// Keeps menu-bar visibility decisions consistent across the native menu,
+/// settings bridge, and status-item renderer.
+enum MenuBarSurfacePolicy {
+    static func isIconVisible(hideRequested: Bool, islandEnabled: Bool) -> Bool {
+        !(hideRequested && islandEnabled)
+    }
+
+    static func shouldOfferHidePrompt(
+        promptShown: Bool,
+        hideRequested: Bool,
+        islandEnabled: Bool
+    ) -> Bool {
+        !promptShown
+            && islandEnabled
+            && isIconVisible(hideRequested: hideRequested, islandEnabled: islandEnabled)
     }
 }

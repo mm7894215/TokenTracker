@@ -19,6 +19,7 @@ import { isNativeApp } from "../../lib/native-bridge.js";
 import { LikeButton } from "../../ui/dashboard/components/LikeButton.jsx";
 import { getInsforgeRemoteUrl } from "../../lib/insforge-config";
 import { safeWriteClipboard } from "../../lib/safe-browser";
+import { getBrowserTimeZone, getBrowserTimeZoneOffsetMinutes } from "../../lib/timezone";
 import { useInsforgeAuth } from "../../contexts/InsforgeAuthContext.jsx";
 import { AchievementsSection } from "../../ui/achievements/AchievementsSection.jsx";
 import { AvatarWithBadge } from "../../ui/achievements/AvatarWithBadge.jsx";
@@ -640,6 +641,8 @@ export function ProfileContent({ data, currency, rate, onClose, variant = "modal
  */
 export function useLeaderboardProfileData({ userId, period, accessToken, enabled = true }) {
   const [state, setState] = useState({ loading: false, error: null, data: null });
+  const timeZone = useMemo(() => getBrowserTimeZone(), []);
+  const tzOffsetMinutes = useMemo(() => getBrowserTimeZoneOffsetMinutes(), []);
 
   useEffect(() => {
     if (!enabled || !userId) return undefined;
@@ -649,7 +652,13 @@ export function useLeaderboardProfileData({ userId, period, accessToken, enabled
       try {
         const token = accessToken ? await resolveAuthAccessTokenWithRetry(accessToken) : null;
         if (!active) return;
-        const data = await getLeaderboardProfile({ accessToken: token, userId, period: period || "week" });
+        const data = await getLeaderboardProfile({
+          accessToken: token,
+          userId,
+          period: period || "week",
+          timeZone,
+          tzOffsetMinutes,
+        });
         if (!active) return;
         setState({ loading: false, error: null, data });
       } catch (err) {
@@ -664,7 +673,7 @@ export function useLeaderboardProfileData({ userId, period, accessToken, enabled
     return () => {
       active = false;
     };
-  }, [enabled, userId, period, accessToken]);
+  }, [enabled, userId, period, accessToken, timeZone, tzOffsetMinutes]);
 
   return state;
 }

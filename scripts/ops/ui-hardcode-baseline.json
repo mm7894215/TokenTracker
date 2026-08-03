@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-24T21:10:59.192Z",
+  "generatedAt": "2026-07-27T14:57:17.435Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
@@ -7,7 +7,7 @@
   },
   "totals": {
     "colors": 377,
-    "rawText": 158
+    "rawText": 160
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -340,6 +340,14 @@
       "rawText": 1,
       "rawTextTokens": [
         ", ); await userEvent.click(screen.getByText(\"MacBook Pro\")); expect(onSelectDevice).toHaveBeenCalledWith(\"d1\"); rerender("
+      ]
+    },
+    "dashboard/src/ui/dashboard/components/IslandOnboardingCard.jsx": {
+      "colors": 0,
+      "rawText": 2,
+      "rawTextTokens": [
+        "$12.40",
+        "8.2M"
       ]
     },
     "dashboard/src/ui/dashboard/components/LikeButton.jsx": {

@@ -19,6 +19,7 @@ final class NativeBridge {
     private weak var viewModel: DashboardViewModel?
     private weak var launchAtLoginManager: LaunchAtLoginManager?
     private weak var desktopPetController: DesktopPetWindowController?
+    private weak var dynamicIslandController: DynamicIslandController?
     private var cancellables = Set<AnyCancellable>()
 
     private init() {}
@@ -26,11 +27,13 @@ final class NativeBridge {
     func configure(
         viewModel: DashboardViewModel,
         launchAtLoginManager: LaunchAtLoginManager,
-        desktopPetController: DesktopPetWindowController
+        desktopPetController: DesktopPetWindowController,
+        dynamicIslandController: DynamicIslandController? = nil
     ) {
         self.viewModel = viewModel
         self.launchAtLoginManager = launchAtLoginManager
         self.desktopPetController = desktopPetController
+        self.dynamicIslandController = dynamicIslandController
 
         cancellables.removeAll()
         // Re-push settings whenever selectable menu-bar items change so the
@@ -88,6 +91,8 @@ final class NativeBridge {
             pushSettings()
         case "getPetSettings":
             pushPetSettings()
+        case "refreshPetCatalog":
+            PetCatalog.shared.refresh()
         case "getSystemAppearance":
             DashboardWindowController.shared.pushCurrentSystemAppearanceToWeb()
         case "setChromeAppearance":
@@ -232,6 +237,11 @@ final class NativeBridge {
             "confettiOnReset": WeeklyLimitResetDetector.confettiEnabled(),
             "launchAtLogin": launchAtLoginValue,
             "launchAtLoginSupported": launchAtLoginSupported,
+            "dynamicIslandEnabled": UserDefaults.standard.bool(forKey: DynamicIslandController.enabledDefaultsKey),
+            "hideMenuBarIcon": UserDefaults.standard.bool(forKey: StatusBarController.hideMenuBarIconKey),
+            // macOS-only feature flag: the Windows bridge never sends this, so
+            // the dashboard can gate the Labs toggle on its presence.
+            "dynamicIslandSupported": true,
             "version": UpdateChecker.shared.currentVersion(),
             "updateStatus": UpdateChecker.shared.statusText ?? NSNull(),
             "updateBusy": UpdateChecker.shared.isBusy,
@@ -304,6 +314,33 @@ final class NativeBridge {
         case "launchAtLogin":
             if let bool = value as? Bool {
                 setLaunchAtLogin(bool)
+            }
+        case "dynamicIslandEnabled":
+            if let bool = value as? Bool {
+                let wasEnabled = dynamicIslandController?.isEnabled == true
+                // Controller persists the flag itself (single write path shared
+                // with the popover menu), then shows/hides the island panel.
+                dynamicIslandController?.setEnabled(bool)
+                if !bool {
+                    // Match the native menu path: disabling the island also
+                    // clears the hide-icon flag, so re-enabling the island
+                    // never silently re-hides the menu bar icon.
+                    StatusBarController.setMenuBarIconHidden(false)
+                } else if !wasEnabled {
+                    StatusBarController.offerHideIconPromptAfterIslandEnabled()
+                }
+                NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
+            }
+        case "hideMenuBarIcon":
+            if let bool = value as? Bool {
+                // A direct bridge message must obey the same never-zero-surface
+                // invariant as the native menu, even if an older dashboard
+                // sends this setting while the island is disabled.
+                if bool, dynamicIslandController?.isEnabled != true {
+                    dynamicIslandController?.setEnabled(true)
+                }
+                StatusBarController.setMenuBarIconHidden(bool)
+                NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
             }
         case "locale":
             LocalizationObserver.shared.storePreference(value)
@@ -409,7 +446,7 @@ final class NativeBridge {
                 self?.pushSettings()
             }
         case "openAbout":
-            if let url = URL(string: "https://github.com/mm7894215/TokenTracker") {
+            if let url = URL(string: "https://github.com/xiufengsun/TokenTracker") {
                 NSWorkspace.shared.open(url)
             }
         case "openWidgetGallery":

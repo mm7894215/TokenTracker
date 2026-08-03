@@ -59,7 +59,7 @@ test("Vite dev server handles the current repo pet API instead of an installed C
     const pets = await request(middleware, "/functions/tokentracker-pets");
     assert.equal(pets.nextCalled, false);
     assert.equal(pets.statusCode, 200);
-    assert.deepEqual(JSON.parse(pets.body), { pets: [] });
+    assert.deepEqual(JSON.parse(pets.body), { pets: [], hiddenBuiltinIds: [] });
 
     const upload = await request(middleware, "/api/pets/import", { method: "POST" });
     assert.equal(upload.nextCalled, false);

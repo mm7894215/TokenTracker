@@ -381,12 +381,12 @@
   "pet.import.subtitle": "codex-pets.net 링크를 붙여넣거나 .zip을 선택하세요.",
   "pet.import.add": "추가",
   "pet.import.zip": "패키지 선택",
-  "pet.import.remove": "가져온 펫 삭제",
+  "pet.import.remove": "펫 삭제",
   "pet.import.success": "펫을 가져와 선택했습니다.",
   "pet.import.failed": "이 펫을 가져올 수 없습니다.",
   "pet.import.busy": "가져오는 중…",
   "pet.format.v2": "V2",
-  "pet.import.removed": "가져온 펫을 삭제했습니다.",
+  "pet.import.removed": "펫을 삭제했습니다.",
   "pet.import.url_label": "Codex Pets URL 또는 펫 ID",
   "dashboard.projects.detail.badge": "프로젝트",
   "achievements.section.title": "업적",
@@ -441,5 +441,12 @@
   "achievements.signin.action": "로그인",
   "achievements.scope.local": "로컬",
   "achievements.page.suggest": "새 배지 아이디어가 있나요?",
-  "achievements.page.suggest_link": "GitHub에서 제안하기"
+  "achievements.page.suggest_link": "GitHub에서 제안하기",
+  "dashboard.context_breakdown.empty_grok": "선택한 기간에 Grok Build 활동이 없습니다.",
+  "dashboard.context_breakdown.error_grok": "이 보기에 필요한 Grok Build 로그를 읽을 수 없습니다.",
+  "dashboard.context_breakdown.footnote_grok": "Grok는 겹치지 않는 토큰 버킷을 사용합니다. 도구/실행 드릴다운은 동일 턴에 대한 휴리스틱 귀속이며 turn_completed.usage를 기준으로 합니다.",
+  "dashboard.context_breakdown.heading": "컨텍스트 분석",
+  "dashboard.context_breakdown.heading_claude": "Claude 컨텍스트 분석",
+  "dashboard.context_breakdown.heading_codex": "Codex 컨텍스트 분석",
+  "dashboard.context_breakdown.heading_grok": "Grok 컨텍스트 분석"
 }

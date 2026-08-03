@@ -397,6 +397,8 @@ export async function getLeaderboardProfile({
   accessToken,
   userId,
   period,
+  timeZone,
+  tzOffsetMinutes,
 }: AnyRecord = {}) {
   if (isMockEnabled()) {
     // Minimal stub for dashboard:dev (no live edge). Frontend layout should
@@ -447,9 +449,10 @@ export async function getLeaderboardProfile({
       badges_include_unearned: false,
     };
   }
+  const tzParams = buildTimeZoneParams({ timeZone, tzOffsetMinutes });
   return fetchInsforgeFunction("tokentracker-leaderboard-profile", {
     accessToken,
-    params: { user_id: userId, period },
+    params: { user_id: userId, period, ...tzParams },
   });
 }
 

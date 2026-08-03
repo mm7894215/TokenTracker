@@ -2,6 +2,81 @@ import XCTest
 
 final class MenuBarDisplayPreferencesTests: XCTestCase {
 
+    func testNoneCanOccupyEitherOrBothSlots() {
+        XCTAssertEqual(
+            MenuBarDisplayPreferences.normalize([
+                MenuBarDisplayPreferences.noneID,
+                MenuBarDisplayMetric.codex5h.rawValue,
+            ]),
+            [MenuBarDisplayPreferences.noneID, MenuBarDisplayMetric.codex5h.rawValue]
+        )
+        XCTAssertEqual(
+            MenuBarDisplayPreferences.normalize([
+                MenuBarDisplayPreferences.noneID,
+                MenuBarDisplayPreferences.noneID,
+            ]),
+            [MenuBarDisplayPreferences.noneID, MenuBarDisplayPreferences.noneID]
+        )
+    }
+
+    func testSingleNoneSlotIsPaddedWithARealDefault() {
+        XCTAssertEqual(
+            MenuBarDisplayPreferences.normalize([MenuBarDisplayPreferences.noneID]),
+            [MenuBarDisplayPreferences.noneID, MenuBarDisplayMetric.todayTokens.rawValue]
+        )
+    }
+
+    func testAvailablePayloadAlwaysStartsWithLocalizedNoneEntry() {
+        let payload = MenuBarDisplayPreferences.availableItemsPayload()
+
+        XCTAssertEqual(payload.first?["id"], MenuBarDisplayPreferences.noneID)
+        XCTAssertEqual(payload.first?["category"], "none")
+        XCTAssertFalse(payload.first?["label"]?.isEmpty ?? true)
+    }
+
+    func testSurfacePolicyNeverHidesIconWithoutIsland() {
+        XCTAssertTrue(
+            MenuBarSurfacePolicy.isIconVisible(hideRequested: true, islandEnabled: false)
+        )
+        XCTAssertFalse(
+            MenuBarSurfacePolicy.isIconVisible(hideRequested: true, islandEnabled: true)
+        )
+        XCTAssertTrue(
+            MenuBarSurfacePolicy.isIconVisible(hideRequested: false, islandEnabled: true)
+        )
+    }
+
+    func testHideIconPromptOnlyAppearsForAVisibleIconAfterIslandEnable() {
+        XCTAssertTrue(
+            MenuBarSurfacePolicy.shouldOfferHidePrompt(
+                promptShown: false,
+                hideRequested: false,
+                islandEnabled: true
+            )
+        )
+        XCTAssertFalse(
+            MenuBarSurfacePolicy.shouldOfferHidePrompt(
+                promptShown: true,
+                hideRequested: false,
+                islandEnabled: true
+            )
+        )
+        XCTAssertFalse(
+            MenuBarSurfacePolicy.shouldOfferHidePrompt(
+                promptShown: false,
+                hideRequested: true,
+                islandEnabled: true
+            )
+        )
+        XCTAssertFalse(
+            MenuBarSurfacePolicy.shouldOfferHidePrompt(
+                promptShown: false,
+                hideRequested: false,
+                islandEnabled: false
+            )
+        )
+    }
+
     func testHiddenProviderExcludedEvenWhenSelected() {
         let ids = MenuBarDisplayPreferences.availableItemIDs(
             keepingSelected: [MenuBarDisplayMetric.claude5h.rawValue],
@@ -114,6 +189,15 @@ final class MenuBarDisplayPreferencesTests: XCTestCase {
             MenuBarDisplayPreferences.summarySelection(for: [
                 MenuBarDisplayMetric.codex5h.rawValue,
                 MenuBarDisplayMetric.codex7d.rawValue,
+            ]).isEmpty
+        )
+    }
+
+    func testNoneSlotsNeedNoUsageSummary() {
+        XCTAssertTrue(
+            MenuBarDisplayPreferences.summarySelection(for: [
+                MenuBarDisplayPreferences.noneID,
+                MenuBarDisplayPreferences.noneID,
             ]).isEmpty
         )
     }

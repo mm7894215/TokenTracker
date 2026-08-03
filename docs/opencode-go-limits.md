@@ -13,6 +13,7 @@
 
 - New provider: `opencodeGo`, displayed as **"OpenCode Go"**, reusing the existing `opencode` icon (`OPENCODE` key) in `ProviderIcon.jsx`.
 - Config: `OPENCODE_GO_WORKSPACE_ID` + `OPENCODE_GO_AUTH_COOKIE` env vars, same naming as `slkiser/opencode-quota#41` and the existing `OPENCODE_*` / `KIMI_*` / `ZAI_*` convention already in `.env.example` (no `TOKENTRACKER_` prefix — that prefix is only for our own CLI runtime, not provider auth). No macOS Keychain reading — env-only matches the rest of the dashboard's `VITE_*` pattern. The Fe26.* cookie becomes `OPENCODE_GO_AUTH_COOKIE` and is sent verbatim as `Cookie: auth=<value>`.
+- The dashboard response is the authoritative subscription source. A page that renders `data-slot="subscribe-button"` is returned as an inactive subscription and never replaced with historical local bars. Local `opencode.db` cost aggregation is disabled by default; set `TOKENTRACKER_OPENCODE_GO_LOCAL_ESTIMATE=1` only when a clearly labeled, unverified local estimate is desired.
 
 ## Files to add / modify
 
@@ -22,10 +23,7 @@
    - Reads `OPENCODE_GO_WORKSPACE_ID` + `OPENCODE_GO_AUTH_COOKIE` from `env` (no `TOKENTRACKER_` prefix — mirrors the `KIMI_API_KEY` / `ZAI_API_KEY` pattern already in `.env.example` and the upstream `slkiser/opencode-quota` env names).
    - `GET https://opencode.ai/workspace/<encoded workspaceId>/go` with `Cookie: auth=<cookie>`, `User-Agent: Mozilla/5.0…` (matches PR #41, dodges some anti-bot 403s).
    - Parses SSR-hydration regexes (3 windows × 2 field orderings) + a `data-slot` HTML fallback, ported from `slkiser/opencode-quota/src/lib/opencode-go.ts:54-126` (MIT, project allows reuse with attribution note in code).
-   - Returns one of:
-     - `{ configured: false }` — env vars missing
-     - `{ configured: true, error: "…" }` — fetch/parse error
-     - `{ configured: true, primary_window, secondary_window, tertiary_window }` where each window is `{ used_percent, reset_at: <ISO from resetInSec> }` — mirrors the existing `zcode` / `kimi` / `antigravity` shape so the dashboard spec works without any spec changes. No `plan_label` is set; the brand "OpenCode Go" is the row title and any plan tier would just duplicate it.
+   - Returns `{ configured: false }` when no authoritative cookie is configured, `{ configured: true, subscription_status: "inactive" }` for an inactive Go page, or the three server windows with `subscription_status: "active"`. A local `opencode.db` estimate is returned only when `TOKENTRACKER_OPENCODE_GO_LOCAL_ESTIMATE=1`, with `source: "local-estimate"` and `subscription_status: "unknown"`.
 2. **`src/lib/usage-limits.js`** — add `import { fetchOpencodeGoLimits }` and a `Promise.all` slot for it next to the existing 10 providers; merge with `withPlanLabel(opencodeGo, opencodeGo?.plan_label, "OpenCode Go")` in the returned `data` object. `normalizePlanLabel(null, ...)` returns `null` so the rendered title stays "OpenCode Go" (the brand), not "OpenCode Go OpenCode Go".
 3. **`src/lib/local-api.js`** — no changes (the new provider is just another key on the JSON the existing `/functions/tokentracker-usage-limits` endpoint already returns).
 4. **`test/opencode-go-limits.test.js` (new)** — node:test, fixtures:

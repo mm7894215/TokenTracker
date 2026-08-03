@@ -14,6 +14,8 @@ const {
   normalizeGeminiQuotaResponse,
   normalizeKimiUsageResponse,
   parseKiroUsageOutput,
+  fetchKiroLimits,
+  runCommand,
   resetUsageLimitsCache,
   normalizeAntigravityResponse,
   parseListeningPorts,
@@ -1500,13 +1502,92 @@ describe("getUsageLimits", () => {
               json: async () => ({ error: { code: "refresh_token_expired" } }),
             });
           }
+          if (url === CODEX_WHAM_USAGE_URL) {
+            return Promise.resolve({
+              ok: false,
+              status: 401,
+              json: async () => ({}),
+            });
+          }
           return pendingUnlessCodexReset(url);
         },
       });
 
       assert.equal(result.codex.configured, true);
       assert.equal(result.codex.auth_action_required, "reauth");
-      assert.match(result.codex.error, /Run `codex` to re-authenticate/);
+      assert.match(result.codex.error, /Run `codex login` to re-authenticate/);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("uses live Codex usage when refresh fails but the access token remains valid", async () => {
+    resetUsageLimitsCache();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-codex-valid-access-"));
+    try {
+      const codexHome = path.join(tmp, ".codex");
+      const accessToken = makeFakeCodexJwt("plus");
+      fs.mkdirSync(codexHome, { recursive: true });
+      fs.writeFileSync(
+        path.join(codexHome, "auth.json"),
+        JSON.stringify({
+          tokens: {
+            access_token: accessToken,
+            id_token: accessToken,
+            refresh_token: "rt-dead-valid-access",
+            account_id: "acc-valid-access",
+          },
+          last_refresh: "2026-01-01T00:00:00Z",
+        }),
+      );
+
+      let whamAuthHeader = null;
+      const result = await getUsageLimits({
+        home: tmp,
+        platform: "linux",
+        providerTimeoutMs: 2000,
+        securityRunner: inactiveRunner,
+        commandRunner: inactiveRunner,
+        fetchImpl(url, options) {
+          if (url === "https://auth.openai.com/oauth/token") {
+            return Promise.resolve({
+              ok: false,
+              status: 401,
+              json: async () => ({ error: { code: "refresh_token_expired" } }),
+            });
+          }
+          if (url === CODEX_WHAM_USAGE_URL) {
+            whamAuthHeader = options?.headers?.Authorization || null;
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                rate_limit: {
+                  primary_window: {
+                    used_percent: 12,
+                    limit_window_seconds: 604800,
+                    reset_at: 1_900_000_000,
+                  },
+                  secondary_window: null,
+                },
+              }),
+            });
+          }
+          return pendingUnlessCodexReset(url);
+        },
+      });
+
+      assert.equal(whamAuthHeader, `Bearer ${accessToken}`);
+      assert.equal(result.codex.configured, true);
+      assert.equal(result.codex.error, null);
+      assert.equal(result.codex.auth_action_required, undefined);
+      assert.equal(result.codex.primary_window, null);
+      assert.deepEqual(result.codex.secondary_window, {
+        used_percent: 12,
+        limit_window_seconds: 604800,
+        reset_at: 1_900_000_000,
+      });
     } finally {
       resetUsageLimitsCache();
       fs.rmSync(tmp, { recursive: true, force: true });
@@ -2522,6 +2603,201 @@ Usage is managed by organization admin.
   });
 });
 
+describe("fetchKiroLimits", () => {
+  const now = new Date("2026-07-25T00:00:00.000Z");
+  const usageOutput = `
+Estimated Usage | resets on 2026-08-01 | KIRO PRO
+████████████ 25%
+(25 of 100 covered in plan)
+`;
+
+  it("uses a PTY first for kiro-cli 2.13 so /usage is not sent as a model prompt", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-kiro-credits-"));
+    const calls = [];
+    try {
+      const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+      fs.mkdirSync(trackerDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(trackerDir, "kiro-credits.json"),
+        JSON.stringify({
+          version: 1,
+          total_credits: 1796.45,
+          record_count: 193,
+          session_count: 19,
+          file_count: 19,
+          latest_at: "2026-07-22T15:28:20.659Z",
+          updated_at: "2026-07-25T00:00:00.000Z",
+        }),
+      );
+      const commandRunner = (command, args) => {
+        calls.push({ command, args });
+        if (command === "which") {
+          return { status: 0, stdout: "/opt/kiro-cli\n", stderr: "" };
+        }
+        if (command === "/opt/kiro-cli" && args[0] === "--version") {
+          return {
+            status: 0,
+            stdout: "kiro-cli 2.13.0\n",
+            stderr: "",
+          };
+        }
+        if (command === "/usr/bin/script") {
+          assert.deepEqual(args, [
+            "-q",
+            "/dev/null",
+            "/opt/kiro-cli",
+            "chat",
+            "--no-interactive",
+            "/usage",
+          ]);
+          return { status: 0, stdout: usageOutput, stderr: "" };
+        }
+        throw new Error(`unexpected command: ${command} ${args.join(" ")}`);
+      };
+
+      const result = await fetchKiroLimits({
+        commandRunner,
+        now,
+        platform: "darwin",
+        home: tmp,
+      });
+
+      assert.equal(result.error, null);
+      assert.equal(result.plan_name, "KIRO PRO");
+      assert.equal(result.primary_window.used_percent, 25);
+      assert.equal(
+        result.primary_window.reset_at,
+        "2026-08-01T00:00:00.000Z",
+      );
+      assert.equal(result.tracked_credits, 1796.45);
+      assert.equal(result.tracked_credit_records, 193);
+      assert.equal(result.tracked_credit_sessions, 19);
+      assert.equal(result.tracked_credits_latest_at, "2026-07-22T15:28:20.659Z");
+      assert.equal(
+        calls.some(
+          ({ command, args }) =>
+            command === "/opt/kiro-cli" && args[0] === "chat",
+        ),
+        false,
+        "2.13 must not run the unsafe pipe transport",
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back from unparseable pipe output to the PTY on older Kiro versions", async () => {
+    const calls = [];
+    const commandRunner = (command, args) => {
+      calls.push({ command, args });
+      if (command === "which") {
+        return { status: 0, stdout: "/opt/kiro-cli\n", stderr: "" };
+      }
+      if (command === "/opt/kiro-cli" && args[0] === "--version") {
+        return {
+          status: 0,
+          stdout: "kiro-cli 2.12.3\n",
+          stderr: "",
+        };
+      }
+      if (command === "/opt/kiro-cli" && args[0] === "chat") {
+        return {
+          status: 0,
+          stdout: "What would you like to work on?",
+          stderr: "[INFO] MCP subsystem initialized",
+        };
+      }
+      if (command === "/usr/bin/script") {
+        return { status: 0, stdout: usageOutput, stderr: "" };
+      }
+      throw new Error(`unexpected command: ${command} ${args.join(" ")}`);
+    };
+
+    const result = await fetchKiroLimits({
+      commandRunner,
+      now,
+      platform: "darwin",
+    });
+
+    assert.equal(result.error, null);
+    assert.equal(result.plan_name, "KIRO PRO");
+    assert.equal(
+      calls.filter(
+        ({ command, args }) =>
+          command === "/opt/kiro-cli" && args[0] === "chat",
+      ).length,
+      1,
+    );
+    assert.equal(
+      calls.filter(({ command }) => command === "/usr/bin/script").length,
+      1,
+    );
+  });
+
+  it("keeps local usage_summary credits visible when kiro-cli is unavailable", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-kiro-local-credits-"));
+    try {
+      const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+      fs.mkdirSync(trackerDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(trackerDir, "kiro-credits.json"),
+        JSON.stringify({
+          version: 1,
+          total_credits: 12.75,
+          record_count: 4,
+          session_count: 2,
+          latest_at: "2026-07-22T15:28:20.659Z",
+          updated_at: "2026-07-25T00:00:00.000Z",
+        }),
+      );
+
+      const result = await fetchKiroLimits({
+        home: tmp,
+        commandRunner(command, args) {
+          assert.equal(command, "which");
+          assert.deepEqual(args, ["kiro-cli"]);
+          return { status: 1, stdout: "", stderr: "" };
+        },
+      });
+
+      assert.equal(result.configured, true);
+      assert.equal(result.error, null);
+      assert.equal(result.tracked_credits, 12.75);
+      assert.equal(result.tracked_credit_records, 4);
+      assert.equal(result.tracked_credit_sessions, 2);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("runCommand completion", () => {
+  it("terminates a process group shortly after complete output arrives", async () => {
+    const startedAt = Date.now();
+    const result = await runCommand(
+      null,
+      process.execPath,
+      [
+        "-e",
+        "process.stdout.write('usage complete\\n'); setInterval(() => {}, 1000);",
+      ],
+      {
+        timeout: 5_000,
+        completeWhen: (stdout) => stdout.includes("usage complete"),
+        completionGraceMs: 25,
+        killProcessGroup: true,
+      },
+    );
+
+    assert.match(result.stdout, /usage complete/);
+    assert.equal(result.error, undefined);
+    assert.ok(
+      Date.now() - startedAt < 2_000,
+      "complete output should not wait for the hard timeout",
+    );
+  });
+});
+
 describe("normalizeGeminiQuotaResponse", () => {
   it("maps pro, flash, and flash-lite windows", () => {
     const result = normalizeGeminiQuotaResponse({
@@ -3018,6 +3294,10 @@ describe("normalizePlanLabel", () => {
 
   it("Title-cases a lowercase tier", () => {
     assert.equal(normalizePlanLabel("business", "Codex"), "Business");
+  });
+
+  it("normalizes machine-readable separators in provider plan ids", () => {
+    assert.equal(normalizePlanLabel("personal_standard", "Qoder"), "Personal Standard");
   });
 
   it("returns null for a null tier", () => {

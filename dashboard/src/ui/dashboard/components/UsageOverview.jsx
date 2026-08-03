@@ -96,7 +96,15 @@ function resolveContextBreakdownSource(provider) {
   const label = String(provider?.label || "").trim().toLowerCase();
   if (source === "claude" || label === "claude") return "claude";
   if (source === "codex" || label === "codex") return "codex";
+  if (source === "grok" || label === "grok" || label.includes("grok")) return "grok";
   return null;
+}
+
+function contextBreakdownHeading(source) {
+  if (source === "claude") return copy("dashboard.context_breakdown.heading_claude");
+  if (source === "codex") return copy("dashboard.context_breakdown.heading_codex");
+  if (source === "grok") return copy("dashboard.context_breakdown.heading_grok");
+  return copy("dashboard.context_breakdown.heading");
 }
 
 function hasProviderModels(provider) {
@@ -606,12 +614,12 @@ export function UsageOverview({
                   .map((provider) => {
                     const color = getProviderColor(provider.label, 0);
                     const contextSource = resolveContextBreakdownSource(provider);
-                    const sortedModels = [...provider.models].sort(
-                      (a, b) => (b.share || 0) - (a.share || 0)
-                    );
+                    const sortedModels = [...provider.models].sort((a, b) => {
+                      return (b.share || 0) - (a.share || 0);
+                    });
 
                     const providerHeading = contextSource
-                      ? `${contextSource === "claude" ? "Claude" : "Codex"} Context Breakdown`
+                      ? contextBreakdownHeading(contextSource)
                       : formatProviderDisplayName(provider.label);
                     return (
                       <ProviderExpandedSection

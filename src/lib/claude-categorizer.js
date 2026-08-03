@@ -1189,9 +1189,24 @@ function toUtcHalfHourStart(ts) {
   ).toISOString();
 }
 
-async function computeClaudeGroundTruthBuckets({ rootDir = null } = {}) {
-  const root = rootDir || defaultClaudeProjectsDir();
-  const files = listSessionFiles(root);
+async function computeClaudeGroundTruthBuckets({ rootDir = null, rootDirs = null } = {}) {
+  // Multi-root (#307): a Windows host may scan a native ~/.claude/projects
+  // plus a WSL install over \\wsl$. `rootDirs` wins over the legacy single
+  // `rootDir`; duplicated session files synced between environments collapse
+  // via the msgId+reqId dedup below.
+  const roots = Array.isArray(rootDirs) && rootDirs.length > 0
+    ? rootDirs
+    : [rootDir || defaultClaudeProjectsDir()];
+  const files = [];
+  const seenFiles = new Set();
+  for (const root of roots) {
+    for (const fp of listSessionFiles(root)) {
+      if (!seenFiles.has(fp)) {
+        seenFiles.add(fp);
+        files.push(fp);
+      }
+    }
+  }
   const buckets = new Map(); // `${model}|${hourStart}` → totals
   const seenHashes = new Set();
   const userMessageBuckets = new Map(); // for conversation_count tracking
@@ -1204,7 +1219,9 @@ async function computeClaudeGroundTruthBuckets({ rootDir = null } = {}) {
       continue;
     }
     const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-    const isMainSession = !fp.includes("/subagents/");
+    // Separator-agnostic: WSL roots are UNC paths where path.join produces
+    // backslashes (mirrors the same check in rollout.js parseClaudeFile).
+    const isMainSession = !/[\\/]subagents[\\/]/.test(fp);
 
     for await (const line of rl) {
       if (!line) continue;
@@ -1224,11 +1241,21 @@ async function computeClaudeGroundTruthBuckets({ rootDir = null } = {}) {
             typeof content === "string" ||
             (Array.isArray(content) && content.some((b) => b?.type === "text"));
           if (hasText) {
-            const ts = typeof userObj?.timestamp === "string" ? userObj.timestamp : null;
-            const hourStart = ts ? toUtcHalfHourStart(ts) : null;
-            if (hourStart) {
-              const k = `unknown|${hourStart}`;
-              userMessageBuckets.set(k, (userMessageBuckets.get(k) || 0) + 1);
+            // Dedup by line uuid (mirrors parseClaudeFile): with multiple
+            // roots the same session file exists under both the native and
+            // the \\wsl$ path, and without this every user message — and so
+            // conversation_count — would double. Usage rows are already
+            // guarded by claudeMessageDedupKey below.
+            const userKey =
+              typeof userObj?.uuid === "string" && userObj.uuid ? `u:${userObj.uuid}` : null;
+            if (!userKey || !seenHashes.has(userKey)) {
+              if (userKey) seenHashes.add(userKey);
+              const ts = typeof userObj?.timestamp === "string" ? userObj.timestamp : null;
+              const hourStart = ts ? toUtcHalfHourStart(ts) : null;
+              if (hourStart) {
+                const k = `unknown|${hourStart}`;
+                userMessageBuckets.set(k, (userMessageBuckets.get(k) || 0) + 1);
+              }
             }
           }
         }

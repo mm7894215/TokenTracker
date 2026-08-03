@@ -32,10 +32,13 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tokentracker.bar
-        PRODUCT_NAME: TokenTrackerBar
+        # App bundle / process / permission-dialog name. Target & scheme stay
+        # "TokenTrackerBar"; the shipped DMG keeps the stable TokenTrackerBar.dmg
+        # filename (download URLs depend on it).
+        PRODUCT_NAME: TokenTracker
         INFOPLIST_VALUES: |
           LSUIElement = YES
-        MARKETING_VERSION: "0.84.4"
+        MARKETING_VERSION: "0.87.11"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_EMIT_LOC_STRINGS: "YES"
         CODE_SIGN_STYLE: Automatic
@@ -47,7 +50,8 @@ targets:
       properties:
         LSUIElement: true
         CFBundleDisplayName: TokenTracker
-        CFBundleName: TokenTrackerBar
+        # Keep in sync with CFBundleDisplayName: the app menu title uses CFBundleName.
+        CFBundleName: TokenTracker
         CFBundleIconFile: AppIcon
         CFBundleIconName: AppIcon
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
@@ -85,7 +89,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tokentracker.bar.widget
         PRODUCT_NAME: TokenTrackerWidget
-        MARKETING_VERSION: "0.84.4"
+        MARKETING_VERSION: "0.87.11"
         CURRENT_PROJECT_VERSION: "1"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         SWIFT_EMIT_LOC_STRINGS: "YES"
@@ -117,6 +121,7 @@ targets:
       - path: TokenTrackerBarTests
       - path: TokenTrackerBar/Models/LimitsSettingsStore.swift
       - path: TokenTrackerBar/Models/MenuBarDisplayPreferences.swift
+      - path: TokenTrackerBar/Models/DynamicIslandLayoutPolicy.swift
       - path: TokenTrackerBar/Models/MenuBarIconStyle.swift
       - path: TokenTrackerBar/Models/UsageLimits.swift
       - path: TokenTrackerBar/Models/LimitPace.swift

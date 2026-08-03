@@ -5,32 +5,23 @@ const { readSqliteJsonRowsAsync } = require("./sqlite-reader");
 
 // OpenCode Go usage limits.
 //
-// Two data sources, in priority order:
+// Two data sources are available:
 //
-//   1. Local opencode.db (auth-free, the default / zero-config path). The
-//      `opencode` CLI records every Go turn's USD `cost` in its SQLite
-//      `message` table. OpenCode Go's limits are themselves dollar caps
-//      ($12/5h, $30/week, $60/month — https://opencode.ai/docs/go), so summing
-//      local cost per window ÷ the dollar cap is dimensionally exact, not a
-//      heuristic. Its only blind spot is usage that did NOT go through the
-//      local CLI (e.g. the web console, or another machine). This is what
-//      token-monitor (Javis603/token-monitor) falls back to, and the only
-//      source that survives opencode's OAuth changes (see #225).
+//   1. Web scrape of the workspace dashboard
+//      (https://opencode.ai/workspace/<id>/go) for the server's authoritative
+//      rolling (5h) / weekly / monthly usagePercent and subscription state.
+//      The cookie is sent as `Cookie: auth=<OPENCODE_GO_AUTH_COOKIE>` per
+//      slkiser/opencode-quota#41.
 //
-//   2. Web scrape of the workspace dashboard
-//      (https://opencode.ai/workspace/<id>/go) for the server's EXACT
-//      rolling (5h) / weekly / monthly usagePercent. Used only when a cookie
-//      is configured AND the scrape succeeds — it carries the precise
-//      server-side number but is fragile: opencode moved auth to OAuth
-//      (auth.opencode.ai), so a bare `auth` cookie now often 302s to the login
-//      page (the #225 saga). The cookie is sent verbatim as
-//      `Cookie: auth=<OPENCODE_GO_AUTH_COOKIE>` per slkiser/opencode-quota#41.
+//   2. Local opencode.db cost aggregation, explicitly enabled with
+//      TOKENTRACKER_OPENCODE_GO_LOCAL_ESTIMATE=1. The `opencode` CLI records
+//      every Go turn's USD `cost` in SQLite, so cost ÷ Go's dollar caps is a
+//      useful local estimate. It cannot prove that the account still has an
+//      active Go subscription, because the database contains historical turns
+//      but no current entitlement state.
 //
-// The opencode web console has no public REST API for quota
-// (anomalyco/opencode#16017, #16513) and the CLI's `sk-` API key authenticates
-// only the inference gateway (/zen/go/v1), not the usage windows — so the local
-// DB is the only accurate auth-free option. The returned shape is identical for
-// both sources; `source` is `'local'` or `'web'`.
+// The returned shape is shared by both sources. `source` is `'web'` for
+// authoritative dashboard data or `'local-estimate'` for the opt-in estimate.
 
 const SCRAPED_NUMBER_PATTERN = "([0-9]+(?:\\.[0-9]+)?)";
 
@@ -52,6 +43,26 @@ const DASHBOARD_URL_SUFFIX = "/go";
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Gecko/20100101 Firefox/148.0";
 const DEFAULT_SCRAPE_TIMEOUT_MS = 10_000;
+const LOCAL_ESTIMATE_ENV = "TOKENTRACKER_OPENCODE_GO_LOCAL_ESTIMATE";
+
+function isTruthyEnvValue(value) {
+  return ["1", "true", "yes", "on"].includes(String(value ?? "").trim().toLowerCase());
+}
+
+function localEstimateEnabled(env = process.env) {
+  return Boolean(env && typeof env === "object" && isTruthyEnvValue(env[LOCAL_ESTIMATE_ENV]));
+}
+
+// OpenCode's inactive Go workspace renders a Subscribe button and no usage
+// items. Keep this detection deliberately narrow: an unknown/changed page must
+// remain an error, not be guessed as an inactive subscription.
+function detectSubscriptionStatus(html) {
+  if (typeof html !== "string") return "unknown";
+  const normalized = html.replace(/\\(["'])/g, "$1");
+  return /data-slot\s*=\s*["']subscribe-button["']/i.test(normalized)
+    ? "inactive"
+    : "unknown";
+}
 
 function readConfig(env = process.env) {
   if (!env || typeof env !== "object") return null;
@@ -412,7 +423,8 @@ function buildGoAggregateSql({ sessionStart, weekStart, weekEnd, monthStart, mon
 }
 
 // Returns { source:'local', primary/secondary/tertiary_window } or null when no
-// opencode.db / no opencode-go rows are found.
+// opencode.db / no opencode-go rows are found. The caller labels this result as
+// an estimate and only exposes it when explicitly opted in.
 async function collectOpencodeGoLocal({ home, env = process.env, nowMs = Date.now(), sqliteOptions = {} } = {}) {
   const paths = discoverOpencodeDbPaths({ home, env });
   if (paths.length === 0) return null;
@@ -465,7 +477,8 @@ function localGoResult(local) {
   return {
     configured: true,
     error: null,
-    source: "local",
+    source: "local-estimate",
+    subscription_status: "unknown",
     // No `plan_label` — the brand name "OpenCode Go" is the row title.
     primary_window: local.primary_window || null,
     secondary_window: local.secondary_window || null,
@@ -527,6 +540,13 @@ async function scrapeOpencodeGoWeb({ cfg, fetchImpl, nowMs, timeoutMs }) {
 
   const { rolling, weekly, monthly } = extractWindows(html, nowMs);
   if (!rolling && !weekly && !monthly) {
+    if (detectSubscriptionStatus(html) === "inactive") {
+      return {
+        configured: true,
+        error: null,
+        subscription_status: "inactive",
+      };
+    }
     return {
       configured: true,
       error:
@@ -537,6 +557,7 @@ async function scrapeOpencodeGoWeb({ cfg, fetchImpl, nowMs, timeoutMs }) {
   return {
     configured: true,
     error: null,
+    subscription_status: "active",
     // No `plan_label` — the brand name "OpenCode Go" is the row title, so
     // appending "Go" again would render "OpenCode Go Go" in the panel.
     primary_window: rolling,
@@ -554,20 +575,26 @@ async function fetchOpencodeGoLimits({
   sqliteOptions = {},
 } = {}) {
   const cfg = readConfig(env);
+  const allowLocalEstimate = localEstimateEnabled(env);
 
-  // Cookie configured → prefer the exact server-side scrape; fall back to the
-  // local DB estimate when the scrape can't authenticate/parse (the #225 case).
+  // A configured cookie gives us the only authoritative subscription state.
+  // Never replace an explicit inactive page with historical local usage.
   if (cfg) {
     const web = await scrapeOpencodeGoWeb({ cfg, fetchImpl, nowMs, timeoutMs });
+    if (web?.subscription_status === "inactive") return web;
     if (web && !web.error && (web.primary_window || web.secondary_window || web.tertiary_window)) {
       return { ...web, source: "web" };
     }
-    const local = await collectOpencodeGoLocal({ home, env, nowMs, sqliteOptions });
-    if (local) return localGoResult(local);
+    if (allowLocalEstimate) {
+      const local = await collectOpencodeGoLocal({ home, env, nowMs, sqliteOptions });
+      if (local) return localGoResult(local);
+    }
     return web || { configured: true, error: "OpenCode Go unavailable" };
   }
 
-  // No cookie → the local opencode.db is the zero-config source.
+  // Local history cannot establish that the account is currently subscribed.
+  // Keep it available for users who explicitly accept that limitation.
+  if (!allowLocalEstimate) return { configured: false };
   const local = await collectOpencodeGoLocal({ home, env, nowMs, sqliteOptions });
   if (local) return localGoResult(local);
   return { configured: false };
@@ -576,6 +603,8 @@ async function fetchOpencodeGoLimits({
 module.exports = {
   fetchOpencodeGoLimits,
   readConfig,
+  localEstimateEnabled,
+  detectSubscriptionStatus,
   extractWindows,
   parseWindowUsage,
   parseDataSlotFormat,

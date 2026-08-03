@@ -48,12 +48,27 @@ const { computeRowCost } = require("./pricing");
 //   - session_id is only set when the log actually contained a sessionId
 //     record. It used to fall back to the file's basename, which produced
 //     resume commands for non-session files (`claude --resume journal`).
-const SIDECAR_VERSION = 9;
-const EDIT_TOOLS = new Set(["apply_patch", "edit", "write", "multiedit", "notebookedit"]);
+// v10 adds Grok Build sessions (~/.grok/sessions/**/updates.jsonl), scanned
+// from turn_completed.usage + tool_call metadata. Bump so Claude/Codex rows
+// stay valid while Grok entries appear on the next full rebuild.
+const SIDECAR_VERSION = 10;
+const EDIT_TOOLS = new Set([
+  "apply_patch",
+  "edit",
+  "write",
+  "multiedit",
+  "notebookedit",
+  // Grok Build write tools (ACP tool titles / x.ai/tool.name).
+  "search_replace",
+  "str_replace",
+  "create_file",
+  "write_file",
+]);
 const PLACEHOLDER_MODELS = new Set(["<synthetic>", "synthetic", "<unknown>", "unknown"]);
 const CLAUDE_MEM_OBSERVER_PROJECT_SUFFIX = "--claude-mem-observer-sessions";
 const CODEX_SUBAGENT_TOOLS = new Set(["spawn_agent", "multi_agent_v1__spawn_agent"]);
 const CODEX_SIGNAL_TOOLS = new Set([...EDIT_TOOLS, ...CODEX_SUBAGENT_TOOLS]);
+const GROK_SUBAGENT_TOOLS = new Set(["spawn_subagent", "spawn_agent"]);
 
 function normalizeSessionModel(value) {
   if (typeof value !== "string") return null;
@@ -457,11 +472,302 @@ async function scanCodexSession(filePath) {
   });
 }
 
+// Grok Build sessions live at:
+//   ~/.grok/sessions/<url-encoded-cwd>/<session-uuid>/updates.jsonl
+// with sibling summary.json (id/cwd/title) and signals.json (aggregate
+// counters). Billable tokens come only from turn_completed.usage — the same
+// authority as the Grok usage parser — not from context-window totalTokens.
+function resolveGrokHome(home = os.homedir(), env = process.env) {
+  if (typeof env.TOKENTRACKER_GROK_HOME === "string" && env.TOKENTRACKER_GROK_HOME.trim()) {
+    return path.resolve(env.TOKENTRACKER_GROK_HOME.trim());
+  }
+  if (typeof env.GROK_HOME === "string" && env.GROK_HOME.trim()) {
+    return path.resolve(env.GROK_HOME.trim());
+  }
+  return path.join(home, ".grok");
+}
+
+function grokSummaryPathFor(updatesPath) {
+  return path.join(path.dirname(updatesPath), "summary.json");
+}
+
+function grokSignalsPathFor(updatesPath) {
+  return path.join(path.dirname(updatesPath), "signals.json");
+}
+
+function readJsonFileSync(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function grokTimestampIso(obj) {
+  const metaMs = Number(obj?.params?._meta?.agentTimestampMs);
+  if (Number.isFinite(metaMs) && metaMs > 0) return new Date(metaMs).toISOString();
+  const top = Number(obj?.timestamp);
+  if (!Number.isFinite(top) || top <= 0) return null;
+  // Grok writes unix seconds on the envelope; ms values are already > 1e12.
+  const ms = top > 1e12 ? top : top * 1000;
+  return new Date(ms).toISOString();
+}
+
+// Grok reports inputTokens as the full prompt (including cache hits). Split so
+// pricing can apply cache_read rates correctly — same authority as the usage
+// parser and grok-context-breakdown.readUsageTotals. Prefer the reported
+// totalTokens; do not re-sum input+cached (that double-counts cache hits).
+function grokUsageTotals(usage) {
+  if (!usage || typeof usage !== "object") return emptyTotals();
+  const inputRaw = finite(usage.inputTokens ?? usage.input_tokens);
+  const cached_input_tokens = finite(
+    usage.cachedReadTokens ?? usage.cache_read_input_tokens ?? usage.cached_input_tokens,
+  );
+  const cache_creation_input_tokens = finite(
+    usage.cachedWriteTokens ?? usage.cache_creation_input_tokens,
+  );
+  const output_tokens = finite(usage.outputTokens ?? usage.output_tokens);
+  const reasoning_output_tokens = finite(
+    usage.reasoningTokens ?? usage.reasoning_output_tokens,
+  );
+  const input_tokens = Math.max(0, inputRaw - cached_input_tokens);
+  let total_tokens = finite(usage.totalTokens ?? usage.total_tokens);
+  if (total_tokens <= 0) {
+    total_tokens = input_tokens
+      + cached_input_tokens
+      + cache_creation_input_tokens
+      + output_tokens
+      + reasoning_output_tokens;
+  }
+  return {
+    input_tokens,
+    cached_input_tokens,
+    cache_creation_input_tokens,
+    output_tokens,
+    reasoning_output_tokens,
+    total_tokens,
+  };
+}
+
+function pickGrokModel(usage, fallback) {
+  const modelUsage = usage?.modelUsage;
+  if (modelUsage && typeof modelUsage === "object") {
+    let bestName = null;
+    let bestTokens = -1;
+    for (const [name, entry] of Object.entries(modelUsage)) {
+      const normalized = normalizeSessionModel(name);
+      if (!normalized) continue;
+      const tokens = finite(entry?.totalTokens ?? entry?.total_tokens)
+        + finite(entry?.inputTokens ?? entry?.input_tokens)
+        + finite(entry?.outputTokens ?? entry?.output_tokens);
+      if (tokens >= bestTokens) {
+        bestTokens = tokens;
+        bestName = normalized;
+      }
+    }
+    if (bestName) return bestName;
+  }
+  return normalizeSessionModel(fallback) || "unknown";
+}
+
+function extractGrokUserPrompt(update) {
+  if (!update || update.sessionUpdate !== "user_message_chunk") return null;
+  const content = update.content;
+  if (typeof content === "string") {
+    const text = content.trim();
+    return text || null;
+  }
+  if (content && typeof content === "object") {
+    if (typeof content.text === "string") {
+      const text = content.text.trim();
+      return text || null;
+    }
+  }
+  return null;
+}
+
+function extractGrokToolName(update) {
+  if (!update || update.sessionUpdate !== "tool_call") return "";
+  const metaName = update._meta?.["x.ai/tool"]?.name;
+  return canonicalToolName(metaName || update.title || "");
+}
+
+async function listGrokSessionFiles(sessionsRoot) {
+  if (!fs.existsSync(sessionsRoot)) return [];
+  const found = [];
+  async function walk(dir, depth) {
+    if (depth > 6) return;
+    let entries;
+    try {
+      entries = await fsp.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name.startsWith(".")) continue;
+      const full = path.join(dir, entry.name);
+      const updatesPath = path.join(full, "updates.jsonl");
+      try {
+        const stat = await fsp.stat(updatesPath);
+        if (stat.isFile() && stat.size > 0) {
+          found.push(updatesPath);
+          continue;
+        }
+      } catch { /* not a session leaf */ }
+      await walk(full, depth + 1);
+    }
+  }
+  await walk(sessionsRoot, 0);
+  // Deterministic order so filesSignature is stable across readdir() shuffles.
+  found.sort((a, b) => a.localeCompare(b));
+  return found;
+}
+
+async function scanGrokSession(filePath) {
+  const summary = readJsonFileSync(grokSummaryPathFor(filePath)) || {};
+  const signals = readJsonFileSync(grokSignalsPathFor(filePath)) || {};
+  const tokens = emptyTotals();
+  const bounds = emptyBounds();
+  const dirName = path.basename(path.dirname(filePath));
+  let observedSessionId = typeof summary?.info?.id === "string" && summary.info.id
+    ? summary.info.id
+    : (/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(dirName) ? dirName : null);
+  let cwd = typeof summary?.info?.cwd === "string" && summary.info.cwd
+    ? summary.info.cwd
+    : null;
+  // Prefer agent-authored generated_title over free-form session_summary when
+  // both exist; both are Grok metadata, never the raw user prompt body.
+  const title = cleanSessionTitle(summary.generated_title)
+    || cleanSessionTitle(summary.session_summary)
+    || null;
+  let model = pickGrokModel(null, signals.primaryModelId || summary.current_model_id);
+  let turns = 0;
+  let editTurns = 0;
+  let retryTurns = 0;
+  let currentHadEdit = false;
+  let subagentCalls = 0;
+  const subagentTypes = new Map();
+  let lastPromptFingerprint = null;
+  // Grok streams user_message_chunk pieces for one prompt. Accumulate until
+  // turn_completed, then fingerprint the full prompt for retry detection.
+  let openUserTurn = false;
+  let userChunkBuffer = "";
+
+  function closeTurn() {
+    if (currentHadEdit) editTurns += 1;
+    currentHadEdit = false;
+    if (userChunkBuffer) {
+      const fingerprint = promptFingerprint(userChunkBuffer);
+      if (lastPromptFingerprint && fingerprint === lastPromptFingerprint) retryTurns += 1;
+      lastPromptFingerprint = fingerprint;
+    }
+    openUserTurn = false;
+    userChunkBuffer = "";
+  }
+
+  const input = fs.createReadStream(filePath, { encoding: "utf8" });
+  const lines = readline.createInterface({ input, crlfDelay: Infinity });
+  for await (const line of lines) {
+    let obj;
+    try { obj = JSON.parse(line); } catch { continue; }
+    updateBounds(bounds, grokTimestampIso(obj));
+    const params = obj.params && typeof obj.params === "object" ? obj.params : {};
+    if (typeof params.sessionId === "string" && params.sessionId) {
+      observedSessionId = params.sessionId;
+    }
+    const update = params.update && typeof params.update === "object" ? params.update : null;
+    if (!update) continue;
+    const sessionUpdate = update.sessionUpdate;
+
+    if (sessionUpdate === "user_message_chunk") {
+      const piece = extractGrokUserPrompt(update);
+      if (!piece) continue;
+      // First non-empty chunk after a closed turn opens a new user turn;
+      // later chunks only extend the fingerprint buffer.
+      if (!openUserTurn) {
+        turns += 1;
+        openUserTurn = true;
+        userChunkBuffer = piece;
+      } else {
+        userChunkBuffer += piece;
+      }
+      continue;
+    }
+
+    if (sessionUpdate === "tool_call") {
+      // Tools belong to the current user turn. After turn_completed closes a
+      // turn, a tool-only follow-up must open a new anonymous turn — otherwise
+      // edit_turns can exceed turns.
+      if (!openUserTurn) {
+        turns += 1;
+        openUserTurn = true;
+      }
+      const name = extractGrokToolName(update);
+      if (EDIT_TOOLS.has(name)) currentHadEdit = true;
+      if (GROK_SUBAGENT_TOOLS.has(name)) {
+        subagentCalls += 1;
+        const display = name === "spawn_agent" ? "spawn_subagent" : name;
+        subagentTypes.set(display, (subagentTypes.get(display) || 0) + 1);
+      }
+      continue;
+    }
+
+    if (sessionUpdate === "turn_completed") {
+      closeTurn();
+      const usage = update.usage;
+      addTotals(tokens, grokUsageTotals(usage));
+      const candidate = pickGrokModel(usage, model);
+      if (candidate && candidate !== "unknown") model = candidate;
+      continue;
+    }
+  }
+  closeTurn();
+
+  // Prefer observed turn_completed totals. Never invent billable totals from
+  // signals.contextTokensUsed (context-window occupancy is not API usage);
+  // leave zeros so listSessionsForBrowser filters empty sessions out.
+  if (turns === 0 && finite(signals.turnCount) > 0) {
+    turns = finite(signals.turnCount);
+  }
+  if (!Number.isFinite(Date.parse(bounds.started_at || "")) && summary.created_at) {
+    updateBounds(bounds, summary.created_at);
+  }
+  if (!Number.isFinite(Date.parse(bounds.ended_at || "")) && (summary.last_active_at || summary.updated_at)) {
+    updateBounds(bounds, summary.last_active_at || summary.updated_at);
+  }
+  if ((!model || model === "unknown") && signals.primaryModelId) {
+    model = normalizeSessionModel(signals.primaryModelId) || model;
+  }
+
+  return finalizeRecord({
+    version: SIDECAR_VERSION,
+    session_hash: sessionHash("grok", observedSessionId || filePath),
+    session_id: observedSessionId || null,
+    // Local-only: stripped in summarizeSessions before any cloud/CSV export.
+    title,
+    source: "grok",
+    project_key: projectKey(cwd, filePath),
+    project_ref: cwd || null,
+    model: model || "unknown",
+    ...bounds,
+    turns,
+    edit_turns: editTurns,
+    retry_turns: retryTurns,
+    subagent_calls: subagentCalls,
+    subagent_types: Object.fromEntries([...subagentTypes.entries()].sort()),
+    tokens,
+    provenance: { source: "local-session-log", confidence: "observed", retry_confidence: "inferred", content_retained: false },
+  });
+}
+
 async function discoverSessionFiles(home) {
-  const [allClaude, codex, archived] = await Promise.all([
+  const grokHome = resolveGrokHome(home);
+  const [allClaude, codex, archived, grok] = await Promise.all([
     listClaudeProjectFiles(path.join(home, ".claude", "projects")),
     listRolloutFilesDeep(path.join(home, ".codex", "sessions")),
     listRolloutFilesDeep(path.join(home, ".codex", "archived_sessions")),
+    listGrokSessionFiles(path.join(grokHome, "sessions")),
   ]);
   // Claude Memory stores thousands of background observer transcripts beside
   // real Claude Code sessions. They contain <synthetic>/haiku bookkeeping and
@@ -479,7 +785,7 @@ async function discoverSessionFiles(home) {
     const previous = codexBySession.get(id);
     if (!previous || mtimeOf(filePath) > mtimeOf(previous)) codexBySession.set(id, filePath);
   }
-  return { claude, codex: [...codexBySession.values()] };
+  return { claude, codex: [...codexBySession.values()], grok };
 }
 
 function filesSignature(files) {
@@ -548,10 +854,18 @@ function loadCodexTitleIndex(filePath) {
 // A Codex row also depends on session_index.jsonl, not just its rollout file.
 // Include that dependency in the incremental cache key so renaming a thread is
 // visible after the next refresh instead of leaving a stale title indefinitely.
+// Grok titles live in sibling summary.json (and signals can change without
+// touching updates.jsonl on some partial flushes).
 function analyticsEntryStatKey(source, filePath) {
   const sessionStat = sessionFileStatKey(filePath);
-  if (!sessionStat || source !== "codex") return sessionStat;
-  return `${sessionStat}|title-index:${sessionFileStatKey(codexTitleIndexPathFor(filePath)) || "missing"}`;
+  if (!sessionStat) return sessionStat;
+  if (source === "codex") {
+    return `${sessionStat}|title-index:${sessionFileStatKey(codexTitleIndexPathFor(filePath)) || "missing"}`;
+  }
+  if (source === "grok") {
+    return `${sessionStat}|summary:${sessionFileStatKey(grokSummaryPathFor(filePath)) || "missing"}|signals:${sessionFileStatKey(grokSignalsPathFor(filePath)) || "missing"}`;
+  }
+  return sessionStat;
 }
 
 function readSidecar(sidecarPath) {
@@ -587,11 +901,15 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
   const discovered = await discoverSessionFiles(home);
   // Codex thread titles are stored separately from rollout files. Include the
   // index in the overall signature so an index-only rename reaches the
-  // per-file dependency check below on the next refresh.
+  // per-file dependency check below on the next refresh. Grok titles/metadata
+  // live in sibling summary.json / signals.json next to updates.jsonl.
   const signature = filesSignature([
     ...discovered.claude,
     ...discovered.codex,
     ...discovered.codex.map(codexTitleIndexPathFor).filter(Boolean),
+    ...discovered.grok,
+    ...discovered.grok.map(grokSummaryPathFor),
+    ...discovered.grok.map(grokSignalsPathFor),
   ]);
   if (!force && previousMeta?.version === SIDECAR_VERSION && previousMeta.signature === signature) {
     await writeAtomic(metaPath, `${JSON.stringify({ ...previousMeta, checked_at: new Date().toISOString() })}\n`);
@@ -612,6 +930,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
   const entries = [
     ...discovered.claude.map((filePath) => ({ source: "claude", filePath, scan: scanClaudeSession })),
     ...discovered.codex.map((filePath) => ({ source: "codex", filePath, scan: scanCodexSession })),
+    ...discovered.grok.map((filePath) => ({ source: "grok", filePath, scan: scanGrokSession })),
   ];
   // Files we could not turn into a row (permission denied, half-written line,
   // vanished mid-scan). Swallowing these silently made sessions disappear with
@@ -664,8 +983,8 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
   return sessions;
 }
 
-// A cold scan walks every local Claude/Codex session file. Period switches can
-// issue overlapping requests while that scan is still running; share the
+// A cold scan walks every local Claude/Codex/Grok session file. Period switches
+// can issue overlapping requests while that scan is still running; share the
 // promise per home so those requests wait for one scan instead of multiplying
 // the disk work and racing the atomic sidecar write.
 const sessionAnalyticsBuilds = new Map();
@@ -808,6 +1127,9 @@ function resumeCommandFor(source, sessionId) {
   if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(id)) return null;
   if (source === "claude") return `claude --resume ${id}`;
   if (source === "codex") return `codex resume ${id}`;
+  // Grok Build: `grok --resume <session-id>` (also accepts a title). The
+  // command must still be run from the session's project_ref cwd.
+  if (source === "grok") return `grok --resume ${id}`;
   return null;
 }
 
@@ -934,6 +1256,7 @@ module.exports = {
   sessionHash,
   scanClaudeSession,
   scanCodexSession,
+  scanGrokSession,
   buildSessionAnalytics,
   summarizeSessions,
   listSessionsForBrowser,

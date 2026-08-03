@@ -35,6 +35,7 @@ enum LimitResetProviderIconCatalog {
         case "copilot": return "copilot.svg"
         case "zcode": return "zcode.svg"
         case "opencodeGo": return "opencode.svg"
+        case "qoder": return "qoder.svg"
         default: return nil
         }
     }
@@ -236,6 +237,12 @@ extension UsageLimitsResponse {
                 ("primary", "5h", opencodeGo.primaryWindow),
                 ("secondary", "Weekly", opencodeGo.secondaryWindow),
                 ("tertiary", "Monthly", opencodeGo.tertiaryWindow),
+            ])
+        }
+        if let qoder {
+            addGeneric("qoder", qoder.configured, qoder.error, [
+                ("primary", "Credits", qoder.primaryWindow),
+                ("secondary", "Ultimate Free Calls", qoder.secondaryWindow),
             ])
         }
 

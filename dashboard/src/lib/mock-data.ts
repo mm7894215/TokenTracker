@@ -805,7 +805,7 @@ export function getMockLeaderboard({
       other_tokens: String(entry.other_tokens ?? 0),
       total_tokens: String(entry.total_tokens),
       is_public: Boolean(entry.is_public),
-      github_url: entry.id % 3 === 0 ? "https://github.com/mm7894215/TokenTracker" : null,
+      github_url: entry.id % 3 === 0 ? "https://github.com/xiufengsun/TokenTracker" : null,
       badges: mockCompactBadges(entry.id),
       badge_count: mockCompactBadges(entry.id).length,
     }));
@@ -896,7 +896,7 @@ export function getMockUsageModelBreakdown({ from, to, seed }: AnyRecord = {}) {
   const sources = [
     {
       source: "codex",
-      weight: 0.7,
+      weight: 0.6,
       models: [
         { model: "gpt-5.2-codex", model_id: "gpt-5.2-codex", weight: 0.2 },
         { model: "unknown", model_id: "unknown", weight: 0.8 },
@@ -911,8 +911,13 @@ export function getMockUsageModelBreakdown({ from, to, seed }: AnyRecord = {}) {
       ],
     },
     {
+      source: "claude-science",
+      weight: 0.12,
+      models: [{ model: "claude-opus-4", model_id: "claude-opus-4", weight: 1 }],
+    },
+    {
       source: "every-code",
-      weight: 0.1,
+      weight: 0.08,
       models: [{ model: "unknown", model_id: "unknown", weight: 1 }],
     },
   ];

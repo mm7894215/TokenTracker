@@ -392,12 +392,12 @@
   "pet.import.subtitle": "codex-pets.net-Link einfügen oder .zip-Paket wählen.",
   "pet.import.add": "Hinzufügen",
   "pet.import.zip": "Paket auswählen",
-  "pet.import.remove": "Importiertes Pet entfernen",
+  "pet.import.remove": "Pet entfernen",
   "pet.import.success": "Pet importiert und ausgewählt.",
   "pet.import.failed": "Dieses Pet konnte nicht importiert werden.",
   "pet.import.busy": "Wird importiert…",
   "pet.format.v2": "V2",
-  "pet.import.removed": "Importiertes Pet entfernt.",
+  "pet.import.removed": "Pet entfernt.",
   "pet.import.url_label": "Codex-Pets-URL oder Pet-ID",
   "dashboard.projects.detail.badge": "Projekt",
   "achievements.section.title": "Erfolge",
@@ -452,5 +452,12 @@
   "achievements.signin.action": "Anmelden",
   "achievements.scope.local": "Lokal",
   "achievements.page.suggest": "Eine Idee für ein neues Abzeichen?",
-  "achievements.page.suggest_link": "Auf GitHub vorschlagen"
+  "achievements.page.suggest_link": "Auf GitHub vorschlagen",
+  "dashboard.context_breakdown.empty_grok": "Keine Grok-Build-Aktivität im ausgewählten Zeitraum.",
+  "dashboard.context_breakdown.error_grok": "Grok-Build-Logs für diese Ansicht konnten nicht gelesen werden.",
+  "dashboard.context_breakdown.footnote_grok": "Grok nutzt hier nicht-überlappende Token-Buckets. Tool- und Exec-Details sind separate heuristische Zuordnungen über dieselben Turns, mit turn_completed.usage als autoritativer Gesamtsumme.",
+  "dashboard.context_breakdown.heading": "Kontextaufschlüsselung",
+  "dashboard.context_breakdown.heading_claude": "Claude Kontextaufschlüsselung",
+  "dashboard.context_breakdown.heading_codex": "Codex Kontextaufschlüsselung",
+  "dashboard.context_breakdown.heading_grok": "Grok Kontextaufschlüsselung"
 }

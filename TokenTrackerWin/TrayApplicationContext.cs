@@ -532,6 +532,13 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private void RebuildCustomPetMenus()
     {
+        _petCharacterSprout.Visible = !PetWindow.IsBuiltinCharacterHidden(PetWindow.CharacterSprout);
+        _petCharacterByte.Visible = !PetWindow.IsBuiltinCharacterHidden(PetWindow.CharacterByte);
+        _petCharacterEmber.Visible = !PetWindow.IsBuiltinCharacterHidden(PetWindow.CharacterEmber);
+        _petCtxCharacterSprout.Visible = _petCharacterSprout.Visible;
+        _petCtxCharacterByte.Visible = _petCharacterByte.Visible;
+        _petCtxCharacterEmber.Visible = _petCharacterEmber.Visible;
+
         static void RemoveCustom(ToolStripItemCollection items)
         {
             foreach (var item in items.Cast<ToolStripItem>().Where(item => item.Tag is string).ToArray())

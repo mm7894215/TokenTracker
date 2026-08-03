@@ -56,6 +56,10 @@ const {
   removeGrokHook,
   GROK_HOOK_FILENAME
 } = require("../lib/grok-hook");
+const {
+  upsertOmpHook,
+  probeOmpHookState,
+} = require("../lib/omp-hook");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
 const {
   resolveOmpAgentDir,
@@ -124,7 +128,9 @@ const SUPPORTED_PROVIDERS = [
   "Droid",
   "Mimo",
   "ZCode",
+  "Qoder",
   "AnythingLLM Desktop",
+  "Claude Science",
 ];
 
 async function cmdInit(argv) {
@@ -340,6 +346,9 @@ async function runSetup({
   const config = {
     ...existingPlainConfig,
     installedAt,
+    // Keep a persisted legacy URL until the first sync. sync owns the migration
+    // lock and must reset the upload offset/backoff before removing this marker;
+    // rewriting it here would skip the historical replay permanently.
     baseUrl: opts.baseUrl || existingPlainConfig.baseUrl || DEFAULT_BASE_URL,
   };
   if (opts.dashboardUrl) {
@@ -356,6 +365,7 @@ async function runSetup({
     trackerDir,
     notifyPath,
     notifyOriginalPath,
+    dryRun: Boolean(opts.dryRun),
   });
 
   return {
@@ -546,7 +556,13 @@ function buildIntegrationTargets({ home, trackerDir, notifyPath }) {
   };
 }
 
-async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOriginalPath }) {
+async function applyIntegrationSetup({
+  home,
+  trackerDir,
+  notifyPath,
+  notifyOriginalPath,
+  dryRun = false,
+}) {
   const context = buildIntegrationTargets({ home, trackerDir, notifyPath });
   context.notifyOriginalPath = notifyOriginalPath;
 
@@ -637,15 +653,44 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
     }
   }
 
-  // oh-my-pi: passive reader — no hook installation needed.
-  // TokenTracker reads ~/.omp/agent/sessions/**/*.jsonl directly.
+  // oh-my-pi: passive session scan always works; also install an optional
+  // notify extension so turn_end triggers sync --source omp near-real-time.
   {
-    // resolveOmpAgentDir returns null on Windows when ~/.omp doesn't exist (the
-    // win32 path resolver only yields a dir it can see) — null means "not
-    // installed", so skip rather than path.join(null, …) and crash.
+    const fssyncLocal = require("node:fs");
     const ompAgentDir = resolveOmpAgentDir(process.env);
-    if (ompAgentDir && fssync.existsSync(path.join(ompAgentDir, "sessions"))) {
-      summary.push({ label: "oh-my-pi", status: "detected", detail: "Passive reader (no hook needed)" });
+    const ompSessions = ompAgentDir && fssyncLocal.existsSync(path.join(ompAgentDir, "sessions"));
+    if (ompAgentDir && (ompSessions || fssyncLocal.existsSync(ompAgentDir))) {
+      if (dryRun) {
+        const probe = await probeOmpHookState({ home, trackerDir, env: process.env });
+        summary.push({
+          label: "oh-my-pi",
+          status: "detected",
+          detail: probe.configured
+            ? "Notify extension already installed (passive scan still runs)"
+            : "Will install notify extension + keep passive scan",
+        });
+      } else {
+        const result = await upsertOmpHook({ home, trackerDir, env: process.env });
+        if (result.written) {
+          summary.push({
+            label: "oh-my-pi",
+            status: "installed",
+            detail: `Notify extension → ${result.extensionPath} (passive scan still runs)`,
+          });
+        } else if (result.skippedReason === "unmanaged-extension-present") {
+          summary.push({
+            label: "oh-my-pi",
+            status: "skipped",
+            detail: "Existing unmanaged tokentracker-notify extension left untouched",
+          });
+        } else {
+          summary.push({
+            label: "oh-my-pi",
+            status: "detected",
+            detail: "Passive reader (notify extension not written)",
+          });
+        }
+      }
     }
   }
 
@@ -1899,6 +1944,7 @@ module.exports = {
   installLocalTrackerApp,
   repairCodexNotifyIntegration,
   repairRuntimeIntegrations,
+  applyIntegrationSetup,
 };
 
 async function probeFile(p) {

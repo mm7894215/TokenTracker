@@ -66,6 +66,7 @@ export const PROVIDER_LIMIT_SPECS = {
     },
   },
   kiro: {
+    extra: "kiro_credits",
     windows(data) {
       return [
         { key: "month", labelKey: "limits.label.kiro_month", window: data.primary_window },
@@ -147,6 +148,19 @@ export const PROVIDER_LIMIT_SPECS = {
       ];
     },
   },
+  qoder: {
+    windows(data) {
+      return [
+        { key: "credits", labelKey: "limits.label.qoder_credits", window: data.primary_window },
+        {
+          key: "ultimate",
+          labelKey: "limits.label.qoder_ultimate",
+          window: data.secondary_window,
+          timeKind: "expiry",
+        },
+      ];
+    },
+  },
 };
 
 /** Static copy() anchors for validate:copy — labels resolve at runtime via spec.labelKey. */
@@ -191,5 +205,7 @@ export function usageLimitsLabelCopyAnchor() {
     copy("limits.label.opencode_go_5h"),
     copy("limits.label.opencode_go_weekly"),
     copy("limits.label.opencode_go_monthly"),
+    copy("limits.label.qoder_credits"),
+    copy("limits.label.qoder_ultimate"),
   ];
 }

@@ -145,6 +145,7 @@ export function LimitsPage() {
                 copilot={usageLimits?.copilot}
                 zcode={usageLimits?.zcode}
                 opencodeGo={usageLimits?.opencodeGo}
+                qoder={usageLimits?.qoder}
                 order={prefs.order}
                 visibility={prefs.visibility}
                 displayMode={prefs.displayMode}

@@ -5,7 +5,7 @@ const path = require("node:path");
 const pkg = require("../../package.json");
 const { readJson, writeJson } = require("./fs");
 
-const STAR_CTA_URL = "https://github.com/mm7894215/TokenTracker";
+const STAR_CTA_URL = "https://github.com/xiufengsun/TokenTracker";
 const STAR_CTA_STATE_FILE = "star-cta.json";
 
 function isTruthyFlag(value) {

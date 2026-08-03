@@ -29,6 +29,53 @@ OpenClaw requires `allowConversationAccess` before non-bundled plugins can regis
 
 The plugin only passes session identifiers, model names, timestamps, and token counters into TokenTracker. It never reads or transmits prompt or response content.
 
+## Passive transcript scanning (fallback for missed sessions)
+
+The session plugin is the fast path, but it can't cover every case: messages that
+arrive through a channel (for example a WeChat ClawBot) may carry a session key the
+plugin can't map back to a `sessions.json` entry, the gateway may not have loaded the
+plugin yet, or a newer OpenClaw build may keep runtime rows in SQLite and only leave
+archived transcripts on disk. In all of those cases usage exists but would otherwise
+show as 0.
+
+To close that gap, a full `tokentracker sync` also passively scans every transcript
+under `~/.openclaw/agents/*/` and counts their token usage directly — no plugin event
+required. The per-event identity dedup makes the plugin path and the passive scan
+idempotent, so a session counted by both is never double counted, and the
+`sessions.json` totals fallback defers to real transcript events once it sees them.
+
+Scanned locations, per agent:
+
+- `sessions/*.jsonl` — the live transcripts.
+- `sessions/*.jsonl.reset.<iso>` and `*.jsonl.deleted.<ts>` — archives left behind by
+  session resets and deletes.
+- `session-sqlite-import-archive/*.jsonl` — where the SQLite migration moves
+  still-hot transcripts. Note this is a *sibling* of `sessions/`, not a child.
+
+### Windows: the state directory is usually inside WSL
+
+OpenClaw's recommended Windows install (Windows Hub → "Set up locally") provisions an
+app-owned `OpenClawGateway` WSL distro and runs the gateway inside it. `.openclaw` then
+lives on the distro's Linux home and `C:\Users\<you>\.openclaw` stays empty. TokenTracker
+probes the WSL distro home on Windows for exactly this reason. Only the native path is
+scanned when `TOKENTRACKER_OPENCLAW_HOME`, `OPENCLAW_HOME` or `OPENCLAW_STATE_DIR` is set —
+an explicit override means you have told us where to look.
+
+If usage still reads 0 on Windows, check where the gateway actually runs:
+
+```bash
+openclaw gateway status --json
+openclaw --version
+```
+
+### Known expiry: the SQLite flip
+
+Upstream moved runtime session and transcript rows into
+`~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite`, leaving `sessions/` as a
+legacy/archive location. That change is not in the stable line yet, so JSONL scanning
+still covers current installs — but once it ships, transcripts alone will stop reflecting
+new usage and this reader will need a SQLite path.
+
 ## Verifying the install
 
 Run:

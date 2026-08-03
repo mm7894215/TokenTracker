@@ -384,12 +384,12 @@
   "pet.import.subtitle": "粘贴 codex-pets.net 链接，或选择 .zip 宠物包。",
   "pet.import.add": "添加",
   "pet.import.zip": "选择宠物包",
-  "pet.import.remove": "移除已导入宠物",
+  "pet.import.remove": "移除宠物",
   "pet.import.success": "宠物已导入并选中。",
   "pet.import.failed": "无法导入这个宠物。",
   "pet.import.busy": "正在导入…",
   "pet.format.v2": "V2",
-  "pet.import.removed": "已移除导入的宠物。",
+  "pet.import.removed": "已移除宠物。",
   "pet.import.url_label": "Codex Pets 链接或宠物 ID",
   "pet.codex.title": "从 Codex 导入",
   "pet.codex.subtitle": "把你在 Codex App 里已有的宠物导入进来——包括 Codex 自带的内置角色。",
@@ -536,5 +536,12 @@
   "wrapped.highlight.day": "最忙碌的一天是 {{day}}（{{tokens}} Token）。",
   "wrapped.highlight.hour": "你的高效时段集中在 UTC {{hour}}:00 左右。",
   "wrapped.highlight.streak": "最长连续活跃：连续 {{days}} 天使用 AI 编程。",
-  "wrapped.highlight.tools": "你使用了 {{count}} 款不同的 AI 工具，涉猎广泛。"
+  "wrapped.highlight.tools": "你使用了 {{count}} 款不同的 AI 工具，涉猎广泛。",
+  "dashboard.context_breakdown.empty_grok": "所选时间段内没有 Grok Build 活动。",
+  "dashboard.context_breakdown.error_grok": "无法读取此视图所需的 Grok Build 日志。",
+  "dashboard.context_breakdown.footnote_grok": "Grok 在此使用互不重叠的 Token 分类。工具和命令执行下钻数据，是对同一批对话轮次进行的独立启发式归因，以 turn_completed.usage 为权威总量。",
+  "dashboard.context_breakdown.heading": "上下文细分",
+  "dashboard.context_breakdown.heading_claude": "Claude 上下文细分",
+  "dashboard.context_breakdown.heading_codex": "Codex 上下文细分",
+  "dashboard.context_breakdown.heading_grok": "Grok 上下文细分"
 }

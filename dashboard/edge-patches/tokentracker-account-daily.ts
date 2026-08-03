@@ -56,31 +56,58 @@ function b64urlToBytes(s: string): Uint8Array<ArrayBuffer> {
 }
 
 /**
- * Verify HS256 JWT against JWT_SECRET and return its sub. Mirrors the helper
- * in tokentracker-device-token-issue.ts. Returns null on any failure — caller
- * surfaces that as 401. InsForge does NOT validate JWTs at the gateway, so
- * exposing per-user data without local verification lets anyone forge
- * {"sub":"<victim>"} and read another user's data.
+ * Verify legacy HS256 and current RS256 InsForge JWTs locally. InsForge 2.2.2+
+ * signs newly refreshed access tokens with RS256/JWT_PUBLIC_KEY while existing
+ * sessions may still present HS256/JWT_SECRET tokens during the transition.
+ * Returns null on any failure so an unverified sub can never reach user data.
  */
 async function verifiedUserIdFromJwt(authHeader: string | null): Promise<string | null> {
   if (!authHeader) return null;
   const token = authHeader.replace(/^Bearer\s+/i, "").trim();
   if (!token) return null;
-  const secret = Deno.env.get("JWT_SECRET");
-  if (!secret) return null;
   const parts = token.split(".");
   if (parts.length !== 3) return null;
   try {
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(secret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["verify"],
-    );
+    const header = JSON.parse(
+      new TextDecoder().decode(b64urlToBytes(parts[0])),
+    ) as Record<string, unknown>;
     const data = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
     const sig = b64urlToBytes(parts[2]);
-    const ok = await crypto.subtle.verify("HMAC", key, sig, data);
+    let ok = false;
+    if (header.alg === "HS256") {
+      const secret = Deno.env.get("JWT_SECRET");
+      if (!secret) return null;
+      const key = await crypto.subtle.importKey(
+        "raw",
+        new TextEncoder().encode(secret),
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["verify"],
+      );
+      ok = await crypto.subtle.verify("HMAC", key, sig, data);
+    } else if (header.alg === "RS256") {
+      const publicKeyPem = Deno.env.get("JWT_PUBLIC_KEY");
+      if (!publicKeyPem) return null;
+      const publicKeyDer = Uint8Array.from(
+        atob(publicKeyPem.replace(/-----[^-]+-----|\s/g, "")),
+        (char) => char.charCodeAt(0),
+      );
+      const key = await crypto.subtle.importKey(
+        "spki",
+        publicKeyDer,
+        { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+        false,
+        ["verify"],
+      );
+      ok = await crypto.subtle.verify(
+        "RSASSA-PKCS1-v1_5",
+        key,
+        sig,
+        data,
+      );
+    } else {
+      return null;
+    }
     if (!ok) return null;
     const payload = JSON.parse(new TextDecoder().decode(b64urlToBytes(parts[1]))) as Record<string, unknown>;
     if (typeof payload.exp === "number" && Date.now() / 1000 > payload.exp) return null;

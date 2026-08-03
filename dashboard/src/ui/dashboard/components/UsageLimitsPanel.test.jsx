@@ -36,6 +36,7 @@ beforeEach(() => {
 
 afterEach(() => {
   getContextSpy?.mockRestore();
+  vi.useRealTimers();
 });
 
 describe("UsageLimitsPanel", () => {
@@ -118,6 +119,54 @@ describe("UsageLimitsPanel", () => {
     expect(screen.getByText("Not connected")).toBeInTheDocument();
   });
 
+  it("shows Kiro credits observed from local usage_summary records", () => {
+    const { rerender } = render(
+      <UsageLimitsPanel
+        kiro={{
+          configured: true,
+          error: null,
+          tracked_credits: 1796.45,
+          tracked_credit_records: 193,
+          tracked_credit_sessions: 19,
+          primary_window: { used_percent: 25, reset_at: "2026-08-01T00:00:00.000Z" },
+        }}
+        order={["kiro"]}
+      />,
+    );
+
+    expect(screen.getByText("Kiro")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        copy("limits.label.kiro_tracked_credits", {
+          credits: "1,796.45",
+          count: 193,
+        }),
+      ),
+    ).toBeInTheDocument();
+
+    rerender(
+      <UsageLimitsPanel
+        kiro={{
+          configured: true,
+          error: "Kiro CLI timed out.",
+          tracked_credits: 1796.45,
+          tracked_credit_records: 193,
+          tracked_credit_sessions: 19,
+        }}
+        order={["kiro"]}
+      />,
+    );
+    expect(screen.getByText(/Kiro CLI timed out/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        copy("limits.label.kiro_tracked_credits", {
+          credits: "1,796.45",
+          count: 193,
+        }),
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("renders OpenCode Go 5h / Weekly / Monthly windows", () => {
     const { rerender } = render(
       <UsageLimitsPanel
@@ -162,6 +211,110 @@ describe("UsageLimitsPanel", () => {
     expect(
       screen.getByText(/Could not parse any known OpenCode Go dashboard usage windows/),
     ).toBeInTheDocument();
+  });
+
+  it("shows an inactive OpenCode Go status without rendering historical bars", () => {
+    render(
+      <UsageLimitsPanel
+        opencodeGo={{
+          configured: true,
+          error: null,
+          subscription_status: "inactive",
+          primary_window: { used_percent: 12, reset_at: "2026-06-24T20:00:00.000Z" },
+        }}
+        order={["opencodeGo"]}
+      />,
+    );
+
+    expect(screen.getByText("OpenCode Go")).toBeInTheDocument();
+    expect(screen.getByText("OpenCode Go subscription is inactive")).toBeInTheDocument();
+    expect(screen.queryByText("5h")).not.toBeInTheDocument();
+    expect(screen.queryByText("12%")).not.toBeInTheDocument();
+  });
+
+  it("renders Qoder credits with exact amounts in the hover detail", () => {
+    render(
+      <UsageLimitsPanel
+        qoder={{
+          configured: true,
+          error: null,
+          primary_window: {
+            used_percent: 25,
+            used_credits: 25,
+            limit_credits: 100,
+            remaining_credits: 75,
+            reset_at: "2026-08-01T00:00:00.000Z",
+          },
+        }}
+        order={["qoder"]}
+      />,
+    );
+
+    expect(screen.getByText("Qoder")).toBeInTheDocument();
+    expect(screen.getByText("Credits")).toBeInTheDocument();
+    expect(screen.getByText("25%")).toBeInTheDocument();
+    expect(screen.getByRole("tooltip")).toHaveTextContent(/25.*100.*75/);
+  });
+
+  it("renders Qoder Ultimate Free Calls separately from Plan Credits", () => {
+    render(
+      <UsageLimitsPanel
+        qoder={{
+          configured: true,
+          error: null,
+          primary_window: {
+            used_percent: 0,
+            used_credits: 0,
+            limit_credits: 0,
+            remaining_credits: 0,
+            reset_at: null,
+          },
+          secondary_window: {
+            used_percent: 65.75,
+            used_credits: 789,
+            limit_credits: 1200,
+            remaining_credits: 411,
+            reset_at: "2026-07-30T13:19:00.000Z",
+            unit: "calls",
+          },
+        }}
+        order={["qoder"]}
+      />,
+    );
+
+    expect(screen.getByText("Credits")).toBeInTheDocument();
+    expect(screen.getByText("Ultimate Free Calls")).toBeInTheDocument();
+    expect(screen.getByText("66%")).toBeInTheDocument();
+    expect(screen.getAllByRole("tooltip").some((tip) => /789[\s\S]*1200[\s\S]*411/.test(tip.textContent))).toBe(true);
+  });
+
+  it("marks Qoder last-good limits as cached with their capture age", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-26T10:10:00.000Z"));
+    render(
+      <UsageLimitsPanel
+        qoder={{
+          configured: true,
+          error: null,
+          cached: true,
+          stale: true,
+          cached_at: "2026-07-26T10:00:00.000Z",
+          secondary_window: {
+            used_percent: 75,
+            used_credits: 900,
+            limit_credits: 1200,
+            remaining_credits: 300,
+            reset_at: "2026-07-30T15:59:00.000Z",
+            unit: "calls",
+          },
+        }}
+        order={["qoder"]}
+      />,
+    );
+
+    const badge = screen.getAllByText(/^cached/i).find((node) => /10m/i.test(node.textContent));
+    expect(badge).toHaveTextContent(/10m/i);
+    expect(screen.getByText("Cached limits. Run Qoder to refresh.")).toBeInTheDocument();
   });
 
   it("appends plan_label to the provider title when present", () => {

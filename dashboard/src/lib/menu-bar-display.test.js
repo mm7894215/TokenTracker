@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MENU_BAR_ITEMS,
   FALLBACK_MENU_BAR_ITEMS,
+  MENU_BAR_NONE_ID,
   normalizeMenuBarItems,
 } from "./menu-bar-display.js";
 
@@ -28,5 +29,16 @@ describe("normalizeMenuBarItems", () => {
   it("caps selections to the native menu bar width limit", () => {
     const ids = FALLBACK_MENU_BAR_ITEMS.map((item) => item.id);
     expect(normalizeMenuBarItems(ids, FALLBACK_MENU_BAR_ITEMS, 3)).toEqual(ids.slice(0, 3));
+  });
+
+  it("keeps the 'none' sentinel in either slot and allows it in both (issue 379)", () => {
+    expect(normalizeMenuBarItems(["claude5h", MENU_BAR_NONE_ID])).toEqual([
+      "claude5h",
+      MENU_BAR_NONE_ID,
+    ]);
+    expect(normalizeMenuBarItems([MENU_BAR_NONE_ID, MENU_BAR_NONE_ID])).toEqual([
+      MENU_BAR_NONE_ID,
+      MENU_BAR_NONE_ID,
+    ]);
   });
 });

@@ -18,7 +18,7 @@ internal static class Constants
     public const int StartupTimeoutSeconds = 20;
 
     public const string AppDisplayName = "TokenTracker";
-    public const string GitHubUrl = "https://github.com/mm7894215/TokenTracker";
+    public const string GitHubUrl = "https://github.com/xiufengsun/TokenTracker";
 
     /// <summary>HKCU Run-key value name used for launch-at-startup.</summary>
     public const string StartupRegistryValueName = "TokenTracker";

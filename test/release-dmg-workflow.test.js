@@ -164,6 +164,38 @@ test("published releases are immutable and builds use the version tag", () => {
   );
 });
 
+test("missing releases cannot be recreated from an existing version tag", () => {
+  const content = loadWorkflow();
+  const missingReleaseGuard = content.indexOf(
+    "Release $tag is missing, but its tag already exists"
+  );
+  const createDraft = content.indexOf(
+    'gh release create "$tag" --verify-tag --draft'
+  );
+  // The fresh-create path's tag creation is the LAST git/refs POST; the first
+  // one belongs to the draft-reuse branch and legitimately precedes the guard.
+  const createTagRef = content.lastIndexOf("repos/$GITHUB_REPOSITORY/git/refs");
+
+  assert.ok(
+    missingReleaseGuard > 0,
+    "a missing release with an existing tag must be rejected"
+  );
+  assert.ok(
+    content.includes(
+      "This version is already consumed; bump the version instead of recreating it."
+    ),
+    "the failure must require a new version"
+  );
+  assert.ok(
+    missingReleaseGuard < createTagRef,
+    "the existing-tag guard must run before creating a replacement tag ref"
+  );
+  assert.ok(
+    missingReleaseGuard < createDraft,
+    "the existing-tag guard must run before creating a replacement release"
+  );
+});
+
 test("homebrew tap is notified only after publish (not mid-build)", () => {
   const content = loadWorkflow();
   // The dispatch must come AFTER the un-draft, so the tap fetches a public,

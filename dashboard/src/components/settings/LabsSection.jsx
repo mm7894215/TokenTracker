@@ -3,6 +3,7 @@ import { copy } from "../../lib/copy";
 import { SectionCard, SettingsRow, ToggleSwitch } from "./Controls.jsx";
 import { useQualityPerDollarPref } from "../../hooks/use-quality-per-dollar-pref.js";
 import { useSessionEfficiencyPref } from "../../hooks/use-session-efficiency-pref.js";
+import { useNativeSettings } from "../../hooks/use-native-settings.js";
 
 function BetaLabel({ labelKey }) {
   return (
@@ -22,9 +23,43 @@ function BetaLabel({ labelKey }) {
 export function LabsSection() {
   const { enabled: qpdEnabled, toggle: toggleQpd } = useQualityPerDollarPref();
   const { enabled: sessionsEnabled, toggle: toggleSessions } = useSessionEfficiencyPref();
+  // Dynamic Island is a native macOS feature: the toggle drives the Swift app
+  // through the NativeBridge (not localStorage), and only renders when the
+  // macOS bridge advertises support (Windows/browser never send the flag).
+  const { available: nativeAvailable, settings: nativeSettings, setSetting } = useNativeSettings();
+  const islandSupported = nativeAvailable && Boolean(nativeSettings?.dynamicIslandSupported);
+  const islandEnabled = Boolean(nativeSettings?.dynamicIslandEnabled);
 
   return (
     <SectionCard title={copy("settings.section.labs")}>
+      {islandSupported && (
+        <>
+          <SettingsRow
+            label={<BetaLabel labelKey="settings.labs.island.label" />}
+            hint={copy("settings.labs.island.hint")}
+            control={
+              <ToggleSwitch
+                checked={islandEnabled}
+                onChange={() => setSetting("dynamicIslandEnabled", !islandEnabled)}
+                ariaLabel={copy("settings.labs.island.aria")}
+              />
+            }
+          />
+          {islandEnabled && (
+            <SettingsRow
+              label={copy("settings.labs.island_hide_menubar.label")}
+              hint={copy("settings.labs.island_hide_menubar.hint")}
+              control={
+                <ToggleSwitch
+                  checked={Boolean(nativeSettings?.hideMenuBarIcon)}
+                  onChange={() => setSetting("hideMenuBarIcon", !nativeSettings?.hideMenuBarIcon)}
+                  ariaLabel={copy("settings.labs.island_hide_menubar.aria")}
+                />
+              }
+            />
+          )}
+        </>
+      )}
       <SettingsRow
         label={<BetaLabel labelKey="settings.labs.qpd.label" />}
         hint={copy("settings.labs.qpd.hint")}

@@ -1,7 +1,7 @@
 # Token Tracker LLMs Index
 
 Token Tracker is a free, open-source, local-first AI coding usage and cost
-tracker for 27 tools. Its distinctive desktop experience includes a pixel pet
+tracker for 29 tools. Its distinctive desktop experience includes a pixel pet
 powered by real token activity, four desktop widgets, and achievements. The
 same data powers a cross-platform CLI, a native macOS menu bar app, a native
 Windows system tray app, and a dashboard. It records token counts and
@@ -12,18 +12,18 @@ timestamps, never prompts, responses, or source code.
 
 ## Priority URLs
 - [Homepage](https://www.tokentracker.cc/)
-- [GitHub repository](https://github.com/mm7894215/TokenTracker)
+- [GitHub repository](https://github.com/xiufengsun/TokenTracker)
 - [Leaderboard](https://www.tokentracker.cc/leaderboard)
 - [Claude IP check](https://www.tokentracker.cc/ip-check)
 
 ## Product
 - Install command: `npx tokentracker-cli`
-- macOS app: `brew install --cask mm7894215/tokentracker/tokentracker`
+- macOS app: `brew install --cask xiufengsun/tokentracker/tokentracker`
 - Windows app: `TokenTracker-Setup.exe` from the latest GitHub Release
 - [npm package](https://www.npmjs.com/package/tokentracker-cli)
-- [Latest release](https://github.com/mm7894215/TokenTracker/releases/latest)
+- [Latest release](https://github.com/xiufengsun/TokenTracker/releases/latest)
 
-## Supported AI coding tools (27)
+## Supported AI coding tools (29)
 - Claude Code
 - Codex CLI
 - Cursor
@@ -50,7 +50,9 @@ timestamps, never prompts, responses, or source code.
 - Droid (Factory)
 - Mimo Code
 - ZCode
+- Qoder
 - AnythingLLM Desktop
+- Claude Science
 
 ## Capabilities
 - Desktop pet that reacts to real token burn, streaks, and rest
@@ -75,4 +77,4 @@ limits, projects, heatmap, skills, achievements, widgets, and settings.
 - Token counts only; prompts and conversation content are never collected.
 
 ## Contact
-- [GitHub issues](https://github.com/mm7894215/TokenTracker/issues)
+- [GitHub issues](https://github.com/xiufengsun/TokenTracker/issues)

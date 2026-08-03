@@ -53,21 +53,25 @@ async function verifyCallerUserId(req: Request): Promise<string | null> {
   const auth = req.headers.get("Authorization") ?? "";
   const token = auth.replace(/^Bearer\s+/i, "").trim();
   if (!token) return null;
-  const secret = Deno.env.get("JWT_SECRET");
-  if (!secret) return null;
   const parts = token.split(".");
   if (parts.length !== 3) return null;
   try {
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(secret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["verify"],
-    );
+    const header = JSON.parse(new TextDecoder().decode(b64urlToBytes(parts[0]))) as Record<string, unknown>;
     const data = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
     const sig = b64urlToBytes(parts[2]);
-    const ok = await crypto.subtle.verify("HMAC", key, sig, data);
+    let ok = false;
+    if (header.alg === "HS256") {
+      const secret = Deno.env.get("JWT_SECRET");
+      if (!secret) return null;
+      const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+      ok = await crypto.subtle.verify("HMAC", key, sig, data);
+    } else if (header.alg === "RS256") {
+      const publicKeyPem = Deno.env.get("JWT_PUBLIC_KEY");
+      if (!publicKeyPem) return null;
+      const publicKeyDer = Uint8Array.from(atob(publicKeyPem.replace(/-----[^-]+-----|\s/g, "")), (char) => char.charCodeAt(0));
+      const key = await crypto.subtle.importKey("spki", publicKeyDer, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+      ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, sig, data);
+    } else return null;
     if (!ok) return null;
     const payloadStr = new TextDecoder().decode(b64urlToBytes(parts[1]));
     const payload = JSON.parse(payloadStr) as Record<string, unknown>;
@@ -417,10 +421,53 @@ function canonicalSource(s: string) {
 const ACCOUNT_LEVEL_SOURCES = new Set<string>(["cursor"]);
 
 // ─────────────────────────── Window bounds ──────────────────────────
-function windowBoundsForPeriod(period: string): { from_day: string; to_day: string } {
-  const now = new Date();
+function normalizeTimeZone(value: string | null): string | null {
+  const timeZone = value?.trim();
+  if (!timeZone) return null;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone }).format(new Date(0));
+    return timeZone;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeTimeZoneOffset(value: string | null): number | null {
+  if (value == null || value === "") return null;
+  const offset = Number(value);
+  if (!Number.isFinite(offset) || Math.abs(offset) > 14 * 60) return null;
+  return Math.trunc(offset);
+}
+
+function zonedDayKey(date: Date, timeZone: string | null, offsetMinutes: number | null): string {
+  if (timeZone) {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(date);
+    const year = parts.find((part) => part.type === "year")?.value;
+    const month = parts.find((part) => part.type === "month")?.value;
+    const day = parts.find((part) => part.type === "day")?.value;
+    if (year && month && day) return `${year}-${month}-${day}`;
+  }
+  const shifted = offsetMinutes == null
+    ? date
+    : new Date(date.getTime() + offsetMinutes * 60_000);
+  return shifted.toISOString().slice(0, 10);
+}
+
+function addCalendarDays(day: string, amount: number): string {
+  const date = new Date(`${day}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + amount);
+  return date.toISOString().slice(0, 10);
+}
+
+function windowBoundsForPeriod(period: string, todayDay: string): { from_day: string; to_day: string } {
+  const now = new Date(`${todayDay}T00:00:00Z`);
   if (period === "week") {
-    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const d = new Date(now);
     d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)) /* ISO Mon-start, matches leaderboard-refresh+dashboard */;
     const from = d.toISOString().slice(0, 10);
     d.setUTCDate(d.getUTCDate() + 6);
@@ -438,14 +485,13 @@ function windowBoundsForPeriod(period: string): { from_day: string; to_day: stri
   heatmapStart.setUTCDate(heatmapStart.getUTCDate() - 364);
   return {
     from_day: heatmapStart.toISOString().slice(0, 10),
-    to_day: now.toISOString().slice(0, 10),
+    to_day: todayDay,
   };
 }
 
 /** Compute current & longest consecutive-day streaks within a date set. */
-function computeStreak(daysWithActivity: Set<string>): { current_days: number; longest_days: number } {
-  const today = new Date();
-  const todayUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+function computeStreak(daysWithActivity: Set<string>, todayDay: string): { current_days: number; longest_days: number } {
+  const todayUTC = new Date(`${todayDay}T00:00:00Z`);
   // Current: start from today; if today has nothing, allow yesterday as starting point.
   let cursor = new Date(todayUTC);
   let current = 0;
@@ -476,7 +522,14 @@ function computeStreak(daysWithActivity: Set<string>): { current_days: number; l
 
 // ─────────────────────────── Main handler ──────────────────────────
 // deno-lint-ignore no-explicit-any
-async function fetchDailyGroupedRows(client: any, userId: string, rangeStartIso: string, rangeEndIso: string): Promise<GroupedRow[]> {
+async function fetchDailyGroupedRows(
+  client: any,
+  userId: string,
+  rangeStartIso: string,
+  rangeEndIso: string,
+  timeZone: string | null,
+  timeZoneOffsetMinutes: number | null,
+): Promise<GroupedRow[]> {
   // The two-class cross-device aggregation runs in Postgres
   // (account_usage_grouped), matching tokentracker-leaderboard-refresh.ts:
   //   * ACCOUNT-LEVEL sources (cursor): ONE canonical whole row per
@@ -507,8 +560,8 @@ async function fetchDailyGroupedRows(client: any, userId: string, rangeStartIso:
     p_from: rangeStartIso,
     p_to: rangeEndIso,
     p_trunc: "day",
-    p_tz: null,
-    p_offset_min: null,
+    p_tz: timeZone,
+    p_offset_min: timeZoneOffsetMinutes,
   };
   const { data, error } = hasActiveDevice
     ? await client.database.rpc("account_usage_grouped_cached", { ...common, p_device_id: null })
@@ -525,6 +578,10 @@ export default async function (req: Request): Promise<Response> {
   const userId = url.searchParams.get("user_id");
   const periodInput = url.searchParams.get("period") || "week";
   const period = ["week", "month", "total"].includes(periodInput) ? periodInput : "week";
+  const timeZone = normalizeTimeZone(url.searchParams.get("tz"));
+  const timeZoneOffsetMinutes = normalizeTimeZoneOffset(url.searchParams.get("tz_offset_minutes"));
+  const now = new Date();
+  const todayDay = zonedDayKey(now, timeZone, timeZoneOffsetMinutes);
   if (!userId) return json({ error: "user_id is required" }, 400);
   if (BLOCKED_LEADERBOARD_USER_IDS.has(userId)) return json({ error: "Not found" }, 404);
 
@@ -607,9 +664,10 @@ export default async function (req: Request): Promise<Response> {
   // latest generated_at row for the period regardless of window returned the
   // PREVIOUS week/month's rank next to freshly-computed current-window totals
   // right after a window rollover ("Rank #3, 0 tokens").
-  const periodBounds = windowBoundsForPeriod(period);
-  let snapFromDay = periodBounds.from_day;
-  let snapToDay = periodBounds.to_day;
+  const periodBounds = windowBoundsForPeriod(period, todayDay);
+  const snapshotBounds = windowBoundsForPeriod(period, now.toISOString().slice(0, 10));
+  let snapFromDay = snapshotBounds.from_day;
+  let snapToDay = snapshotBounds.to_day;
   if (period === "total") {
     // total snapshots are keyed (1970-01-01, <refresh day>) — mirror the
     // reader (tokentracker-leaderboard.ts) and resolve the latest pair.
@@ -637,28 +695,28 @@ export default async function (req: Request): Promise<Response> {
   const snap = (snapRow || null) as { rank?: number | null; display_name?: string | null; avatar_url?: string | null; generated_at?: string | null } | null;
 
   // Heatmap window: trailing 365 days (always).
-  const now = new Date();
-  const heatmapEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
-  const heatmapStart = new Date(heatmapEnd);
-  heatmapStart.setUTCDate(heatmapStart.getUTCDate() - 365);
+  const heatmapEndDay = addCalendarDays(todayDay, 1);
+  const heatmapStartDay = addCalendarDays(heatmapEndDay, -365);
   // Period range may be wider than 365d ("total" maps to 365d here); we scan
   // the heatmap window and slice the period window from the same map.
-  const periodStartIso = `${periodBounds.from_day}T00:00:00Z`;
-  const periodEndIso = (() => {
-    const d = new Date(periodBounds.to_day + "T00:00:00Z");
-    d.setUTCDate(d.getUTCDate() + 1);
-    return d.toISOString();
-  })();
-  const scanStartIso = heatmapStart < new Date(periodStartIso)
-    ? heatmapStart.toISOString()
-    : periodStartIso;
-  const scanEndIso = heatmapEnd > new Date(periodEndIso)
-    ? heatmapEnd.toISOString()
-    : periodEndIso;
+  const periodEndDay = addCalendarDays(periodBounds.to_day, 1);
+  const scanStartDay = heatmapStartDay < periodBounds.from_day ? heatmapStartDay : periodBounds.from_day;
+  const scanEndDay = heatmapEndDay > periodEndDay ? heatmapEndDay : periodEndDay;
+  // Widen one UTC day on both sides so every IANA/offset-shifted local bucket
+  // is present before the day-key filters below trim the response.
+  const scanStartIso = `${addCalendarDays(scanStartDay, -1)}T00:00:00Z`;
+  const scanEndIso = `${addCalendarDays(scanEndDay, 1)}T00:00:00Z`;
 
   let groupedRows: GroupedRow[];
   try {
-    groupedRows = await fetchDailyGroupedRows(client, userId, scanStartIso, scanEndIso);
+    groupedRows = await fetchDailyGroupedRows(
+      client,
+      userId,
+      scanStartIso,
+      scanEndIso,
+      timeZone,
+      timeZoneOffsetMinutes,
+    );
   } catch (e) {
     return json({ error: (e as Error).message || "scan failed" }, 500);
   }
@@ -666,9 +724,6 @@ export default async function (req: Request): Promise<Response> {
   // ── Aggregate into the modal's shape. Two parallel passes:
   //   - period-scoped: totals/by_provider/best_day/favorite_model/active_days/streak/daily_trend
   //   - 365d heatmap: per-day token totals
-  const periodFrom = new Date(periodStartIso);
-  const periodTo = new Date(periodEndIso);
-
   const heatmapByDay = new Map<string, number>();
   // Per-day model breakdown for the hover tooltip. Same shape the dashboard
   // ActivityHeatmap consumes (cell.models = { [model_name]: tokens }).
@@ -683,12 +738,9 @@ export default async function (req: Request): Promise<Response> {
   for (const row of groupedRows) {
     const day = String(row.bucket || "");
     if (!day) continue;
-    // Rows are already day-grained (UTC), and every window bound below is
-    // day-aligned, so a day-level comparison matches the old hour-level one.
-    const dayMs = Date.parse(`${day}T00:00:00Z`);
     const tokens = Number(row.total_tokens) || 0;
     const cost = computeRowCost(row);
-    if (dayMs >= heatmapStart.getTime() && dayMs < heatmapEnd.getTime()) {
+    if (day >= heatmapStartDay && day < heatmapEndDay) {
       heatmapByDay.set(day, (heatmapByDay.get(day) || 0) + tokens);
       if (row.model && tokens > 0) {
         let dayModels = heatmapModelsByDay.get(day);
@@ -699,7 +751,7 @@ export default async function (req: Request): Promise<Response> {
         dayModels.set(row.model, (dayModels.get(row.model) || 0) + tokens);
       }
     }
-    if (dayMs >= periodFrom.getTime() && dayMs < periodTo.getTime()) {
+    if (day >= periodBounds.from_day && day < periodEndDay) {
       periodByDay.set(day, (periodByDay.get(day) || 0) + tokens);
       periodByDayCost.set(day, (periodByDayCost.get(day) || 0) + cost);
       const src = canonicalSource(row.source);
@@ -713,9 +765,11 @@ export default async function (req: Request): Promise<Response> {
     }
   }
 
-  // best_day in period
+  // best_day in period. A grouped zero row is not activity and must not turn
+  // an otherwise empty profile into a synthetic "best" day.
   let bestDay: { date: string; total_tokens: number; estimated_cost_usd: number } | null = null;
   for (const [day, tokens] of periodByDay.entries()) {
+    if (tokens <= 0) continue;
     if (!bestDay || tokens > bestDay.total_tokens) {
       bestDay = { date: day, total_tokens: tokens, estimated_cost_usd: periodByDayCost.get(day) || 0 };
     }
@@ -730,12 +784,16 @@ export default async function (req: Request): Promise<Response> {
   }
 
   // streak (over period — set of active day strings)
-  const activeDaySet = new Set(periodByDay.keys());
-  const streak = computeStreak(activeDaySet);
+  const activeDaySet = new Set(
+    Array.from(periodByDay.entries())
+      .filter(([, tokens]) => tokens > 0)
+      .map(([day]) => day),
+  );
+  const streak = computeStreak(activeDaySet, todayDay);
 
   // daily_trend (period, dense — include 0 days so frontend can chart cleanly)
   const dailyTrend: Array<{ date: string; total_tokens: number }> = [];
-  for (let cur = new Date(periodFrom); cur < periodTo; cur.setUTCDate(cur.getUTCDate() + 1)) {
+  for (let cur = new Date(`${periodBounds.from_day}T00:00:00Z`); cur < new Date(`${periodEndDay}T00:00:00Z`); cur.setUTCDate(cur.getUTCDate() + 1)) {
     const day = cur.toISOString().slice(0, 10);
     dailyTrend.push({ date: day, total_tokens: periodByDay.get(day) || 0 });
   }
@@ -743,7 +801,7 @@ export default async function (req: Request): Promise<Response> {
   // per-cell model breakdown tooltip. Days with no activity get no models
   // key (the heatmap component already handles that gracefully).
   const heatmap: Array<{ date: string; total_tokens: number; models?: Record<string, number> }> = [];
-  for (let cur = new Date(heatmapStart); cur < heatmapEnd; cur.setUTCDate(cur.getUTCDate() + 1)) {
+  for (let cur = new Date(`${heatmapStartDay}T00:00:00Z`); cur < new Date(`${heatmapEndDay}T00:00:00Z`); cur.setUTCDate(cur.getUTCDate() + 1)) {
     const day = cur.toISOString().slice(0, 10);
     const cell: { date: string; total_tokens: number; models?: Record<string, number> } = {
       date: day,
@@ -790,6 +848,8 @@ export default async function (req: Request): Promise<Response> {
       kind: period,
       from: periodBounds.from_day,
       to: periodBounds.to_day,
+      time_zone: timeZone,
+      time_zone_offset_minutes: timeZoneOffsetMinutes,
       generated_at: snap?.generated_at || new Date().toISOString(),
     },
     totals: {

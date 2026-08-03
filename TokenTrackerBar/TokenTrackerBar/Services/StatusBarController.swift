@@ -31,6 +31,7 @@ final class StatusBarController: NSObject {
     private let serverManager: ServerManager
     private let launchAtLoginManager: LaunchAtLoginManager
     private let desktopPetController: DesktopPetWindowController
+    private let dynamicIslandController: DynamicIslandController
     private var animator: MenuBarAnimator?
     private let queueActivityMonitor = QueueActivityMonitor()
     private let accountUploadMonitor = QueueActivityMonitor(
@@ -50,6 +51,7 @@ final class StatusBarController: NSObject {
     private let menuBarIconSize = NSSize(width: 22, height: 22)
     private let emptyAttributedTitle = NSAttributedString(string: "")
     private var isUpdatingDisplay = false
+    private var isHideIconPromptPending = false
 
     private static let showStatsKey = "MenuBarShowStats"
     private var showStats: Bool {
@@ -65,11 +67,13 @@ final class StatusBarController: NSObject {
     init(viewModel: DashboardViewModel,
          serverManager: ServerManager,
          launchAtLoginManager: LaunchAtLoginManager,
-         desktopPetController: DesktopPetWindowController) {
+         desktopPetController: DesktopPetWindowController,
+         dynamicIslandController: DynamicIslandController) {
         self.viewModel = viewModel
         self.serverManager = serverManager
         self.launchAtLoginManager = launchAtLoginManager
         self.desktopPetController = desktopPetController
+        self.dynamicIslandController = dynamicIslandController
         super.init()
 
         Self.instance = self
@@ -156,8 +160,76 @@ final class StatusBarController: NSObject {
                 guard let self else { return }
                 self.animator?.applyCurrentState()
                 self.updateStatsDisplay()
+                self.updateMenuBarIconVisibility()
             }
         }
+    }
+
+    static let hideMenuBarIconKey = "HideMenuBarIcon"
+    private static let hideIconPromptShownKey = "HideMenuBarIconPromptShown"
+
+    static func setMenuBarIconHidden(_ hidden: Bool) {
+        instance?.updateMenuBarIconVisibility(userRequestedHide: hidden)
+    }
+
+    /// One-time native prompt after the island is enabled: offer to hide the
+    /// menu bar icon so both surfaces don't crowd the menu bar.
+    static func offerHideIconPromptAfterIslandEnabled() {
+        instance?.maybeOfferHidingMenuBarIcon()
+    }
+
+    private func maybeOfferHidingMenuBarIcon() {
+        let defaults = UserDefaults.standard
+        let islandEnabled = defaults.bool(forKey: DynamicIslandController.enabledDefaultsKey)
+        let hideRequested = defaults.bool(forKey: Self.hideMenuBarIconKey)
+        guard !isHideIconPromptPending,
+              MenuBarSurfacePolicy.shouldOfferHidePrompt(
+                  promptShown: defaults.bool(forKey: Self.hideIconPromptShownKey),
+                  hideRequested: hideRequested,
+                  islandEnabled: islandEnabled
+              ) else { return }
+
+        // Let the island appear first so the prompt refers to something visible.
+        isHideIconPromptPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            guard let self else { return }
+            self.isHideIconPromptPending = false
+
+            let islandEnabled = defaults.bool(forKey: DynamicIslandController.enabledDefaultsKey)
+            let hideRequested = defaults.bool(forKey: Self.hideMenuBarIconKey)
+            guard MenuBarSurfacePolicy.shouldOfferHidePrompt(
+                promptShown: defaults.bool(forKey: Self.hideIconPromptShownKey),
+                hideRequested: hideRequested,
+                islandEnabled: islandEnabled
+            ) else { return }
+
+            defaults.set(true, forKey: Self.hideIconPromptShownKey)
+            let alert = NSAlert()
+            alert.messageText = Strings.alertHideIconTitle
+            alert.informativeText = Strings.alertHideIconMessage
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: Strings.alertHideIconConfirm)
+            alert.addButton(withTitle: Strings.alertHideIconKeep)
+            NSApp.activate(ignoringOtherApps: true)
+            if alert.runModal() == .alertFirstButtonReturn {
+                self.updateMenuBarIconVisibility(userRequestedHide: true)
+                NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
+                NativeBridge.shared.pushSettings()
+            }
+        }
+    }
+
+    func updateMenuBarIconVisibility(userRequestedHide: Bool? = nil) {
+        let hideRequested = userRequestedHide ?? UserDefaults.standard.bool(forKey: Self.hideMenuBarIconKey)
+        if let userRequestedHide {
+            UserDefaults.standard.set(userRequestedHide, forKey: Self.hideMenuBarIconKey)
+        }
+        let islandEnabled = UserDefaults.standard.bool(forKey: DynamicIslandController.enabledDefaultsKey)
+        // Never leave the user with zero UI: only hide menu bar icon if Dynamic Island is active.
+        statusItem.isVisible = MenuBarSurfacePolicy.isIconVisible(
+            hideRequested: hideRequested,
+            islandEnabled: islandEnabled
+        )
     }
 
     private func observeApplicationActivity() {
@@ -166,11 +238,15 @@ final class StatusBarController: NSObject {
             object: NSApp,
             queue: .main
         ) { [weak self] _ in
-            self?.closePopoverIfShown()
+            MainActor.assumeIsolated { self?.closePopoverIfShown() }
         }
     }
 
     // MARK: - Status Item
+
+    static var currentMenuBarIcon: NSImage? {
+        instance?.animator?.currentImage
+    }
 
     private func setupStatusItem() {
         guard let button = statusItem.button else { return }
@@ -182,11 +258,15 @@ final class StatusBarController: NSObject {
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         button.action = #selector(handleClick(_:))
         button.target = self
+        updateMenuBarIconVisibility()
 
         animator = MenuBarAnimator(button: button)
-        animator?.onImageUpdated = { [weak self] _ in
-            guard let self, self.showStats, !self.buildMenuBarDisplayValues().isEmpty else { return }
-            self.updateStatsDisplay()
+        animator?.onImageUpdated = { [weak self] image in
+            guard let self else { return }
+            if self.showStats, !self.buildMenuBarDisplayValues().isEmpty {
+                self.updateStatsDisplay()
+            }
+            NotificationCenter.default.post(name: .menuBarIconFrameUpdated, object: image)
         }
 
         // Real-time activity: queue.jsonl appends make the runner icon sprint.
@@ -440,6 +520,10 @@ final class StatusBarController: NSObject {
                 return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.zcode?.configured, error: viewModel.usageLimits?.zcode?.error, window: viewModel.usageLimits?.zcode?.primaryWindow)
             case .zcodeGlm5Turbo:
                 return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.zcode?.configured, error: viewModel.usageLimits?.zcode?.error, window: viewModel.usageLimits?.zcode?.secondaryWindow)
+            case .qoderQuota:
+                return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.qoder?.configured, error: viewModel.usageLimits?.qoder?.error, window: viewModel.usageLimits?.qoder?.primaryWindow)
+            case .qoderUltimate:
+                return genericLimitValue(id: id, metric: metric, configured: viewModel.usageLimits?.qoder?.configured, error: viewModel.usageLimits?.qoder?.error, window: viewModel.usageLimits?.qoder?.secondaryWindow)
             }
         }
     }
@@ -477,9 +561,9 @@ final class StatusBarController: NSObject {
     }
 
     private func formatLimitPercent(_ value: Double) -> String {
-        let raw = min(max(value, 0), 100)
-        let displayed = LimitsSettingsStore.shared.displayMode == .remaining ? (100 - raw) : raw
-        return "\(Int(displayed.rounded()))%"
+        // Shared with the Dynamic Island wings so both surfaces render the
+        // same number for the same window (display mode + rounding).
+        LimitsSettingsStore.formatPercentText(value)
     }
 
     // ISO8601DateFormatter is expensive to allocate, and updateStatsDisplay
@@ -723,6 +807,15 @@ final class StatusBarController: NSObject {
 
         // Keep keyboard focus inside the popover while it is visible.
         if let window = popover.contentViewController?.view.window {
+            // The _NSPopoverWindow is reused across shows and its default
+            // collectionBehavior is only .ignoresCycle — it does NOT inherit the
+            // anchor window's .canJoinAllSpaces, so it stays pinned to the Space it
+            // was first ordered in on and reopens on the wrong desktop (#372).
+            // Use .canJoinAllSpaces (not .moveToActiveSpace, which only migrates on
+            // app *activation* and is a no-op when the app is already active, e.g.
+            // while the Dashboard window is frontmost). .fullScreenAuxiliary matches
+            // the anchor window so the popover also shows over full-screen Spaces.
+            window.collectionBehavior.insert([.canJoinAllSpaces, .fullScreenAuxiliary])
             NSApp.activate(ignoringOtherApps: true)
             window.makeKey()
         }
@@ -771,10 +864,38 @@ final class StatusBarController: NSObject {
 
     // MARK: - Right-Click Menu
 
+    static func showContextMenuFromIsland(event: NSEvent, view: NSView) {
+        guard let instance else { return }
+        let menu = instance.buildMenu()
+        // popUpContextMenu blocks in a tracking run loop until dismissal —
+        // hold the island open for the whole interaction.
+        instance.dynamicIslandController.beginMenuHold()
+        NSMenu.popUpContextMenu(menu, with: event, for: view)
+        instance.dynamicIslandController.endMenuHold()
+    }
+
+    /// Click-invoked variant for the island's gear button (no right-click
+    /// NSEvent available): pops the same tray menu at the pointer.
+    static func showContextMenuFromIslandGear() {
+        guard let instance else { return }
+        let menu = instance.buildMenu()
+        instance.dynamicIslandController.beginMenuHold()
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+        instance.dynamicIslandController.endMenuHold()
+    }
+
     private func showMenu() {
+        let menu = buildMenu()
+        trackedStatusMenu = menu
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
+    }
+
+    private func buildMenu() -> NSMenu {
         let menu = NSMenu()
 
-        // Today summary — click to open popover
+        // ── Group 1: Core Actions ──
         let todayText = buildTodaySummary()
         let todayItem = NSMenuItem(title: "", action: #selector(openPopover), keyEquivalent: "")
         todayItem.target = self
@@ -789,55 +910,61 @@ final class StatusBarController: NSObject {
 
         menu.addItem(.separator())
 
-        // Sync Now
         let syncItem = NSMenuItem(title: Strings.menuSyncNow, action: #selector(syncNow), keyEquivalent: "r")
         syncItem.target = self
         syncItem.isEnabled = !viewModel.isSyncing
         menu.addItem(syncItem)
 
-        // Open Dashboard
         let dashboardItem = NSMenuItem(title: Strings.openDashboard, action: #selector(openDashboard), keyEquivalent: "d")
         dashboardItem.target = self
         menu.addItem(dashboardItem)
 
-        // Settings — jumps straight to the dashboard Settings page.
-        // NOTE: selector must NOT be named `openSettings(_:)` — AppKit treats that as
-        // the system Settings action and injects a gear image + steals the item. Use
-        // a custom name so the item renders plain.
         let settingsItem = NSMenuItem(title: Strings.menuSettings, action: #selector(openDashboardSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
 
-        // Check for Updates — dynamic text when downloading (refreshes via Notification while menu stays open)
-        let updateTitle = UpdateChecker.shared.statusText ?? Strings.menuCheckForUpdates
-        let updateItem = NSMenuItem(title: updateTitle, action: #selector(checkForUpdates), keyEquivalent: "u")
-        updateItem.tag = Self.updateMenuItemTag
-        updateItem.target = self
-        updateItem.isEnabled = !UpdateChecker.shared.isBusy
-        menu.addItem(updateItem)
-
-        menu.delegate = self
-
         menu.addItem(.separator())
 
-        // About
-        let version = UpdateChecker.shared.currentVersion()
-        let aboutItem = NSMenuItem(title: "TokenTrackerBar v\(version)", action: #selector(openAbout), keyEquivalent: "")
-        aboutItem.target = self
-        menu.addItem(aboutItem)
+        // ── Group 2: Display Surfaces & Components ──
+        let islandEnabled = UserDefaults.standard.bool(forKey: DynamicIslandController.enabledDefaultsKey)
+        let isIconHidden = UserDefaults.standard.bool(forKey: Self.hideMenuBarIconKey)
+        let iconVisible = MenuBarSurfacePolicy.isIconVisible(
+            hideRequested: isIconHidden,
+            islandEnabled: islandEnabled
+        )
 
-        // Star on GitHub — only visible to users who actively open the menu,
-        // so it's not a "promotional" intrusion. Sits next to About by
-        // convention (users scan that region for project links).
-        let starItem = NSMenuItem(title: Strings.menuStarOnGitHub, action: #selector(openGitHub), keyEquivalent: "")
-        starItem.target = self
-        menu.addItem(starItem)
+        // Dynamic Island
+        let islandItem = NSMenuItem(title: Strings.menuDynamicIsland, action: #selector(toggleDynamicIsland), keyEquivalent: "")
+        islandItem.target = self
+        islandItem.state = islandEnabled ? .on : .off
+        menu.addItem(islandItem)
 
-        menu.addItem(.separator())
+        // Menu Bar Icon
+        let menuBarIconItem = NSMenuItem(title: Strings.menuMenuBarIcon, action: #selector(toggleMenuBarIcon), keyEquivalent: "")
+        menuBarIconItem.target = self
+        menuBarIconItem.state = iconVisible ? .on : .off
+        menu.addItem(menuBarIconItem)
 
-        // Menu Bar Display (stats toggle + quick slot pickers, mirrors the
-        // Widgets page so users don't have to open the dashboard to switch)
-        let displayItem = NSMenuItem(title: Strings.menuMenuBarDisplay, action: nil, keyEquivalent: "")
+        if iconVisible || islandEnabled {
+            // Icon Style Submenu — the style drives both the menu bar icon and
+            // the Dynamic Island's left wing glyph, so keep it reachable
+            // whenever either surface is showing (not just the menu bar icon).
+            let iconStyleItem = NSMenuItem(title: Strings.menuIconStyle, action: nil, keyEquivalent: "")
+            let iconStyleMenu = NSMenu()
+            let currentStyle = animator?.iconStyle ?? .clawd
+            for style in MenuBarIconStyle.allCases {
+                let item = NSMenuItem(title: iconStyleLabel(style), action: #selector(selectIconStyle(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = style.rawValue
+                item.state = style == currentStyle ? .on : .off
+                iconStyleMenu.addItem(item)
+            }
+            iconStyleItem.submenu = iconStyleMenu
+            menu.addItem(iconStyleItem)
+        }
+
+        // Display Metrics Submenu (affects both Dynamic Island & Menu Bar Icon)
+        let displayItem = NSMenuItem(title: Strings.menuDisplayMetrics, action: nil, keyEquivalent: "")
         let displayMenu = NSMenu()
 
         let statsItem = NSMenuItem(title: Strings.menuShowStats, action: #selector(toggleStats), keyEquivalent: "")
@@ -883,21 +1010,20 @@ final class StatusBarController: NSObject {
         displayItem.submenu = displayMenu
         menu.addItem(displayItem)
 
-        // Menu Bar Icon (style submenu: Clawd / Cat / My Pet / Static)
-        let iconItem = NSMenuItem(title: Strings.menuMenuBarIcon, action: nil, keyEquivalent: "")
-        let iconMenu = NSMenu()
-        let currentStyle = animator?.iconStyle ?? .clawd
-        for style in MenuBarIconStyle.allCases {
-            let item = NSMenuItem(title: iconStyleLabel(style), action: #selector(selectIconStyle(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = style.rawValue
-            item.state = style == currentStyle ? .on : .off
-            iconMenu.addItem(item)
-        }
-        iconItem.submenu = iconMenu
-        menu.addItem(iconItem)
+        // Desktop Pet
+        let petItem = NSMenuItem(title: Strings.menuDesktopPet, action: #selector(toggleDesktopPet), keyEquivalent: "")
+        petItem.target = self
+        petItem.state = desktopPetController.isVisible ? .on : .off
+        menu.addItem(petItem)
 
-        // Limit reset feedback (independent toggles)
+        menu.addItem(.separator())
+
+        // ── Group 3: Preferences & Notifications ──
+        let loginItem = NSMenuItem(title: Strings.menuLaunchAtLogin, action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        loginItem.target = self
+        loginItem.state = launchAtLoginManager.isEnabled ? .on : .off
+        menu.addItem(loginItem)
+
         let toastItem = NSMenuItem(title: Strings.toastOnResetLabel, action: #selector(toggleResetToast), keyEquivalent: "")
         toastItem.target = self
         toastItem.state = WeeklyLimitResetDetector.toastEnabled() ? .on : .off
@@ -908,16 +1034,26 @@ final class StatusBarController: NSObject {
         confettiItem.state = WeeklyLimitResetDetector.confettiEnabled() ? .on : .off
         menu.addItem(confettiItem)
 
-        // Launch at Login (toggle)
-        let loginItem = NSMenuItem(title: Strings.menuLaunchAtLogin, action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
-        loginItem.target = self
-        loginItem.state = launchAtLoginManager.isEnabled ? .on : .off
-        menu.addItem(loginItem)
+        menu.addItem(.separator())
 
-        let petItem = NSMenuItem(title: Strings.menuDesktopPet, action: #selector(toggleDesktopPet), keyEquivalent: "")
-        petItem.target = self
-        petItem.state = desktopPetController.isVisible ? .on : .off
-        menu.addItem(petItem)
+        // ── Group 4: System & App Info ──
+        let updateTitle = UpdateChecker.shared.statusText ?? Strings.menuCheckForUpdates
+        let updateItem = NSMenuItem(title: updateTitle, action: #selector(checkForUpdates), keyEquivalent: "u")
+        updateItem.tag = Self.updateMenuItemTag
+        updateItem.target = self
+        updateItem.isEnabled = !UpdateChecker.shared.isBusy
+        menu.addItem(updateItem)
+
+        let version = UpdateChecker.shared.currentVersion()
+        let aboutItem = NSMenuItem(title: "TokenTracker v\(version)", action: #selector(openAbout), keyEquivalent: "")
+        aboutItem.target = self
+        menu.addItem(aboutItem)
+
+        let starItem = NSMenuItem(title: Strings.menuStarOnGitHub, action: #selector(openGitHub), keyEquivalent: "")
+        starItem.target = self
+        menu.addItem(starItem)
+
+        menu.delegate = self
 
         menu.addItem(.separator())
 
@@ -926,11 +1062,48 @@ final class StatusBarController: NSObject {
         quitItem.target = self
         menu.addItem(quitItem)
 
-        // Show the menu at the status item
-        statusItem.menu = menu
-        statusItem.button?.performClick(nil)
-        // Clear menu so left-click works again next time
-        statusItem.menu = nil
+        return menu
+    }
+
+    // MARK: - Surface Toggles (Dynamic Island & Menu Bar Icon)
+
+    @objc private func toggleDynamicIsland() {
+        let current = UserDefaults.standard.bool(forKey: DynamicIslandController.enabledDefaultsKey)
+        let next = !current
+        if !next {
+            // Turning OFF Dynamic Island: MUST unhide Menu Bar Icon so user is not left with zero UI!
+            updateMenuBarIconVisibility(userRequestedHide: false)
+        }
+        dynamicIslandController.setEnabled(next)
+        NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
+        // Keep an open dashboard Settings page in sync with the new state.
+        NativeBridge.shared.pushSettings()
+        if next {
+            maybeOfferHidingMenuBarIcon()
+        }
+    }
+
+    @objc private func toggleMenuBarIcon() {
+        let isIconHidden = UserDefaults.standard.bool(forKey: Self.hideMenuBarIconKey)
+        let islandEnabled = UserDefaults.standard.bool(forKey: DynamicIslandController.enabledDefaultsKey)
+        let iconVisible = MenuBarSurfacePolicy.isIconVisible(
+            hideRequested: isIconHidden,
+            islandEnabled: islandEnabled
+        )
+        if iconVisible {
+            // User wants to HIDE Menu Bar Icon (turn icon OFF)
+            if !islandEnabled {
+                // If Dynamic Island is currently OFF, enable it FIRST so App is never hidden!
+                dynamicIslandController.setEnabled(true)
+            }
+            updateMenuBarIconVisibility(userRequestedHide: true)
+        } else {
+            // User wants to SHOW Menu Bar Icon (turn icon ON)
+            updateMenuBarIconVisibility(userRequestedHide: false)
+        }
+        NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
+        // Keep an open dashboard Settings page in sync with the new state.
+        NativeBridge.shared.pushSettings()
     }
 
     // MARK: - Menu Actions
@@ -959,15 +1132,15 @@ final class StatusBarController: NSObject {
     }
 
     @objc private func openGitHub() {
-        if let url = URL(string: "https://github.com/mm7894215/TokenTracker") {
+        if let url = URL(string: "https://github.com/xiufengsun/TokenTracker") {
             NSWorkspace.shared.open(url)
         }
     }
 
     @objc private func openAbout() {
-        if let url = URL(string: "https://github.com/mm7894215/TokenTracker") {
-            NSWorkspace.shared.open(url)
-        }
+        // Standard About panel (icon + version); GitHub already has its own "Star" item.
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(nil)
     }
 
     @objc private func toggleStats() {
@@ -981,7 +1154,9 @@ final class StatusBarController: NSObject {
         var ids = MenuBarDisplayPreferences.read()
         guard ids.indices.contains(slot) else { return }
         let other = slot == 0 ? 1 : 0
-        if ids.indices.contains(other), ids[other] == id {
+        // "None" may occupy both slots; only real metrics must stay distinct.
+        if id != MenuBarDisplayPreferences.noneID,
+           ids.indices.contains(other), ids[other] == id {
             // Keep both slots distinct by swapping instead of rejecting.
             ids[other] = ids[slot]
         }

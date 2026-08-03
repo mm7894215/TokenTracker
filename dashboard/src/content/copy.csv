@@ -90,6 +90,7 @@ landing.v2.distill.body,landing,LandingPage,MarketingLanding,distill_body,"100% 
 landing.v2.footer.line,landing,LandingPage,MarketingLanding,footer_line,"Token Tracker — Made by developers, for developers.",,active
 landing.v2.nav.status,landing,LandingPage,MarketingLanding,nav_status,"Status",,active
 landing.v2.nav.github,landing,LandingPage,MarketingLanding,nav_github,"GitHub",,active
+landing.v2.nav.privacy,landing,LandingPage,MarketingLanding,nav_privacy,"Privacy",,active
 landing.v2.cta.primary,landing,LandingPage,MarketingLanding,cta_primary,"Dashboard",,active
 landing.v2.hero.subtagline,landing,LandingPage,MarketingLanding,hero_subtagline,"Automatically monitor token usage across Claude Code, Cursor, Codex, and more. Local-first, privacy-focused, and zero manual configuration.",,active
 landing.v3.hero.kicker,landing,LandingPage,HeroSection,hero_kicker,"Desktop pet · 4 widgets · Achievements",,active
@@ -461,6 +462,18 @@ settings.section.appearance,ui,SettingsPage,SettingsPage,sec_appearance,"Appeara
 settings.section.account,ui,SettingsPage,SettingsPage,sec_account,"Account",,active
 settings.section.limits,ui,SettingsPage,SettingsPage,sec_limits,"Limits Display",,active
 settings.limits.providers,ui,SettingsPage,SettingsPage,limits_providers,"Providers",,active
+settings.labs.island.label,ui,SettingsPage,LabsSection,island_label,"Dynamic Island",,active
+settings.labs.island.hint,ui,SettingsPage,LabsSection,island_hint,"Turn the MacBook notch into a Dynamic Island: today's tokens and spend at a glance, hover for spend and limit details.",,active
+settings.labs.island.aria,ui,SettingsPage,LabsSection,island_aria,"Toggle Dynamic Island",,active
+settings.labs.island_hide_menubar.label,ui,SettingsPage,LabsSection,island_hide_menubar_label,"Hide Menu Bar Item",,active
+settings.labs.island_hide_menubar.hint,ui,SettingsPage,LabsSection,island_hide_menubar_hint,"Hide top menu bar icon and use Dynamic Island exclusively.",,active
+settings.labs.island_hide_menubar.aria,ui,SettingsPage,LabsSection,island_hide_menubar_aria,"Toggle hide menu bar item",,active
+dashboard.island.title,ui,DashboardPage,IslandOnboardingCard,island_title,"Meet the Dynamic Island",,active
+dashboard.island.hint,ui,DashboardPage,IslandOnboardingCard,island_hint,"Turn the MacBook notch into a live token meter — today's tokens and spend at a glance, hover for spend and limit details.",,active
+dashboard.island.enable,ui,DashboardPage,IslandOnboardingCard,island_enable,"Turn it on",,active
+dashboard.island.settings_link,ui,DashboardPage,IslandOnboardingCard,island_settings,"View in Settings",,active
+dashboard.island.enabled_toast,ui,DashboardPage,IslandOnboardingCard,island_toast,"Dynamic Island is on — look up at the notch",,active
+dashboard.island.dismiss_aria,ui,DashboardPage,IslandOnboardingCard,island_dismiss,"Dismiss Dynamic Island tip",,active
 settings.labs.qpd.label,ui,SettingsPage,LabsSection,qpd_label,"Analyze PR cost-efficiency",,active
 settings.labs.qpd.hint,ui,SettingsPage,LabsSection,qpd_hint,"Analyze average delivery costs and effective Tokens per model from merged PRs and AI-attributed commits.",,active
 settings.labs.qpd.aria,ui,SettingsPage,LabsSection,qpd_aria,"Toggle PR cost-efficiency analysis",,active
@@ -580,6 +593,7 @@ menubar.slot.primary,ui,WidgetsPage,MenuBarDisplayCard,slot_primary,"Primary slo
 menubar.slot.secondary,ui,WidgetsPage,MenuBarDisplayCard,slot_secondary,"Secondary slot",,active
 menubar.native_only,ui,WidgetsPage,MenuBarDisplayCard,native_only,"Open TokenTrackerBar for macOS to edit the live menu bar display.",,active
 menubar.metric.today_tokens,ui,WidgetsPage,MenuBarDisplayCard,metric_today_tokens,"Today Tokens",,active
+menubar.metric.none,ui,WidgetsPage,MenuBarDisplayCard,metric_none,"None (hide slot)",,active
 menubar.metric.today_cost,ui,WidgetsPage,MenuBarDisplayCard,metric_today_cost,"Today Cost",,active
 menubar.metric.last_7d_tokens,ui,WidgetsPage,MenuBarDisplayCard,metric_last_7d,"Last 7 Days",,active
 menubar.metric.total_tokens,ui,WidgetsPage,MenuBarDisplayCard,metric_total_tokens,"Total Tokens",,active
@@ -685,6 +699,7 @@ limits.label.cursor_auto,ui,LimitsPage,UsageLimitsPanel,cursor_auto,"Auto",,acti
 limits.label.cursor_api,ui,LimitsPage,UsageLimitsPanel,cursor_api,"API",,active
 limits.label.kiro_month,ui,LimitsPage,UsageLimitsPanel,kiro_month,"Month",,active
 limits.label.kiro_bonus,ui,LimitsPage,UsageLimitsPanel,kiro_bonus,"Bonus",,active
+limits.label.kiro_tracked_credits,ui,LimitsPage,UsageLimitsPanel,kiro_tracked_credits,"Local usage: {{credits}} credits · {{count}} turns",,active
 limits.label.kimi_weekly,ui,LimitsPage,UsageLimitsPanel,kimi_weekly,"Weekly",,active
 limits.label.kimi_5h,ui,LimitsPage,UsageLimitsPanel,kimi_5h,"5h",,active
 limits.label.kimi_total,ui,LimitsPage,UsageLimitsPanel,kimi_total,"Total",,active
@@ -717,6 +732,7 @@ limits.provider.grok,ui,LimitsPage,UsageLimitsPanel,provider_grok,"Grok Build",,
 limits.provider.copilot,ui,LimitsPage,UsageLimitsPanel,provider_copilot,"GitHub Copilot",,active
 limits.provider.antigravity,ui,LimitsPage,UsageLimitsPanel,provider_antigravity,"Antigravity",,active
 limits.provider.zcode,ui,LimitsPage,UsageLimitsPanel,provider_zcode,"ZCode",,active
+provider.display.omp,ui,*,ProviderDisplay,omp,"oh-my-pi",,active
 limits.label.zcode_glm52,ui,LimitsPage,UsageLimitsPanel,zcode_glm52,"GLM-5.2",,active
 limits.label.zcode_glm5t,ui,LimitsPage,UsageLimitsPanel,zcode_glm5t,"GLM-5-Turbo",,active
 limits.label.zcode_5h,ui,LimitsPage,UsageLimitsPanel,zcode_5h,"5h",,active
@@ -745,15 +761,29 @@ limits.label.antigravity_live,ui,LimitsPage,UsageLimitsPanel,antigravity_live,"l
 limits.label.antigravity_cached,ui,LimitsPage,UsageLimitsPanel,antigravity_cached,"cached",,active
 limits.tooltip.antigravity_live,ui,LimitsPage,UsageLimitsPanel,antigravity_live_tooltip,"Real-time limits retrieved directly from the running Antigravity process.",,active
 limits.tooltip.antigravity_cached,ui,LimitsPage,UsageLimitsPanel,antigravity_cached_tooltip,"Cached limits. Run Antigravity IDE/CLI to refresh.",,active
+limits.tooltip.qoder_cached,ui,LimitsPage,UsageLimitsPanel,qoder_cached_tooltip,"Cached limits. Run Qoder to refresh.",,active
 limits.bar.sub_one_percent,ui,LimitsPage,UsageLimitsPanel,bar_sub_one_percent,"<1",,active
 limits.status.not_connected,ui,LimitsPage,UsageLimitsPanel,status_not_connected,"Not connected",,active
 limits.status.no_data,ui,LimitsPage,UsageLimitsPanel,status_no_data,"No live limit data returned",,active
+limits.opencodeGo.status.inactive,ui,LimitsPage,UsageLimitsPanel,opencode_go_status_inactive,"OpenCode Go subscription is inactive",,active
 limits.status.all_hidden,ui,LimitsPage,UsageLimitsPanel,status_all_hidden,"All limit providers are hidden. Open display settings to show them.",,active
 shared.time.now,shared,*,Shared,time_now,"now",,active
 shared.time.m_ago,shared,*,Shared,time_m_ago,"{{n}}m",,active
 shared.time.h_ago,shared,*,Shared,time_h_ago,"{{n}}h",,active
 shared.time.d_ago,shared,*,Shared,time_d_ago,"{{n}}d",,active
 nav.ip_check,shared,*,Sidebar,nav_ip_check,Claude IP Check,,active
+nav.service_status,shared,*,Sidebar,nav_service_status,Service Status,,active
+status.page.subtitle,ui,ServiceStatusPage,ServiceStatusPage,subtitle,"Live incident status from your AI providers' official status pages.",,active
+status.page.source_note,ui,ServiceStatusPage,ServiceStatusPage,source_note,"Read directly from each provider's public status page in your browser. Auto-refreshes every minute.",,active
+status.state.checking,ui,ServiceStatusPage,StatusCard,state_checking,"Checking…",,active
+status.state.none,ui,ServiceStatusPage,StatusCard,state_none,"Operational",,active
+status.state.minor,ui,ServiceStatusPage,StatusCard,state_minor,"Minor incident",,active
+status.state.major,ui,ServiceStatusPage,StatusCard,state_major,"Major incident",,active
+status.state.critical,ui,ServiceStatusPage,StatusCard,state_critical,"Critical outage",,active
+status.state.unknown,ui,ServiceStatusPage,StatusCard,state_unknown,"Unreachable",,active
+status.open_page,ui,ServiceStatusPage,StatusCard,open_page,"Open {{provider}} status page",,active
+status.refresh,ui,ServiceStatusPage,ServiceStatusPage,refresh,"Refresh",,active
+status.last_checked,ui,ServiceStatusPage,ServiceStatusPage,last_checked,"Checked at {{time}}",,active
 nav.skills,shared,*,Sidebar,nav_skills,Skills,,active
 nav.sessions,shared,*,Sidebar,nav_sessions,Sessions,,active
 skills.page.title,ui,SkillsPage,SkillsPage,title,Skills,,active
@@ -828,6 +858,10 @@ settings.appearance.language.traditional_chinese,ui,SettingsPage,SettingsPage,la
 settings.appearance.language.japanese,ui,SettingsPage,SettingsPage,language_japanese,Japanese,,active
 settings.appearance.language.korean,ui,SettingsPage,SettingsPage,language_korean,Korean,,active
 settings.appearance.language.german,ui,SettingsPage,SettingsPage,language_german,German,,active
+dashboard.context_breakdown.heading,dashboard,DashboardPage,UsageOverview,heading,"Context Breakdown",,active
+dashboard.context_breakdown.heading_claude,dashboard,DashboardPage,UsageOverview,heading_claude,"Claude Context Breakdown",,active
+dashboard.context_breakdown.heading_codex,dashboard,DashboardPage,UsageOverview,heading_codex,"Codex Context Breakdown",,active
+dashboard.context_breakdown.heading_grok,dashboard,DashboardPage,UsageOverview,heading_grok,"Grok Context Breakdown",,active
 dashboard.context_breakdown.empty,dashboard,DashboardPage,ContextBreakdownPanel,empty,"No Claude Code activity in the selected period.",,active
 dashboard.context_breakdown.empty_codex,dashboard,DashboardPage,ContextBreakdownPanel,empty_codex,"No Codex activity in the selected period.",,active
 dashboard.context_breakdown.error,dashboard,DashboardPage,ContextBreakdownPanel,error,"Couldn't read Claude Code logs for this view.",,active
@@ -836,6 +870,9 @@ dashboard.context_breakdown.bar_aria,dashboard,DashboardPage,ContextBreakdownPan
 dashboard.context_breakdown.system_prefix_tooltip,dashboard,DashboardPage,ContextBreakdownPanel,tooltip,"System prompt, tools schema, skills, rules, and MCP descriptions are cached together as one prefix and can't be separated from the logs.",,active
 dashboard.context_breakdown.footnote,dashboard,DashboardPage,ContextBreakdownPanel,footnote,"Approximate: cache reads accumulate across turns, so conversation history dominates over time. Only Claude Code logs expose the per-message detail this view requires.",,active
 dashboard.context_breakdown.footnote_codex,dashboard,DashboardPage,ContextBreakdownPanel,footnote_codex,"Codex uses non-overlapping token buckets here. Tool and exec drill-downs are separate heuristic attributions over the same turns.",,active
+dashboard.context_breakdown.empty_grok,dashboard,DashboardPage,ContextBreakdownPanel,empty_grok,"No Grok Build activity in the selected period.",,active
+dashboard.context_breakdown.error_grok,dashboard,DashboardPage,ContextBreakdownPanel,error_grok,"Couldn't read Grok Build logs for this view.",,active
+dashboard.context_breakdown.footnote_grok,dashboard,DashboardPage,ContextBreakdownPanel,footnote_grok,"Grok uses non-overlapping token buckets here. Tool and exec drill-downs are separate heuristic attributions over the same turns, using turn_completed.usage as the authoritative total.",,active
 dashboard.context_breakdown.category.system_prompt,dashboard,DashboardPage,ContextBreakdownPanel,cat,"System prompt",,active
 dashboard.context_breakdown.category.messages,dashboard,DashboardPage,ContextBreakdownPanel,cat,"Messages",,active
 dashboard.context_breakdown.category.tool_calls,dashboard,DashboardPage,ContextBreakdownPanel,cat,"Tool calls",,active
@@ -1139,6 +1176,13 @@ skills.usage.months_ago,ui,SkillsPage,SkillDetailPanel,usage_months_ago,"{{month
 skills.usage.unknown,ui,SkillsPage,SkillDetailPanel,usage_unknown,"Unknown",,active
 skills.usage.unused,ui,SkillsPage,SkillDetailPanel,usage_unused,"Not invoked yet. Possible dead weight if you never use it.",,active
 skills.usage.disclaimer,ui,SkillsPage,SkillDetailPanel,usage_disclaimer,"Counts from Claude transcripts. Cost is the approximate spend of turns that invoked this skill.",,active
+skills.inventory.plugin,ui,SkillsPage,InstalledSkillRow,inventory_plugin,"Plugin",,active
+skills.inventory.remote,ui,SkillsPage,InstalledSkillRow,inventory_remote,"Other device",,active
+skills.inventory.on_devices,ui,SkillsPage,InstalledSkillRow,inventory_on_devices,"Also on {{devices}}",,active
+skills.inventory.read_only_remote,ui,SkillsPage,SkillDetailPanel,inventory_read_only_remote,"This skill is installed on another device and is shown here as read-only.",,active
+skills.inventory.read_only_managed,ui,SkillsPage,SkillDetailPanel,inventory_read_only_managed,"This plugin skill is managed by its tool and cannot be changed or removed from Token Tracker.",,active
+skills.inventory.source,ui,SkillsPage,SkillDetailPanel,inventory_source,"Source: {{source}}",,active
+skills.inventory.devices_title,ui,SkillsPage,SkillDetailPanel,inventory_devices_title,"Installed on other devices",,active
 dashboard.device_filter.all,dashboard,DashboardPage,UsageOverview,option_all,"All devices",,active
 dashboard.device_filter.aria,dashboard,DashboardPage,UsageOverview,select_aria,"Filter by device",,active
 dashboard.device_card.title,dashboard,DashboardPage,DeviceUsageCard,title,"By device",,active
@@ -1157,6 +1201,11 @@ limits.provider.opencode_go,ui,LimitsPage,UsageLimitsPanel,provider_opencode_go,
 limits.label.opencode_go_5h,ui,LimitsPage,UsageLimitsPanel,opencode_go_5h,"5h",,active
 limits.label.opencode_go_weekly,ui,LimitsPage,UsageLimitsPanel,opencode_go_weekly,"Weekly",,active
 limits.label.opencode_go_monthly,ui,LimitsPage,UsageLimitsPanel,opencode_go_monthly,"Monthly",,active
+limits.provider.qoder,ui,LimitsPage,UsageLimitsPanel,provider_qoder,"Qoder",,active
+limits.label.qoder_credits,ui,LimitsPage,UsageLimitsPanel,qoder_credits,"Credits",,active
+limits.label.qoder_ultimate,ui,LimitsPage,UsageLimitsPanel,qoder_ultimate,"Ultimate Free Calls",,active
+limits.qoder_calls.detail,ui,LimitsPage,UsageLimitsPanel,qoder_calls_detail,"{{used}} / {{limit}} calls used · {{remaining}} left",,active
+limits.hover.expires_at,ui,LimitsPage,UsageLimitsPanel,hover_expires_at,"Expires {{time}}",,active
 limits.opencodeGo.setupHint.title,ui,LimitsPage,UsageLimitsPanel,opencode_go_hint_title,"Connect OpenCode Go",,active
 limits.opencodeGo.setupHint.subtitle,ui,LimitsPage,UsageLimitsPanel,opencode_go_hint_subtitle,"Limits read from your signed-in opencode.ai session (no public API).",,active
 limits.opencodeGo.setupHint.step1,ui,LimitsPage,UsageLimitsPanel,opencode_go_hint_step1,"Sign in and open your Go workspace.",,active
@@ -1210,12 +1259,12 @@ pet.import.title,dashboard,PetPage,PetPage,import_title,"Import Codex Pet",,acti
 pet.import.subtitle,dashboard,PetPage,PetPage,import_subtitle,"Paste a codex-pets.net link or choose a .zip package.",,active
 pet.import.add,dashboard,PetPage,PetPage,import_add,"Add",,active
 pet.import.zip,dashboard,PetPage,PetPage,import_zip,"Choose package",,active
-pet.import.remove,dashboard,PetPage,PetPage,import_remove,"Remove imported pet",,active
+pet.import.remove,dashboard,PetPage,PetPage,import_remove,"Remove pet",,active
 pet.import.success,dashboard,PetPage,PetPage,import_success,"Pet imported and selected.",,active
 pet.import.failed,dashboard,PetPage,PetPage,import_failed,"Could not import this pet.",,active
 pet.import.busy,dashboard,PetPage,PetPage,import_busy,"Importing…",,active
 pet.format.v2,dashboard,PetPage,PetPage,format_v2,"V2",,active
-pet.import.removed,dashboard,PetPage,PetPage,import_removed,"Imported pet removed.",,active
+pet.import.removed,dashboard,PetPage,PetPage,import_removed,"Pet removed.",,active
 pet.import.url_label,dashboard,PetPage,PetPage,import_url_label,"Codex Pets URL or pet id",,active
 pet.codex.title,dashboard,PetPage,PetPage,codex_title,"From Codex",,active
 pet.codex.subtitle,dashboard,PetPage,PetPage,codex_subtitle,"Import pets you already have in the Codex app — including its built-in companions.",,active

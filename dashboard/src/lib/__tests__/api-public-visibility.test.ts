@@ -10,7 +10,7 @@ vi.mock("../insforge-config", () => ({
   getInsforgeRemoteUrl: getInsforgeRemoteUrlMock,
 }));
 
-import { getPublicVisibility, getUserBadges, setPublicVisibility } from "../api";
+import { getLeaderboardProfile, getPublicVisibility, getUserBadges, setPublicVisibility } from "../api";
 
 function makeJwt(payload: Record<string, unknown>) {
   const encode = (value: unknown) =>
@@ -138,5 +138,32 @@ describe("achievement badges API", () => {
         Authorization: `Bearer ${accessToken}`,
       }),
     }));
+  });
+});
+
+describe("leaderboard profile API", () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    getInsforgeAnonKeyMock.mockClear();
+    getInsforgeRemoteUrlMock.mockReset();
+    getInsforgeRemoteUrlMock.mockReturnValue("https://example.insforge.app");
+  });
+
+  it("sends the dashboard timezone for calendar-day statistics", async () => {
+    const fetchMock = mockJsonFetch({ totals: { total_tokens: 1 } });
+
+    await getLeaderboardProfile({
+      userId: "user-123",
+      period: "total",
+      timeZone: "Asia/Shanghai",
+      tzOffsetMinutes: 480,
+    });
+
+    const url = new URL(fetchMock.mock.calls[0]?.[0] as string);
+    expect(url.pathname).toBe("/functions/tokentracker-leaderboard-profile");
+    expect(url.searchParams.get("user_id")).toBe("user-123");
+    expect(url.searchParams.get("period")).toBe("total");
+    expect(url.searchParams.get("tz")).toBe("Asia/Shanghai");
+    expect(url.searchParams.get("tz_offset_minutes")).toBe("480");
   });
 });

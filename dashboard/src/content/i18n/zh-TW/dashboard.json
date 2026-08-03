@@ -376,12 +376,12 @@
   "pet.import.subtitle": "貼上 codex-pets.net 連結，或選擇 .zip 寵物包。",
   "pet.import.add": "新增",
   "pet.import.zip": "選擇寵物套件",
-  "pet.import.remove": "移除已匯入寵物",
+  "pet.import.remove": "移除寵物",
   "pet.import.success": "寵物已匯入並選取。",
   "pet.import.failed": "無法匯入這個寵物。",
   "pet.import.busy": "正在匯入…",
   "pet.format.v2": "V2",
-  "pet.import.removed": "已移除匯入的寵物。",
+  "pet.import.removed": "已移除寵物。",
   "pet.import.url_label": "Codex Pets 連結或寵物 ID",
   "dashboard.projects.detail.badge": "專案",
   "achievements.section.title": "成就",
@@ -595,5 +595,12 @@
   "wrapped.highlight.day": "最忙碌的一天是 {{day}}（{{tokens}} Token）。",
   "wrapped.highlight.hour": "你的高效時段集中在 UTC {{hour}}:00 左右。",
   "wrapped.highlight.streak": "最長連續活躍：連續 {{days}} 天使用 AI 編碼。",
-  "wrapped.highlight.tools": "你使用了 {{count}} 款不同的 AI 工具，涉獵廣泛。"
+  "wrapped.highlight.tools": "你使用了 {{count}} 款不同的 AI 工具，涉獵廣泛。",
+  "dashboard.context_breakdown.empty_grok": "所選時間範圍內沒有 Grok Build 活動。",
+  "dashboard.context_breakdown.error_grok": "無法讀取此檢視所需的 Grok Build 日誌。",
+  "dashboard.context_breakdown.footnote_grok": "Grok 在此使用互不重疊的 Token 分類。工具和命令執行下鑽資料，是對同一批對話輪次進行的獨立啟發式歸因，以 turn_completed.usage 為權威總量。",
+  "dashboard.context_breakdown.heading": "上下文細分",
+  "dashboard.context_breakdown.heading_claude": "Claude 上下文細分",
+  "dashboard.context_breakdown.heading_codex": "Codex 上下文細分",
+  "dashboard.context_breakdown.heading_grok": "Grok 上下文細分"
 }

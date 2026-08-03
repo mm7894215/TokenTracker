@@ -1,6 +1,9 @@
 import SwiftUI
 
 struct FooterView: View {
+    var horizontalPadding: CGFloat = 20
+    var verticalPadding: CGFloat = 6
+
     @State private var hoveringDashboard = false
     @State private var hoveringQuit = false
 
@@ -22,9 +25,9 @@ struct FooterView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .pointingHandCursor()
             .onHover { hovering in
                 hoveringDashboard = hovering
-                if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
             }
 
             Spacer()
@@ -44,12 +47,12 @@ struct FooterView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .pointingHandCursor()
             .onHover { hovering in
                 hoveringQuit = hovering
-                if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 6)
+        .padding(.horizontal, horizontalPadding)
+        .padding(.vertical, verticalPadding)
     }
 }

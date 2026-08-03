@@ -19,4 +19,9 @@ describe("formatProviderDisplayName", () => {
     expect(formatProviderDisplayName("pi-anthropic")).toBe("Pi · Anthropic");
     expect(formatProviderDisplayName("PI-GITHUB-COPILOT")).toBe("Pi · GitHub Copilot");
   });
+
+  it("formats omp as oh-my-pi", () => {
+    expect(formatProviderDisplayName("omp")).toBe("oh-my-pi");
+    expect(formatProviderDisplayName("OMP")).toBe("oh-my-pi");
+  });
 });

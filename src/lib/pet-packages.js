@@ -10,6 +10,8 @@ const MAX_PACKAGE_BYTES = 12 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 16 * 1024;
 const MAX_SPRITESHEET_BYTES = 10 * 1024 * 1024;
 const BUILTIN_IDS = new Set(["clawd", "sprout", "byte", "ember"]);
+const REMOVABLE_BUILTIN_IDS = new Set(["sprout", "byte", "ember"]);
+const HIDDEN_BUILTINS_FILE = ".hidden-builtins.json";
 // codex-pets.net added `kind` to pet.json long after launch, and its enum may keep
 // growing — packages published before that (and future kinds) must stay importable,
 // so kind is optional metadata validated only as a short slug.
@@ -33,6 +35,44 @@ function resolveCodexPetsDir() {
   return path.resolve(
     process.env.TOKENTRACKER_CODEX_PETS_DIR || path.join(os.homedir(), ".codex", "pets"),
   );
+}
+
+function readHiddenBuiltinIds() {
+  const file = path.join(resolvePetsDir(), HIDDEN_BUILTINS_FILE);
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (!Array.isArray(parsed)) return [];
+    return [...new Set(parsed
+      .map((id) => String(id || "").trim().toLowerCase())
+      .filter((id) => REMOVABLE_BUILTIN_IDS.has(id)))].sort();
+  } catch {
+    return [];
+  }
+}
+
+function hideBuiltinPet(id) {
+  const normalized = String(id || "").trim().toLowerCase();
+  if (normalized === "clawd") throw new Error("Clawd cannot be removed");
+  if (!REMOVABLE_BUILTIN_IDS.has(normalized)) throw new Error("Invalid built-in pet id");
+
+  const root = resolvePetsDir();
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  const hidden = new Set(readHiddenBuiltinIds());
+  hidden.add(normalized);
+  const destination = path.join(root, HIDDEN_BUILTINS_FILE);
+  const stage = path.join(root, `${HIDDEN_BUILTINS_FILE}.${process.pid}-${crypto.randomBytes(6).toString("hex")}`);
+  const backup = `${stage}-backup`;
+  try {
+    fs.writeFileSync(stage, `${JSON.stringify([...hidden].sort(), null, 2)}\n`, { mode: 0o600 });
+    if (fs.existsSync(destination)) fs.renameSync(destination, backup);
+    fs.renameSync(stage, destination);
+  } catch (error) {
+    try { fs.rmSync(stage, { force: true }); } catch {}
+    if (!fs.existsSync(destination) && fs.existsSync(backup)) fs.renameSync(backup, destination);
+    throw error;
+  }
+  try { fs.rmSync(backup, { force: true }); } catch {}
+  return { id: normalized, hidden: true };
 }
 
 function readUInt24LE(buffer, offset) {
@@ -368,10 +408,11 @@ async function installFromCodexPets(input, fetchImpl = fetch) {
 
 function removeInstalledPet(id) {
   const normalized = String(id || "").trim().toLowerCase();
-  if (!PET_ID_RE.test(normalized) || BUILTIN_IDS.has(normalized)) throw new Error("Invalid custom pet id");
+  if (!PET_ID_RE.test(normalized)) throw new Error("Invalid pet id");
+  if (BUILTIN_IDS.has(normalized)) return hideBuiltinPet(normalized);
   const root = resolvePetsDir();
   const destination = path.join(root, normalized);
-  if (!destination.startsWith(`${root}${path.sep}`)) throw new Error("Invalid custom pet path");
+  if (!destination.startsWith(`${root}${path.sep}`)) throw new Error("Invalid pet path");
   fs.rmSync(destination, { recursive: true, force: true });
   petDirectoryCache.delete(destination);
   return { id: normalized };
@@ -627,6 +668,7 @@ module.exports = {
   petIdFromCodexPetsUrl,
   readCodexBuiltinPets,
   readCodexImportableAsset,
+  readHiddenBuiltinIds,
   readWebpDimensions,
   removeInstalledPet,
   resolveCodexPetsDir,

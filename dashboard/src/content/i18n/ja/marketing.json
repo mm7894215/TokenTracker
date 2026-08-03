@@ -56,6 +56,7 @@
   "landing.v2.leaderboard.view_more": "リーダーボード全体を見る",
   "landing.v2.footer.line": "Token Tracker — 開発者が、開発者のために作りました。",
   "landing.v2.nav.status": "ステータス",
+  "landing.v2.nav.privacy": "プライバシー",
   "landing.v2.nav.github": "GitHub",
   "landing.v2.models.agent.codex": "Codex",
   "landing.v2.models.agent.claude_code": "Claude Code",

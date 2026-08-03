@@ -6,18 +6,18 @@
 
 ### Track every AI token — then bring your usage to life
 
-An accurate, local-first token usage and cost dashboard for **27 AI coding tools** — plus a desktop pet, **4 native widgets**, and **15 achievement tracks**. No cloud account, no API keys, no setup.
+An accurate, local-first token usage and cost dashboard for **29 AI coding tools** — plus a desktop pet, **4 native widgets**, and **15 achievement tracks**. No cloud account, no API keys, no setup.
 
 [![npm version](https://img.shields.io/npm/v/tokentracker-cli.svg?color=blue)](https://www.npmjs.com/package/tokentracker-cli)
 [![npm downloads](https://img.shields.io/npm/dm/tokentracker-cli.svg?color=brightgreen)](https://www.npmjs.com/package/tokentracker-cli)
-[![Homebrew](https://img.shields.io/github/v/release/mm7894215/TokenTracker?label=brew&color=F8B73E&logo=homebrew&logoColor=white)](https://github.com/mm7894215/homebrew-tokentracker)
+[![Homebrew](https://img.shields.io/github/v/release/xiufengsun/TokenTracker?label=brew&color=F8B73E&logo=homebrew&logoColor=white)](https://github.com/xiufengsun/homebrew-tokentracker)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![CLI](https://img.shields.io/badge/CLI-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-lightgrey.svg)](https://www.npmjs.com/package/tokentracker-cli)
-[![macOS app](https://img.shields.io/badge/macOS%20app-menu%20bar%20%2B%20widgets-lightgrey.svg?logo=apple&logoColor=white)](https://github.com/mm7894215/TokenTracker/releases/latest)
-[![Windows app](https://img.shields.io/badge/Windows%20app-system%20tray-lightgrey.svg?logo=windows&logoColor=white)](https://github.com/mm7894215/TokenTracker/releases/latest)
-[![GitHub stars](https://img.shields.io/github/stars/mm7894215/TokenTracker?style=social)](https://github.com/mm7894215/TokenTracker/stargazers)
+[![macOS app](https://img.shields.io/badge/macOS%20app-menu%20bar%20%2B%20widgets-lightgrey.svg?logo=apple&logoColor=white)](https://github.com/xiufengsun/TokenTracker/releases/latest)
+[![Windows app](https://img.shields.io/badge/Windows%20app-system%20tray-lightgrey.svg?logo=windows&logoColor=white)](https://github.com/xiufengsun/TokenTracker/releases/latest)
+[![GitHub stars](https://img.shields.io/github/stars/xiufengsun/TokenTracker?style=social)](https://github.com/xiufengsun/TokenTracker/stargazers)
 [![Featured in 阮一峰周刊 #393](https://img.shields.io/badge/Featured%20in-%E9%98%AE%E4%B8%80%E5%B3%B0%E5%91%A8%E5%88%8A%20%23393-FF6B35?logo=rss&logoColor=white)](https://github.com/ruanyf/weekly/blob/master/docs/issue-393.md)
-[![Author tokens](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=0652839f-d19f-4f67-af85-6b7675875443&metric=tokens&compact=1&label=author%20tokens)](https://github.com/mm7894215/TokenTracker)
+[![Author tokens](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=0652839f-d19f-4f67-af85-6b7675875443&metric=tokens&compact=1&label=author%20tokens)](https://github.com/xiufengsun/TokenTracker)
 
 <br/>
 
@@ -25,7 +25,7 @@ An accurate, local-first token usage and cost dashboard for **27 AI coding tools
 
 <br/><br/>
 
-<video src="https://github.com/user-attachments/assets/3275979d-bbed-4639-83e2-8b7d83bed6af" controls muted playsinline poster="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-light.png" width="820"></video>
+<video src="https://github.com/user-attachments/assets/3275979d-bbed-4639-83e2-8b7d83bed6af" controls muted playsinline poster="https://raw.githubusercontent.com/xiufengsun/tokentracker/main/docs/screenshots/dashboard-light.png" width="820"></video>
 
 <br/><br/>
 
@@ -56,13 +56,13 @@ An accurate, local-first token usage and cost dashboard for **27 AI coding tools
 
 <br/><br/>
 
-<video src="https://github.com/user-attachments/assets/5e709422-5af8-4e4c-8109-f5bb711eb3f8" controls muted playsinline poster="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-dark.png" width="820">
-  <img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-dark.png" alt="Token Tracker Dashboard" width="820" />
+<video src="https://github.com/user-attachments/assets/5e709422-5af8-4e4c-8109-f5bb711eb3f8" controls muted playsinline poster="https://raw.githubusercontent.com/xiufengsun/tokentracker/main/docs/screenshots/dashboard-dark.png" width="820">
+  <img src="https://raw.githubusercontent.com/xiufengsun/tokentracker/main/docs/screenshots/dashboard-dark.png" alt="Token Tracker Dashboard" width="820" />
 </video>
 
 <br/><br/>
 
-⭐ **If TokenTracker saves you time, please [star it on GitHub](https://github.com/mm7894215/TokenTracker) — it helps other developers find it.**
+⭐ **If TokenTracker saves you time, please [star it on GitHub](https://github.com/xiufengsun/TokenTracker) — it helps other developers find it.**
 
 <br/>
 
@@ -89,8 +89,8 @@ That's it. First run installs hooks, syncs your data, and opens the dashboard at
 - 🧩 *Optional:* a Skills tab that browses 250+ public skills and syncs them across Claude · Codex · Grok · Antigravity · Gemini · OpenCode · Hermes
 
 > **Want a native desktop app?**
-> - **macOS** — [Download `TokenTrackerBar.dmg`](https://github.com/mm7894215/TokenTracker/releases/latest/download/TokenTrackerBar.dmg) → drag to Applications. Menu bar status icon, desktop widgets, and the dashboard in a WKWebView.
-> - **Windows** — [Download `TokenTracker-Setup.exe`](https://github.com/mm7894215/TokenTracker/releases/latest/download/TokenTracker-Setup.exe) → run the per-user installer (no admin needed). System-tray app with the dashboard in WebView2. Portable zip also on the [releases page](https://github.com/mm7894215/TokenTracker/releases/latest).
+> - **macOS** — [Download `TokenTrackerBar.dmg`](https://github.com/xiufengsun/TokenTracker/releases/latest/download/TokenTrackerBar.dmg) → drag to Applications. Menu bar status icon, desktop widgets, and the dashboard in a WKWebView.
+> - **Windows** — [Download `TokenTracker-Setup.exe`](https://github.com/xiufengsun/TokenTracker/releases/latest/download/TokenTracker-Setup.exe) → run the per-user installer (no admin needed). System-tray app with the dashboard in WebView2. Portable zip also on the [releases page](https://github.com/xiufengsun/TokenTracker/releases/latest).
 
 Install globally for shorter commands:
 
@@ -111,13 +111,13 @@ Prefer `brew`? Install directly — no extra tap step needed:
 
 ```bash
 # macOS menu bar app (DMG)
-brew install --cask mm7894215/tokentracker/tokentracker
+brew install --cask xiufengsun/tokentracker/tokentracker
 
 # CLI only
-brew install mm7894215/tokentracker/tokentracker
+brew install xiufengsun/tokentracker/tokentracker
 ```
 
-Upgrade with `brew upgrade --cask mm7894215/tokentracker/tokentracker`. The tap auto-bumps within an hour of every new release.
+Upgrade with `brew upgrade --cask xiufengsun/tokentracker/tokentracker`. The tap auto-bumps within an hour of every new release.
 
 ### 🐧 Local Arch/KDE Linux client
 
@@ -135,7 +135,7 @@ See [`TokenTrackerLinux/README.md`](TokenTrackerLinux/README.md). This is not a 
 
 ## ✨ Features
 
-- 🔌 **27 AI tools out of the box** — Claude Code, Codex CLI, Cursor, Gemini CLI, Antigravity, Kiro, OpenCode, OpenClaw, Every Code, Hermes Agent, GitHub Copilot, Kimi Code, CodeBuddy, WorkBuddy, Grok Build, oh-my-pi, pi, Craft Agents, Kilo CLI, Kilo Code, Roo Code, Zed Agent, Goose, Droid, Mimo Code, ZCode, AnythingLLM Desktop
+- 🔌 **29 AI tools out of the box** — Claude Code, Codex CLI, Cursor, Gemini CLI, Antigravity, Kiro, OpenCode, OpenClaw, Every Code, Hermes Agent, GitHub Copilot, Kimi Code, CodeBuddy, WorkBuddy, Grok Build, oh-my-pi, pi, Craft Agents, Kilo CLI, Kilo Code, Roo Code, Zed Agent, Goose, Droid, Mimo Code, ZCode, Qoder, AnythingLLM Desktop, Claude Science
 - 🏠 **100% local** — Token data never leaves your machine. No account, no API keys.
 - 🚀 **Zero config** — Hooks auto-install on first run. From zero to dashboard in 30 seconds.
 - 📊 **Beautiful dashboard** — Usage trends, cost breakdowns by model, GitHub-style activity heatmap, project attribution
@@ -143,7 +143,8 @@ See [`TokenTrackerLinux/README.md`](TokenTrackerLinux/README.md). This is not a 
 - 🐾 **Desktop pet** — A pixel companion powered by real coding activity: it works when you work, celebrates streaks, and sleeps when you rest
 - 🎨 **4 desktop widgets** — Pin Usage / Activity Heatmap / Top Models / Usage Limits to your desktop
 - 🏆 **15 achievement tracks** — Turn daily usage, streaks, tools, models, and milestones into collectible badges worth sharing
-- 📈 **Real-time rate limit tracking** — Claude / Codex / Cursor / Gemini / Kiro / Copilot / Antigravity quota windows with reset countdowns
+- 📈 **Real-time usage limits** — Claude / Codex / Cursor / Gemini / Kimi / Kiro / Grok / Copilot / Antigravity / ZCode / OpenCode Go / Qoder quota windows, with last-good caching when a local provider app is temporarily closed
+- 🟢 **Service Status page** — live operational and incident status from 8 official provider status pages
 - 💰 **Cost engine** — 2,200+ models priced via [LiteLLM](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json) (auto-refreshed daily) + curated overrides for niche tools (Kiro, Cursor Composer, Kimi, CodeBuddy hy3); 24h disk cache + bundled offline snapshot mean accurate USD without an internet connection. Models without published vendor pricing (e.g. Tencent hy3-preview) are tracked by tokens but show $0 cost until the vendor publishes a rate.
 - 🌐 **Optional leaderboard** — Compare with developers worldwide; drag-to-reorder columns to focus on the providers you care about (opt-in, sign in to participate)
 - 🔄 **Cross-device account view** — Opt in to cloud sync and the dashboard merges your usage across every machine you work on (laptop + desktop + server) into one combined view — totals, trends, heatmap and model breakdown all device-aggregated (opt-in, sign in; the default local-only experience stays instant and offline)
@@ -160,14 +161,14 @@ See [`TokenTrackerLinux/README.md`](TokenTrackerLinux/README.md). This is not a 
 
 **Dashboard** — usage trends, model breakdown, cost analysis
 
-<img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-light.png" alt="Dashboard" />
+<img src="https://raw.githubusercontent.com/xiufengsun/tokentracker/main/docs/screenshots/dashboard-light.png" alt="Dashboard" />
 
 </td>
 <td width="50%">
 
 **Desktop Widgets** — pin usage to your desktop
 
-<img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/widgets-overview.png" alt="Desktop Widgets" />
+<img src="https://raw.githubusercontent.com/xiufengsun/tokentracker/main/docs/screenshots/widgets-overview.png" alt="Desktop Widgets" />
 
 </td>
 </tr>
@@ -176,14 +177,14 @@ See [`TokenTrackerLinux/README.md`](TokenTrackerLinux/README.md). This is not a 
 
 **Menu Bar App** — animated Clawd companion + native panels
 
-<img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/menubar.gif" alt="Menu Bar App" />
+<img src="https://raw.githubusercontent.com/xiufengsun/tokentracker/main/docs/screenshots/menubar.gif" alt="Menu Bar App" />
 
 </td>
 <td width="50%">
 
 **Global Leaderboard** — compare with developers worldwide
 
-<img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/leaderboard.png" alt="Leaderboard" />
+<img src="https://raw.githubusercontent.com/xiufengsun/tokentracker/main/docs/screenshots/leaderboard.png" alt="Leaderboard" />
 
 </td>
 </tr>
@@ -192,7 +193,7 @@ See [`TokenTrackerLinux/README.md`](TokenTrackerLinux/README.md). This is not a 
 
 **Skills Manager** — browse 250+ public skills from GitHub & `skills.sh`, install once, sync to Claude / Codex / Grok / Antigravity / Gemini / OpenCode / Hermes. Per-target toggles, one-click Undo, no manual file copying.
 
-<img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/skills.png" alt="Skills Manager" />
+<img src="https://raw.githubusercontent.com/xiufengsun/tokentracker/main/docs/screenshots/skills.png" alt="Skills Manager" />
 
 </td>
 </tr>
@@ -201,7 +202,7 @@ See [`TokenTrackerLinux/README.md`](TokenTrackerLinux/README.md). This is not a 
 
 **Desktop Pet** — a pixel companion that floats on your desktop and reacts to your real token burn: it codes when you code, celebrates streaks, and sleeps when you rest. Import community pets from [codex-pets.net](https://codex-pets.net) with a link or a `.codex-pet.zip` — V2 pets even turn their head to follow your cursor in 16 directions. macOS, Windows, and web.
 
-<img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/pet.png" alt="Desktop Pet" />
+<img src="https://raw.githubusercontent.com/xiufengsun/tokentracker/main/docs/screenshots/pet.png" alt="Desktop Pet" />
 
 </td>
 </tr>
@@ -210,7 +211,7 @@ See [`TokenTrackerLinux/README.md`](TokenTrackerLinux/README.md). This is not a 
 
 **Achievements** — 15 tracks turn usage milestones, streaks, tools, and models into collectible badges — with progress visible before each unlock.
 
-<img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/achievements.png" alt="TokenTracker Achievements" />
+<img src="https://raw.githubusercontent.com/xiufengsun/tokentracker/main/docs/screenshots/achievements.png" alt="TokenTracker Achievements" />
 
 </td>
 </tr>
@@ -234,7 +235,7 @@ See [`TokenTrackerLinux/README.md`](TokenTrackerLinux/README.md). This is not a 
 | **GitHub Copilot App / CLI** | ✅ Auto | Unified per-request SQLite usage (`~/.copilot/session-store.db`); App DB legacy baseline |
 | **GitHub Copilot Chat extension / legacy CLI** | ✅ Auto | OpenTelemetry file exporter (`COPILOT_OTEL_FILE_EXPORTER_PATH`) |
 | **Kimi Code** | ✅ Auto | Passive `wire.jsonl` reader (`~/.kimi/sessions/**/wire.jsonl`) |
-| **oh-my-pi (Pi Coding Agent)** | ✅ Auto | Passive reader (`~/.omp/agent/sessions/**/*.jsonl`) |
+| **oh-my-pi (Pi Coding Agent)** | ✅ Auto | Passive reader (`~/.omp/agent/sessions/**/*.jsonl`) + managed notify extension written by `tokentracker init` to `~/.omp/agent/extensions/tokentracker-notify.ts` for near-real-time sync (skipped if a same-named unmanaged file already exists; removed by `tokentracker uninstall` when still managed) |
 | **CodeBuddy** (Tencent) | ✅ Auto | SessionEnd hook in `~/.codebuddy/settings.json` (Claude-Code fork) |
 | **WorkBuddy** (Tencent) | ✅ Auto | SessionEnd hook in `~/.workbuddy/settings.json` (Claude-Code fork) + passive `projects/**/*.jsonl` scan |
 | **Grok Build** (xAI) | ✅ Auto | SessionEnd hook + passive `updates.jsonl` / `signals.json` scan (`~/.grok/sessions/**/`) |
@@ -249,33 +250,36 @@ See [`TokenTrackerLinux/README.md`](TokenTrackerLinux/README.md). This is not a 
 | **Droid** (Factory) | ✅ Auto | Passive session reader (`~/.factory/sessions/**/settings.json`, cumulative deltas) |
 | **Mimo Code** (mimocode) | ✅ Auto | Passive SQLite reader (`~/.local/share/mimocode/mimocode.db`, OpenCode-fork schema; counts only mimo-native turns — mirrored Claude/claude-mem history is excluded) |
 | **ZCode** (Z.ai) | ✅ Auto | Passive SQLite reader (`~/.zcode/cli/db/db.sqlite`, OpenCode-fork schema; counts only Z.ai/BigModel GLM turns — bundled Claude/Codex/Gemini sub-agents are excluded) |
+| **Qoder** | ✅ Auto | Passive SQLite reader (`Qoder/SharedClientCache/cache/db/local.db`; reads assistant `token_info`, separates cached input, and never reads prompt or response text), plus Plan Credits and Ultimate Free Calls limits from Qoder's local session |
 | **AnythingLLM Desktop** | ✅ Auto | Passive SQLite reader (`anythingllm-desktop/storage/anythingllm.db`; reads per-message token metrics only, never prompts or responses) |
+| **Claude Science** | ✅ Auto | Passive SQLite reader (`~/.claude-science/operon-cli.db`; reads the `frames` table's token counters only, never prompts, artifacts or research content). No native Windows build — on Windows the app runs inside WSL and is read from there. |
 
 > **Do I need to install any plugin or hook manually?** No. `tokentracker` (or `tokentracker init`) handles everything on first run:
 > - **Hook-based** tools (Claude Code, Codex, Gemini, Every Code, **CodeBuddy**, **WorkBuddy**, **Grok Build**) — we write a SessionEnd hook or TOML notify entry into the tool's own config.
 > - **Plugin-based** tools (OpenCode, **OpenClaw**) — plugins ship inside the npm package. OpenClaw's session plugin lives at `~/.tokentracker/tracker/openclaw-plugin/openclaw-session-sync/`; we link and enable it via OpenClaw's own CLI, then set `hooks.allowConversationAccess=true` so OpenClaw permits the session-finished event that triggers sync. No download, no drag-and-drop.
-> - **Passive readers** (Cursor, Kiro, Hermes, Kimi Code, Copilot, **Grok Build**, **oh-my-pi**, **pi**, **Craft Agents**, **Kilo CLI**, **Kilo Code**, **Roo Code**, **Antigravity**, **Zed Agent**, **Goose**, **Droid**, **Mimo Code**, **ZCode**, **AnythingLLM Desktop**) — nothing is installed into those tools. We only read files they already produce (SQLite DB, JSONL, OTEL export, session logs). Copilot App / CLI usage is read per request from `~/.copilot/session-store.db`; `data.db` provides the one-time legacy adoption baseline and stays observe-only after the store becomes canonical, while the Chat extension and legacy CLI continue using OTEL. TokenTracker coordinates the sources so overlapping requests are counted once. Mixed App/CLI usage that predates adoption is retained as a `github-copilot-legacy` aggregate rather than assigned to a guessed request model.
+> - **oh-my-pi** — passive session scan is always the billing/token source of truth (`~/.omp/agent/sessions/**/*.jsonl`). When OMP is detected, `tokentracker init` also writes a managed notify extension to `~/.omp/agent/extensions/tokentracker-notify.ts` so turns can trigger near-real-time sync. That file is owned only when it carries TokenTracker's managed marker: a same-named user-authored extension is never overwritten or deleted. `tokentracker uninstall` removes the extension only while it is still managed.
+> - **Passive readers** (Cursor, Kiro, Hermes, Kimi Code, Copilot, **Grok Build**, **pi**, **Craft Agents**, **Kilo CLI**, **Kilo Code**, **Roo Code**, **Antigravity**, **Zed Agent**, **Goose**, **Droid**, **Mimo Code**, **ZCode**, **Qoder**, **AnythingLLM Desktop**, **Claude Science**) — nothing is installed into those tools. We only read files they already produce (SQLite DB, JSONL, OTEL export, session logs). Copilot App / CLI usage is read per request from `~/.copilot/session-store.db`; `data.db` provides the one-time legacy adoption baseline and stays observe-only after the store becomes canonical, while the Chat extension and legacy CLI continue using OTEL. TokenTracker coordinates the sources so overlapping requests are counted once. Mixed App/CLI usage that predates adoption is retained as a `github-copilot-legacy` aggregate rather than assigned to a guessed request model.
 > - **Grok Build estimate** — current local telemetry exposes cumulative `updates.jsonl` `totalTokens`, but not a stable prompt/output/cache split; `signals.json` remains a fallback with `contextTokensUsed` snapshots. TokenTracker estimates Grok cost until per-call usage details are available.
 >
 > Run `tokentracker status` anytime to verify every integration's state. If something shows `skipped`, the `detail` column explains why (e.g. tool CLI not on `PATH`, config unreadable).
 >
 > Deeper dives: [OpenClaw integration & troubleshooting](docs/openclaw-integration.md).
 
-Missing your tool? [Open an issue](https://github.com/mm7894215/TokenTracker/issues/new) — adding new providers is usually one parser file away.
+Missing your tool? [Open an issue](https://github.com/xiufengsun/TokenTracker/issues/new) — adding new providers is usually one parser file away.
 
 ---
 
 ## 🆚 Why TokenTracker? <a id="ccusage-alternative"></a>
 
-> **Looking for a ccusage alternative with a GUI?** TokenTracker covers 27 tools (not just Claude Code), adds native macOS and Windows apps + desktop widgets, and de-duplicates token records correctly across providers — so your numbers match the providers' own billing.
+> **Looking for a ccusage alternative with a GUI?** TokenTracker covers 29 tools (not just Claude Code), adds native macOS and Windows apps + desktop widgets, and de-duplicates token records correctly across providers — so your numbers match the providers' own billing.
 
 |                          | **TokenTracker** | ccusage     | Cursor stats |
 |--------------------------|:---:|:---:|:---:|
-| **AI tools supported**   | **27**           | 1 (Claude)  | 1 (Cursor)   |
+| **AI tools supported**   | **29**           | 1 (Claude)  | 1 (Cursor)   |
 | **Local-first, no account** | ✅            | ✅           | ❌            |
 | **Native desktop app**   | ✅ macOS + Windows | ❌           | ❌            |
 | **Desktop widgets**      | ✅ 4 widgets      | ❌           | ❌            |
-| **Rate-limit tracking**  | ✅ 7 providers    | ❌           | Cursor only  |
+| **Rate-limit tracking**  | ✅ 12 providers   | ❌           | Cursor only  |
 | **Accurate multi-provider dedup** | ✅      | ❌ ¹         | —            |
 
 <sub>¹ `reqId`-based deduplication over-counts providers that omit a request ID (DeepSeek / Kimi / MiniMax / Claude sub-agents) by 1.6–3.7×. TokenTracker dedups on a composite key, so totals match each provider's own billing dashboard.</sub>
@@ -286,7 +290,7 @@ Missing your tool? [Open an issue](https://github.com/mm7894215/TokenTracker/iss
 
 ```mermaid
 flowchart LR
-    A["AI coding tools<br/>Claude Code · Codex · Cursor · Gemini · Kiro<br/>OpenCode · OpenClaw · Every Code · Hermes · Copilot<br/>Kimi Code · CodeBuddy · WorkBuddy · Grok Build · Kilo CLI · Kilo Code<br/>Antigravity · oh-my-pi · pi · Craft · Roo · Zed · Goose · Droid · Mimo · ZCode · AnythingLLM"]
+    A["AI coding tools<br/>Claude Code · Codex · Cursor · Gemini · Kiro<br/>OpenCode · OpenClaw · Every Code · Hermes · Copilot<br/>Kimi Code · CodeBuddy · WorkBuddy · Grok Build · Kilo CLI · Kilo Code<br/>Antigravity · oh-my-pi · pi · Craft · Roo · Zed · Goose · Droid · Mimo · ZCode · Qoder · AnythingLLM · Claude Science"]
     A -->|hooks trigger| B[Token Tracker]
     B -->|parse logs<br/>30-min UTC buckets| C[(Local SQLite)]
     C --> D[Web Dashboard]
@@ -304,6 +308,8 @@ flowchart LR
 ---
 
 ## 🛡️ Privacy
+
+> 📄 **[Full Privacy Policy](docs/PRIVACY.md)** — every network request the app can make, what each one sends, and how to switch it off.
 
 | Protection | Description |
 |---|---|
@@ -349,7 +355,7 @@ Configure this behavior using the `TOKENTRACKER_WSL_MODE` environment variable:
 Supported providers for WSL auto-discovery and aggregation:
 * **Dual-Install Aggregation (`both` mode):**
   * **File-list & Active CLIs:** Every Code, Kimi (legacy & Code), Gemini CLI, Antigravity, OpenCode (JSON), Codex CLI, CodeBuddy, WorkBuddy, oh-my-pi (omp), pi, GitHub Copilot (OTEL), Roo Code, Craft, Kilo Code, Droid.
-  * **SQLite-based DBs:** Hermes, Zed Agent, Goose, OpenCode (`opencode.db`), Kilo CLI, Mimo Code, ZCode, GitHub Copilot (App DB).
+  * **SQLite-based DBs:** Hermes, Zed Agent, Goose, OpenCode (`opencode.db`), Kilo CLI, Mimo Code, ZCode, Qoder, Claude Science (`operon-cli.db`), GitHub Copilot (App DB).
 * **WSL Auto-Discovery (Preference/Isolation only, no dual aggregation):**
   * Grok Build (dynamically selects either native or WSL depending on the mode, but does not aggregate both in `both` mode).
 
@@ -358,7 +364,7 @@ Supported providers for WSL auto-discovery and aggregation:
 ## 🛠️ Development
 
 ```bash
-git clone https://github.com/mm7894215/TokenTracker.git
+git clone https://github.com/xiufengsun/TokenTracker.git
 cd TokenTracker
 npm install
 
@@ -443,7 +449,7 @@ Then run the doctor for a deeper health check:
 tokentracker doctor
 ```
 
-If a provider shows as not configured even though you use it, try `tokentracker activate-if-needed` to re-run hook detection. If still missing, [open an issue](https://github.com/mm7894215/TokenTracker/issues/new) with the `doctor` output attached.
+If a provider shows as not configured even though you use it, try `tokentracker activate-if-needed` to re-run hook detection. If still missing, [open an issue](https://github.com/xiufengsun/TokenTracker/issues/new) with the `doctor` output attached.
 
 </details>
 
@@ -486,7 +492,7 @@ You only need to do this once. Older macOS alternative: right-click the app in F
 This is Gatekeeper reacting to the `com.apple.quarantine` attribute macOS attaches to every downloaded file — not an actual problem. Clear it once with:
 
 ```bash
-xattr -cr /Applications/TokenTrackerBar.app
+xattr -cr /Applications/TokenTracker.app
 ```
 
 After that the app opens normally.
@@ -521,9 +527,9 @@ To get `YOUR_USER_ID`:
 Then drop one of these in:
 
 ```markdown
-[![tokens](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=YOUR_USER_ID&metric=tokens)](https://github.com/mm7894215/TokenTracker)
-[![cost](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=YOUR_USER_ID&metric=cost)](https://github.com/mm7894215/TokenTracker)
-[![rank](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=YOUR_USER_ID&metric=rank)](https://github.com/mm7894215/TokenTracker)
+[![tokens](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=YOUR_USER_ID&metric=tokens)](https://github.com/xiufengsun/TokenTracker)
+[![cost](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=YOUR_USER_ID&metric=cost)](https://github.com/xiufengsun/TokenTracker)
+[![rank](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=YOUR_USER_ID&metric=rank)](https://github.com/xiufengsun/TokenTracker)
 ```
 
 > The link target defaults to the TokenTracker repo so every click helps other developers discover the tool. Swap it for your leaderboard profile, personal site, or `https://www.tokentracker.cc` if you'd rather route clicks elsewhere.
@@ -544,11 +550,11 @@ Renders shields.io-compatible badges with your current totals (60s cache):
 
 ## ⭐ Star History
 
-<a href="https://www.star-history.com/?type=date&repos=mm7894215%2FTokenTracker">
+<a href="https://www.star-history.com/?repos=xiufengsun%2FTokenTracker&type=date&legend=top-left">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=mm7894215/TokenTracker&type=date&theme=dark&legend=top-left&sealed_token=Xb4biZj6WI7GnAYqiQdvOITTTMcqLjMHZTNJ2UzckXkd4FdNyLLNwz0K6wG1hDug6G3HxW4K4bmIETMQTXK74rD4Io0eTU6igxPnSeLgP-NkOnZz7rlCePm6aVMFVm2JCuPoi92rcR6OhEmdYqopiFIxHt4iwzOa-L1-YcLplRoLIdtjTyjUotxai-QH" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=mm7894215/TokenTracker&type=date&legend=top-left&sealed_token=Xb4biZj6WI7GnAYqiQdvOITTTMcqLjMHZTNJ2UzckXkd4FdNyLLNwz0K6wG1hDug6G3HxW4K4bmIETMQTXK74rD4Io0eTU6igxPnSeLgP-NkOnZz7rlCePm6aVMFVm2JCuPoi92rcR6OhEmdYqopiFIxHt4iwzOa-L1-YcLplRoLIdtjTyjUotxai-QH" />
-    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=mm7894215/TokenTracker&type=date&legend=top-left&sealed_token=Xb4biZj6WI7GnAYqiQdvOITTTMcqLjMHZTNJ2UzckXkd4FdNyLLNwz0K6wG1hDug6G3HxW4K4bmIETMQTXK74rD4Io0eTU6igxPnSeLgP-NkOnZz7rlCePm6aVMFVm2JCuPoi92rcR6OhEmdYqopiFIxHt4iwzOa-L1-YcLplRoLIdtjTyjUotxai-QH" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=xiufengsun/TokenTracker&type=date&theme=dark&legend=top-left&sealed_token=Vr7qbPNqOTtzQEdtkxS2yArAReX2QkBZKNJgs3n32Q5oJa1iXddLlrT201teNSnt7QnsXtDcHy_T387xvXJ_HXHrPtvH2QQ1xqQZ67N_HV45ulWrt3j6hziDW5eshRCmu8CAT_W31PY0-WVZpFv7NQD-acv1stVK8ndribTokIp9ukSYAedx3icuUrOu" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=xiufengsun/TokenTracker&type=date&legend=top-left&sealed_token=Vr7qbPNqOTtzQEdtkxS2yArAReX2QkBZKNJgs3n32Q5oJa1iXddLlrT201teNSnt7QnsXtDcHy_T387xvXJ_HXHrPtvH2QQ1xqQZ67N_HV45ulWrt3j6hziDW5eshRCmu8CAT_W31PY0-WVZpFv7NQD-acv1stVK8ndribTokIp9ukSYAedx3icuUrOu" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=xiufengsun/TokenTracker&type=date&legend=top-left&sealed_token=Vr7qbPNqOTtzQEdtkxS2yArAReX2QkBZKNJgs3n32Q5oJa1iXddLlrT201teNSnt7QnsXtDcHy_T387xvXJ_HXHrPtvH2QQ1xqQZ67N_HV45ulWrt3j6hziDW5eshRCmu8CAT_W31PY0-WVZpFv7NQD-acv1stVK8ndribTokIp9ukSYAedx3icuUrOu" />
   </picture>
 </a>
 
@@ -556,10 +562,10 @@ Renders shields.io-compatible badges with your current totals (60s cache):
 
 ## 🤝 Contributing & Support
 
-- **Bugs / feature requests**: [open an issue](https://github.com/mm7894215/TokenTracker/issues/new)
+- **Bugs / feature requests**: [open an issue](https://github.com/xiufengsun/TokenTracker/issues/new)
 - **Security**: see [SECURITY.md](SECURITY.md) — please don't open public issues for security reports
 - **Pull requests**: see [CONTRIBUTING.md](CONTRIBUTING.md) for setup, tests, and how to add a new AI tool integration
-- **Questions / showcase**: [GitHub Discussions](https://github.com/mm7894215/TokenTracker/discussions)
+- **Questions / showcase**: [GitHub Discussions](https://github.com/xiufengsun/TokenTracker/discussions)
 
 ## 🙏 Credits
 
@@ -579,6 +585,6 @@ The Clawd character design belongs to Anthropic. This is a community project wit
 
 **Token Tracker** — Quantify your AI output.
 
-<a href="https://www.tokentracker.cc">tokentracker.cc</a>  ·  <a href="https://www.npmjs.com/package/tokentracker-cli">npm</a>  ·  <a href="https://github.com/mm7894215/TokenTracker">GitHub</a>
+<a href="https://www.tokentracker.cc">tokentracker.cc</a>  ·  <a href="https://www.npmjs.com/package/tokentracker-cli">npm</a>  ·  <a href="https://github.com/xiufengsun/TokenTracker">GitHub</a>
 
 </div>

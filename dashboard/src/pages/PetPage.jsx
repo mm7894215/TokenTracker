@@ -6,6 +6,7 @@ import { ProviderIcon } from "../ui/dashboard/components/ProviderIcon.jsx";
 import { usePetSettings } from "../hooks/use-pet-settings.js";
 import { usePetCatalog } from "../hooks/use-pet-catalog.js";
 import { useNativeSettings } from "../hooks/use-native-settings.js";
+import { refreshNativePetCatalog } from "../lib/native-bridge.js";
 import {
   importCodexPets,
   importPetPackage,
@@ -94,7 +95,7 @@ function CharacterCard({ character, selected, onSelect, onRemove, removeDisabled
           aria-label={`${copy("pet.import.remove")} · ${name}`}
           className={cn(
             "absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-md border border-oai-gray-200/90 bg-white/95 text-oai-gray-500 transition-opacity hover:text-red-600 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 disabled:opacity-40 dark:border-oai-gray-700 dark:bg-oai-gray-900/95 dark:text-oai-gray-400 dark:hover:text-red-400",
-            selected ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+            "opacity-0 group-hover:opacity-100",
           )}
         >
           <Trash2 className="h-3 w-3" aria-hidden />
@@ -311,6 +312,7 @@ export function PetPage() {
     try {
       const result = await operation();
       await refresh();
+      refreshNativePetCatalog();
       if (result?.pet?.id) setSetting("character", result.pet.id);
       showToast({ title: successMessage, timeout: 4000 });
       setImportUrl("");
@@ -409,7 +411,7 @@ export function PetPage() {
                         selected={selectedCharacter === character.id}
                         onSelect={() => setSetting("character", character.id)}
                         removeDisabled={importBusy}
-                        onRemove={catalogAvailable && character.custom
+                        onRemove={catalogAvailable && character.id !== "clawd"
                           ? () => runImport(async () => {
                             await removePet(character.id);
                             if (selectedCharacter === character.id) setSetting("character", "clawd");

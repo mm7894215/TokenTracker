@@ -14,7 +14,7 @@ type CodexCreditWindow = {
   readonly source?: string | null;
   readonly used_percent: number;
   readonly remaining_percent?: number | null;
-  readonly reset_at?: number | null;
+  readonly reset_at?: string | number | null;
   readonly limit_credits?: number | null;
   readonly used_credits?: number | null;
   readonly remaining_credits?: number | null;
@@ -56,7 +56,18 @@ interface UsageLimitsData {
   grok: { configured: boolean; error?: string | null; plan_label?: string | null; primary_window?: { used_percent: number; reset_at?: string | null } | null; secondary_window?: { used_percent: number; reset_at?: string | null } | null };
   antigravity: { configured: boolean; error?: string | null; plan_label?: string | null; account_email?: string | null; account_plan?: string | null; cached?: boolean; cached_at?: string | null; primary_window?: { used_percent: number; reset_at?: string | null } | null; secondary_window?: { used_percent: number; reset_at?: string | null } | null; tertiary_window?: { used_percent: number; reset_at?: string | null } | null; quaternary_window?: { used_percent: number; reset_at?: string | null } | null };
   zcode: { configured: boolean; error?: string | null; plan_label?: string | null; plan_id?: string | null; plan_kind?: string | null; primary_window?: { used_percent: number; reset_at?: string | null } | null; secondary_window?: { used_percent: number; reset_at?: string | null } | null; tertiary_window?: { used_percent: number; reset_at?: string | null } | null };
-  opencodeGo: { configured: boolean; error?: string | null; plan_label?: string | null; primary_window?: { used_percent: number; reset_at?: string | null } | null; secondary_window?: { used_percent: number; reset_at?: string | null } | null; tertiary_window?: { used_percent: number; reset_at?: string | null } | null };
+  opencodeGo: { configured: boolean; error?: string | null; plan_label?: string | null; source?: string | null; subscription_status?: "active" | "inactive" | "unknown" | null; primary_window?: { used_percent: number; reset_at?: string | null } | null; secondary_window?: { used_percent: number; reset_at?: string | null } | null; tertiary_window?: { used_percent: number; reset_at?: string | null } | null };
+  qoder: {
+    configured: boolean;
+    error?: string | null;
+    plan_label?: string | null;
+    primary_window?: CodexCreditWindow | null;
+    secondary_window?: CodexCreditWindow | null;
+    cached?: boolean;
+    stale?: boolean;
+    cached_at?: string | null;
+    source?: string | null;
+  };
 }
 
 interface UsageLimitsInitialState {

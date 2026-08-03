@@ -9,11 +9,57 @@ const {
   buildSessionAnalytics,
   scanClaudeSession,
   scanCodexSession,
+  scanGrokSession,
   summarizeSessions,
   listSessionsForBrowser,
   resumeCommandFor,
   sessionsToCsv,
 } = require("../src/lib/session-analytics");
+
+function writeGrokSessionFixture(home, {
+  sessionId = "019f740c-e792-7fb1-a218-59ea1b340714",
+  cwd = "/work/tokentracker",
+  title = "Wire up Grok sessions",
+  updates = [],
+  signals = null,
+} = {}) {
+  // Mirror Grok Build layout: ~/.grok/sessions/<url-encoded-cwd>/<uuid>/
+  const encodedCwd = encodeURIComponent(cwd);
+  const sessionDir = path.join(home, ".grok", "sessions", encodedCwd, sessionId);
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const updatesPath = path.join(sessionDir, "updates.jsonl");
+  fs.writeFileSync(updatesPath, `${updates.map(JSON.stringify).join("\n")}\n`);
+  fs.writeFileSync(path.join(sessionDir, "summary.json"), `${JSON.stringify({
+    info: { id: sessionId, cwd },
+    generated_title: title,
+    session_summary: title,
+    created_at: "2026-07-18T06:00:00.000Z",
+    updated_at: "2026-07-18T06:10:00.000Z",
+    last_active_at: "2026-07-18T06:10:00.000Z",
+    current_model_id: "alphafox",
+  })}\n`);
+  fs.writeFileSync(path.join(sessionDir, "signals.json"), `${JSON.stringify(signals || {
+    turnCount: 1,
+    primaryModelId: "grok-4.5",
+    modelsUsed: ["grok-4.5"],
+    contextTokensUsed: 99999,
+  })}\n`);
+  return updatesPath;
+}
+
+function grokUpdate(sessionId, sessionUpdate, updateFields = {}, opts = {}) {
+  const ts = opts.timestamp ?? 1_784_358_461;
+  const agentTimestampMs = opts.agentTimestampMs ?? ts * 1000;
+  return {
+    timestamp: ts,
+    method: sessionUpdate === "turn_completed" ? "_x.ai/session/update" : "session/update",
+    params: {
+      sessionId,
+      update: { sessionUpdate, ...updateFields },
+      _meta: { agentTimestampMs },
+    },
+  };
+}
 
 test("Claude session analytics retains metadata but never content", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tt-session-"));
@@ -494,7 +540,223 @@ test("resume commands reject ids that could inject shell syntax", () => {
     resumeCommandFor("codex", "11111111-2222-3333-4444-555555555555"),
     "codex resume 11111111-2222-3333-4444-555555555555",
   );
+  assert.equal(
+    resumeCommandFor("grok", "019f740c-e792-7fb1-a218-59ea1b340714"),
+    "grok --resume 019f740c-e792-7fb1-a218-59ea1b340714",
+  );
   assert.equal(resumeCommandFor("claude", "--dangerous-flag"), null);
   assert.equal(resumeCommandFor("claude", "valid; touch /tmp/pwned"), null);
   assert.equal(resumeCommandFor("codex", "valid\nrm -rf workspace"), null);
+  assert.equal(resumeCommandFor("grok", "valid; rm -rf /"), null);
+});
+
+test("Grok session analytics bills from turn_completed.usage and keeps titles local-only", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tt-grok-session-"));
+  const sessionId = "019f740c-e792-7fb1-a218-59ea1b340714";
+  const secret = "TOP-SECRET-GROK-PROMPT-CONTENT";
+  const updatesPath = writeGrokSessionFixture(home, {
+    sessionId,
+    cwd: "/work/myproject",
+    title: "Refactor the auth module",
+    updates: [
+      grokUpdate(sessionId, "user_message_chunk", {
+        content: { type: "text", text: secret },
+      }, { timestamp: 1_784_358_400, agentTimestampMs: 1_784_358_400_000 }),
+      grokUpdate(sessionId, "tool_call", {
+        toolCallId: "call-1",
+        title: "search_replace",
+        _meta: { "x.ai/tool": { name: "search_replace", kind: "edit" } },
+      }, { timestamp: 1_784_358_410, agentTimestampMs: 1_784_358_410_000 }),
+      grokUpdate(sessionId, "tool_call", {
+        toolCallId: "call-2",
+        title: "spawn_subagent",
+        _meta: { "x.ai/tool": { name: "spawn_subagent", kind: "other" } },
+      }, { timestamp: 1_784_358_415, agentTimestampMs: 1_784_358_415_000 }),
+      grokUpdate(sessionId, "turn_completed", {
+        usage: {
+          inputTokens: 100,
+          outputTokens: 20,
+          totalTokens: 120,
+          cachedReadTokens: 10,
+          reasoningTokens: 5,
+          modelUsage: {
+            "grok-4.5-build-free": {
+              inputTokens: 100,
+              outputTokens: 20,
+              totalTokens: 120,
+              cachedReadTokens: 10,
+              reasoningTokens: 5,
+            },
+          },
+        },
+      }, { timestamp: 1_784_358_430, agentTimestampMs: 1_784_358_430_000 }),
+    ],
+  });
+
+  const session = await scanGrokSession(updatesPath);
+  assert.equal(session.source, "grok");
+  assert.equal(session.session_id, sessionId);
+  assert.equal(session.title, "Refactor the auth module");
+  assert.equal(session.project_key, "myproject");
+  assert.equal(session.project_ref, "/work/myproject");
+  assert.equal(session.turns, 1);
+  assert.equal(session.edit_turns, 1);
+  assert.equal(session.retry_turns, 0);
+  assert.equal(session.one_shot, true);
+  assert.equal(session.subagent_calls, 1);
+  assert.equal(session.subagent_types.spawn_subagent, 1);
+  // Grok inputTokens is cache-inclusive: non-cached input = 100 - 10 = 90.
+  // Prefer reported totalTokens (120), never input+cached+output (would be 130).
+  assert.equal(session.total_tokens, 120);
+  assert.equal(session.tokens.input_tokens, 90);
+  assert.equal(session.tokens.cached_input_tokens, 10);
+  assert.equal(session.tokens.output_tokens, 20);
+  assert.equal(session.tokens.reasoning_output_tokens, 5);
+  assert.equal(session.model, "grok-4.5-build-free");
+  // Prompt body never lands in the metadata row.
+  assert.equal(JSON.stringify(session).includes(secret), false);
+
+  const summary = summarizeSessions([session]);
+  assert.equal(Object.hasOwn(summary.sessions[0], "title"), false);
+  assert.equal(Object.hasOwn(summary.sessions[0], "project_ref"), false);
+  assert.equal(Object.hasOwn(summary.sessions[0], "session_id"), false);
+
+  const browser = listSessionsForBrowser([session]);
+  assert.equal(browser.sessions.length, 1);
+  assert.equal(browser.sessions[0].title, "Refactor the auth module");
+  assert.equal(browser.sessions[0].resume_command, `grok --resume ${sessionId}`);
+});
+
+test("Grok session analytics counts repeated prompts as retries across turns", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tt-grok-retry-"));
+  const sessionId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const prompt = "make the requested change";
+  const usage = {
+    inputTokens: 10,
+    outputTokens: 2,
+    totalTokens: 12,
+    cachedReadTokens: 0,
+    reasoningTokens: 0,
+    modelUsage: { "grok-4.5": { inputTokens: 10, outputTokens: 2, totalTokens: 12 } },
+  };
+  const updatesPath = writeGrokSessionFixture(home, {
+    sessionId,
+    title: "Retry fixture",
+    updates: [
+      grokUpdate(sessionId, "user_message_chunk", { content: { type: "text", text: prompt } }, { timestamp: 100, agentTimestampMs: 100_000 }),
+      grokUpdate(sessionId, "tool_call", {
+        title: "search_replace",
+        _meta: { "x.ai/tool": { name: "search_replace" } },
+      }, { timestamp: 101, agentTimestampMs: 101_000 }),
+      grokUpdate(sessionId, "turn_completed", { usage }, { timestamp: 102, agentTimestampMs: 102_000 }),
+      grokUpdate(sessionId, "user_message_chunk", { content: { type: "text", text: prompt } }, { timestamp: 103, agentTimestampMs: 103_000 }),
+      grokUpdate(sessionId, "turn_completed", { usage }, { timestamp: 104, agentTimestampMs: 104_000 }),
+    ],
+  });
+
+  const session = await scanGrokSession(updatesPath);
+  assert.equal(session.turns, 2);
+  assert.equal(session.edit_turns, 1);
+  assert.equal(session.retry_turns, 1);
+  assert.equal(session.one_shot, false);
+  assert.equal(session.total_tokens, 24);
+});
+
+test("Grok discovery builds sessions from ~/.grok/sessions layout", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tt-grok-discover-"));
+  const sessionId = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
+  writeGrokSessionFixture(home, {
+    sessionId,
+    cwd: "/repo/alpha",
+    title: "Discovered Grok session",
+    updates: [
+      grokUpdate(sessionId, "user_message_chunk", { content: { type: "text", text: "hi" } }, { timestamp: 200, agentTimestampMs: 200_000 }),
+      grokUpdate(sessionId, "turn_completed", {
+        usage: {
+          inputTokens: 7,
+          outputTokens: 3,
+          totalTokens: 10,
+          cachedReadTokens: 0,
+          reasoningTokens: 0,
+          modelUsage: { "grok-4.5": { inputTokens: 7, outputTokens: 3, totalTokens: 10 } },
+        },
+      }, { timestamp: 210, agentTimestampMs: 210_000 }),
+    ],
+  });
+
+  // Pin Grok home to the fixture tree so a developer-exported GROK_HOME /
+  // TOKENTRACKER_GROK_HOME cannot pull real sessions into this unit test.
+  const prevGrokHome = process.env.GROK_HOME;
+  const prevTtGrokHome = process.env.TOKENTRACKER_GROK_HOME;
+  delete process.env.GROK_HOME;
+  delete process.env.TOKENTRACKER_GROK_HOME;
+  try {
+    const rows = await buildSessionAnalytics({ home, force: true });
+    const grokRows = rows.filter((row) => row.source === "grok");
+    assert.equal(grokRows.length, 1);
+    assert.equal(grokRows[0].session_id, sessionId);
+    assert.equal(grokRows[0].title, "Discovered Grok session");
+    assert.equal(grokRows[0].total_tokens, 10);
+
+    const browser = listSessionsForBrowser(rows);
+    const grokOnly = browser.sessions.filter((row) => row.source === "grok");
+    assert.equal(grokOnly.length, 1);
+    assert.equal(grokOnly[0].resume_command, `grok --resume ${sessionId}`);
+  } finally {
+    if (prevGrokHome === undefined) delete process.env.GROK_HOME;
+    else process.env.GROK_HOME = prevGrokHome;
+    if (prevTtGrokHome === undefined) delete process.env.TOKENTRACKER_GROK_HOME;
+    else process.env.TOKENTRACKER_GROK_HOME = prevTtGrokHome;
+  }
+});
+
+test("Grok tool-only turn after turn_completed still increments turns", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tt-grok-tool-only-"));
+  const sessionId = "dddddddd-eeee-4fff-8000-111111111111";
+  const usage = {
+    inputTokens: 20,
+    outputTokens: 5,
+    totalTokens: 25,
+    cachedReadTokens: 0,
+    reasoningTokens: 0,
+    modelUsage: { "grok-4.5": { inputTokens: 20, outputTokens: 5, totalTokens: 25 } },
+  };
+  const updatesPath = writeGrokSessionFixture(home, {
+    sessionId,
+    title: "Tool-only follow-up",
+    updates: [
+      grokUpdate(sessionId, "user_message_chunk", { content: { type: "text", text: "first" } }, { timestamp: 100, agentTimestampMs: 100_000 }),
+      grokUpdate(sessionId, "turn_completed", { usage }, { timestamp: 101, agentTimestampMs: 101_000 }),
+      // No new user_message_chunk — only a tool after the previous turn closed.
+      grokUpdate(sessionId, "tool_call", {
+        title: "search_replace",
+        _meta: { "x.ai/tool": { name: "search_replace" } },
+      }, { timestamp: 102, agentTimestampMs: 102_000 }),
+      grokUpdate(sessionId, "turn_completed", { usage }, { timestamp: 103, agentTimestampMs: 103_000 }),
+    ],
+  });
+
+  const session = await scanGrokSession(updatesPath);
+  assert.equal(session.turns, 2);
+  assert.equal(session.edit_turns, 1);
+  assert.ok(session.edit_turns <= session.turns);
+  assert.equal(session.total_tokens, 50);
+});
+
+test("Grok does not invent billable tokens from context window occupancy", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tt-grok-nocontxt-"));
+  const sessionId = "cccccccc-dddd-4eee-8fff-000000000000";
+  // Only a user chunk — no turn_completed.usage. signals.contextTokensUsed is
+  // deliberately huge and must not become total_tokens.
+  const updatesPath = writeGrokSessionFixture(home, {
+    sessionId,
+    title: "Empty billable",
+    signals: { turnCount: 1, primaryModelId: "grok-4.5", contextTokensUsed: 500_000 },
+    updates: [
+      grokUpdate(sessionId, "user_message_chunk", { content: { type: "text", text: "hi" } }),
+    ],
+  });
+  const session = await scanGrokSession(updatesPath);
+  assert.equal(session.total_tokens, 0);
+  assert.equal(listSessionsForBrowser([session]).sessions.length, 0);
 });

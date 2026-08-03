@@ -2,14 +2,16 @@
 set -euo pipefail
 
 # =============================================================================
-# create-dmg.sh — Create a professional DMG installer for TokenTrackerBar
-# Usage: ./create-dmg.sh [path/to/TokenTrackerBar.app]
+# create-dmg.sh — Create a professional DMG installer for TokenTracker
+# Usage: ./create-dmg.sh [path/to/TokenTracker.app]
 # Set CI=true to skip Finder/AppleScript customization (headless mode)
 # =============================================================================
 
-APP_NAME="TokenTrackerBar"
-VOLUME_NAME="TokenTrackerBar"
-DMG_FILENAME="${APP_NAME}.dmg"
+APP_NAME="TokenTracker"
+VOLUME_NAME="TokenTracker"
+# Keep the historical filename: the website and READMEs link to the stable
+# releases/latest/download/TokenTrackerBar.dmg URL.
+DMG_FILENAME="TokenTrackerBar.dmg"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="${PROJECT_DIR}/build"
@@ -43,7 +45,7 @@ fi
 
 if [[ ! -d "$APP_PATH" ]]; then
     echo "Error: ${APP_NAME}.app not found at: $APP_PATH"
-    echo "Usage: $0 [path/to/TokenTrackerBar.app]"
+    echo "Usage: $0 [path/to/${APP_NAME}.app]"
     exit 1
 fi
 

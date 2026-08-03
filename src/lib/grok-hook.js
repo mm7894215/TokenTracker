@@ -31,10 +31,15 @@ function resolveLegacyTrackerBinDir(trackerDir) {
   return path.join(trackerDir, "bin");
 }
 
-function buildGrokSessionEndHookJson({ notifyGrokHandlerPath }) {
+function buildGrokSessionEndHookJson(
+  { notifyGrokHandlerPath },
+  { platform = process.platform, execPath = process.execPath } = {},
+) {
   // The command runs our dedicated handler.
   // We pass the session id and cwd via environment variables that Grok already sets.
-  const cmd = `/usr/bin/env node ${shellQuote(notifyGrokHandlerPath)}`;
+  const cmd = platform === "win32"
+    ? `${windowsCommandQuote(execPath)} ${windowsCommandQuote(notifyGrokHandlerPath)}`
+    : `/usr/bin/env node ${shellQuote(notifyGrokHandlerPath)}`;
   return {
     hooks: {
       SessionEnd: [
@@ -54,6 +59,10 @@ function buildGrokSessionEndHookJson({ notifyGrokHandlerPath }) {
 
 function shellQuote(value) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+function windowsCommandQuote(value) {
+  return `"${String(value).replace(/"/g, '""')}"`;
 }
 
 async function ensureGrokHookFiles({

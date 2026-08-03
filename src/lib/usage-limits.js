@@ -27,6 +27,8 @@ const {
 const { fetchGrokLimits } = require("./grok-limits");
 const { fetchZcodeLimits } = require("./zcode-limits");
 const { fetchOpencodeGoLimits } = require("./opencode-go-limits");
+const { fetchQoderLimits } = require("./qoder-limits");
+const { fetchProviderServiceStatus } = require("./provider-status");
 const { readSqliteJsonRows, readSqliteJsonRowsAsync } = require("./sqlite-reader");
 
 const execFileAsync = promisify(cp.execFile);
@@ -62,6 +64,7 @@ const CODEX_LIMITS_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 // restart — stops calling until it expires. Hammering during the cooldown just renews the
 // penalty, which is what kept the panel stuck on the error.
 const CLAUDE_RATE_LIMIT_FILE = "claude-usage-rate-limit.json";
+const KIRO_CREDITS_SIDECAR_FILE = "kiro-credits.json";
 const CLAUDE_RATE_LIMIT_DEFAULT_COOLDOWN_SEC = 5 * 60;
 const CLAUDE_RATE_LIMIT_MAX_COOLDOWN_SEC = 60 * 60;
 
@@ -520,15 +523,16 @@ async function fetchCodexUsageLimits(
       // 401/403/404 from wham means "no usage data available for this auth state" — render
       // a neutral empty state instead of a red "Fetch failed" error.
       if (res.status === 401 || res.status === 403 || res.status === 404) {
-        return { body: null };
+        return { body: null, status: res.status };
       }
       if (res.status !== 200) {
         throw new Error(`Codex API returned ${res.status}`);
       }
-      return { body: await res.json() };
+      return { body: await res.json(), status: res.status };
     }), "Codex", providerTimeoutMs);
   if (!usage.body) {
     return {
+      upstream_status: usage.status,
       primary_window: null,
       secondary_window: null,
       credit_window: null,
@@ -555,6 +559,7 @@ async function fetchCodexUsageLimits(
     }
   }
   return {
+    upstream_status: usage.status,
     ...normalizeCodexRateWindows(body.rate_limit || {}),
     credit_window: normalizeCodexCreditWindow(body.spend_control?.individual_limit),
     ...normalizeCodexSparkRateWindows(body.additional_rate_limits),
@@ -1222,11 +1227,24 @@ function runCommand(commandRunner, command, args, options = {}) {
     return Promise.resolve(commandRunner(command, args, merged));
   }
 
-  const { timeout, maxBuffer, ...spawnOptions } = merged;
+  const {
+    timeout,
+    maxBuffer,
+    completeWhen,
+    completionGraceMs = 250,
+    killProcessGroup = false,
+    ...spawnOptions
+  } = merged;
   return new Promise((resolve) => {
     let child;
+    const useProcessGroup =
+      killProcessGroup && process.platform !== "win32";
     try {
-      child = cp.spawn(command, args, { ...spawnOptions, stdio: ["ignore", "pipe", "pipe"] });
+      child = cp.spawn(command, args, {
+        ...spawnOptions,
+        detached: useProcessGroup || spawnOptions.detached,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
     } catch (error) {
       resolve({ status: null, stdout: "", stderr: "", error });
       return;
@@ -1238,12 +1256,14 @@ function runCommand(commandRunner, command, args, options = {}) {
     let timedOut = false;
     let timer = null;
     let hardTimer = null;
+    let completionTimer = null;
 
     const settle = ({ status = null, error = null } = {}) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
       if (hardTimer) clearTimeout(hardTimer);
+      if (completionTimer) clearTimeout(completionTimer);
       let finalError = error;
       if (!finalError && timedOut) {
         finalError = new Error(`spawn ${command} ETIMEDOUT`);
@@ -1254,18 +1274,48 @@ function runCommand(commandRunner, command, args, options = {}) {
       resolve(result);
     };
 
+    const signalChild = (signal) => {
+      try {
+        if (useProcessGroup && Number.isInteger(child.pid)) {
+          process.kill(-child.pid, signal);
+        } else {
+          child.kill(signal);
+        }
+      } catch (_error) {}
+    };
+
+    const stopChild = ({ timeoutExpired = false } = {}) => {
+      if (settled) return;
+      if (timeoutExpired) timedOut = true;
+      signalChild("SIGTERM");
+      // Guarantee settlement even if the process group ignores SIGTERM or
+      // keeps inherited stdio open.
+      hardTimer = setTimeout(() => {
+        signalChild("SIGKILL");
+        settle({ status: null });
+      }, 1000);
+      if (typeof hardTimer.unref === "function") hardTimer.unref();
+    };
+
     if (Number.isFinite(timeout) && timeout > 0) {
       timer = setTimeout(() => {
-        timedOut = true;
-        try { child.kill("SIGTERM"); } catch (_error) {}
-        // Guarantee settlement even if the child ignores SIGTERM or keeps stdio open.
-        hardTimer = setTimeout(() => {
-          try { child.kill("SIGKILL"); } catch (_error) {}
-          settle({ status: null });
-        }, 1000);
-        if (typeof hardTimer.unref === "function") hardTimer.unref();
+        stopChild({ timeoutExpired: true });
       }, timeout);
     }
+
+    const scheduleCompletion = () => {
+      if (typeof completeWhen !== "function" || settled) return;
+      let complete = false;
+      try {
+        complete = Boolean(completeWhen(stdout, stderr));
+      } catch (_error) {}
+      if (!complete) return;
+      if (completionTimer) clearTimeout(completionTimer);
+      completionTimer = setTimeout(
+        () => stopChild(),
+        Math.max(0, Number(completionGraceMs) || 0),
+      );
+    };
 
     const collect = (stream, append) => {
       if (!stream) return;
@@ -1275,9 +1325,11 @@ function runCommand(commandRunner, command, args, options = {}) {
         if (stdout.length + stderr.length > maxBuffer) {
           const error = new Error(`spawn ${command} maxBuffer length exceeded`);
           error.code = "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
-          try { child.kill("SIGKILL"); } catch (_error) {}
+          signalChild("SIGKILL");
           settle({ status: null, error });
+          return;
         }
+        scheduleCompletion();
       });
     };
     collect(child.stdout, (chunk) => { stdout += chunk; });
@@ -1324,14 +1376,94 @@ function parseMonthDayResetDate(dateStr, now = new Date()) {
   return candidate.toISOString();
 }
 
+function parseKiroResetDate(dateStr, now = new Date()) {
+  if (typeof dateStr !== "string") return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    const candidate = new Date(`${dateStr}T00:00:00.000Z`);
+    if (
+      Number.isFinite(candidate.getTime()) &&
+      candidate.toISOString().slice(0, 10) === dateStr
+    ) {
+      return candidate.toISOString();
+    }
+    return null;
+  }
+  return parseMonthDayResetDate(dateStr, now);
+}
+
 function isKiroUsageOutputComplete(output) {
-  const lowered = stripAnsi(output).toLowerCase();
-  return lowered.includes("covered in plan")
-    || lowered.includes("resets on")
-    || lowered.includes("bonus credits")
-    || lowered.includes("plan:")
-    || lowered.includes("managed by admin")
-    || lowered.includes("managed by organization");
+  try {
+    parseKiroUsageOutput(output);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function parseKiroCliVersion(output) {
+  const match = String(output || "").match(
+    /(?:kiro-cli\s+)?(\d+)\.(\d+)\.(\d+)/i,
+  );
+  if (!match) return null;
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+  };
+}
+
+function kiroCliRequiresPty(version) {
+  if (!version) return false;
+  if (version.major !== 2) return version.major > 2;
+  return version.minor >= 13;
+}
+
+function quotePosixShellArg(value) {
+  return `'${String(value).replace(/'/g, `'"'"'`)}'`;
+}
+
+function kiroPtyInvocation(binaryPath, args, platform = process.platform) {
+  if (platform === "darwin") {
+    return {
+      command: "/usr/bin/script",
+      args: ["-q", "/dev/null", binaryPath, ...args],
+    };
+  }
+  if (platform === "linux") {
+    const commandLine = [binaryPath, ...args]
+      .map(quotePosixShellArg)
+      .join(" ");
+    return {
+      command: "script",
+      args: ["-q", "-c", commandLine, "/dev/null"],
+    };
+  }
+  return null;
+}
+
+function combineKiroCommandOutput(result) {
+  const stdout =
+    typeof result?.stdout === "string" ? result.stdout.trim() : "";
+  const stderr =
+    typeof result?.stderr === "string" ? result.stderr.trim() : "";
+  return [stdout, stderr].filter(Boolean).join("\n");
+}
+
+function parseKiroCommandResult(result, { now = new Date() } = {}) {
+  const output = combineKiroCommandOutput(result);
+  if (
+    result?.error?.code === "ETIMEDOUT" &&
+    !isKiroUsageOutputComplete(output)
+  ) {
+    throw new Error("Kiro CLI timed out.");
+  }
+  if (!output && result?.status !== 0) {
+    const detail = result?.error?.message
+      ? `: ${result.error.message}`
+      : ".";
+    throw new Error(`Kiro CLI failed with status ${result?.status ?? "unknown"}${detail}`);
+  }
+  return parseKiroUsageOutput(output, { now });
 }
 
 function parseKiroUsageOutput(output, { now = new Date() } = {}) {
@@ -1364,8 +1496,12 @@ function parseKiroUsageOutput(output, { now = new Date() } = {}) {
     planName = modernPlan[1].split("\n")[0].trim() || planName;
   }
 
-  const resetMatch = stripped.match(/resets on (\d{2}\/\d{2})/i);
-  const primaryReset = resetMatch ? parseMonthDayResetDate(resetMatch[1], now) : null;
+  const resetMatch = stripped.match(
+    /resets on (\d{4}-\d{2}-\d{2}|\d{2}\/\d{2})/i,
+  );
+  const primaryReset = resetMatch
+    ? parseKiroResetDate(resetMatch[1], now)
+    : null;
 
   let creditsPercent = null;
   const percentMatch = stripped.match(/█+\s*(\d+)%/);
@@ -1418,6 +1554,43 @@ function parseKiroUsageOutput(output, { now = new Date() } = {}) {
     primary_window: buildWindow({ usedPercent: creditsPercent, resetAt: primaryReset }),
     secondary_window: bonusWindow,
   };
+}
+
+function readKiroCreditsSummary({ home = os.homedir() } = {}) {
+  const sidecarPath = path.join(
+    home,
+    ".tokentracker",
+    "tracker",
+    KIRO_CREDITS_SIDECAR_FILE,
+  );
+  try {
+    const parsed = JSON.parse(fs.readFileSync(sidecarPath, "utf8"));
+    if (parsed?.version !== 1) return null;
+    const totalCredits = Number(parsed.total_credits);
+    const recordCount = Number(parsed.record_count);
+    const sessionCount = Number(parsed.session_count);
+    if (
+      !Number.isFinite(totalCredits) ||
+      totalCredits < 0 ||
+      !Number.isSafeInteger(recordCount) ||
+      recordCount <= 0 ||
+      !Number.isSafeInteger(sessionCount) ||
+      sessionCount <= 0
+    ) {
+      return null;
+    }
+    return {
+      tracked_credits: totalCredits,
+      tracked_credit_records: recordCount,
+      tracked_credit_sessions: sessionCount,
+      tracked_credits_latest_at:
+        typeof parsed.latest_at === "string" ? parsed.latest_at : null,
+      tracked_credits_updated_at:
+        typeof parsed.updated_at === "string" ? parsed.updated_at : null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1845,42 +2018,86 @@ async function fetchCopilotLimits({
   }
 }
 
-async function fetchKiroLimits({ commandRunner, now = new Date() } = {}) {
-  if (!(await isBinaryAvailable("kiro-cli", { commandRunner }))) {
-    return { configured: false };
+async function fetchKiroLimits({
+  commandRunner,
+  now = new Date(),
+  platform = process.platform,
+  home = os.homedir(),
+} = {}) {
+  const trackedCredits = readKiroCreditsSummary({ home });
+  const binaryPath = await whichBinary("kiro-cli", { commandRunner });
+  if (!binaryPath) {
+    return trackedCredits
+      ? { configured: true, error: null, ...trackedCredits }
+      : { configured: false };
   }
 
-  const result = await runCommand(
+  const versionResult = await runCommand(
     commandRunner,
-    "kiro-cli",
-    ["chat", "--no-interactive", "/usage"],
+    binaryPath,
+    ["--version"],
     {
-      timeout: 20_000,
+      timeout: 2_000,
       env: { ...process.env, TERM: "xterm-256color" },
     },
   );
+  const version = parseKiroCliVersion(
+    combineKiroCommandOutput(versionResult),
+  );
+  const args = ["chat", "--no-interactive", "/usage"];
+  const pty = kiroPtyInvocation(binaryPath, args, platform);
 
-  const stdout = typeof result?.stdout === "string" ? result.stdout : "";
-  const stderr = typeof result?.stderr === "string" ? result.stderr : "";
-  const output = stderr.trim() || stdout.trim();
+  // Kiro CLI 2.13 changed pipe behavior: /usage is treated as a normal model
+  // prompt without a terminal. Go straight to a PTY so a refresh does not
+  // accidentally spend credits on an assistant response. Older/unknown builds
+  // retain the existing pipe-first behavior, with a bounded PTY fallback if
+  // the output is not a recognizable usage panel.
+  const attempts = [];
+  if (kiroCliRequiresPty(version)) {
+    if (pty) attempts.push(pty);
+  } else {
+    attempts.push({ command: binaryPath, args });
+    if (pty) attempts.push(pty);
+  }
 
+  let lastError = null;
   try {
-    if (result?.error?.code === "ETIMEDOUT" && !isKiroUsageOutputComplete(output)) {
-      throw new Error("Kiro CLI timed out.");
+    if (attempts.length === 0) {
+      throw new Error(
+        `Kiro CLI ${version ? `${version.major}.${version.minor}.${version.patch}` : ""} requires a pseudo-terminal on ${platform}.`,
+      );
     }
-    if (!output && result?.status !== 0) {
-      throw new Error(`Kiro CLI failed with status ${result.status}.`);
+    for (const attempt of attempts) {
+      const result = await runCommand(
+        commandRunner,
+        attempt.command,
+        attempt.args,
+        {
+          timeout: 20_000,
+          env: { ...process.env, TERM: "xterm-256color" },
+          completeWhen: (stdout, stderr) =>
+            isKiroUsageOutputComplete(`${stdout}\n${stderr}`),
+          completionGraceMs: 750,
+          killProcessGroup: Boolean(pty),
+        },
+      );
+      try {
+        return {
+          configured: true,
+          error: null,
+          ...parseKiroCommandResult(result, { now }),
+          ...(trackedCredits || {}),
+        };
+      } catch (error) {
+        lastError = error;
+      }
     }
-
-    return {
-      configured: true,
-      error: null,
-      ...parseKiroUsageOutput(output, { now }),
-    };
+    throw lastError || new Error("Failed to read Kiro usage.");
   } catch (error) {
     return {
       configured: true,
       error: error?.message || "Unknown error",
+      ...(trackedCredits || {}),
     };
   }
 }
@@ -2740,7 +2957,7 @@ function toTitleCase(s) {
 // leading brand word and Title Case the rest.
 function normalizePlanLabel(raw, brand) {
   if (raw == null) return null;
-  let s = String(raw).trim();
+  let s = String(raw).replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
   if (!s) return null;
   const lower = s.toLowerCase();
   if (["free", "none", "unknown"].includes(lower)) return null;
@@ -2836,14 +3053,14 @@ async function fetchUsageLimitsUncached({
   ]);
   const claudePlanType = claudeSubscription?.planType || null;
 
-  // Proactively refresh Codex tokens that are >8 days stale, mirroring CodexBar's
-  // CodexTokenRefresher.swift. Without this, users who logged in once and didn't run
-  // `codex` for >a week get wham 401 → "Fetch failed" (issue #52). Best-effort: any
-  // refresh failure falls through to using the existing (possibly stale) token, then the
-  // 4xx graceful path in fetchCodexUsageLimits surfaces a neutral state instead of red.
+  // Match the official Codex CLI: prefer the access token's JWT expiry and refresh only
+  // within five minutes of it; fall back to last_refresh >8 days for opaque/legacy tokens.
+  // Best-effort: a refresh failure still falls through to the existing access token.
   let refreshError = null;
   let codexAuthRefreshed = codexAuth;
-  if (codexAuth && isTokenStale(codexAuth.lastRefresh) && codexAuth.refreshToken) {
+  if (codexAuth
+    && isTokenStale(codexAuth.lastRefresh, nowMs, codexAuth.accessToken)
+    && codexAuth.refreshToken) {
     try {
       const newTokens = await refreshCodexTokens({
         refreshToken: codexAuth.refreshToken,
@@ -2883,7 +3100,7 @@ async function fetchUsageLimitsUncached({
     : null;
 
   const providerFetch = withFetchTimeout(fetchImpl, providerTimeoutMs);
-  const [claudeResult, codexResult, cursor, kimi, gemini, kiro, antigravity, copilot, grok, zcode, opencodeGo] = await Promise.all([
+  const [claudeResult, codexResult, cursor, kimi, gemini, kiro, antigravity, copilot, grok, zcode, opencodeGo, qoder, claudeServiceStatus] = await Promise.all([
     claudeToken && !freshClaudeCache && !claudeRetryAtMs
       ? withProviderTimeout(fetchClaudeUsageLimits(claudeToken, { fetchImpl: providerFetch, maxAttempts: 1 }), "Claude", providerTimeoutMs).then(
           (value) => ({ status: "fulfilled", value }),
@@ -2906,7 +3123,7 @@ async function fetchUsageLimitsUncached({
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
     withProviderTimeout(fetchGeminiLimits({ home, env, fetchImpl: providerFetch, commandRunner }), "Gemini", providerTimeoutMs)
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
-    fetchKiroLimits({ commandRunner, now }),
+    fetchKiroLimits({ commandRunner, now, platform, home }),
     fetchAntigravityLimits({ home, commandRunner, requestFn, fetchImpl: providerFetch, nowMs }),
     withProviderTimeout(fetchCopilotLimits({ home, env, fetchImpl: providerFetch, platform, securityRunner }), "GitHub Copilot", providerTimeoutMs)
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
@@ -2914,11 +3131,27 @@ async function fetchUsageLimitsUncached({
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
     withProviderTimeout(fetchZcodeLimits({ home, env, fetchImpl: providerFetch }), "ZCode", providerTimeoutMs)
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
-    // OpenCode Go: local opencode.db cost-vs-dollar-cap estimate by default
-    // (auth-free, zero-config), upgraded to the exact server-side scrape when an
-    // OPENCODE_GO_AUTH_COOKIE is set. See src/lib/opencode-go-limits.js.
+    // OpenCode Go: authoritative subscription windows come from the dashboard
+    // scrape; local opencode.db cost is available only as an explicit estimate.
+    // See src/lib/opencode-go-limits.js.
     withProviderTimeout(fetchOpencodeGoLimits({ home, env, fetchImpl: providerFetch }), "OpenCode Go", providerTimeoutMs)
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
+    withProviderTimeout(
+      fetchQoderLimits({
+        home,
+        env,
+        platform,
+        fetchImpl: providerFetch,
+      }),
+      "Qoder",
+      providerTimeoutMs,
+    ).catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
+    // Public status-page probe (fail-soft, own 5-min cache in provider-status.js).
+    // Only probed for configured accounts — without a token the Claude section
+    // never renders, so the reading would have nowhere to go.
+    claudeToken
+      ? fetchProviderServiceStatus("claude", { fetchImpl, nowMs })
+      : Promise.resolve(null),
   ]);
 
   let claude;
@@ -2985,12 +3218,48 @@ async function fetchUsageLimitsUncached({
     }
   }
 
+  // Attach the service-status reading AFTER assembly so it rides on every path
+  // (live, fresh-cache, stale-cache, error) but never gets persisted by
+  // writeClaudeLimitsCache above — a disk cache must not resurrect an incident
+  // banner hours later. Only active incidents ship; "none" is omitted so the
+  // client renders nothing in the happy path.
+  if (claude.configured && claudeServiceStatus && claudeServiceStatus.indicator !== "none") {
+    claude.service_status = claudeServiceStatus;
+  }
+
+  const codexRefreshRequiresReauth = refreshError?.code === "REFRESH_TOKEN_EXPIRED";
+  const codexLiveUsageSucceeded = codexResult?.status === "fulfilled"
+    && codexResult.value.upstream_status === 200;
   let codex;
   if (!codexToken) {
     codex = { configured: false };
-  } else if (refreshError && refreshError.code === "REFRESH_TOKEN_EXPIRED") {
+  } else if (codexResult?.status === "fulfilled"
+    && (!codexRefreshRequiresReauth || codexLiveUsageSucceeded)) {
+    // A proactive refresh can fail while the existing access token is still valid.
+    // Prefer a confirmed 200 live usage read over the refresh error so usable quota
+    // data is not discarded before the access token actually expires. A neutral
+    // 401/403/404 no-data response must not mask a failed refresh.
+    codex = {
+      configured: true,
+      error: null,
+      plan_type: codexPlanType || null,
+      primary_window: codexResult.value.primary_window,
+      secondary_window: codexResult.value.secondary_window,
+      credit_window: codexResult.value.credit_window,
+      spark_primary_window: codexResult.value.spark_primary_window,
+      spark_secondary_window: codexResult.value.spark_secondary_window,
+      reset_credits: codexResult.value.reset_credits,
+      // Live read is current as of now; the stale fallback path below serves the
+      // disk cache with `stale: true`. Always emitting both lets the client show a
+      // data-age label uniformly (see the Claude live-success block).
+      stale: false,
+      cached_at: new Date(nowMs).toISOString(),
+    };
+    writeCodexLimitsCache(codex, { home, nowMs });
+  } else if (codexRefreshRequiresReauth) {
     // Refresh token is dead — the user must re-run `codex` to log in again. Surface a
-    // specific, actionable message rather than the generic "Fetch failed".
+    // specific, actionable message rather than the generic "Fetch failed", but only
+    // after the existing access token also failed to fetch live usage above.
     codex = {
       configured: true,
       error: refreshError.message,
@@ -3006,24 +3275,6 @@ async function fetchUsageLimitsUncached({
     } else {
       codex = { configured: true, error: codexResult?.reason?.message || "Unknown error" };
     }
-  } else {
-    codex = {
-      configured: true,
-      error: null,
-      plan_type: codexPlanType || null,
-      primary_window: codexResult.value.primary_window,
-      secondary_window: codexResult.value.secondary_window,
-      credit_window: codexResult.value.credit_window,
-      spark_primary_window: codexResult.value.spark_primary_window,
-      spark_secondary_window: codexResult.value.spark_secondary_window,
-      reset_credits: codexResult.value.reset_credits,
-      // Live read is current as of now; the stale fallback path above serves the
-      // disk cache with `stale: true`. Always emitting both lets the client show a
-      // data-age label uniformly (see the Claude live-success block).
-      stale: false,
-      cached_at: new Date(nowMs).toISOString(),
-    };
-    writeCodexLimitsCache(codex, { home, nowMs });
   }
 
   const data = {
@@ -3043,6 +3294,7 @@ async function fetchUsageLimitsUncached({
     grok: withPlanLabel(grok, null, "Grok"),
     zcode: withPlanLabel(zcode, zcode.plan_label, "ZCode"),
     opencodeGo: withPlanLabel(opencodeGo, opencodeGo?.plan_label, "OpenCode Go"),
+    qoder: withPlanLabel(qoder, qoder?.plan_label, "Qoder"),
   };
 
   for (const [providerName, provider] of Object.entries(data)) {
@@ -3086,6 +3338,8 @@ module.exports = {
   normalizeGeminiQuotaResponse,
   normalizeKimiUsageResponse,
   parseKiroUsageOutput,
+  readKiroCreditsSummary,
+  fetchKiroLimits,
   normalizeAntigravityResponse,
   parseListeningPorts,
   detectAntigravityProcess,
@@ -3100,4 +3354,5 @@ module.exports = {
   fetchGrokLimits,
   fetchZcodeLimits,
   fetchOpencodeGoLimits,
+  fetchQoderLimits,
 };

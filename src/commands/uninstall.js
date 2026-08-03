@@ -24,6 +24,7 @@ const { resolveOpencodeConfigDir, removeOpencodePlugin } = require("../lib/openc
 const { removeOpenclawHookConfig } = require("../lib/openclaw-hook");
 const { removeOpenclawSessionPluginConfig } = require("../lib/openclaw-session-plugin");
 const { removeGrokHook } = require("../lib/grok-hook");
+const { removeOmpHook } = require("../lib/omp-hook");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
 
 async function cmdUninstall(argv) {
@@ -104,6 +105,7 @@ async function cmdUninstall(argv) {
   });
   const openclawHookRemove = await removeOpenclawHookConfig({ home, trackerDir, env: process.env });
   const grokHookRemove = await removeGrokHook({ home, trackerDir, env: process.env });
+  const ompHookRemove = await removeOmpHook({ home, trackerDir, env: process.env });
 
   // Remove installed notify handler.
   await fs.unlink(notifyPath).catch(() => {});
@@ -195,6 +197,7 @@ async function cmdUninstall(argv) {
       grokHookRemove?.removed
         ? `- Grok Build hook removed: ${grokHookRemove.hookPath}`
         : "- Grok Build hook: no change",
+      formatOmpHookRemoveLine(ompHookRemove),
       opts.purge ? `- Purged: ${path.join(home, ".tokentracker")}` : "- Purge: skipped (use --purge)",
       ...(machineIdSeedKept
         ? [`- Kept: ${machineIdSeedPath} (cloud device identity — a reinstall reuses the same device; delete it to fully reset)`]
@@ -202,6 +205,38 @@ async function cmdUninstall(argv) {
       "",
     ].join("\n"),
   );
+}
+
+function formatOmpHookRemoveLine(ompHookRemove) {
+  if (ompHookRemove?.removed) {
+    return `- oh-my-pi notify extension removed: ${ompHookRemove.extensionPath}`;
+  }
+  const reason = ompHookRemove?.skippedReason;
+  const residualPath = ompHookRemove?.stagedPath || ompHookRemove?.extensionPath;
+  const residual = residualPath
+    ? ` (left in place: ${residualPath})`
+    : "";
+  if (reason === "unmanaged") {
+    return `- oh-my-pi notify extension: skipped (unmanaged file)${residual}`;
+  }
+  if (reason === "unlink-failed") {
+    const detail = ompHookRemove?.error ? `: ${ompHookRemove.error}` : "";
+    return `- oh-my-pi notify extension: failed to remove${detail}${residual}`;
+  }
+  if (reason === "extension-read-failed") {
+    const detail = ompHookRemove?.error ? `: ${ompHookRemove.error}` : "";
+    return `- oh-my-pi notify extension: failed to read${detail}${residual}`;
+  }
+  if (reason === "identity-changed") {
+    return `- oh-my-pi notify extension: skipped (file changed during uninstall)${residual}`;
+  }
+  if (reason === "omp-agent-dir-unresolved") {
+    return "- oh-my-pi notify extension: skipped (omp agent dir unresolved)";
+  }
+  if (reason === "missing") {
+    return "- oh-my-pi notify extension: no change";
+  }
+  return "- oh-my-pi notify extension: no change";
 }
 
 function parseArgs(argv) {
@@ -214,7 +249,7 @@ function parseArgs(argv) {
   return out;
 }
 
-module.exports = { cmdUninstall };
+module.exports = { cmdUninstall, formatOmpHookRemoveLine };
 
 async function isFile(p) {
   try {

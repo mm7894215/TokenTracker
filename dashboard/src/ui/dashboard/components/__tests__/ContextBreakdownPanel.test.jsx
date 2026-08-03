@@ -644,4 +644,156 @@ describe("ContextBreakdownPanel", () => {
     expect(await screen.findByText("test")).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
+
+
+  it("does not flash loading skeleton when revisiting a cached source", async () => {
+    const codexPayload = {
+      source: "codex",
+      scope: "supported",
+      totals: {
+        input_tokens: 100,
+        cached_input_tokens: 900,
+        cache_creation_input_tokens: 0,
+        output_tokens: 20,
+        reasoning_output_tokens: 5,
+        total_tokens: 1020,
+      },
+      session_count: 1,
+      message_count: 2,
+      tool_calls_breakdown: {
+        total_calls: 1,
+        categories: [
+          {
+            name: "Execution",
+            calls: 1,
+            totals: {
+              input_tokens: 100,
+              cached_input_tokens: 900,
+              cache_creation_input_tokens: 0,
+              output_tokens: 20,
+              reasoning_output_tokens: 5,
+              total_tokens: 1020,
+            },
+            tools: [],
+          },
+        ],
+      },
+      exec_command_breakdown: { by_type: [], by_exit: [] },
+    };
+    const claudePayload = {
+      ...codexPayload,
+      source: "claude",
+      totals: { ...codexPayload.totals, total_tokens: 500 },
+    };
+
+    let resolveCodex;
+    const slowCodex = new Promise((resolve) => {
+      resolveCodex = resolve;
+    });
+
+    getUsageCategoryBreakdown
+      .mockResolvedValueOnce(codexPayload)
+      .mockResolvedValueOnce(claudePayload)
+      .mockReturnValueOnce(slowCodex);
+
+    const { rerender } = render(
+      <ContextBreakdownPanel from="2026-05-09" to="2026-05-09" source="codex" />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(copy("dashboard.context_breakdown.category.tool_calls"))).toBeInTheDocument();
+    });
+
+    rerender(
+      <ContextBreakdownPanel from="2026-05-09" to="2026-05-09" source="claude" />,
+    );
+    await waitFor(() => {
+      expect(getUsageCategoryBreakdown).toHaveBeenCalledWith(
+        expect.objectContaining({ source: "claude" }),
+      );
+    });
+
+    // Revisit codex while the third fetch is intentionally pending: sticky cache
+    // should keep prior codex rows instead of the scanning skeleton.
+    rerender(
+      <ContextBreakdownPanel from="2026-05-09" to="2026-05-09" source="codex" />,
+    );
+
+    expect(screen.queryByText(copy("dashboard.context_breakdown.loading_hint"))).not.toBeInTheDocument();
+    expect(screen.getByText(copy("dashboard.context_breakdown.category.tool_calls"))).toBeInTheDocument();
+
+    // Background rescan may still be in flight; sticky cache is what matters for UX.
+    expect(getUsageCategoryBreakdown.mock.calls.some((call) => call[0]?.source === "codex")).toBe(true);
+    expect(getUsageCategoryBreakdown.mock.calls.some((call) => call[0]?.source === "claude")).toBe(true);
+
+    resolveCodex(codexPayload);
+  });
+
+  it("shows loading skeleton instead of stale data when visiting an uncached source", async () => {
+    const codexPayload = {
+      source: "codex",
+      scope: "supported",
+      totals: {
+        input_tokens: 100,
+        cached_input_tokens: 900,
+        cache_creation_input_tokens: 0,
+        output_tokens: 20,
+        reasoning_output_tokens: 5,
+        total_tokens: 1020,
+      },
+      session_count: 1,
+      message_count: 2,
+      tool_calls_breakdown: {
+        total_calls: 1,
+        categories: [
+          {
+            name: "Execution",
+            calls: 1,
+            totals: {
+              input_tokens: 100,
+              cached_input_tokens: 900,
+              cache_creation_input_tokens: 0,
+              output_tokens: 20,
+              reasoning_output_tokens: 5,
+              total_tokens: 1020,
+            },
+            tools: [],
+          },
+        ],
+      },
+      exec_command_breakdown: { by_type: [], by_exit: [] },
+    };
+
+    let resolveGrok;
+    const slowGrok = new Promise((resolve) => {
+      resolveGrok = resolve;
+    });
+
+    getUsageCategoryBreakdown
+      .mockResolvedValueOnce(codexPayload)
+      .mockReturnValueOnce(slowGrok);
+
+    const { rerender } = render(
+      <ContextBreakdownPanel from="2026-05-09" to="2026-05-09" source="codex" />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(copy("dashboard.context_breakdown.category.tool_calls"))).toBeInTheDocument();
+    });
+
+    // First visit to grok (cache miss, fetch pending): must show the skeleton,
+    // never the previous codex payload under grok's display branch.
+    rerender(
+      <ContextBreakdownPanel from="2026-05-09" to="2026-05-09" source="grok" />,
+    );
+
+    expect(screen.getByText(copy("dashboard.context_breakdown.loading_hint"))).toBeInTheDocument();
+    expect(screen.queryByText(copy("dashboard.context_breakdown.category.tool_calls"))).not.toBeInTheDocument();
+
+    resolveGrok({ ...codexPayload, source: "grok" });
+    await waitFor(() => {
+      expect(screen.getByText(copy("dashboard.context_breakdown.category.tool_calls"))).toBeInTheDocument();
+    });
+  });
+
 });

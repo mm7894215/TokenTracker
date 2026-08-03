@@ -61,6 +61,7 @@ const DashboardPage = lazy(() =>
   import("./pages/DashboardPage.jsx").then((m) => ({ default: m.DashboardPage })),
 );
 const IpCheckPage = lazy(() => import("./pages/IpCheckPage.jsx"));
+const ServiceStatusPage = lazy(() => import("./pages/ServiceStatusPage.jsx"));
 const AchievementsPage = lazy(() => import("./pages/AchievementsPage.jsx"));
 const LandingPage = lazy(() =>
   import("./pages/LandingPage.jsx").then((m) => ({ default: m.LandingPage })),
@@ -219,8 +220,9 @@ export default function App() {
   const isWidgetsPath = normalizedPath === "/widgets";
   const isPetPath = normalizedPath === "/pet-settings";
   const isIpCheckPath = normalizedPath === "/ip-check";
+  const isServiceStatusPath = normalizedPath === "/service-status";
   const isAchievementsPath = normalizedPath === "/achievements";
-  if (isLimitsPath || isSettingsPath || isSkillsPath || isSessionsPath || isWidgetsPath || isPetPath || isIpCheckPath || isAchievementsPath) gate = "dashboard";
+  if (isLimitsPath || isSettingsPath || isSkillsPath || isSessionsPath || isWidgetsPath || isPetPath || isIpCheckPath || isServiceStatusPath || isAchievementsPath) gate = "dashboard";
 
   let PageComponent = DashboardPage;
   if (profileUserId) {
@@ -241,6 +243,8 @@ export default function App() {
     PageComponent = PetPage;
   } else if (isIpCheckPath) {
     PageComponent = IpCheckPage;
+  } else if (isServiceStatusPath) {
+    PageComponent = ServiceStatusPage;
   } else if (isAchievementsPath) {
     PageComponent = AchievementsPage;
   }
@@ -258,6 +262,7 @@ export default function App() {
       isWidgetsPath ||
       isPetPath ||
       isIpCheckPath ||
+      isServiceStatusPath ||
       isAchievementsPath);
 
   // Public-host gating: on www.tokentracker.cc et al. there is no local

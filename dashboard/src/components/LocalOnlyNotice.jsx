@@ -2,7 +2,7 @@ import React from "react";
 import { Download, ArrowUpRight } from "lucide-react";
 import { copy } from "../lib/copy";
 
-const RELEASES_URL = "https://github.com/mm7894215/TokenTracker/releases/latest";
+const RELEASES_URL = "https://github.com/xiufengsun/TokenTracker/releases/latest";
 
 /**
  * Empty state for local-first pages (Limits, Skills) when viewed on the

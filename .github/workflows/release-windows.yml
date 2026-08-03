@@ -96,7 +96,7 @@ jobs:
       # the dashboard/dist built above) so the .exe is self-contained.
       - name: Cache Node.js binary for EmbeddedServer
         if: ${{ !inputs.no_cache }}
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}\ttnode-22.22.2
           key: node-win-x64-22.22.2
@@ -110,7 +110,7 @@ jobs:
       # end users do NOT need to install the .NET Desktop Runtime first).
       - name: Cache NuGet packages
         if: ${{ !inputs.no_cache }}
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('TokenTrackerWin/TokenTrackerWin.csproj') }}

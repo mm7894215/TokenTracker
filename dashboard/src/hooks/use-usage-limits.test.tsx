@@ -41,6 +41,7 @@ const existingLimits = {
   antigravity: { configured: false },
   zcode: { configured: false },
   opencodeGo: { configured: false },
+  qoder: { configured: false },
 };
 
 const freshLimits = {

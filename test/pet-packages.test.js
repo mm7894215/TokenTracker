@@ -398,3 +398,26 @@ test("removing a pet only touches TokenTracker's dir, never Codex", async () => 
     assert.ok(fs.existsSync(path.join(codexDir, "codex-native")), "Codex pet untouched");
   });
 });
+
+test("removing bundled pets hides every built-in except Clawd", async () => {
+  await withCodexEnv(async ({ ttDir }) => {
+    assert.deepEqual(pets.readHiddenBuiltinIds(), []);
+
+    assert.deepEqual(
+      pets.removeInstalledPet("sprout"),
+      { id: "sprout", hidden: true },
+    );
+    assert.deepEqual(
+      pets.removeInstalledPet("ember"),
+      { id: "ember", hidden: true },
+    );
+    assert.deepEqual(pets.readHiddenBuiltinIds(), ["ember", "sprout"]);
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(path.join(ttDir, ".hidden-builtins.json"), "utf8")),
+      ["ember", "sprout"],
+    );
+
+    assert.throws(() => pets.removeInstalledPet("clawd"), /Clawd cannot be removed/);
+    assert.deepEqual(pets.readHiddenBuiltinIds(), ["ember", "sprout"]);
+  });
+});
