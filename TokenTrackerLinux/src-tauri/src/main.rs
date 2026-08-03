@@ -1,14 +1,26 @@
-mod paths;
-mod server;
-mod tray;
+use tokentracker_linux::{oauth, paths, server, tray};
 
 use std::sync::Mutex;
 
+use oauth::{DashboardBaseUrl, PendingAuthCode};
 use once_cell::sync::Lazy;
 use server::TokenTrackerServer;
 use tauri::{Manager, WindowEvent};
 
 static SERVER: Lazy<Mutex<Option<TokenTrackerServer>>> = Lazy::new(|| Mutex::new(None));
+
+const NATIVE_OAUTH_BRIDGE: &str = r#"
+(() => {
+  if (window.location.hostname !== '127.0.0.1') return;
+  window.webkit = window.webkit || {};
+  window.webkit.messageHandlers = window.webkit.messageHandlers || {};
+  window.webkit.messageHandlers.nativeOAuth = {
+    postMessage(url) {
+      return window.__TAURI_INTERNALS__.invoke('open_oauth', { url });
+    }
+  };
+})();
+"#;
 
 fn stop_server() {
     if let Ok(mut guard) = SERVER.lock() {
@@ -99,16 +111,33 @@ fn start_health_monitor() {
 }
 
 fn main() {
+    let initial_args: Vec<String> = std::env::args().collect();
+
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        .manage(PendingAuthCode::default())
+        .manage(DashboardBaseUrl::default())
+        .invoke_handler(tauri::generate_handler![oauth::open_oauth])
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            for arg in argv {
+                if oauth::handle_callback(app, &arg) {
+                    return;
+                }
+            }
             tray::show_main_window(app);
         }))
-        .setup(|app| {
+        .setup(move |app| {
             tray::install(app)?;
+
+            for arg in &initial_args {
+                if let Some(code) = oauth::parse_auth_callback(arg) {
+                    app.state::<PendingAuthCode>().store(code);
+                }
+            }
 
             let runtime_paths = paths::resolve_runtime_paths()?;
             let server = TokenTrackerServer::start(runtime_paths)?;
             let dashboard_url = server.url().to_string();
+            app.state::<DashboardBaseUrl>().store(dashboard_url.clone());
 
             if let Ok(mut guard) = SERVER.lock() {
                 *guard = Some(server);
@@ -116,23 +145,23 @@ fn main() {
 
             start_health_monitor();
 
-            let _window = tauri::WebviewWindowBuilder::new(
+            let window = tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
                 tauri::WebviewUrl::App("index.html".into()),
             )
+            .initialization_script(NATIVE_OAUTH_BRIDGE)
             .title("TokenTracker")
             .inner_size(1180.0, 820.0)
             .min_inner_size(960.0, 640.0)
             .build()?;
 
-            if let Some(window) = app.get_webview_window("main") {
-                window.navigate(
-                    dashboard_url
-                        .parse::<tauri::Url>()
-                        .map_err(|error| error.to_string())?,
-                )?;
-            }
+            window.navigate(
+                dashboard_url
+                    .parse::<tauri::Url>()
+                    .map_err(|error| error.to_string())?,
+            )?;
+            oauth::deliver_pending_callback(app.handle());
 
             Ok(())
         })

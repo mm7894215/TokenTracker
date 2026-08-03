@@ -1,6 +1,6 @@
 # Maintainer: local
 pkgname=tokentracker-linux
-pkgver=0.84.4
+pkgver=0.87.11
 pkgrel=1
 pkgdesc='Local TokenTracker Linux desktop client for Arch KDE'
 arch=('x86_64')

@@ -4,7 +4,9 @@ use std::io::{Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::thread;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::paths::RuntimePaths;
@@ -23,12 +25,64 @@ pub const MAX_RESTARTS: u32 = 3;
 /// Back-off after exhausting `MAX_RESTARTS` before retrying.
 pub const RESTART_BACKOFF: Duration = Duration::from_secs(300);
 
+/// Match the five-minute native background refresh cadence on macOS and Windows.
+pub const BACKGROUND_SYNC_INTERVAL: Duration = Duration::from_secs(300);
+
+#[derive(Debug)]
+struct BackgroundSync {
+    cancelled: Arc<AtomicBool>,
+    child: Arc<Mutex<Option<Child>>>,
+    worker: Option<JoinHandle<()>>,
+}
+
+impl BackgroundSync {
+    fn start(paths: RuntimePaths) -> Self {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let child = Arc::new(Mutex::new(None));
+        let worker_cancelled = Arc::clone(&cancelled);
+        let worker_child = Arc::clone(&child);
+        let worker = thread::spawn(move || loop {
+            if worker_cancelled.load(Ordering::Acquire) {
+                break;
+            }
+
+            run_background_sync(&paths, &worker_child);
+
+            let deadline = Instant::now() + BACKGROUND_SYNC_INTERVAL;
+            while Instant::now() < deadline {
+                if worker_cancelled.load(Ordering::Acquire) {
+                    return;
+                }
+                thread::sleep(Duration::from_millis(250));
+            }
+        });
+
+        Self {
+            cancelled,
+            child,
+            worker: Some(worker),
+        }
+    }
+
+    fn stop(&mut self) {
+        self.cancelled.store(true, Ordering::Release);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+        if let Ok(mut child) = self.child.lock() {
+            stop_child(child.as_mut());
+            *child = None;
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct TokenTrackerServer {
     child: Child,
     url: String,
     port: u16,
     paths: RuntimePaths,
+    background_sync: BackgroundSync,
 }
 
 impl TokenTrackerServer {
@@ -51,11 +105,14 @@ impl TokenTrackerServer {
             error
         })?;
 
+        let background_sync = BackgroundSync::start(paths.clone());
+
         Ok(Self {
             child,
             url,
             port,
             paths,
+            background_sync,
         })
     }
 
@@ -112,17 +169,8 @@ impl TokenTrackerServer {
     }
 
     pub fn stop(&mut self) {
-        match self.child.try_wait() {
-            Ok(Some(_status)) => {}
-            Ok(None) => {
-                let _ = self.child.kill();
-                let _ = self.child.wait();
-            }
-            Err(_error) => {
-                let _ = self.child.kill();
-                let _ = self.child.wait();
-            }
-        }
+        self.background_sync.stop();
+        stop_child(Some(&mut self.child));
     }
 }
 
@@ -199,6 +247,64 @@ pub fn serve_args(tracker: &Path, port: u16) -> Vec<OsString> {
         OsString::from("--no-open"),
         OsString::from("--no-sync"),
     ]
+}
+
+pub fn sync_args(tracker: &Path) -> Vec<OsString> {
+    vec![
+        tracker.as_os_str().to_os_string(),
+        OsString::from("sync"),
+        OsString::from("--auto"),
+        OsString::from("--background"),
+        OsString::from("--all-local-sources"),
+    ]
+}
+
+fn run_background_sync(paths: &RuntimePaths, child_slot: &Mutex<Option<Child>>) {
+    let mut child = match child_slot.lock() {
+        Ok(child) => child,
+        Err(_) => return,
+    };
+
+    if let Some(current) = child.as_mut() {
+        match current.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    eprintln!("[TokenTracker] background sync exited with {status}");
+                }
+                *child = None;
+            }
+            Ok(None) => return,
+            Err(error) => {
+                eprintln!("[TokenTracker] failed to inspect background sync: {error}");
+                stop_child(Some(current));
+                *child = None;
+            }
+        }
+    }
+
+    let args = sync_args(&paths.tracker);
+    match Command::new(&paths.node)
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::from(open_server_log()))
+        .spawn()
+    {
+        Ok(process) => *child = Some(process),
+        Err(error) => eprintln!("[TokenTracker] failed to start background sync: {error}"),
+    }
+}
+
+fn stop_child(child: Option<&mut Child>) {
+    let Some(child) = child else {
+        return;
+    };
+    match child.try_wait() {
+        Ok(Some(_)) => {}
+        Ok(None) | Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
 }
 
 pub fn wait_for_server_ready(port: u16, timeout: Duration) -> Result<(), String> {

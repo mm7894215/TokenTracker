@@ -1,2 +1,4 @@
-// Placeholder library target for the initial Linux Tauri scaffold.
-// Later tasks will move shared Rust modules here as needed.
+pub mod oauth;
+pub mod paths;
+pub mod server;
+pub mod tray;
