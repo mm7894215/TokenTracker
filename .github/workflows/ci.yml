@@ -63,6 +63,75 @@ jobs:
           npm run validate:versions
           node --test test/architecture-guardrails.test.js
 
+  arch-package:
+    name: Arch Linux package
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install Arch build dependencies
+        run: |
+          set -euo pipefail
+          pacman -Syu --noconfirm --needed \
+            git \
+            nodejs npm \
+            rust cargo \
+            pkgconf \
+            webkit2gtk-4.1 gtk3 libayatana-appindicator librsvg \
+            xdg-utils \
+            desktop-file-utils \
+            curl file binutils
+          node -e '
+            const major = Number(process.versions.node.split(".")[0]);
+            if (major < 24) {
+              throw new Error(`Node 24+ is required; found ${process.version}`);
+            }
+          '
+
+      - name: Create package builder
+        run: |
+          set -euo pipefail
+          useradd --create-home --shell /bin/bash builder
+          chown -R builder:builder "$GITHUB_WORKSPACE" /home/builder
+
+      - name: Run Linux Rust tests
+        run: |
+          set -euo pipefail
+          runuser -u builder -- env HOME=/home/builder bash -lc '
+            set -euo pipefail
+            cd "$GITHUB_WORKSPACE"
+            npm run validate:versions
+            cargo test --locked --manifest-path TokenTrackerLinux/src-tauri/Cargo.toml
+          '
+
+      - name: Build Arch package
+        run: |
+          set -euo pipefail
+          runuser -u builder -- env HOME=/home/builder bash -lc '
+            set -euo pipefail
+            cd "$GITHUB_WORKSPACE/TokenTrackerLinux/packaging/arch/tokentracker-linux"
+            makepkg --cleanbuild --force --noconfirm
+          '
+
+      - name: Validate packaged runtime
+        run: |
+          set -euo pipefail
+          runuser -u builder -- env HOME=/home/builder bash -lc '
+            set -euo pipefail
+            cd "$GITHUB_WORKSPACE"
+            shopt -s nullglob
+            packages=(TokenTrackerLinux/packaging/arch/tokentracker-linux/*.pkg.tar.zst)
+            test "${#packages[@]}" -eq 1
+            TokenTrackerLinux/scripts/validate-package.sh "${packages[0]}"
+          '
+
   macos-tests:
     name: macOS unit tests
     runs-on: macos-26
