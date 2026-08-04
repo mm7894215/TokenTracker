@@ -1,6 +1,6 @@
 {
   "name": "tokentracker-linux",
-  "version": "0.87.11",
+  "version": "0.87.12",
   "private": true,
   "type": "module",
   "scripts": {

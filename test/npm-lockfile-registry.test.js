@@ -13,9 +13,9 @@ const managedLockfiles = [
 test('managed npm lockfiles use the official npm registry', () => {
   for (const relativePath of managedLockfiles) {
     const contents = fs.readFileSync(path.join(root, relativePath), 'utf8');
-    assert.doesNotMatch(
-      contents,
-      /registry\.npmmirror\.com/,
+    assert.equal(
+      contents.includes('registry.npmmirror.com'),
+      false,
       `${relativePath} must not pin packages to registry.npmmirror.com`,
     );
   }
