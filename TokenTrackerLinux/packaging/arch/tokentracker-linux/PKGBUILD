@@ -6,6 +6,7 @@ pkgdesc='Local TokenTracker Linux desktop client for Arch KDE'
 arch=('x86_64')
 url='https://github.com/mm7894215/TokenTracker'
 license=('MIT')
+options=(!debug)
 depends=(
   'webkit2gtk-4.1'
   'gtk3'

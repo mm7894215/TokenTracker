@@ -6,6 +6,10 @@ const test = require('node:test');
 const root = path.resolve(__dirname, '..');
 const workflow = fs.readFileSync(path.join(root, '.github/workflows/ci.yml'), 'utf8');
 const validatorPath = path.join(root, 'TokenTrackerLinux/scripts/validate-package.sh');
+const pkgbuild = fs.readFileSync(
+  path.join(root, 'TokenTrackerLinux/packaging/arch/tokentracker-linux/PKGBUILD'),
+  'utf8',
+);
 
 test('CI builds and validates the Arch package as a non-root user', () => {
   assert.match(workflow, /arch-package:/);
@@ -16,6 +20,10 @@ test('CI builds and validates the Arch package as a non-root user', () => {
   assert.equal((workflow.match(/makepkg --cleanbuild --force --noconfirm/g) || []).length, 1);
   assert.match(workflow, /TokenTrackerLinux\/scripts\/validate-package\.sh/);
   assert.doesNotMatch(workflow, /sudo\s+makepkg|makepkg\s+-si/);
+});
+
+test('Arch package build disables the unused split debug package', () => {
+  assert.match(pkgbuild, /^options=\(!debug\)$/m);
 });
 
 test('Arch package validator checks the shipped runtime contract', () => {
