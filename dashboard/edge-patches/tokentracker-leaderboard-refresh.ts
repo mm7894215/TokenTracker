@@ -649,6 +649,30 @@ export default async function (req: Request): Promise<Response> {
     nextDay.setUTCDate(nextDay.getUTCDate() + 1);
     const rangeEnd = nextDay.toISOString();
 
+    // Keep the cluster-aware historical rollup on a closed-day watermark.
+    // This is cheap in scheduled total refreshes (normally zero or one day)
+    // and avoids depending on the legacy postgres-owned nightly function,
+    // whose cross-device semantics predate machine clusters (issue #412).
+    if (period === "total") {
+      const { error: advanceErr } = await client.database.rpc(
+        "leaderboard_rollup_daily_advance_v2",
+      );
+      if (advanceErr) {
+        logRefreshEvent({
+          event: "period_error",
+          request_id: requestId,
+          source: requestSource,
+          period,
+          from_day,
+          to_day,
+          stage: "rollup_advance",
+          error: advanceErr.message,
+          duration_ms: Date.now() - periodStartedAt,
+        });
+        return json({ error: advanceErr.message }, 500);
+      }
+    }
+
     const __t0 = Date.now();
     const { data: groupedData, error: rpcErr } = await client.database.rpc(
       "leaderboard_usage_grouped",

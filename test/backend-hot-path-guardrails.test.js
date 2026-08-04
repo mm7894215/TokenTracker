@@ -100,6 +100,16 @@ test("leaderboard refresh fetches all user metadata with one RPC", () => {
   assert.doesNotMatch(source, /const fallbackResults = await Promise\.all/u);
 });
 
+test("total leaderboard advances the cluster-aware rollup before reading it", () => {
+  const source = read("dashboard/edge-patches/tokentracker-leaderboard-refresh.ts");
+  const advance = source.indexOf('rpc(\n        "leaderboard_rollup_daily_advance_v2"');
+  const aggregate = source.indexOf('rpc(\n      "leaderboard_usage_grouped"');
+
+  assert.ok(advance > 0, "total refresh must advance the v2 closed-day rollup");
+  assert.ok(aggregate > advance, "aggregation must read only after the rollup advance succeeds");
+  assert.match(source.slice(advance, aggregate), /if \(advanceErr\)[\s\S]*stage: "rollup_advance"/u);
+});
+
 test("signed-in users cannot trigger expensive month, total, or all-period leaderboard refreshes", () => {
   const source = read("dashboard/edge-patches/tokentracker-leaderboard-refresh.ts");
   const clientSource = read("dashboard/src/lib/cloud-sync.ts");

@@ -212,10 +212,10 @@ enum Strings {
     static var petLimitLow: String { t("low", "余量偏低", "餘量偏低", "残りわずか", "얼마 안 남음") }
     static var petLimitSomeLeft: String { t("some left", "还有余量", "還有餘量", "残りあり", "남아 있음") }
     static func petLimitReset(_ value: String) -> String {
-        t("in (value)", "(value)后重置", "(value)後重置", "(value)でリセット", "(value) 후 초기화")
+        t("in \(value)", "\(value)后重置", "\(value)後重置", "\(value)でリセット", "\(value) 후 초기화")
     }
     static func petCostToday(_ cost: String) -> String {
-        t("(cost) today", "今日 (cost)", "今日 (cost)", "今日 (cost)", "오늘 (cost)")
+        t("\(cost) today", "今日 \(cost)", "今日 \(cost)", "今日 \(cost)", "오늘 \(cost)")
     }
 
 

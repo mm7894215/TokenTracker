@@ -87,7 +87,7 @@ landing.v2.install.os_windows,landing,LandingPage,MarketingLanding,os_windows,"W
 landing.v2.install.availability,landing,LandingPage,MarketingLanding,availability,"Available for macOS and Windows",,active
 landing.v2.models.title,landing,LandingPage,MarketingLanding,models_title,"SUPPORTED AI CLI TOOLS",,active
 landing.v2.distill.body,landing,LandingPage,MarketingLanding,distill_body,"100% local processing. No prompts or code are ever collected.",,active
-landing.v2.footer.line,landing,LandingPage,MarketingLanding,footer_line,"Token Tracker — Made by developers, for developers.",,active
+landing.v2.footer.line,landing,LandingPage,MarketingLanding,footer_line,"Token Tracker — Made for everyone working with AI.",,active
 landing.v2.nav.status,landing,LandingPage,MarketingLanding,nav_status,"Status",,active
 landing.v2.nav.github,landing,LandingPage,MarketingLanding,nav_github,"GitHub",,active
 landing.v2.nav.privacy,landing,LandingPage,MarketingLanding,nav_privacy,"Privacy",,active
@@ -97,7 +97,7 @@ landing.v3.hero.kicker,landing,LandingPage,HeroSection,hero_kicker,"Desktop pet 
 landing.v3.hero.subtitle,landing,LandingPage,HeroSection,hero_subtitle,"A living desktop companion powered by real activity from 27 AI coding tools — local-first, open source, and private by design.",,active
 landing.v3.hero.stat_label,landing,LandingPage,HeroSection,hero_stat_label,"Tokens tracked by the community",,active
 landing.v3.hero.scroll_hint,landing,LandingPage,HeroSection,hero_scroll_hint,"Scroll",,active
-landing.v3.stats.devs_syncing,landing,LandingPage,HeroSection,stats_devs_syncing,"{{count}} developers syncing",,active
+landing.v3.stats.devs_syncing,landing,LandingPage,HeroSection,stats_devs_syncing,"{{count}} users syncing",,active
 landing.v3.stats.fallback_tokens,landing,LandingPage,HeroSection,stats_fallback_tokens,"2200000000000",,active
 landing.v3.stats.fallback_devs,landing,LandingPage,HeroSection,stats_fallback_devs,"600",,active
 landing.v3.tools.count,landing,LandingPage,ToolsStrip,tools_count,"{{count}}+ AI coding agents supported out of the box.",,active
@@ -384,14 +384,14 @@ limits.settings.display_mode_used,ui,LimitsPage,LimitsSettingsPanel,display_mode
 limits.settings.display_mode_remaining,ui,LimitsPage,LimitsSettingsPanel,display_mode_remaining,"Remaining",,active
 limits.page.openSettings,ui,LimitsPage,LimitsPage,open_settings,"Display settings",,active
 leaderboard.community.tokens_label,ui,LeaderboardPage,LeaderboardPage,community_tokens_label,"Tokens tracked by the community",,active
-leaderboard.community.devs,ui,LeaderboardPage,LeaderboardPage,community_devs,"{{count}} developers syncing",,active
+leaderboard.community.devs,ui,LeaderboardPage,LeaderboardPage,community_devs,"{{count}} users syncing",,active
 leaderboard.community.view_stats,ui,LeaderboardPage,CommunityStatsChip,view_stats,"View global community stats",,active
 leaderboard.community.tokens_chip,ui,LeaderboardPage,CommunityStatsChip,tokens_chip,"Community Tokens",,active
-leaderboard.community.devs_chip,ui,LeaderboardPage,CommunityStatsChip,devs_chip,"Devs",,active
+leaderboard.community.devs_chip,ui,LeaderboardPage,CommunityStatsChip,devs_chip,"Users",,active
 leaderboard.community.modal.title,ui,LeaderboardPage,CommunityStatsModal,title,"Global Metrics",,active
 leaderboard.community.modal.description,ui,LeaderboardPage,CommunityStatsModal,description,"A privacy-safe view of how the community builds with AI.",,active
 leaderboard.community.modal.total_tokens,ui,LeaderboardPage,CommunityStatsModal,total_tokens,"Total Tokens",,active
-leaderboard.community.modal.active_devs,ui,LeaderboardPage,CommunityStatsModal,active_devs,"Active Devs",,active
+leaderboard.community.modal.active_devs,ui,LeaderboardPage,CommunityStatsModal,active_devs,"Active users",,active
 leaderboard.community.modal.active_devs_detail,ui,LeaderboardPage,CommunityStatsModal,active_devs_detail,"{{count}} syncing",,active
 leaderboard.community.modal.global_spend,ui,LeaderboardPage,CommunityStatsModal,global_spend,"Est. Spend",,active
 leaderboard.community.modal.global_spend_detail,ui,LeaderboardPage,CommunityStatsModal,global_spend_detail,"${{amount}} USD",,active
@@ -400,7 +400,7 @@ leaderboard.community.modal.all_time,ui,LeaderboardPage,CommunityStatsModal,all_
 leaderboard.community.modal.tokens_title,ui,LeaderboardPage,CommunityStatsModal,tokens_title,"{{count}} tokens",,active
 leaderboard.community.modal.no_data,ui,LeaderboardPage,CommunityStatsModal,no_data,"No aggregate data yet",,active
 leaderboard.community.modal.activity_chart,ui,LeaderboardPage,CommunityStatsModal,activity_chart,"Daily community token activity",,active
-leaderboard.community.modal.developers_short,ui,LeaderboardPage,CommunityStatsModal,developers_short,"developers",,active
+leaderboard.community.modal.developers_short,ui,LeaderboardPage,CommunityStatsModal,developers_short,"users",,active
 leaderboard.community.modal.daily_tokens,ui,LeaderboardPage,CommunityStatsModal,daily_tokens,"Daily tokens",,active
 leaderboard.community.modal.seven_day_average,ui,LeaderboardPage,CommunityStatsModal,seven_day_average,"7-day average",,active
 leaderboard.community.modal.composition,ui,LeaderboardPage,CommunityStatsModal,composition,"Composition",,active
@@ -420,7 +420,7 @@ leaderboard.community.modal.provider_distribution,ui,LeaderboardPage,CommunitySt
 leaderboard.community.modal.rank,ui,LeaderboardPage,CommunityStatsModal,rank,"Rank",,active
 leaderboard.community.modal.provider,ui,LeaderboardPage,CommunityStatsModal,provider,"Provider",,active
 leaderboard.community.modal.usage_share,ui,LeaderboardPage,CommunityStatsModal,usage_share,"Usage share",,active
-leaderboard.community.modal.developer_count,ui,LeaderboardPage,CommunityStatsModal,developer_count,"{{count}} developers",,active
+leaderboard.community.modal.developer_count,ui,LeaderboardPage,CommunityStatsModal,developer_count,"{{count}} users",,active
 leaderboard.community.modal.participation,ui,LeaderboardPage,CommunityStatsModal,participation,"Participation",,active
 leaderboard.community.modal.usage_distribution,ui,LeaderboardPage,CommunityStatsModal,usage_distribution,"Lifetime usage bands",,active
 leaderboard.community.modal.band.lt_1m,ui,LeaderboardPage,CommunityStatsModal,band_lt_1m,"Under 1M",,active
@@ -925,15 +925,15 @@ heatmap.3d.modal.control.pause,ui,ActivityHeatmap,ActivityHeatmap,control_pause,
 heatmap.3d.modal.control.reset,ui,ActivityHeatmap,ActivityHeatmap,control_reset,"Reset 3D view",,active
 heatmap.3d.modal.footer.tip,ui,ActivityHeatmap,ActivityHeatmap,footer_tip,"Pinch to zoom / Scroll to zoom / Drag to rotate 3D chart",,active
 heatmap.3d.modal.ai.title.default,ui,ActivityHeatmap,ActivityHeatmap,ai_title_default,"Persistent Creator",,active
-heatmap.3d.modal.ai.eval.default,ui,ActivityHeatmap,ActivityHeatmap,ai_eval_default,"Persist in the river of technology. Daily coding may not always be majestic, but every tiny active point records your thoughts and exploration. Sparks accumulate, eventually converging into your own digital ocean.",,active
+heatmap.3d.modal.ai.eval.default,ui,ActivityHeatmap,ActivityHeatmap,ai_eval_default,"You keep showing up and moving forward. Every small point of activity records another moment of thought and exploration. Over time, those sparks gather into a body of work that is uniquely yours.",,active
 heatmap.3d.modal.ai.title.peak,ui,ActivityHeatmap,ActivityHeatmap,ai_title_peak,"Peak Contributor",,active
-heatmap.3d.modal.ai.eval.peak,ui,ActivityHeatmap,ActivityHeatmap,ai_eval_peak,"This year, your token output shows extremely high engineering density. This scale of development is equivalent to deeply participating in the refactoring of a medium-to-large system base, with each keystroke converging complex logic into deterministic code. A testament to pure engineering passion.",,active
+heatmap.3d.modal.ai.eval.peak,ui,ActivityHeatmap,ActivityHeatmap,ai_eval_peak,"This year, your token activity reached an exceptional level. You repeatedly turned complex ideas into concrete results with remarkable focus and momentum — a clear sign of sustained creative drive.",,active
 heatmap.3d.modal.ai.title.heavy,ui,ActivityHeatmap,ActivityHeatmap,ai_title_heavy,"Heavy Producer",,active
-heatmap.3d.modal.ai.eval.heavy,ui,ActivityHeatmap,ActivityHeatmap,ai_eval_heavy,"Exceptional continuous output. Your accumulated tokens have reached millions, equivalent to the volume of dozens of technical novellas. The highly saturated coding pace demonstrates your great execution in building digital assets.",,active
+heatmap.3d.modal.ai.eval.heavy,ui,ActivityHeatmap,ActivityHeatmap,ai_eval_heavy,"Exceptional continuous output. Your accumulated tokens reflect an enormous volume of research, creation, and problem-solving. This sustained pace shows impressive focus and execution.",,active
 heatmap.3d.modal.ai.title.core,ui,ActivityHeatmap,ActivityHeatmap,ai_title_core,"Core Productivity Expert",,active
-heatmap.3d.modal.ai.eval.core,ui,ActivityHeatmap,ActivityHeatmap,ai_eval_core,"Highly resilient long-term commitment. Over the past year, you have steadily maintained a high-intensity development rhythm. With solid code volume and token output, you have silently built the core architecture, a true engineering backbone.",,active
-heatmap.3d.modal.ai.title.steady,ui,ActivityHeatmap,ActivityHeatmap,ai_title_steady,"Steady Developer",,active
-heatmap.3d.modal.ai.eval.steady,ui,ActivityHeatmap,ActivityHeatmap,ai_eval_steady,"Steady and firm accumulation of technology. Every step of token increment is a brick in the foundation of your future. This slow but steady pace is the path for an excellent developer to become an engineering master.",,active
+heatmap.3d.modal.ai.eval.core,ui,ActivityHeatmap,ActivityHeatmap,ai_eval_core,"Highly resilient long-term commitment. Over the past year, you maintained a strong and consistent rhythm, steadily turning AI-assisted work into durable results. You are a true productivity cornerstone.",,active
+heatmap.3d.modal.ai.title.steady,ui,ActivityHeatmap,ActivityHeatmap,ai_title_steady,"Steady Creator",,active
+heatmap.3d.modal.ai.eval.steady,ui,ActivityHeatmap,ActivityHeatmap,ai_eval_steady,"Steady and focused progress. Every token marks another step in turning ideas into useful work. This consistent rhythm is how lasting expertise is built.",,active
 heatmap.3d.voxel.joke.1,ui,ActivityHeatmap3D,ActivityHeatmap3D,voxel_joke1,"🔥 Extremely crazy! Produced {{value}} tokens! Are you training a large language model or writing a compiler by hand?",,active
 heatmap.3d.voxel.joke.2,ui,ActivityHeatmap3D,ActivityHeatmap3D,voxel_joke2,"🚀 Epic output! Total {{value}} tokens. Today's production can circle the earth once, even the AI is amazed by you!",,active
 heatmap.3d.voxel.joke.3,ui,ActivityHeatmap3D,ActivityHeatmap3D,voxel_joke3,"⚡ Critical Day! {{value}} tokens. Code is gushing out, and the keyboard is starting to smoke!",,active
@@ -1126,8 +1126,8 @@ dashboard.expired_gate.feature.cloud.title,dashboard,DashboardPage,DashboardView
 dashboard.expired_gate.feature.cloud.desc,dashboard,DashboardPage,DashboardView,cloud_desc,"Readily access parsed token logs anywhere through synced dashboard.",,active
 landing.v2.leaderboard.kicker,landing,LandingPage,MarketingLanding,leaderboard_kicker,"GLOBAL TOKEN LEADERBOARD",,active
 landing.v2.leaderboard.title,landing,LandingPage,MarketingLanding,leaderboard_title,"AI Token Efficiency",,active
-landing.v2.leaderboard.subtitle,landing,LandingPage,MarketingLanding,leaderboard_subtitle,"Optionally and anonymously sync your local AI token usage to join the global efficiency leaderboard. Benchmark cost efficiency and model rotations with developers worldwide.",,active
-landing.v2.leaderboard.active_developers,landing,LandingPage,MarketingLanding,active_developers,"1,240+ developers actively syncing",,active
+landing.v2.leaderboard.subtitle,landing,LandingPage,MarketingLanding,leaderboard_subtitle,"Optionally and anonymously sync your local AI token usage to join the global efficiency leaderboard. Benchmark cost efficiency and model rotations with users worldwide.",,active
+landing.v2.leaderboard.active_developers,landing,LandingPage,MarketingLanding,active_developers,"1,240+ users actively syncing",,active
 landing.v2.leaderboard.top_badge,landing,LandingPage,MarketingLanding,top_badge,"EFFICIENCY CHAMP",,active
 landing.v2.leaderboard.rank_first,landing,LandingPage,MarketingLanding,rank_first,"NO. 1 GLOBAL",,active
 landing.v2.leaderboard.rank_second,landing,LandingPage,MarketingLanding,rank_second,"NO. 2",,active
