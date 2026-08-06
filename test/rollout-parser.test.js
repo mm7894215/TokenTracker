@@ -37,6 +37,8 @@ const {
   probeWslDistros,
   discoverWslHermesHome,
   parseCopilotIncremental,
+  resolveReasonixStatFiles,
+  parseReasonixIncremental,
   parseKimiIncremental,
   parseCodebuddyIncremental,
   parseCursorApiIncremental,
@@ -6663,6 +6665,215 @@ test("parseKimiIncremental returns zero when no wire files exist", async () => {
     assert.equal(result.recordsProcessed, 0);
     assert.equal(result.eventsAggregated, 0);
     assert.equal(result.bucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reasonix — passive ~/.reasonix/stats/YYYY-MM-DD.jsonl reader.
+// Each line is a usage record (model + token fields) or a turn marker (no
+// model field, skipped). Files are append-only and named by day.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("parseReasonixIncremental aggregates usage records and skips turn markers", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-reasonix-"));
+  try {
+    const statsDir = path.join(tmp, "stats");
+    await fs.mkdir(statsDir, { recursive: true });
+    const lines = [
+      JSON.stringify({
+        ts: "2026-08-07T00:22:36.563231+08:00",
+        model: "deepseek/deepseek-v4-flash",
+        source: "desktop",
+        prompt: 3860,
+        completion: 208,
+        reasoning: 126,
+        cache_miss: 3860,
+        total: 4068,
+        requests: 1,
+      }),
+      JSON.stringify({ ts: "2026-08-07T00:24:30.184705+08:00", source: "desktop", turn: true }),
+      JSON.stringify({
+        ts: "2026-08-07T00:22:43.571662+08:00",
+        model: "deepseek/deepseek-v4-flash",
+        source: "desktop",
+        prompt: 7517,
+        completion: 260,
+        reasoning: 120,
+        cache_hit: 7424,
+        cache_miss: 93,
+        total: 7777,
+        requests: 1,
+      }),
+    ].join("\n");
+    const content = lines + "\n"; // real stats files end each row with a newline
+
+    const statFile = path.join(statsDir, "2026-08-07.jsonl");
+    await fs.writeFile(statFile, content);
+
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+    const result = await parseReasonixIncremental({ statFiles: [statFile], cursors, queuePath });
+
+    assert.equal(result.recordsProcessed, 2); // turn marker is not counted
+    assert.equal(result.eventsAggregated, 2);
+    assert.ok(result.bucketsQueued > 0);
+
+    // Cursor state persisted with per-file offsets
+    assert.ok(cursors.reasonix && typeof cursors.reasonix === "object");
+    assert.ok(cursors.reasonix.fileOffsets[statFile]);
+    assert.equal(cursors.reasonix.fileOffsets[statFile].size, Buffer.byteLength(content));
+    assert.equal(cursors.reasonix.seenIds[statFile].length, 2);
+
+    // Aggregated bucket totals: input is net of cache (prompt = cache_miss + cache_hit)
+    const queueRows = (await fs.readFile(queuePath, "utf8"))
+      .trim()
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map(JSON.parse);
+    const row = queueRows.find((r) => r.source === "reasonix");
+    assert.ok(row, "queue contains a reasonix bucket");
+    assert.equal(row.model, "deepseek/deepseek-v4-flash");
+    assert.equal(row.hour_start, "2026-08-06T16:00:00.000Z");
+    assert.equal(row.input_tokens, 3860 + (7517 - 7424)); // 3953
+    assert.equal(row.cached_input_tokens, 7424);
+    assert.equal(row.cache_creation_input_tokens, 0);
+    assert.equal(row.output_tokens, 208 + 260);
+    assert.equal(row.reasoning_output_tokens, 126 + 120);
+    // total_tokens is the normalized sum of the delta columns
+    assert.equal(row.total_tokens, 3953 + 7424 + 468 + 246); // 12091
+    assert.equal(row.conversation_count, 2);
+
+    // Second run — no new data
+    const result2 = await parseReasonixIncremental({ statFiles: [statFile], cursors, queuePath });
+    assert.equal(result2.recordsProcessed, 0);
+    assert.equal(result2.eventsAggregated, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseReasonixIncremental returns zero when no stat files exist", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-reasonix-"));
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+    const result = await parseReasonixIncremental({ statFiles: [], cursors, queuePath });
+    assert.equal(result.recordsProcessed, 0);
+    assert.equal(result.eventsAggregated, 0);
+    assert.equal(result.bucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseReasonixIncremental rolls back cursor on an incomplete trailing line", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-reasonix-"));
+  try {
+    const statsDir = path.join(tmp, "stats");
+    await fs.mkdir(statsDir, { recursive: true });
+    const statFile = path.join(statsDir, "2026-08-07.jsonl");
+
+    const line1 = JSON.stringify({
+      ts: "2026-08-07T00:22:36.563231+08:00",
+      model: "deepseek/deepseek-v4-flash",
+      source: "desktop",
+      prompt: 3860,
+      completion: 208,
+      reasoning: 126,
+      cache_miss: 3860,
+      total: 4068,
+      requests: 1,
+    });
+    const line2 = JSON.stringify({
+      ts: "2026-08-07T00:22:43.571662+08:00",
+      model: "deepseek/deepseek-v4-flash",
+      source: "desktop",
+      prompt: 7517,
+      completion: 260,
+      reasoning: 120,
+      cache_hit: 7424,
+      cache_miss: 93,
+      total: 7777,
+      requests: 1,
+    });
+    // A row that is still being appended: no trailing newline yet.
+    const partialTail = '{"ts":"2026-08-07T01:00:00.000000+08:00","model":"deepseek/deepseek-v4-flash","source":"desk';
+    await fs.writeFile(statFile, line1 + "\n" + line2 + "\n" + partialTail);
+
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+    const result = await parseReasonixIncremental({ statFiles: [statFile], cursors, queuePath });
+
+    // Both complete rows aggregated; the incomplete tail is not counted.
+    assert.equal(result.recordsProcessed, 2);
+    assert.equal(result.eventsAggregated, 2);
+    // Cursor rolled back to just after the last complete newline.
+    assert.equal(cursors.reasonix.fileOffsets[statFile].size, Buffer.byteLength(line1 + "\n" + line2 + "\n"));
+
+    // Append completes the row.
+    await fs.appendFile(statFile, 'top","prompt":100,"completion":10,"reasoning":0,"cache_hit":0,"cache_miss":100,"total":110,"requests":1}\n');
+    const result2 = await parseReasonixIncremental({ statFiles: [statFile], cursors, queuePath });
+    assert.equal(result2.recordsProcessed, 1);
+    assert.equal(result2.eventsAggregated, 1);
+    assert.equal(result2.bucketsQueued, 1);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseReasonixIncremental does not double-count after an inode-rotated re-read", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-reasonix-"));
+  try {
+    const statsDir = path.join(tmp, "stats");
+    await fs.mkdir(statsDir, { recursive: true });
+    const statFile = path.join(statsDir, "2026-08-07.jsonl");
+    const row = JSON.stringify({
+      ts: "2026-08-07T00:22:36.563231+08:00",
+      model: "deepseek/deepseek-v4-flash",
+      source: "desktop",
+      prompt: 3860,
+      completion: 208,
+      reasoning: 126,
+      cache_miss: 3860,
+      total: 4068,
+      requests: 1,
+    });
+    const content = row + "\n";
+    await fs.writeFile(statFile, content);
+
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+    const result1 = await parseReasonixIncremental({ statFiles: [statFile], cursors, queuePath });
+    assert.equal(result1.eventsAggregated, 1);
+
+    // Rotate the file: remove and rewrite the same content with a new inode.
+    await fs.rm(statFile);
+    await fs.writeFile(statFile, content);
+
+    const result2 = await parseReasonixIncremental({ statFiles: [statFile], cursors, queuePath });
+    // Full re-read (inode changed) but seenIds dedup prevents double-counting.
+    assert.equal(result2.eventsAggregated, 0);
+    assert.equal(result2.recordsProcessed, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveReasonixStatFiles lists only .jsonl files sorted by name", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-reasonix-"));
+  try {
+    const statsDir = path.join(tmp, "stats");
+    await fs.mkdir(statsDir, { recursive: true });
+    await fs.writeFile(path.join(statsDir, "2026-08-07.jsonl"), "x\n");
+    await fs.writeFile(path.join(statsDir, "2026-08-06.jsonl"), "x\n");
+    await fs.writeFile(path.join(statsDir, "notes.txt"), "x\n");
+    const files = resolveReasonixStatFiles({ REASONIX_HOME: tmp });
+    assert.deepEqual(
+      files.map((f) => path.basename(f)),
+      ["2026-08-06.jsonl", "2026-08-07.jsonl"],
+    );
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

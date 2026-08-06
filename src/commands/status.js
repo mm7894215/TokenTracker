@@ -44,6 +44,8 @@ const {
 } = require("../lib/openclaw-session-plugin");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
 const {
+  resolveReasonixStatsDir,
+  resolveReasonixStatFiles,
   resolveKimiWireFiles,
   resolveKimiCodeWireFiles,
   resolveKiroCliDbPath,
@@ -372,6 +374,11 @@ async function cmdStatus(argv = []) {
   const piAgentDir = resolvePiAgentDir(process.env);
   const piInstalled = !piCollides && Boolean(piAgentDir) && fssync.existsSync(path.join(piAgentDir, "sessions"));
   const piFiles = piInstalled ? resolvePiSessionFiles(process.env) : [];
+
+  // Reasonix — passive scan only (no hooks). Reads ~/.reasonix/stats/*.jsonl.
+  const reasonixStatsDir = resolveReasonixStatsDir(process.env);
+  const reasonixStatFiles = resolveReasonixStatFiles(process.env);
+  const reasonixInstalled = reasonixStatFiles.length > 0;
 
   // Craft Agents — passive scan only (no hooks).
   const craftConfigDir = resolveCraftConfigDir(process.env);
@@ -784,6 +791,9 @@ async function cmdStatus(argv = []) {
         pi: piInstalled
           ? { installed: true, files: piFiles.length }
           : { installed: false },
+        reasonix: reasonixInstalled
+          ? { installed: true, files: reasonixStatFiles.length, dir: reasonixStatsDir }
+          : { installed: false },
         craft: craftInstalled
           ? { installed: true, files: craftFiles.length }
           : { installed: false },
@@ -907,6 +917,9 @@ async function cmdStatus(argv = []) {
         : null,
       piInstalled
         ? `- pi: passive reader (${piFiles.length} session jsonl file${piFiles.length !== 1 ? "s" : ""} found)`
+        : null,
+      reasonixInstalled
+        ? `- Reasonix: passive reader (${reasonixStatFiles.length} stats jsonl file${reasonixStatFiles.length !== 1 ? "s" : ""} found in ${reasonixStatsDir})`
         : null,
       craftInstalled
         ? `- Craft Agents: passive reader (${craftFiles.length} session jsonl file${craftFiles.length !== 1 ? "s" : ""} found)`

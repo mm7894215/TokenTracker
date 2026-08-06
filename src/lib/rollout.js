@@ -7547,6 +7547,213 @@ async function parseKimiIncremental({ wireFiles, cursors, queuePath, onProgress,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Reasonix — passive JSONL reader (~/.reasonix/stats/YYYY-MM-DD.jsonl).
+// No hook installation needed; Reasonix appends one usage record per request.
+// Each line is either a usage record (model + token fields) or a turn marker
+// (no model field) which is skipped. Files are append-only and named by day,
+// so an offset-based incremental cursor is sufficient.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function resolveReasonixStatsDir(env = process.env) {
+  const home = require("node:os").homedir();
+  const explicit = typeof env?.REASONIX_HOME === "string" ? env.REASONIX_HOME.trim() : "";
+  if (explicit) return path.join(path.resolve(explicit), "stats");
+  if (process.platform === "win32") {
+    const appData = env.APPDATA || path.join(home, "AppData", "Roaming");
+    return path.join(appData, "reasonix", "stats");
+  }
+  return path.join(home, ".reasonix", "stats");
+}
+
+function resolveReasonixStatFiles(env = process.env) {
+  const statsDir = resolveReasonixStatsDir(env);
+  if (!statsDir || !fssync.existsSync(statsDir)) return [];
+  const files = [];
+  try {
+    for (const name of fssync.readdirSync(statsDir)) {
+      if (!name.endsWith(".jsonl")) continue;
+      const full = path.join(statsDir, name);
+      let st;
+      try { st = fssync.lstatSync(full); } catch { continue; }
+      // lstat: skip symlinks and non-regular entries so the reader never
+      // follows a *.jsonl link to an unrelated readable file.
+      if (!st.isFile()) continue;
+      files.push(full);
+    }
+  } catch { /* ignore */ }
+  files.sort((a, b) => a.localeCompare(b));
+  return files;
+}
+
+async function parseReasonixIncremental({ statFiles, cursors, queuePath, onProgress, env } = {}) {
+  await ensureDir(path.dirname(queuePath));
+  const reasonixState = cursors.reasonix && typeof cursors.reasonix === "object" ? cursors.reasonix : {};
+  // Per-file seen fingerprints: { [filePath]: string[] } in the cursor, rebuilt
+  // as Sets here so an inode-rotated re-read of one file never replays records
+  // evicted from another file's cap.
+  const seenRaw =
+    reasonixState.seenIds && typeof reasonixState.seenIds === "object" && !Array.isArray(reasonixState.seenIds)
+      ? reasonixState.seenIds
+      : {};
+  const seenByFile = new Map();
+  for (const [filePath, keys] of Object.entries(seenRaw)) {
+    if (Array.isArray(keys)) seenByFile.set(filePath, new Set(keys));
+  }
+  const fileOffsets =
+    reasonixState.fileOffsets && typeof reasonixState.fileOffsets === "object"
+      ? { ...reasonixState.fileOffsets }
+      : {};
+
+  const files = Array.isArray(statFiles)
+    ? statFiles
+    : resolveReasonixStatFiles(env || process.env);
+  if (files.length === 0) {
+    cursors.reasonix = { ...reasonixState, seenIds: seenRaw, fileOffsets, updatedAt: new Date().toISOString() };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
+
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const touchedBuckets = new Set();
+  const cb = typeof onProgress === "function" ? onProgress : null;
+  let recordsProcessed = 0;
+  let eventsAggregated = 0;
+
+  for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+    const filePath = files[fileIdx];
+    let stat;
+    try { stat = fssync.statSync(filePath); } catch { continue; }
+    const statSize = stat.size; // snapshot: the stream and cursor never exceed this
+
+    const prevEntry = fileOffsets[filePath] || {};
+    const prevSize = Number(prevEntry.size) || 0;
+    const prevIno = prevEntry.ino;
+    const inodeChanged = typeof prevIno === "number" && prevIno !== stat.ino;
+    const startOffset = statSize < prevSize || inodeChanged ? 0 : prevSize;
+    if (statSize <= startOffset) continue;
+
+    let seenIds = seenByFile.get(filePath);
+    if (!seenIds) {
+      seenIds = new Set();
+      seenByFile.set(filePath, seenIds);
+    }
+
+    let stream;
+    try {
+      stream = fssync.createReadStream(filePath, { encoding: "utf8", start: startOffset, end: statSize - 1 });
+    } catch { continue; }
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+    for await (const line of rl) {
+      if (!line || !line.trim()) continue;
+      let entry;
+      try { entry = JSON.parse(line); } catch { continue; }
+
+      // Turn markers carry no model/usage — skip them.
+      if (typeof entry.model !== "string" || !entry.model) continue;
+
+      // Usage records have no stable id; dedup on every field that feeds the
+      // delta so an inode change / truncation-triggered full re-read cannot
+      // double-count, while records differing in any aggregated value survive.
+      const seenKey = `${entry.model}|${entry.ts}|${entry.prompt}|${entry.completion}|${entry.total}|${entry.cache_hit}|${entry.reasoning}|${entry.requests}`;
+      if (seenIds.has(seenKey)) continue;
+      seenIds.add(seenKey);
+
+      recordsProcessed++;
+
+      const cacheRead = toNonNegativeInt(entry.cache_hit);
+      // prompt already includes cache_hit (prompt = cache_miss + cache_hit),
+      // so input_tokens is net of cache to avoid double-counting.
+      const input = Math.max(0, toNonNegativeInt(entry.prompt) - cacheRead);
+      const output = toNonNegativeInt(entry.completion);
+      const reasoning = toNonNegativeInt(entry.reasoning);
+      const total = toNonNegativeInt(entry.total);
+      if (input === 0 && output === 0 && reasoning === 0 && total === 0) continue;
+
+      const tsIso = typeof entry.ts === "string" ? entry.ts : "";
+      const bucketStart = toUtcHalfHourStart(tsIso);
+      if (!bucketStart) continue;
+
+      const delta = {
+        input_tokens: input,
+        cached_input_tokens: cacheRead,
+        cache_creation_input_tokens: 0,
+        output_tokens: output,
+        reasoning_output_tokens: reasoning,
+        // total_tokens is the normalized sum of the delta columns so it stays
+        // internally consistent with the other providers (input is net of
+        // cache; reasoning is included, matching Antigravity/Kimi conventions).
+        total_tokens: input + cacheRead + output + reasoning,
+        conversation_count: toNonNegativeInt(entry.requests) || 1,
+      };
+
+      const bucket = getHourlyBucket(hourlyState, "reasonix", entry.model, bucketStart);
+      addTotals(bucket.totals, delta);
+      touchedBuckets.add(bucketKey("reasonix", entry.model, bucketStart));
+      eventsAggregated++;
+
+      if (cb) {
+        cb({
+          index: fileIdx + 1,
+          total: files.length,
+          recordsProcessed,
+          eventsAggregated,
+          bucketsQueued: touchedBuckets.size,
+        });
+      }
+    }
+
+    let postStat = stat;
+    try { postStat = fssync.statSync(filePath); } catch {}
+
+    // If the snapshot does not end with a newline, the tail line may be an
+    // incomplete append in progress. Roll the cursor back to just after the
+    // last complete newline (within the snapshot) so that line is re-read
+    // once it is fully written, instead of being permanently dropped.
+    let cursorSize = statSize;
+    if (cursorSize > startOffset) {
+      const tailLen = Math.min(cursorSize - startOffset, 64 * 1024);
+      let fd = null;
+      try {
+        fd = fssync.openSync(filePath, "r");
+        const buf = Buffer.alloc(tailLen);
+        fssync.readSync(fd, buf, 0, tailLen, cursorSize - tailLen);
+        const lastNewline = buf.lastIndexOf(0x0a);
+        if (lastNewline === -1) {
+          cursorSize = startOffset;
+        } else {
+          const newlineAbs = cursorSize - tailLen + lastNewline;
+          if (newlineAbs + 1 < cursorSize) {
+            cursorSize = newlineAbs + 1;
+          }
+        }
+      } catch {
+        // File rotated/deleted between stat and open: roll back so the next
+        // run re-reads from a safe boundary instead of aborting this run.
+        cursorSize = startOffset;
+      } finally {
+        if (fd !== null) fssync.closeSync(fd);
+      }
+    }
+    fileOffsets[filePath] = { size: cursorSize, mtimeMs: postStat.mtimeMs, ino: postStat.ino };
+  }
+
+  // Cap per-file seen fingerprints to last 10k to bound cursor state size.
+  const seenPersist = {};
+  for (const [filePath, keys] of seenByFile) {
+    const arr = Array.from(keys);
+    seenPersist[filePath] = arr.length > 10_000 ? arr.slice(arr.length - 10_000) : arr;
+  }
+
+  const bucketsQueued = await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets });
+  const updatedAt = new Date().toISOString();
+  hourlyState.updatedAt = updatedAt;
+  cursors.hourly = hourlyState;
+  cursors.reasonix = { ...reasonixState, seenIds: seenPersist, fileOffsets, updatedAt };
+
+  return { recordsProcessed, eventsAggregated, bucketsQueued };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Kimi Code (official @moonshot-ai/kimi-code) — passive JSONL reader.
 //
 // Distinct from the legacy community `kimi-cli` above (Python, ~/.kimi). The
@@ -15866,6 +16073,9 @@ module.exports = {
   parseCopilotIncremental,
   parseCopilotSessionStoreIncremental,
   parseCopilotAppDbIncremental,
+  resolveReasonixStatsDir,
+  resolveReasonixStatFiles,
+  parseReasonixIncremental,
   resolveKimiHome,
   resolveKimiWireFiles,
   resolveKimiDefaultModel,

@@ -66,6 +66,8 @@ const {
   parseCopilotIncremental,
   parseCopilotSessionStoreIncremental,
   parseCopilotAppDbIncremental,
+  resolveReasonixStatFiles,
+  parseReasonixIncremental,
   resolveKimiWireFiles,
   parseKimiIncremental,
   resolveKimiCodeWireFiles,
@@ -273,6 +275,7 @@ const AUTO_SYNC_SOURCES = new Set([
   "kimi-code",
   "mimo",
   "omp",
+  "reasonix",
   "opencode",
   "openclaw",
   "pi",
@@ -1722,6 +1725,34 @@ async function cmdSync(argv, context = {}) {
       }
     }
 
+    // ── Reasonix (passive ~/.reasonix/stats/*.jsonl reader) ──
+    let reasonixResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    const reasonixStatFiles = sourceAllowed("reasonix")
+      ? mergeBothFileSources({ resolveFiles: resolveReasonixStatFiles, env: process.env })
+      : [];
+    if (reasonixStatFiles.length > 0) {
+      if (progress?.enabled) {
+        progress.start(`Parsing Reasonix ${renderBar(0)} | buckets 0`);
+      }
+      try {
+        reasonixResult = await parseReasonixIncremental({
+          statFiles: reasonixStatFiles,
+          cursors,
+          queuePath,
+          env: process.env,
+          onProgress: (p) => {
+            if (!progress?.enabled) return;
+            const pct = p.total > 0 ? p.index / p.total : 1;
+            progress.update(
+              `Parsing Reasonix ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} files | buckets ${formatNumber(p.bucketsQueued)}`,
+            );
+          },
+        });
+      } catch (err) {
+        warnProviderParseFailure("Reasonix", err, opts);
+      }
+    }
+
     // ── Kimi (passive wire.jsonl reader) ──
     let kimiResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     const kimiWireFiles = sourceAllowed("kimi")
@@ -2397,6 +2428,7 @@ async function cmdSync(argv, context = {}) {
       kiroResult.recordsProcessed +
       kiroCliResult.recordsProcessed +
       hermesResult.recordsProcessed +
+      reasonixResult.recordsProcessed +
       kimiResult.recordsProcessed +
       kimiCodeResult.recordsProcessed +
       codebuddyResult.recordsProcessed +
@@ -2428,6 +2460,7 @@ async function cmdSync(argv, context = {}) {
       kiroResult.bucketsQueued +
       kiroCliResult.bucketsQueued +
       hermesResult.bucketsQueued +
+      reasonixResult.bucketsQueued +
       kimiResult.bucketsQueued +
       kimiCodeResult.bucketsQueued +
       codebuddyResult.bucketsQueued +

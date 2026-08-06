@@ -6,7 +6,7 @@
 
 ### 모든 CLI에서 AI에 쓰는 비용을 정확히 파악
 
-**29개의 AI 코딩 도구**에서 토큰 수치를 자동으로 수집하고 로컬에서 집계해, 실제 비용 추세를 아름다운 대시보드에서 확인. 클라우드 계정 불필요, API Key 불필요, 셋업 불필요 — 명령 한 줄이면 끝.
+**30개의 AI 코딩 도구**에서 토큰 수치를 자동으로 수집하고 로컬에서 집계해, 실제 비용 추세를 아름다운 대시보드에서 확인. 클라우드 계정 불필요, API Key 불필요, 셋업 불필요 — 명령 한 줄이면 끝.
 
 [![npm version](https://img.shields.io/npm/v/tokentracker-cli.svg?color=blue)](https://www.npmjs.com/package/tokentracker-cli)
 [![npm downloads](https://img.shields.io/npm/dm/tokentracker-cli.svg?color=brightgreen)](https://www.npmjs.com/package/tokentracker-cli)
@@ -87,7 +87,7 @@ brew install xiufengsun/tokentracker/tokentracker
 
 ## ✨ 기능
 
-- 🔌 **29개의 AI 도구 기본 지원** — Claude Code, Codex CLI, Cursor, Gemini CLI, Antigravity, Kiro, OpenCode, OpenClaw, Every Code, Hermes Agent, GitHub Copilot, Kimi Code, CodeBuddy, WorkBuddy, Grok Build, oh-my-pi, pi, Craft Agents, Kilo CLI, Kilo Code, Roo Code, Zed Agent, Goose, Droid, Mimo Code, ZCode, Qoder, AnythingLLM Desktop, Claude Science
+- 🔌 **30개의 AI 도구 기본 지원** — Claude Code, Codex CLI, Cursor, Gemini CLI, Antigravity, Kiro, OpenCode, OpenClaw, Every Code, Hermes Agent, GitHub Copilot, Kimi Code, CodeBuddy, WorkBuddy, Grok Build, oh-my-pi, pi, Craft Agents, Kilo CLI, Kilo Code, Roo Code, Zed Agent, Goose, Droid, Mimo Code, ZCode, Qoder, AnythingLLM Desktop, Claude Science, Reasonix
 - 🏠 **100% 로컬** — 토큰 데이터가 기기를 떠나지 않습니다. 계정 없음, API Key 없음.
 - 🚀 **제로 설정** — 첫 실행 시 Hook 자동 설치. 0에서 대시보드까지 30초.
 - 📊 **아름다운 대시보드** — 사용 추세, 모델별 비용 분석, GitHub 스타일 활동 히트맵, 프로젝트 귀속 정보
@@ -176,6 +176,7 @@ brew install xiufengsun/tokentracker/tokentracker
 | **GitHub Copilot App / CLI** | ✅ 자동 | 요청별 통합 SQLite 사용량 (`~/.copilot/session-store.db`), App DB는 레거시 기준선 |
 | **GitHub Copilot Chat 확장 / 이전 CLI** | ✅ 자동 | OpenTelemetry 파일 익스포터 (`COPILOT_OTEL_FILE_EXPORTER_PATH`) |
 | **Kimi Code** | ✅ 자동 | 패시브 `wire.jsonl` 리더 (`~/.kimi/sessions/**/wire.jsonl`) |
+| **Reasonix** | ✅ 자동 | 패시브 JSONL 리더 (`~/.reasonix/stats/*.jsonl`, 요청별 토큰 사용량, reasoning·캐시 히트 구분 포함) |
 | **oh-my-pi (Pi Coding Agent)** | ✅ 자동 | 패시브 리더 (`~/.omp/agent/sessions/**/*.jsonl`) |
 | **CodeBuddy** (Tencent) | ✅ 자동 | `~/.codebuddy/settings.json`의 SessionEnd hook (Claude-Code fork) |
 | **WorkBuddy** (Tencent) | ✅ 자동 | `~/.workbuddy/settings.json`의 SessionEnd hook (Claude-Code fork) + 패시브 `projects/**/*.jsonl` 스캔 |
@@ -213,7 +214,7 @@ brew install xiufengsun/tokentracker/tokentracker
 
 |                          | **TokenTracker** | ccusage     | Cursor stats |
 |--------------------------|:---:|:---:|:---:|
-| **지원 AI 도구**         | **29**           | 1 (Claude)  | 1 (Cursor)   |
+| **지원 AI 도구**         | **30**           | 1 (Claude)  | 1 (Cursor)   |
 | **로컬 우선, 계정 불필요** | ✅            | ✅           | ❌            |
 | **네이티브 데스크톱 앱** | ✅ macOS + Windows | ❌          | ❌            |
 | **데스크톱 위젯**        | ✅ 4종            | ❌           | ❌            |

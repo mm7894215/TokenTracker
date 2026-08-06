@@ -6,7 +6,7 @@
 
 ### AI に使ったコストを正確に把握 — すべての CLI を横断して
 
-**29 種類の AI コーディングツール**からトークン数を自動収集し、ローカルで集計、美しいダッシュボードで本当のコスト推移を可視化します。クラウドアカウント不要、API キー不要、セットアップ不要 — コマンド 1 つで完了です。
+**30 種類の AI コーディングツール**からトークン数を自動収集し、ローカルで集計、美しいダッシュボードで本当のコスト推移を可視化します。クラウドアカウント不要、API キー不要、セットアップ不要 — コマンド 1 つで完了です。
 
 [![npm version](https://img.shields.io/npm/v/tokentracker-cli.svg?color=blue)](https://www.npmjs.com/package/tokentracker-cli)
 [![npm downloads](https://img.shields.io/npm/dm/tokentracker-cli.svg?color=brightgreen)](https://www.npmjs.com/package/tokentracker-cli)
@@ -87,7 +87,7 @@ brew install xiufengsun/tokentracker/tokentracker
 
 ## ✨ 機能
 
-- 🔌 **29 種類の AI ツールを標準対応** — Claude Code、Codex CLI、Cursor、Gemini CLI、Antigravity、Kiro、OpenCode、OpenClaw、Every Code、Hermes Agent、GitHub Copilot、Kimi Code、CodeBuddy、WorkBuddy、Grok Build、oh-my-pi、pi、Craft Agents、Kilo CLI、Kilo Code、Roo Code、Zed Agent、Goose、Droid、Mimo Code、ZCode、Qoder、AnythingLLM Desktop、Claude Science
+- 🔌 **30 種類の AI ツールを標準対応** — Claude Code、Codex CLI、Cursor、Gemini CLI、Antigravity、Kiro、OpenCode、OpenClaw、Every Code、Hermes Agent、GitHub Copilot、Kimi Code、CodeBuddy、WorkBuddy、Grok Build、oh-my-pi、pi、Craft Agents、Kilo CLI、Kilo Code、Roo Code、Zed Agent、Goose、Droid、Mimo Code、ZCode、Qoder、AnythingLLM Desktop、Claude Science、Reasonix
 - 🏠 **100% ローカル** — トークンデータがマシンから外に出ることはありません。アカウント不要、API キー不要。
 - 🚀 **ゼロコンフィグ** — Hook は初回実行で自動インストール。0 からダッシュボードまで 30 秒。
 - 📊 **美しいダッシュボード** — 使用トレンド、モデル別コスト内訳、GitHub スタイルのアクティビティヒートマップ、プロジェクト別の帰属表示
@@ -176,6 +176,7 @@ brew install xiufengsun/tokentracker/tokentracker
 | **GitHub Copilot App / CLI** | ✅ 自動 | リクエスト単位の統合 SQLite 使用量 (`~/.copilot/session-store.db`)、App DB は旧データのベースライン |
 | **GitHub Copilot Chat 拡張 / 旧 CLI** | ✅ 自動 | OpenTelemetry のファイルエクスポーター (`COPILOT_OTEL_FILE_EXPORTER_PATH`) |
 | **Kimi Code** | ✅ 自動 | パッシブな `wire.jsonl` リーダー (`~/.kimi/sessions/**/wire.jsonl`) |
+| **Reasonix** | ✅ 自動 | パッシブな JSONL リーダー (`~/.reasonix/stats/*.jsonl`、リクエスト単位の token 使用量、reasoning とキャッシュヒット内訳を含む) |
 | **oh-my-pi (Pi Coding Agent)** | ✅ 自動 | パッシブリーダー (`~/.omp/agent/sessions/**/*.jsonl`) |
 | **CodeBuddy** (Tencent) | ✅ 自動 | `~/.codebuddy/settings.json` 内の SessionEnd hook（Claude-Code fork） |
 | **WorkBuddy** (Tencent) | ✅ 自動 | `~/.workbuddy/settings.json` 内の SessionEnd hook（Claude-Code fork）+ パッシブな `projects/**/*.jsonl` スキャン |
@@ -213,7 +214,7 @@ brew install xiufengsun/tokentracker/tokentracker
 
 |                          | **TokenTracker** | ccusage     | Cursor stats |
 |--------------------------|:---:|:---:|:---:|
-| **対応 AI ツール数**     | **29**           | 1 (Claude)  | 1 (Cursor)   |
+| **対応 AI ツール数**     | **30**           | 1 (Claude)  | 1 (Cursor)   |
 | **ローカルファースト、アカウント不要** | ✅            | ✅           | ❌            |
 | **ネイティブデスクトップアプリ** | ✅ macOS + Windows | ❌          | ❌            |
 | **デスクトップウィジェット** | ✅ 4 種類      | ❌           | ❌            |

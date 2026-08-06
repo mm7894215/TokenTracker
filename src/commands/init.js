@@ -62,6 +62,7 @@ const {
 } = require("../lib/omp-hook");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
 const {
+  resolveReasonixStatsDir,
   resolveOmpAgentDir,
   resolvePiAgentDir,
   piAgentDirCollidesWithOmp,
@@ -123,6 +124,7 @@ const SUPPORTED_PROVIDERS = [
   "Kilo CLI",
   "Kilo Code",
   "Roo Code",
+  "Reasonix",
   "Zed Agent",
   "Goose",
   "Droid",
@@ -713,6 +715,15 @@ async function applyIntegrationSetup({
     const craftConfigDir = process.env.CRAFT_CONFIG_DIR || path.join(home, ".craft-agent");
     if (fssync.existsSync(craftConfigDir)) {
       summary.push({ label: "Craft Agents", status: "detected", detail: "Passive reader (no hook needed)" });
+    }
+  }
+
+  // Reasonix: passive reader — no hook installation needed.
+  // TokenTracker reads ~/.reasonix/stats/*.jsonl usage records.
+  {
+    const reasonixStatsDir = resolveReasonixStatsDir(process.env);
+    if (fssync.existsSync(reasonixStatsDir)) {
+      summary.push({ label: "Reasonix", status: "detected", detail: "Passive reader (no hook needed)" });
     }
   }
 
