@@ -641,7 +641,7 @@ test("fetchQoderCnLimits falls back to the qoder.com.cn site and its own cache n
   const result = await fetchQoderCnLimits({
     home,
     platform: "darwin",
-    env: { QODER_COOKIE: "session=manual-secret" },
+    env: { QODER_CN_COOKIE: "session=manual-secret" },
     rpcRequest: async () => {
       throw new Error("Qoder local service is not running.");
     },
@@ -742,7 +742,7 @@ test("fetchQoderCnLimits stays on the china site even when QODER_SITE points els
   const result = await fetchQoderCnLimits({
     home,
     platform: "darwin",
-    env: { QODER_COOKIE: "session=manual-secret", QODER_SITE: "qoder.com" },
+    env: { QODER_CN_COOKIE: "session=manual-secret", QODER_SITE: "qoder.com" },
     rpcRequest: async () => {
       throw new Error("Qoder local service is not running.");
     },

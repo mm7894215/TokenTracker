@@ -722,7 +722,11 @@ async function fetchQoderLimits({
     return cachedLimits;
   }
 
-  const manualCookie = typeof env.QODER_COOKIE === "string" ? env.QODER_COOKIE.trim() : "";
+  // Manual-cookie fallback reads an envPrefix-specific key: QODER_COOKIE for
+  // the international flow, QODER_CN_COOKIE for the CN flow — the two installs
+  // hold different sessions and must never share a cookie.
+  const cookieKey = `${envPrefix}_COOKIE`;
+  const manualCookie = typeof env[cookieKey] === "string" ? env[cookieKey].trim() : "";
   // QODER_SITE is an international-flow knob. A pinned site (the CN fetch)
   // must never be overridden by it — the CN flow always targets china.
   const manualSite = sitePinned ? site : env.QODER_SITE ? siteFromEnv(env.QODER_SITE) : site;
@@ -730,7 +734,7 @@ async function fetchQoderLimits({
     ? [{
         cookieHeader: manualCookie,
         site: manualSite,
-        sourceLabel: "QODER_COOKIE",
+        sourceLabel: cookieKey,
       }]
     : [];
 
