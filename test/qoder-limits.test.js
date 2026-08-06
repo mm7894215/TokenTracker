@@ -733,3 +733,44 @@ test("fetchQoderCnLimits reads credentials via QODER_CN_HOME, not the internatio
   // means the QoderCN .info.json was found.
   assert.ok(message !== "Qoder local service is not running.", "QODER_CN_HOME must locate the QoderCN .info.json");
 });
+
+test("fetchQoderCnLimits stays on the china site even when QODER_SITE points elsewhere", async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-qoder-cn-sitepin-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  let capturedUrl = null;
+
+  const result = await fetchQoderCnLimits({
+    home,
+    platform: "darwin",
+    env: { QODER_COOKIE: "session=manual-secret", QODER_SITE: "qoder.com" },
+    rpcRequest: async () => {
+      throw new Error("Qoder local service is not running.");
+    },
+    fetchImpl: async (url) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            totalQuota: {
+              quotaSummary: {
+                usedValue: 25,
+                limitValue: 100,
+                remainingValue: 75,
+                usagePercentage: 25,
+              },
+            },
+          };
+        },
+      };
+    },
+  });
+
+  // QODER_SITE is an international-flow knob — the CN flow must stay pinned to
+  // qoder.com.cn even if a user set QODER_SITE=qoder.com for the international
+  // install.
+  assert.equal(capturedUrl, "https://qoder.com.cn/api/v2/me/usages/big_model_credits");
+  assert.equal(result.site, "china");
+  assert.equal(result.primary_window.remaining_credits, 75);
+});

@@ -2477,6 +2477,7 @@ async function cmdSync(argv, context = {}) {
       antigravityResult.bucketsQueued +
       opencodeResult.bucketsQueued +
       qoderResult.bucketsQueued +
+      qoderCnResult.bucketsQueued +
       claudeScienceResult.bucketsQueued +
       cursorResult.bucketsQueued +
       kiroResult.bucketsQueued +

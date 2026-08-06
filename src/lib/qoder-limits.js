@@ -665,6 +665,7 @@ async function fetchQoderLimits({
   appDir = "Qoder",
   envPrefix = "QODER",
   site = QODER_SITES.international,
+  sitePinned = false,
   cacheNamespace,
   fetchImpl = fetch,
   rpcRequest = qoderRpcRequest,
@@ -722,10 +723,13 @@ async function fetchQoderLimits({
   }
 
   const manualCookie = typeof env.QODER_COOKIE === "string" ? env.QODER_COOKIE.trim() : "";
+  // QODER_SITE is an international-flow knob. A pinned site (the CN fetch)
+  // must never be overridden by it — the CN flow always targets china.
+  const manualSite = sitePinned ? site : env.QODER_SITE ? siteFromEnv(env.QODER_SITE) : site;
   const sessions = manualCookie
     ? [{
         cookieHeader: manualCookie,
-        site: env.QODER_SITE ? siteFromEnv(env.QODER_SITE) : site,
+        site: manualSite,
         sourceLabel: "QODER_COOKIE",
       }]
     : [];
@@ -803,6 +807,7 @@ function fetchQoderCnLimits(opts = {}) {
     appDir: "QoderCN",
     envPrefix: "QODER_CN",
     site: QODER_SITES.china,
+    sitePinned: true,
     cacheNamespace: "cn",
   });
 }
