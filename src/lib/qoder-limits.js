@@ -142,28 +142,30 @@ function qoderDataRoot({
   home = os.homedir(),
   env = process.env,
   platform = process.platform,
+  appDir = "Qoder",
 } = {}) {
   if (typeof env.QODER_HOME === "string" && env.QODER_HOME.trim()) {
     return path.resolve(env.QODER_HOME.trim());
   }
   if (platform === "darwin") {
-    return path.join(home, "Library", "Application Support", "Qoder");
+    return path.join(home, "Library", "Application Support", appDir);
   }
   if (platform === "win32") {
-    return path.join(env.APPDATA || path.join(home, "AppData", "Roaming"), "Qoder");
+    return path.join(env.APPDATA || path.join(home, "AppData", "Roaming"), appDir);
   }
-  return path.join(home, ".config", "Qoder");
+  return path.join(home, ".config", appDir);
 }
 
 function qoderRpcRequest(method, params = {}, {
   home = os.homedir(),
   env = process.env,
   platform = process.platform,
+  appDir = "Qoder",
   timeoutMs = 1500,
   netModule = net,
 } = {}) {
   return new Promise((resolve, reject) => {
-    const infoPath = path.join(qoderDataRoot({ home, env, platform }), "SharedClientCache", ".info.json");
+    const infoPath = path.join(qoderDataRoot({ home, env, platform, appDir }), "SharedClientCache", ".info.json");
     let info;
     try {
       info = JSON.parse(fs.readFileSync(infoPath, "utf8"));
@@ -302,17 +304,21 @@ function normalizeQoderActivityResponse(response, { nowMs = Date.now() } = {}) {
   };
 }
 
-function qoderActivityCachePath({ home = os.homedir() } = {}) {
-  return path.join(home, ".tokentracker", "tracker", QODER_ACTIVITY_CACHE_FILE);
+function qoderActivityCachePath({ home = os.homedir(), namespace } = {}) {
+  const file = namespace
+    ? `qoder-${namespace}-activity-cache.json`
+    : QODER_ACTIVITY_CACHE_FILE;
+  return path.join(home, ".tokentracker", "tracker", file);
 }
 
 function readQoderActivityCache({
   home = os.homedir(),
   nowMs = Date.now(),
+  namespace,
   maxAgeMs = QODER_ACTIVITY_CACHE_MAX_AGE_MS,
 } = {}) {
   try {
-    const parsed = JSON.parse(fs.readFileSync(qoderActivityCachePath({ home }), "utf8"));
+    const parsed = JSON.parse(fs.readFileSync(qoderActivityCachePath({ home, namespace }), "utf8"));
     const window = parsed?.activity_window;
     const cachedAtMs = Date.parse(parsed?.cached_at || "");
     if (!window || !Number.isFinite(cachedAtMs) || cachedAtMs > nowMs + 60_000) return null;
@@ -336,9 +342,10 @@ function readQoderActivityCache({
 function writeQoderActivityCache(window, {
   home = os.homedir(),
   nowMs = Date.now(),
+  namespace,
 } = {}) {
   if (!window) return;
-  const cachePath = qoderActivityCachePath({ home });
+  const cachePath = qoderActivityCachePath({ home, namespace });
   const payload = {
     activity_window: window,
     cached_at: new Date(nowMs).toISOString(),
@@ -351,8 +358,11 @@ function writeQoderActivityCache(window, {
   } catch (_error) {}
 }
 
-function qoderLimitsCachePath({ home = os.homedir() } = {}) {
-  return path.join(home, ".tokentracker", "tracker", QODER_LIMITS_CACHE_FILE);
+function qoderLimitsCachePath({ home = os.homedir(), namespace } = {}) {
+  const file = namespace
+    ? `qoder-${namespace}-usage-limits-cache.json`
+    : QODER_LIMITS_CACHE_FILE;
+  return path.join(home, ".tokentracker", "tracker", file);
 }
 
 function qoderCachedWindow(window, { cachedAtMs, nowMs } = {}) {
@@ -365,9 +375,10 @@ function qoderCachedWindow(window, { cachedAtMs, nowMs } = {}) {
 function readQoderLimitsCache({
   home = os.homedir(),
   nowMs = Date.now(),
+  namespace,
 } = {}) {
   try {
-    const raw = JSON.parse(fs.readFileSync(qoderLimitsCachePath({ home }), "utf8"))?.qoder;
+    const raw = JSON.parse(fs.readFileSync(qoderLimitsCachePath({ home, namespace }), "utf8"))?.qoder;
     const cachedAtMs = Date.parse(raw?.cached_at || "");
     if (!Number.isFinite(cachedAtMs) || cachedAtMs > nowMs + 60_000) return null;
     const primaryWindow = qoderCachedWindow(raw.primary_window, { cachedAtMs, nowMs });
@@ -398,9 +409,10 @@ function readQoderLimitsCache({
 function writeQoderLimitsCache(limits, {
   home = os.homedir(),
   nowMs = Date.now(),
+  namespace,
 } = {}) {
   if (!limits?.configured || limits.error || (!limits.primary_window && !limits.secondary_window)) return;
-  const cachePath = qoderLimitsCachePath({ home });
+  const cachePath = qoderLimitsCachePath({ home, namespace });
   const payload = {
     qoder: {
       plan_label: limits.plan_label || null,
@@ -595,6 +607,7 @@ function readQoderLocalQuota({
   home = os.homedir(),
   platform = process.platform,
   env = process.env,
+  appDir = "Qoder",
 } = {}) {
   const explicitLogRoot =
     typeof env.QODER_LOG_ROOT === "string" && env.QODER_LOG_ROOT.trim()
@@ -607,10 +620,10 @@ function readQoderLocalQuota({
   const logRoot = explicitLogRoot || (configuredRoot
     ? path.join(configuredRoot, "logs")
     : platform === "darwin"
-      ? path.join(home, "Library", "Application Support", "Qoder", "logs")
+      ? path.join(home, "Library", "Application Support", appDir, "logs")
       : platform === "win32"
-        ? path.join(env.APPDATA || path.join(home, "AppData", "Roaming"), "Qoder", "logs")
-        : path.join(home, ".config", "Qoder", "logs"));
+        ? path.join(env.APPDATA || path.join(home, "AppData", "Roaming"), appDir, "logs")
+        : path.join(home, ".config", appDir, "logs"));
   for (const logPath of listRecentQoderRendererLogs(logRoot)) {
     try {
       const fd = fs.openSync(logPath, "r");
@@ -640,6 +653,9 @@ async function fetchQoderLimits({
   home = os.homedir(),
   env = process.env,
   platform = process.platform,
+  appDir = "Qoder",
+  site = QODER_SITES.international,
+  cacheNamespace,
   fetchImpl = fetch,
   rpcRequest = qoderRpcRequest,
   nowMs = Date.now(),
@@ -648,7 +664,7 @@ async function fetchQoderLimits({
   let rpcAuth = null;
   let activityWindow = null;
   let activitySource = null;
-  const rpcOptions = { home, env, platform };
+  const rpcOptions = { home, env, platform, appDir };
   // Qoder's shared client accepts only one reliable request at a time. Parallel
   // connections intermittently time out even while the desktop app is running.
   try {
@@ -663,7 +679,7 @@ async function fetchQoderLimits({
       activityWindow = await fetchQoderActivity(rpcAuth, fetchImpl, { nowMs });
       if (activityWindow) {
         activitySource = "provider-api";
-        writeQoderActivityCache(activityWindow, { home, nowMs });
+        writeQoderActivityCache(activityWindow, { home, nowMs, namespace: cacheNamespace });
       }
     } catch (_error) {}
   }
@@ -672,7 +688,7 @@ async function fetchQoderLimits({
   // omission, not an authoritative deletion: an activity carries its own
   // expiry, so the last observed window remains valid until reset_at.
   if (!activityWindow) {
-    activityWindow = readQoderActivityCache({ home, nowMs });
+    activityWindow = readQoderActivityCache({ home, nowMs, namespace: cacheNamespace });
     if (activityWindow) activitySource = "disk-cache";
   }
   if (rpcUsage) {
@@ -683,13 +699,13 @@ async function fetchQoderLimits({
     rpcUsage.source = activityWindow
       ? `local-ipc+${activitySource === "disk-cache" ? "cached-activity" : "provider-api"}`
       : "local-ipc";
-    writeQoderLimitsCache(rpcUsage, { home, nowMs });
+    writeQoderLimitsCache(rpcUsage, { home, nowMs, namespace: cacheNamespace });
     return rpcUsage;
   }
 
   // Match the Antigravity last-good behavior: once the local service is
   // unavailable, prefer a bounded disk snapshot before any provider fallback.
-  const cachedLimits = readQoderLimitsCache({ home, nowMs });
+  const cachedLimits = readQoderLimitsCache({ home, nowMs, namespace: cacheNamespace });
   if (cachedLimits) {
     if (activityWindow) cachedLimits.secondary_window = activityWindow;
     return cachedLimits;
@@ -697,7 +713,11 @@ async function fetchQoderLimits({
 
   const manualCookie = typeof env.QODER_COOKIE === "string" ? env.QODER_COOKIE.trim() : "";
   const sessions = manualCookie
-    ? [{ cookieHeader: manualCookie, site: siteFromEnv(env.QODER_SITE), sourceLabel: "QODER_COOKIE" }]
+    ? [{
+        cookieHeader: manualCookie,
+        site: env.QODER_SITE ? siteFromEnv(env.QODER_SITE) : site,
+        sourceLabel: "QODER_COOKIE",
+      }]
     : [];
 
   let lastError = null;
@@ -709,7 +729,7 @@ async function fetchQoderLimits({
       // Preserve that status as metadata, but match Qoder's Credits UI by
       // rendering an empty 0/0 bucket as 0%, not a full red 100% bar.
       const local = result.primary_window?.limit_credits === 0
-        ? readQoderLocalQuota({ home, platform, env })
+        ? readQoderLocalQuota({ home, platform, env, appDir })
         : null;
       if (local) {
         result.quota_exceeded = local.quota_exceeded === true;
@@ -726,20 +746,20 @@ async function fetchQoderLimits({
         cookie_source: session.sourceLabel,
         site: session.site.id,
       };
-      writeQoderLimitsCache(liveResult, { home, nowMs });
+      writeQoderLimitsCache(liveResult, { home, nowMs, namespace: cacheNamespace });
       return liveResult;
     } catch (error) {
       lastError = error;
     }
   }
 
-  const local = readQoderLocalQuota({ home, platform, env });
+  const local = readQoderLocalQuota({ home, platform, env, appDir });
   if (local) {
     if (activityWindow) {
       local.secondary_window = activityWindow;
       local.source += activitySource === "disk-cache" ? "+cached-activity" : "+activity";
     }
-    writeQoderLimitsCache(local, { home, nowMs });
+    writeQoderLimitsCache(local, { home, nowMs, namespace: cacheNamespace });
     return local;
   }
   if (activityWindow) {
@@ -762,6 +782,19 @@ async function fetchQoderLimits({
   return { configured: false };
 }
 
+// Qoder CN (国内版) — quota comes from qoder.com.cn and credentials live in the
+// separate QoderCN data directory (its own app install). Same mechanics as the
+// international fetch, but with the china site, the QoderCN data root, and a
+// dedicated cache namespace so the two editions never clobber each other.
+function fetchQoderCnLimits(opts = {}) {
+  return fetchQoderLimits({
+    ...opts,
+    appDir: "QoderCN",
+    site: QODER_SITES.china,
+    cacheNamespace: "cn",
+  });
+}
+
 module.exports = {
   QODER_SITES,
   normalizeQoderUsageResponse,
@@ -779,4 +812,5 @@ module.exports = {
   parseQoderQuotaLog,
   readQoderLocalQuota,
   fetchQoderLimits,
+  fetchQoderCnLimits,
 };

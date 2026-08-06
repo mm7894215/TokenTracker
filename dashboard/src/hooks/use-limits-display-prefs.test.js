@@ -112,6 +112,7 @@ describe("useLimitsDisplayPrefs", () => {
         "kiro",
         "opencodeGo",
         "qoder",
+        "qoderCn",
         "zcode",
       ].sort(),
     );

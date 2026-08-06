@@ -20,6 +20,7 @@ const {
   readQoderLimitsCache,
   writeQoderLimitsCache,
   parseQoderQuotaLog,
+  fetchQoderCnLimits,
 } = require("../src/lib/qoder-limits");
 
 test("normalizeQoderUsageResponse merges camel-case base and shared quotas", () => {
@@ -630,4 +631,48 @@ test("Qoder limits source contains no browser credential-store access", () => {
     assert.match(example, pattern, `guard must detect ${capability}`);
     assert.doesNotMatch(normalizedSource, pattern, `Qoder limits must not contain ${capability}`);
   }
+});
+
+test("fetchQoderCnLimits falls back to the qoder.com.cn site and its own cache namespace", async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-qoder-cn-site-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  let capturedUrl = null;
+
+  const result = await fetchQoderCnLimits({
+    home,
+    platform: "darwin",
+    env: { QODER_COOKIE: "session=manual-secret" },
+    rpcRequest: async () => {
+      throw new Error("Qoder local service is not running.");
+    },
+    fetchImpl: async (url) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            totalQuota: {
+              quotaSummary: {
+                usedValue: 25,
+                limitValue: 100,
+                remainingValue: 75,
+                usagePercentage: 25,
+              },
+            },
+          };
+        },
+      };
+    },
+  });
+
+  assert.equal(capturedUrl, "https://qoder.com.cn/api/v2/me/usages/big_model_credits");
+  assert.equal(result.primary_window.remaining_credits, 75);
+  assert.equal(result.site, "china");
+
+  // The CN cache lives under its own namespace — the international cache stays
+  // untouched, so the two editions never clobber each other.
+  const cnCache = readQoderLimitsCache({ home, nowMs: Date.now(), namespace: "cn" });
+  assert.equal(cnCache?.primary_window?.remaining_credits, 75);
+  assert.equal(readQoderLimitsCache({ home, nowMs: Date.now() }), null);
 });

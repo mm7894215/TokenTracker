@@ -24,7 +24,7 @@ test("public discovery surfaces describe all 29 supported tools", () => {
     assert.match(source, /Droid/, `${file} lists Droid`);
     assert.match(source, /AnythingLLM Desktop/, `${file} lists AnythingLLM Desktop`);
     assert.match(source, /Qoder/, `${file} lists Qoder`);
-    assert.match(source, /12/, `${file} carries the current usage-limits provider count`);
+    assert.match(source, /13/, `${file} carries the current usage-limits provider count`);
   }
 
   const index = read("dashboard/index.html");
@@ -34,7 +34,7 @@ test("public discovery surfaces describe all 29 supported tools", () => {
   assert.match(index, /Four desktop widgets/);
   assert.match(index, /Achievements/);
   assert.match(index, /Service Status page/);
-  assert.match(index, /usage limits for 12 providers/i);
+  assert.match(index, /usage limits for 13 providers/i);
 
   const llms = read("dashboard/public/llms.txt");
   assert.match(llms, /Supported AI coding tools \(29\)/);

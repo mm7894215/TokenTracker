@@ -66,6 +66,7 @@ const {
   resolveRoocodeTaskFiles,
   resolveZedDbPath,
   resolveQoderDbPaths,
+  resolveQoderCnDbPaths,
   resolveClaudeScienceDbPaths,
   resolveAnythingllmDbPath,
   resolveGooseDbPath,
@@ -427,6 +428,16 @@ async function cmdStatus(argv = []) {
   const qoderActive = formatResolvedPaths(qoderPaths);
   const qoderInstalled = qoderActive.length > 0;
   const qoderDbPath = qoderActive.join(" | ");
+
+  // Qoder CN (国内版) — same schema, separate Application Support/QoderCN dir.
+  const qoderCnPaths = resolveQoderCnDbPaths({
+    home,
+    env: process.env,
+    platform: process.platform,
+  });
+  const qoderCnActive = formatResolvedPaths(qoderCnPaths);
+  const qoderCnInstalled = qoderCnActive.length > 0;
+  const qoderCnDbPath = qoderCnActive.join(" | ");
 
   // Claude Science — token usage lives on the `frames` table of operon-cli.db.
   // Unlike the native/WSL pair other providers resolve to, this is an open-ended
@@ -802,6 +813,9 @@ async function cmdStatus(argv = []) {
         qoder: qoderInstalled
           ? { installed: true, detail: qoderDbPath }
           : { installed: false },
+        "qoder-cn": qoderCnInstalled
+          ? { installed: true, detail: qoderCnDbPath }
+          : { installed: false },
         "claude-science": claudeScienceInstalled
           ? { installed: true, detail: claudeScienceDbPath }
           : { installed: false },
@@ -925,6 +939,9 @@ async function cmdStatus(argv = []) {
         : null,
       qoderInstalled
         ? `- Qoder: passive reader (${qoderDbPath})`
+        : null,
+      qoderCnInstalled
+        ? `- Qoder CN: passive reader (${qoderCnDbPath})`
         : null,
       claudeScienceInstalled
         ? `- Claude Science: passive reader (${claudeScienceDbPath})`

@@ -27,7 +27,7 @@ const {
 const { fetchGrokLimits } = require("./grok-limits");
 const { fetchZcodeLimits } = require("./zcode-limits");
 const { fetchOpencodeGoLimits } = require("./opencode-go-limits");
-const { fetchQoderLimits } = require("./qoder-limits");
+const { fetchQoderLimits, fetchQoderCnLimits } = require("./qoder-limits");
 const { fetchProviderServiceStatus } = require("./provider-status");
 const { readSqliteJsonRows, readSqliteJsonRowsAsync } = require("./sqlite-reader");
 
@@ -3100,7 +3100,7 @@ async function fetchUsageLimitsUncached({
     : null;
 
   const providerFetch = withFetchTimeout(fetchImpl, providerTimeoutMs);
-  const [claudeResult, codexResult, cursor, kimi, gemini, kiro, antigravity, copilot, grok, zcode, opencodeGo, qoder, claudeServiceStatus] = await Promise.all([
+  const [claudeResult, codexResult, cursor, kimi, gemini, kiro, antigravity, copilot, grok, zcode, opencodeGo, qoder, qoderCn, claudeServiceStatus] = await Promise.all([
     claudeToken && !freshClaudeCache && !claudeRetryAtMs
       ? withProviderTimeout(fetchClaudeUsageLimits(claudeToken, { fetchImpl: providerFetch, maxAttempts: 1 }), "Claude", providerTimeoutMs).then(
           (value) => ({ status: "fulfilled", value }),
@@ -3144,6 +3144,16 @@ async function fetchUsageLimitsUncached({
         fetchImpl: providerFetch,
       }),
       "Qoder",
+      providerTimeoutMs,
+    ).catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
+    withProviderTimeout(
+      fetchQoderCnLimits({
+        home,
+        env,
+        platform,
+        fetchImpl: providerFetch,
+      }),
+      "Qoder CN",
       providerTimeoutMs,
     ).catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
     // Public status-page probe (fail-soft, own 5-min cache in provider-status.js).
@@ -3295,6 +3305,7 @@ async function fetchUsageLimitsUncached({
     zcode: withPlanLabel(zcode, zcode.plan_label, "ZCode"),
     opencodeGo: withPlanLabel(opencodeGo, opencodeGo?.plan_label, "OpenCode Go"),
     qoder: withPlanLabel(qoder, qoder?.plan_label, "Qoder"),
+    qoderCn: withPlanLabel(qoderCn, qoderCn?.plan_label, "Qoder CN"),
   };
 
   for (const [providerName, provider] of Object.entries(data)) {
@@ -3355,4 +3366,5 @@ module.exports = {
   fetchZcodeLimits,
   fetchOpencodeGoLimits,
   fetchQoderLimits,
+  fetchQoderCnLimits,
 };

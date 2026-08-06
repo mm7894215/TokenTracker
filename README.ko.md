@@ -217,7 +217,7 @@ brew install xiufengsun/tokentracker/tokentracker
 | **로컬 우선, 계정 불필요** | ✅            | ✅           | ❌            |
 | **네이티브 데스크톱 앱** | ✅ macOS + Windows | ❌          | ❌            |
 | **데스크톱 위젯**        | ✅ 4종            | ❌           | ❌            |
-| **레이트 제한 추적**     | ✅ 12개 프로바이더 | ❌           | Cursor 전용  |
+| **레이트 제한 추적**     | ✅ 13개 프로바이더 | ❌           | Cursor 전용  |
 
 ---
 

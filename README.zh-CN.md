@@ -220,7 +220,7 @@ brew install xiufengsun/tokentracker/tokentracker
 | **本地优先，无需账号**   | ✅               | ✅           | ❌            |
 | **原生桌面 App**         | ✅ macOS + Windows | ❌          | ❌            |
 | **桌面小组件**           | ✅ 4 个小组件    | ❌           | ❌            |
-| **限额追踪**             | ✅ 12 家 provider | ❌           | 只支持 Cursor |
+| **限额追踪**             | ✅ 13 家 provider | ❌           | 只支持 Cursor |
 
 ---
 

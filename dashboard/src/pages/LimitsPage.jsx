@@ -146,6 +146,7 @@ export function LimitsPage() {
                 zcode={usageLimits?.zcode}
                 opencodeGo={usageLimits?.opencodeGo}
                 qoder={usageLimits?.qoder}
+                qoderCn={usageLimits?.qoderCn}
                 order={prefs.order}
                 visibility={prefs.visibility}
                 displayMode={prefs.displayMode}
