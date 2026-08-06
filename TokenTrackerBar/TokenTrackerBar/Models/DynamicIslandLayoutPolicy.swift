@@ -42,3 +42,44 @@ enum DynamicIslandInteractionPolicy {
         hovering && pointerInsideInteractiveRegion
     }
 }
+
+/// Timing and geometry for the island's centered visibility mask.
+enum DynamicIslandVisibilityPolicy {
+    static let showDuration: Double = 0.28
+    static let hideDuration: Double = 0.28
+    /// Lets SwiftUI commit the hidden frame before the panel leaves.
+    static let hideSettleDelay: Double = 0.05
+    static var hideCompletionDelay: Double { hideDuration + hideSettleDelay }
+    static let centerPointWidth: CGFloat = 1
+
+    static func revealWidth(
+        progress: CGFloat,
+        fullWidth: CGFloat,
+        centerGapWidth: CGFloat,
+        hasNotch: Bool,
+        isDismissing: Bool = false
+    ) -> CGFloat {
+        let full = max(0, fullWidth)
+        // The close endpoint must clear the notch's rounded lower corners.
+        let hiddenWidth = hasNotch && !isDismissing
+            ? max(0, centerGapWidth)
+            : centerPointWidth
+        let start = min(full, hiddenWidth)
+        let clampedProgress = min(1, max(0, progress))
+        return start + (full - start) * clampedProgress
+    }
+}
+
+/// Rejects stale delayed completions after rapid toggles.
+struct DynamicIslandVisibilityTransitionTracker {
+    private(set) var current = 0
+
+    mutating func begin() -> Int {
+        current &+= 1
+        return current
+    }
+
+    func owns(_ transition: Int) -> Bool {
+        transition == current
+    }
+}
