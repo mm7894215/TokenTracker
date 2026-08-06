@@ -123,6 +123,7 @@ const SUPPORTED_PROVIDERS = [
   "Kilo CLI",
   "Kilo Code",
   "Roo Code",
+  "Reasonix",
   "Zed Agent",
   "Goose",
   "Droid",
@@ -713,6 +714,19 @@ async function applyIntegrationSetup({
     const craftConfigDir = process.env.CRAFT_CONFIG_DIR || path.join(home, ".craft-agent");
     if (fssync.existsSync(craftConfigDir)) {
       summary.push({ label: "Craft Agents", status: "detected", detail: "Passive reader (no hook needed)" });
+    }
+  }
+
+  // Reasonix: passive reader — no hook installation needed.
+  // TokenTracker reads ~/.reasonix/stats/*.jsonl usage records.
+  {
+    const reasonixHome =
+      process.env.REASONIX_HOME && process.env.REASONIX_HOME.trim()
+        ? path.resolve(process.env.REASONIX_HOME.trim())
+        : path.join(home, ".reasonix");
+    const reasonixStatsDir = path.join(reasonixHome, "stats");
+    if (fssync.existsSync(reasonixStatsDir)) {
+      summary.push({ label: "Reasonix", status: "detected", detail: "Passive reader (no hook needed)" });
     }
   }
 

@@ -6,7 +6,7 @@
 
 ### 跨所有 CLI，看清你到底在 AI 上花了多少钱
 
-自动采集 **29 款 AI 编码工具** 的 token 用量，全程本地聚合，用一套漂亮的 Dashboard 看真实成本与趋势。不需要云账号、不需要 API Key、不需要任何配置 —— 一条命令搞定。
+自动采集 **30 款 AI 编码工具** 的 token 用量，全程本地聚合，用一套漂亮的 Dashboard 看真实成本与趋势。不需要云账号、不需要 API Key、不需要任何配置 —— 一条命令搞定。
 
 [![npm version](https://img.shields.io/npm/v/tokentracker-cli.svg?color=blue)](https://www.npmjs.com/package/tokentracker-cli)
 [![npm downloads](https://img.shields.io/npm/dm/tokentracker-cli.svg?color=brightgreen)](https://www.npmjs.com/package/tokentracker-cli)
@@ -89,7 +89,7 @@ brew install xiufengsun/tokentracker/tokentracker
 
 ## ✨ 特性
 
-- 🔌 **开箱即用支持 29 款 AI 工具** —— Claude Code、Codex CLI、Cursor、Gemini CLI、Kiro、OpenCode、OpenClaw、Every Code、Hermes Agent、GitHub Copilot、Kimi Code、CodeBuddy、WorkBuddy、Grok Build、oh-my-pi、pi、Craft Agents、Kilo CLI、Kilo Code、Roo Code、Antigravity、Zed Agent、Goose、Droid、Mimo Code、ZCode、Qoder、AnythingLLM Desktop、Claude Science
+- 🔌 **开箱即用支持 30 款 AI 工具** —— Claude Code、Codex CLI、Cursor、Gemini CLI、Kiro、OpenCode、OpenClaw、Every Code、Hermes Agent、GitHub Copilot、Kimi Code、CodeBuddy、WorkBuddy、Grok Build、oh-my-pi、pi、Craft Agents、Kilo CLI、Kilo Code、Roo Code、Antigravity、Zed Agent、Goose、Droid、Mimo Code、ZCode、Qoder、AnythingLLM Desktop、Claude Science、Reasonix
 - 🏠 **100% 本地** —— Token 数据绝不离开你的机器。无账号、无 API Key
 - 🚀 **零配置** —— 首次运行自动安装所有 hook。30 秒从零到 Dashboard
 - 📊 **漂亮的 Dashboard** —— 用量趋势、按模型的成本分解、GitHub 风格活跃度热力图、按项目归因
@@ -179,6 +179,7 @@ brew install xiufengsun/tokentracker/tokentracker
 | **GitHub Copilot App / CLI** | ✅ 自动 | 统一逐请求 SQLite 用量（`~/.copilot/session-store.db`）；App DB 作为旧数据基线 |
 | **GitHub Copilot Chat 扩展 / 旧版 CLI** | ✅ 自动 | OpenTelemetry 文件导出（`COPILOT_OTEL_FILE_EXPORTER_PATH`） |
 | **Kimi Code** | ✅ 自动 | 被动读取 `wire.jsonl`（`~/.kimi/sessions/**/wire.jsonl`） |
+| **Reasonix** | ✅ 自动 | 被动 JSONL 读取（`~/.reasonix/stats/*.jsonl`；按请求记录 token 用量，含思考与缓存命中拆分） |
 | **oh-my-pi (Pi Coding Agent)** | ✅ 自动 | 被动读取（`~/.omp/agent/sessions/**/*.jsonl`）+ `tokentracker init` 会写入托管的 notify 扩展（`~/.omp/agent/extensions/tokentracker-notify.ts`）用于近实时同步（若同名非托管文件已存在则跳过；`tokentracker uninstall` 仅在仍为托管时删除） |
 | **CodeBuddy** (腾讯) | ✅ 自动 | 写入 `~/.codebuddy/settings.json` 的 SessionEnd hook（Claude-Code fork） |
 | **WorkBuddy** (腾讯) | ✅ 自动 | 写入 `~/.workbuddy/settings.json` 的 SessionEnd hook（Claude-Code fork）+ 被动扫描 `projects/**/*.jsonl` |
@@ -216,7 +217,7 @@ brew install xiufengsun/tokentracker/tokentracker
 
 |                          | **TokenTracker** | ccusage     | Cursor 自带统计 |
 |--------------------------|:---:|:---:|:---:|
-| **支持的 AI 工具数**     | **29**           | 1（Claude）  | 1（Cursor）   |
+| **支持的 AI 工具数**     | **30**           | 1（Claude）  | 1（Cursor）   |
 | **本地优先，无需账号**   | ✅               | ✅           | ❌            |
 | **原生桌面 App**         | ✅ macOS + Windows | ❌          | ❌            |
 | **桌面小组件**           | ✅ 4 个小组件    | ❌           | ❌            |

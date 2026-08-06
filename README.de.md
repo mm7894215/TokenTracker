@@ -6,7 +6,7 @@
 
 ### Sieh genau, was du für KI ausgibst – über jedes CLI hinweg
 
-Sammle automatisch Token-Zahlen von **29 KI-Coding-Tools**, aggregiere sie lokal und sieh echte Kostentrends in einem schönen Dashboard. Kein Cloud-Konto, keine API-Keys, kein Setup – nur ein Befehl.
+Sammle automatisch Token-Zahlen von **30 KI-Coding-Tools**, aggregiere sie lokal und sieh echte Kostentrends in einem schönen Dashboard. Kein Cloud-Konto, keine API-Keys, kein Setup – nur ein Befehl.
 
 [![npm version](https://img.shields.io/npm/v/tokentracker-cli.svg?color=blue)](https://www.npmjs.com/package/tokentracker-cli)
 [![npm downloads](https://img.shields.io/npm/dm/tokentracker-cli.svg?color=brightgreen)](https://www.npmjs.com/package/tokentracker-cli)
@@ -87,7 +87,7 @@ Aktualisieren mit `brew upgrade --cask xiufengsun/tokentracker/tokentracker`. De
 
 ## ✨ Features
 
-- 🔌 **29 KI-Tools out of the box** — Claude Code, Codex CLI, Cursor, Gemini CLI, Antigravity, Kiro, OpenCode, OpenClaw, Every Code, Hermes Agent, GitHub Copilot, Kimi Code, CodeBuddy, WorkBuddy, Grok Build, oh-my-pi, pi, Craft Agents, Kilo CLI, Kilo Code, Roo Code, Zed Agent, Goose, Droid, Mimo Code, ZCode, Qoder, AnythingLLM Desktop, Claude Science
+- 🔌 **30 KI-Tools out of the box** — Claude Code, Codex CLI, Cursor, Gemini CLI, Antigravity, Kiro, OpenCode, OpenClaw, Every Code, Hermes Agent, GitHub Copilot, Kimi Code, CodeBuddy, WorkBuddy, Grok Build, oh-my-pi, pi, Craft Agents, Kilo CLI, Kilo Code, Roo Code, Zed Agent, Goose, Droid, Mimo Code, ZCode, Qoder, AnythingLLM Desktop, Claude Science, Reasonix
 - 🏠 **100 % lokal** — Token-Daten verlassen nie deinen Rechner. Kein Konto, keine API-Keys.
 - 🚀 **Zero Config** — Hooks installieren sich beim ersten Start automatisch. Von null zum Dashboard in 30 Sekunden.
 - 📊 **Schönes Dashboard** — Nutzungstrends, Kostenaufschlüsselung nach Modell, GitHub-ähnliche Aktivitäts-Heatmap, Projektzuordnung
@@ -175,6 +175,7 @@ Aktualisieren mit `brew upgrade --cask xiufengsun/tokentracker/tokentracker`. De
 | **GitHub Copilot App / CLI** | ✅ Auto | Vereinheitlichte SQLite-Nutzung pro Anfrage (`~/.copilot/session-store.db`); App-DB als Legacy-Baseline |
 | **GitHub Copilot Chat-Erweiterung / ältere CLI** | ✅ Auto | OpenTelemetry-Datei-Exporter (`COPILOT_OTEL_FILE_EXPORTER_PATH`) |
 | **Kimi Code** | ✅ Auto | Passiver `wire.jsonl`-Reader (`~/.kimi/sessions/**/wire.jsonl`) |
+| **Reasonix** | ✅ Auto | Passiver JSONL-Reader (`~/.reasonix/stats/*.jsonl`, Token-Verbrauch pro Anfrage inkl. Reasoning- und Cache-Hit-Aufschlüsselung) |
 | **oh-my-pi (Pi Coding Agent)** | ✅ Auto | Passiver Reader (`~/.omp/agent/sessions/**/*.jsonl`) |
 | **CodeBuddy** (Tencent) | ✅ Auto | SessionEnd-Hook in `~/.codebuddy/settings.json` (Claude-Code-Fork) |
 | **WorkBuddy** (Tencent) | ✅ Auto | SessionEnd-Hook in `~/.workbuddy/settings.json` (Claude-Code-Fork) + passiver `projects/**/*.jsonl`-Scan |
@@ -213,7 +214,7 @@ Fehlt dein Tool? [Erstelle ein Issue](https://github.com/xiufengsun/TokenTracker
 
 | | **TokenTracker** | ccusage | Cursor Stats |
 |---|---|---|---|
-| **Unterstützte KI-Tools** | **29** | 1 (Claude) | 1 (Cursor) |
+| **Unterstützte KI-Tools** | **30** | 1 (Claude) | 1 (Cursor) |
 | **Lokal, kein Konto** | ✅ | ✅ | ❌ |
 | **Native Desktop-App** | ✅ macOS + Windows | ❌ | ❌ |
 | **Desktop-Widgets** | ✅ 4 Widgets | ❌ | ❌ |
