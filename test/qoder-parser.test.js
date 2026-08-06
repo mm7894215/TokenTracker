@@ -295,3 +295,27 @@ test("parseQoderDbIncremental with qoder-cn source keeps a separate cursor and b
   assert.equal(second.bucketsQueued, 0);
   assert.equal(fs.readFileSync(queuePath, "utf8"), before);
 });
+
+test("resolveQoderCnDbPaths ignores QODER_HOME and honors QODER_CN_HOME", () => {
+  // QODER_HOME points at the international install and must never redirect the
+  // CN resolver onto the same DB (that would double-count every message).
+  const withoutOverride = resolveQoderCnDbPaths({
+    home: "/Users/test",
+    env: { QODER_HOME: "/int-home" },
+    platform: "darwin",
+  });
+  assert.equal(
+    withoutOverride.native,
+    path.join("/Users/test", "Library", "Application Support", "QoderCN", "SharedClientCache", "cache", "db", "local.db"),
+  );
+
+  const withOverride = resolveQoderCnDbPaths({
+    home: "/Users/test",
+    env: { QODER_CN_HOME: "/cn-home" },
+    platform: "darwin",
+  });
+  assert.equal(
+    withOverride.native,
+    path.join("/cn-home", "SharedClientCache", "cache", "db", "local.db"),
+  );
+});

@@ -676,3 +676,60 @@ test("fetchQoderCnLimits falls back to the qoder.com.cn site and its own cache n
   assert.equal(cnCache?.primary_window?.remaining_credits, 75);
   assert.equal(readQoderLimitsCache({ home, nowMs: Date.now() }), null);
 });
+
+test("fetchQoderCnLimits targets the china activity host for Ultimate Free Calls", async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-qoder-cn-activity-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  let capturedUrl = null;
+  const rpcRequest = async (method) => {
+    if (method === "credit/usage") {
+      return {
+        userType: "personal_standard",
+        totalUsagePercentage: 25,
+        isQuotaExceeded: false,
+        userQuota: { used: 25, total: 100, remaining: 75, percentage: 25, unit: "credits" },
+        expiresAt: 253_402_214_400_000,
+      };
+    }
+    return { id: "user-1", name: "Test", userType: "personal_standard", token: "oauth-secret" };
+  };
+  const fetchImpl = async (url) => {
+    capturedUrl = url;
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return { code: 0, data: { activities: [] } };
+      },
+    };
+  };
+
+  const result = await fetchQoderCnLimits({ home, platform: "darwin", env: {}, rpcRequest, fetchImpl });
+  assert.equal(capturedUrl, "https://openapi.qoder.com.cn/algo/api/v2/activity");
+  assert.equal(result.primary_window.remaining_credits, 75);
+});
+
+test("fetchQoderCnLimits reads credentials via QODER_CN_HOME, not the international QODER_HOME", async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-qoder-cn-rpc-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const cnRoot = path.join(home, "cn-root");
+  fs.mkdirSync(path.join(cnRoot, "SharedClientCache"), { recursive: true });
+  fs.writeFileSync(
+    path.join(cnRoot, "SharedClientCache", ".info.json"),
+    JSON.stringify({ ipcServerPath: "/tmp/qodercn-test.sock" }),
+  );
+
+  const rpc = require("../src/lib/qoder-limits").qoderRpcRequest;
+  const message = await rpc(
+    "credit/usage",
+    {},
+    { home, env: { QODER_HOME: "/int-should-lose", QODER_CN_HOME: cnRoot }, platform: "darwin", appDir: "QoderCN", envPrefix: "QODER_CN" },
+  ).then(
+    () => "resolved",
+    (err) => err.message,
+  );
+  // If QODER_CN_HOME were ignored, the probe would fail before ever touching
+  // the socket ("Qoder local service is not running"). Reaching the socket
+  // means the QoderCN .info.json was found.
+  assert.ok(message !== "Qoder local service is not running.", "QODER_CN_HOME must locate the QoderCN .info.json");
+});

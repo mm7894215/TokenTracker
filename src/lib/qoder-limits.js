@@ -11,12 +11,14 @@ const QODER_SITES = {
     id: "international",
     origin: "https://qoder.com",
     usageUrl: "https://qoder.com/api/v2/me/usages/big_model_credits",
+    activityUrl: "https://openapi.qoder.sh/algo/api/v2/activity",
     domains: new Set(["qoder.com", "www.qoder.com"]),
   },
   china: {
     id: "china",
     origin: "https://qoder.com.cn",
     usageUrl: "https://qoder.com.cn/api/v2/me/usages/big_model_credits",
+    activityUrl: "https://openapi.qoder.com.cn/algo/api/v2/activity",
     domains: new Set(["qoder.com.cn", "www.qoder.com.cn"]),
   },
 };
@@ -143,9 +145,11 @@ function qoderDataRoot({
   env = process.env,
   platform = process.platform,
   appDir = "Qoder",
+  envPrefix = "QODER",
 } = {}) {
-  if (typeof env.QODER_HOME === "string" && env.QODER_HOME.trim()) {
-    return path.resolve(env.QODER_HOME.trim());
+  const homeKey = `${envPrefix}_HOME`;
+  if (typeof env[homeKey] === "string" && env[homeKey].trim()) {
+    return path.resolve(env[homeKey].trim());
   }
   if (platform === "darwin") {
     return path.join(home, "Library", "Application Support", appDir);
@@ -161,11 +165,12 @@ function qoderRpcRequest(method, params = {}, {
   env = process.env,
   platform = process.platform,
   appDir = "Qoder",
+  envPrefix = "QODER",
   timeoutMs = 1500,
   netModule = net,
 } = {}) {
   return new Promise((resolve, reject) => {
-    const infoPath = path.join(qoderDataRoot({ home, env, platform, appDir }), "SharedClientCache", ".info.json");
+    const infoPath = path.join(qoderDataRoot({ home, env, platform, appDir, envPrefix }), "SharedClientCache", ".info.json");
     let info;
     try {
       info = JSON.parse(fs.readFileSync(infoPath, "utf8"));
@@ -496,7 +501,8 @@ function buildQoderActivityHeaders(authStatus, {
 }
 
 async function fetchQoderActivity(authStatus, fetchImpl = fetch, options = {}) {
-  const response = await fetchImpl(QODER_ACTIVITY_URL, {
+  const activityUrl = options.activityUrl || QODER_ACTIVITY_URL;
+  const response = await fetchImpl(activityUrl, {
     method: "GET",
     headers: buildQoderActivityHeaders(authStatus, options),
   });
@@ -608,14 +614,17 @@ function readQoderLocalQuota({
   platform = process.platform,
   env = process.env,
   appDir = "Qoder",
+  envPrefix = "QODER",
 } = {}) {
+  const logRootKey = `${envPrefix}_LOG_ROOT`;
+  const homeKey = `${envPrefix}_HOME`;
   const explicitLogRoot =
-    typeof env.QODER_LOG_ROOT === "string" && env.QODER_LOG_ROOT.trim()
-      ? path.resolve(env.QODER_LOG_ROOT.trim())
+    typeof env[logRootKey] === "string" && env[logRootKey].trim()
+      ? path.resolve(env[logRootKey].trim())
       : null;
   const configuredRoot =
-    typeof env.QODER_HOME === "string" && env.QODER_HOME.trim()
-      ? path.resolve(env.QODER_HOME.trim())
+    typeof env[homeKey] === "string" && env[homeKey].trim()
+      ? path.resolve(env[homeKey].trim())
       : null;
   const logRoot = explicitLogRoot || (configuredRoot
     ? path.join(configuredRoot, "logs")
@@ -654,6 +663,7 @@ async function fetchQoderLimits({
   env = process.env,
   platform = process.platform,
   appDir = "Qoder",
+  envPrefix = "QODER",
   site = QODER_SITES.international,
   cacheNamespace,
   fetchImpl = fetch,
@@ -664,7 +674,7 @@ async function fetchQoderLimits({
   let rpcAuth = null;
   let activityWindow = null;
   let activitySource = null;
-  const rpcOptions = { home, env, platform, appDir };
+  const rpcOptions = { home, env, platform, appDir, envPrefix };
   // Qoder's shared client accepts only one reliable request at a time. Parallel
   // connections intermittently time out even while the desktop app is running.
   try {
@@ -676,7 +686,7 @@ async function fetchQoderLimits({
   } catch (_error) {}
   if (rpcAuth) {
     try {
-      activityWindow = await fetchQoderActivity(rpcAuth, fetchImpl, { nowMs });
+      activityWindow = await fetchQoderActivity(rpcAuth, fetchImpl, { nowMs, activityUrl: site.activityUrl });
       if (activityWindow) {
         activitySource = "provider-api";
         writeQoderActivityCache(activityWindow, { home, nowMs, namespace: cacheNamespace });
@@ -729,7 +739,7 @@ async function fetchQoderLimits({
       // Preserve that status as metadata, but match Qoder's Credits UI by
       // rendering an empty 0/0 bucket as 0%, not a full red 100% bar.
       const local = result.primary_window?.limit_credits === 0
-        ? readQoderLocalQuota({ home, platform, env, appDir })
+        ? readQoderLocalQuota({ home, platform, env, appDir, envPrefix })
         : null;
       if (local) {
         result.quota_exceeded = local.quota_exceeded === true;
@@ -753,7 +763,7 @@ async function fetchQoderLimits({
     }
   }
 
-  const local = readQoderLocalQuota({ home, platform, env, appDir });
+  const local = readQoderLocalQuota({ home, platform, env, appDir, envPrefix });
   if (local) {
     if (activityWindow) {
       local.secondary_window = activityWindow;
@@ -784,12 +794,14 @@ async function fetchQoderLimits({
 
 // Qoder CN (国内版) — quota comes from qoder.com.cn and credentials live in the
 // separate QoderCN data directory (its own app install). Same mechanics as the
-// international fetch, but with the china site, the QoderCN data root, and a
+// international fetch, but with the china site, the QoderCN data root (own
+// QODER_CN_HOME / QODER_CN_DB_PATH / QODER_CN_LOG_ROOT overrides), and a
 // dedicated cache namespace so the two editions never clobber each other.
 function fetchQoderCnLimits(opts = {}) {
   return fetchQoderLimits({
     ...opts,
     appDir: "QoderCN",
+    envPrefix: "QODER_CN",
     site: QODER_SITES.china,
     cacheNamespace: "cn",
   });
