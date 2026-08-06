@@ -62,6 +62,7 @@ const {
 } = require("../lib/omp-hook");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
 const {
+  resolveReasonixStatsDir,
   resolveOmpAgentDir,
   resolvePiAgentDir,
   piAgentDirCollidesWithOmp,
@@ -720,11 +721,7 @@ async function applyIntegrationSetup({
   // Reasonix: passive reader — no hook installation needed.
   // TokenTracker reads ~/.reasonix/stats/*.jsonl usage records.
   {
-    const reasonixHome =
-      process.env.REASONIX_HOME && process.env.REASONIX_HOME.trim()
-        ? path.resolve(process.env.REASONIX_HOME.trim())
-        : path.join(home, ".reasonix");
-    const reasonixStatsDir = path.join(reasonixHome, "stats");
+    const reasonixStatsDir = resolveReasonixStatsDir(process.env);
     if (fssync.existsSync(reasonixStatsDir)) {
       summary.push({ label: "Reasonix", status: "detected", detail: "Passive reader (no hook needed)" });
     }

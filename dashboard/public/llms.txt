@@ -53,6 +53,7 @@ timestamps, never prompts, responses, or source code.
 - Qoder
 - AnythingLLM Desktop
 - Claude Science
+- Reasonix
 
 ## Capabilities
 - Desktop pet that reacts to real token burn, streaks, and rest

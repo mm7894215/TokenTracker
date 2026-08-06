@@ -6724,7 +6724,7 @@ test("parseReasonixIncremental aggregates usage records and skips turn markers",
     assert.ok(cursors.reasonix && typeof cursors.reasonix === "object");
     assert.ok(cursors.reasonix.fileOffsets[statFile]);
     assert.equal(cursors.reasonix.fileOffsets[statFile].size, Buffer.byteLength(content));
-    assert.equal(cursors.reasonix.seenIds.length, 2);
+    assert.equal(cursors.reasonix.seenIds[statFile].length, 2);
 
     // Aggregated bucket totals: input is net of cache (prompt = cache_miss + cache_hit)
     const queueRows = (await fs.readFile(queuePath, "utf8"))
@@ -6741,7 +6741,8 @@ test("parseReasonixIncremental aggregates usage records and skips turn markers",
     assert.equal(row.cache_creation_input_tokens, 0);
     assert.equal(row.output_tokens, 208 + 260);
     assert.equal(row.reasoning_output_tokens, 126 + 120);
-    assert.equal(row.total_tokens, 4068 + 7777);
+    // total_tokens is the normalized sum of the delta columns
+    assert.equal(row.total_tokens, 3953 + 7424 + 468 + 246); // 12091
     assert.equal(row.conversation_count, 2);
 
     // Second run — no new data

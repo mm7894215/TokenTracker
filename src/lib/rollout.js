@@ -7588,7 +7588,17 @@ function resolveReasonixStatFiles(env = process.env) {
 async function parseReasonixIncremental({ statFiles, cursors, queuePath, onProgress, env } = {}) {
   await ensureDir(path.dirname(queuePath));
   const reasonixState = cursors.reasonix && typeof cursors.reasonix === "object" ? cursors.reasonix : {};
-  const seenIds = new Set(Array.isArray(reasonixState.seenIds) ? reasonixState.seenIds : []);
+  // Per-file seen fingerprints: { [filePath]: string[] } in the cursor, rebuilt
+  // as Sets here so an inode-rotated re-read of one file never replays records
+  // evicted from another file's cap.
+  const seenRaw =
+    reasonixState.seenIds && typeof reasonixState.seenIds === "object" && !Array.isArray(reasonixState.seenIds)
+      ? reasonixState.seenIds
+      : {};
+  const seenByFile = new Map();
+  for (const [filePath, keys] of Object.entries(seenRaw)) {
+    if (Array.isArray(keys)) seenByFile.set(filePath, new Set(keys));
+  }
   const fileOffsets =
     reasonixState.fileOffsets && typeof reasonixState.fileOffsets === "object"
       ? { ...reasonixState.fileOffsets }
@@ -7598,7 +7608,7 @@ async function parseReasonixIncremental({ statFiles, cursors, queuePath, onProgr
     ? statFiles
     : resolveReasonixStatFiles(env || process.env);
   if (files.length === 0) {
-    cursors.reasonix = { ...reasonixState, seenIds: Array.from(seenIds), fileOffsets, updatedAt: new Date().toISOString() };
+    cursors.reasonix = { ...reasonixState, seenIds: seenRaw, fileOffsets, updatedAt: new Date().toISOString() };
     return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
   }
 
@@ -7612,17 +7622,24 @@ async function parseReasonixIncremental({ statFiles, cursors, queuePath, onProgr
     const filePath = files[fileIdx];
     let stat;
     try { stat = fssync.statSync(filePath); } catch { continue; }
+    const statSize = stat.size; // snapshot: the stream and cursor never exceed this
 
     const prevEntry = fileOffsets[filePath] || {};
     const prevSize = Number(prevEntry.size) || 0;
     const prevIno = prevEntry.ino;
     const inodeChanged = typeof prevIno === "number" && prevIno !== stat.ino;
-    const startOffset = stat.size < prevSize || inodeChanged ? 0 : prevSize;
-    if (stat.size <= startOffset) continue;
+    const startOffset = statSize < prevSize || inodeChanged ? 0 : prevSize;
+    if (statSize <= startOffset) continue;
+
+    let seenIds = seenByFile.get(filePath);
+    if (!seenIds) {
+      seenIds = new Set();
+      seenByFile.set(filePath, seenIds);
+    }
 
     let stream;
     try {
-      stream = fssync.createReadStream(filePath, { encoding: "utf8", start: startOffset });
+      stream = fssync.createReadStream(filePath, { encoding: "utf8", start: startOffset, end: statSize - 1 });
     } catch { continue; }
     const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
 
@@ -7634,9 +7651,10 @@ async function parseReasonixIncremental({ statFiles, cursors, queuePath, onProgr
       // Turn markers carry no model/usage — skip them.
       if (typeof entry.model !== "string" || !entry.model) continue;
 
-      // Usage records have no stable id; dedup on the full row so an inode
-      // change / truncation-triggered full re-read cannot double-count.
-      const seenKey = `${entry.model}|${entry.ts}|${entry.prompt}|${entry.completion}|${entry.total}`;
+      // Usage records have no stable id; dedup on every field that feeds the
+      // delta so an inode change / truncation-triggered full re-read cannot
+      // double-count, while records differing in any aggregated value survive.
+      const seenKey = `${entry.model}|${entry.ts}|${entry.prompt}|${entry.completion}|${entry.total}|${entry.cache_hit}|${entry.reasoning}|${entry.requests}`;
       if (seenIds.has(seenKey)) continue;
       seenIds.add(seenKey);
 
@@ -7661,10 +7679,10 @@ async function parseReasonixIncremental({ statFiles, cursors, queuePath, onProgr
         cache_creation_input_tokens: 0,
         output_tokens: output,
         reasoning_output_tokens: reasoning,
-        // total_tokens is Reasonix's own billing total (prompt + completion),
-        // which deliberately excludes reasoning — matches the provider's
-        // dashboard. Do not add reasoning here without adjusting pricing.
-        total_tokens: total,
+        // total_tokens is the normalized sum of the delta columns so it stays
+        // internally consistent with the other providers (input is net of
+        // cache; reasoning is included, matching Antigravity/Kimi conventions).
+        total_tokens: input + cacheRead + output + reasoning,
         conversation_count: toNonNegativeInt(entry.requests) || 1,
       };
 
@@ -7687,11 +7705,11 @@ async function parseReasonixIncremental({ statFiles, cursors, queuePath, onProgr
     let postStat = stat;
     try { postStat = fssync.statSync(filePath); } catch {}
 
-    // If the file does not end with a newline, the tail line may be an
+    // If the snapshot does not end with a newline, the tail line may be an
     // incomplete append in progress. Roll the cursor back to just after the
-    // last complete newline so that line is re-read (and later aggregated)
+    // last complete newline (within the snapshot) so that line is re-read
     // once it is fully written, instead of being permanently dropped.
-    let cursorSize = postStat.size;
+    let cursorSize = statSize;
     if (cursorSize > startOffset) {
       const tailLen = Math.min(cursorSize - startOffset, 64 * 1024);
       let fd = null;
@@ -7719,15 +7737,18 @@ async function parseReasonixIncremental({ statFiles, cursors, queuePath, onProgr
     fileOffsets[filePath] = { size: cursorSize, mtimeMs: postStat.mtimeMs, ino: postStat.ino };
   }
 
-  // Cap seenIds to last 10k to bound cursor state size.
-  const seenArr = Array.from(seenIds);
-  const cappedSeen = seenArr.length > 10_000 ? seenArr.slice(seenArr.length - 10_000) : seenArr;
+  // Cap per-file seen fingerprints to last 10k to bound cursor state size.
+  const seenPersist = {};
+  for (const [filePath, keys] of seenByFile) {
+    const arr = Array.from(keys);
+    seenPersist[filePath] = arr.length > 10_000 ? arr.slice(arr.length - 10_000) : arr;
+  }
 
   const bucketsQueued = await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets });
   const updatedAt = new Date().toISOString();
   hourlyState.updatedAt = updatedAt;
   cursors.hourly = hourlyState;
-  cursors.reasonix = { ...reasonixState, seenIds: cappedSeen, fileOffsets, updatedAt };
+  cursors.reasonix = { ...reasonixState, seenIds: seenPersist, fileOffsets, updatedAt };
 
   return { recordsProcessed, eventsAggregated, bucketsQueued };
 }

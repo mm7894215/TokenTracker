@@ -210,7 +210,7 @@ Fehlt dein Tool? [Erstelle ein Issue](https://github.com/xiufengsun/TokenTracker
 
 ## 🆚 Warum TokenTracker?
 
-> **Suchst du eine ccusage-Alternative mit GUI?** TokenTracker unterstützt 28 Tools (nicht nur Claude Code), bietet native macOS- und Windows-Apps + Desktop-Widgets und dedupliziert Token-Datensätze korrekt über alle Provider hinweg – damit deine Zahlen mit dem Billing der Provider übereinstimmen.
+> **Suchst du eine ccusage-Alternative mit GUI?** TokenTracker unterstützt 30 Tools (nicht nur Claude Code), bietet native macOS- und Windows-Apps + Desktop-Widgets und dedupliziert Token-Datensätze korrekt über alle Provider hinweg – damit deine Zahlen mit dem Billing der Provider übereinstimmen.
 
 | | **TokenTracker** | ccusage | Cursor Stats |
 |---|---|---|---|

@@ -24,6 +24,7 @@ test("public discovery surfaces describe all 30 supported tools", () => {
     assert.match(source, /Droid/, `${file} lists Droid`);
     assert.match(source, /AnythingLLM Desktop/, `${file} lists AnythingLLM Desktop`);
     assert.match(source, /Qoder/, `${file} lists Qoder`);
+    assert.match(source, /Reasonix/, `${file} lists Reasonix`);
     assert.match(source, /12/, `${file} carries the current usage-limits provider count`);
   }
 
