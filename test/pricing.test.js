@@ -130,14 +130,14 @@ test("matcher: GPT-5.6 codex tiers resolve to their real curated rates (not the 
   const litellm = { "gpt-5": { input: 1.25, output: 10, cache_read: 0.125 } };
   const cases = [
     ["gpt-5.6-sol", 5, 30, "curated:exact"],
-    ["gpt-5.6-terra", 2.5, 15, "curated:exact"],
-    ["gpt-5.6-luna", 1, 6, "curated:exact"],
+    ["gpt-5.6-terra", 2, 12, "curated:exact"],
+    ["gpt-5.6-luna", 0.2, 1.2, "curated:exact"],
     // reasoning-effort variants codex appends must still land on the right tier
     ["gpt-5.6-sol-high", 5, 30, null],
     ["gpt-5.6-solhigh", 5, 30, "curated:fuzzy"],
-    ["gpt-5.6-terrahigh", 2.5, 15, "curated:fuzzy"],
+    ["gpt-5.6-terrahigh", 2, 12, "curated:fuzzy"],
     // bare / unknown-tier falls back to the balanced terra tier, never gpt-5
-    ["gpt-5.6", 2.5, 15, "curated:fuzzy"],
+    ["gpt-5.6", 2, 12, "curated:fuzzy"],
   ];
   for (const [model, input, output, source] of cases) {
     const r = matcher.lookupPricing(model, { curated, litellm, source: "codex" });

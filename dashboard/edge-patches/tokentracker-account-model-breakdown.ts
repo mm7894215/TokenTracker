@@ -147,8 +147,8 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   // luna (lightweight). Codex reports the tier in the model id (gpt-5.6-sol,
   // + reasoning-effort variants like gpt-5.6-solhigh). Not yet in LiteLLM.
   "gpt-5.6-sol": { input: 5, output: 30, cache_read: 0.5, cache_write: 6.25 },
-  "gpt-5.6-terra": { input: 2.5, output: 15, cache_read: 0.25, cache_write: 3.125 },
-  "gpt-5.6-luna": { input: 1, output: 6, cache_read: 0.1, cache_write: 1.25 },
+  "gpt-5.6-terra": { input: 2, output: 12, cache_read: 0.2, cache_write: 2.5 },
+  "gpt-5.6-luna": { input: 0.2, output: 1.2, cache_read: 0.02, cache_write: 0.25 },
   "gpt-5-mini": { input: 0.25, output: 2, cache_read: 0.025 },
   "o3": { input: 2, output: 8, cache_read: 0.5 },
   // ── Google Gemini ──
