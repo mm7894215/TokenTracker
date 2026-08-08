@@ -14,6 +14,7 @@ const {
   writeJson,
   chmod600IfPossible,
   openLock,
+  inspectLock,
 } = require("../lib/fs");
 const { physicalJsonlRecords } = require("../lib/jsonl-lines");
 const {
@@ -28,6 +29,7 @@ const {
   readMimoDbMessages,
   readZcodeDbMessages,
   resolveQoderDbPaths,
+  resolveQoderCnDbPaths,
   readQoderDbMessages,
   resolveKiroDbPath,
   resolveKiroJsonlPath,
@@ -277,6 +279,7 @@ const AUTO_SYNC_SOURCES = new Set([
   "openclaw",
   "pi",
   "qoder",
+  "qoder-cn",
   "roocode",
   "workbuddy",
   "zcode",
@@ -397,6 +400,38 @@ async function acquireSyncLock(
   }
 }
 
+const SYNC_SKIP_MARKER = "sync.skip.json";
+
+// A skipped sync used to exit 0 with no output whatsoever, so lock debris left
+// by a killed run stalled every parse for a day with no visible signal and
+// nothing for `tokentracker status` to report (issue #431). Leave a queryable
+// marker that separates ordinary contention (`lock_busy`) from a lease whose
+// owner is gone (`lock_debris`, the state that needs attention).
+async function recordSyncSkip(trackerDir, lockPath) {
+  const holder = await inspectLock(lockPath);
+  const reason = holder.exists && holder.pid && !holder.alive ? "lock_debris" : "lock_busy";
+  const detail = !holder.exists
+    ? "sync lock could not be acquired"
+    : holder.pid
+      ? `sync lock held by pid ${holder.pid} (${holder.alive ? "running" : "not running"})`
+      : "sync lock has no owner record";
+  await writeJson(path.join(trackerDir, SYNC_SKIP_MARKER), {
+    reason,
+    detail,
+    at: new Date().toISOString(),
+    lockPath,
+  });
+  return `Sync skipped: ${reason} — ${detail}\n`;
+}
+
+async function clearSyncSkip(trackerDir) {
+  try {
+    await fs.unlink(path.join(trackerDir, SYNC_SKIP_MARKER));
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+}
+
 async function cmdSync(argv, context = {}) {
   const opts = parseArgs(argv);
   const diagnostics = context && typeof context === "object" ? context.diagnostics : null;
@@ -417,7 +452,13 @@ async function cmdSync(argv, context = {}) {
 
   const lockPath = path.join(trackerDir, "sync.lock");
   const lock = await acquireSyncLock(lockPath, opts, lockWaitOptions);
-  if (!lock) return;
+  if (!lock) {
+    // Warn on stderr so the notice reaches interactive and background runs
+    // alike without disturbing anything that parses sync's stdout.
+    process.stderr.write(await recordSyncSkip(trackerDir, lockPath));
+    return;
+  }
+  await clearSyncSkip(trackerDir);
 
   let progress = null;
   try {
@@ -1155,6 +1196,57 @@ async function cmdSync(argv, context = {}) {
           };
         } catch (err) {
           warnProviderParseFailure("Qoder", err, opts);
+        }
+      }
+    }
+
+    // ── Qoder CN (国内版) — same SharedClientCache/local.db schema, separate
+    // Application Support/QoderCN data directory. Tracked as its own source
+    // with its own cursor namespace: the two DBs each number rowids from 1, so
+    // a shared cursor would mis-dedup across installs.
+    let qoderCnResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    if (sourceAllowed("qoder-cn")) {
+      const qoderCnPaths = resolveQoderCnDbPaths({
+        home,
+        env: process.env,
+        platform: process.platform,
+      });
+      if (qoderCnPaths.native || qoderCnPaths.wsl) {
+        if (progress?.enabled) {
+          progress.start(`Parsing Qoder CN ${renderBar(0)} | buckets 0`);
+        }
+        try {
+          const result = await multiInstallParse({
+            paths: qoderCnPaths,
+            parserFn: async ({ dbPath, ...rest }) => {
+              const dbMessages = await readQoderDbMessages(dbPath, { label: "Qoder CN" });
+              const parsed = await parseQoderDbIncremental({
+                dbMessages,
+                dbPath,
+                sourceKey: "qoder-cn",
+                cursorKey: "qoder-cn",
+                ...rest,
+              });
+              return {
+                recordsProcessed: parsed.messagesProcessed || 0,
+                eventsAggregated: parsed.eventsAggregated || 0,
+                bucketsQueued: parsed.bucketsQueued || 0,
+              };
+            },
+            providerName: "qoder-cn",
+            cursors,
+            queuePath,
+            projectQueuePath,
+            getParams: (dbPath) => ({ dbPath }),
+            onProgress: makeProviderProgress("Qoder CN"),
+          });
+          qoderCnResult = {
+            recordsProcessed: result.recordsProcessed || 0,
+            eventsAggregated: result.eventsAggregated || 0,
+            bucketsQueued: result.bucketsQueued || 0,
+          };
+        } catch (err) {
+          warnProviderParseFailure("Qoder CN", err, opts);
         }
       }
     }
@@ -2392,6 +2484,7 @@ async function cmdSync(argv, context = {}) {
       antigravityResult.filesProcessed +
       opencodeResult.filesProcessed +
       qoderResult.recordsProcessed +
+      qoderCnResult.recordsProcessed +
       claudeScienceResult.recordsProcessed +
       cursorResult.recordsProcessed +
       kiroResult.recordsProcessed +
@@ -2423,6 +2516,7 @@ async function cmdSync(argv, context = {}) {
       antigravityResult.bucketsQueued +
       opencodeResult.bucketsQueued +
       qoderResult.bucketsQueued +
+      qoderCnResult.bucketsQueued +
       claudeScienceResult.bucketsQueued +
       cursorResult.bucketsQueued +
       kiroResult.bucketsQueued +

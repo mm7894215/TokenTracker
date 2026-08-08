@@ -51,6 +51,7 @@ async function chmod600IfPossible(filePath) {
 const LOCK_STALE_MS = 5 * 60 * 1000; // 5 minutes
 const LOCK_HEARTBEAT_MS = 30 * 1000;
 const MAX_RECLAIM_DEPTH = 4;
+const MAX_RECLAIM_SWEEP_DEPTH = 64;
 const TRANSITION_GUARD_RETRY_MS = 5;
 const TRANSITION_GUARD_ATTEMPTS = 1000;
 
@@ -122,6 +123,66 @@ async function existingLockCanBeReclaimed(lockPath) {
   } finally {
     await lockHandle?.close().catch(() => {});
   }
+}
+
+async function inspectLock(lockPath) {
+  let raw = null;
+  try {
+    raw = await fs.readFile(lockPath, "utf8");
+  } catch (e) {
+    if (e?.code === "ENOENT") return { exists: false, pid: null, alive: false };
+    return { exists: true, pid: null, alive: true };
+  }
+  const owner = parseLockOwner(raw);
+  if (!owner) return { exists: true, pid: null, alive: true };
+  return { exists: true, pid: owner.pid, alive: isProcessAlive(owner.pid) };
+}
+
+// Drop an abandoned lock file. The rename makes the removal atomic, so two
+// sweepers racing on the same debris cannot delete a lease installed in
+// between: only the winner of the rename removes anything.
+async function removeAbandonedLockFile(lockPath) {
+  if (!(await existingLockCanBeReclaimed(lockPath))) return false;
+  const quarantinePath = `${lockPath}.stale.${process.pid}.${crypto.randomUUID()}`;
+  try {
+    await fs.rename(lockPath, quarantinePath);
+  } catch (_e) {
+    return false;
+  }
+  const owner = parseLockOwner(await fs.readFile(quarantinePath, "utf8").catch(() => ""));
+  if (owner) {
+    await fs.unlink(heartbeatPathFor(lockPath, owner.token)).catch(() => {});
+  }
+  await fs.unlink(quarantinePath).catch(() => {});
+  return true;
+}
+
+// A sync killed while it held a transition guard leaves `${lockPath}.reclaim`
+// behind, and the next reclaimer then nests its own guard on top of that
+// orphan. Four nested levels exhaust MAX_RECLAIM_DEPTH, after which every
+// acquisition gives up forever instead of healing (issue #431). Recursion
+// cannot clean the chain — each level needs a guard one level deeper — so sweep
+// it iteratively. Only levels whose owner is dead or whose heartbeat expired are
+// removed, deepest first: dropping a shallow guard while a deeper orphan
+// survives would just rebuild the same clogged chain on the next attempt.
+async function sweepAbandonedReclaimGuards(lockPath) {
+  const chain = [];
+  let guardPath = lockPath;
+  for (let depth = 0; depth < MAX_RECLAIM_SWEEP_DEPTH; depth += 1) {
+    guardPath = `${guardPath}.reclaim`;
+    try {
+      await fs.access(guardPath);
+    } catch (_e) {
+      break;
+    }
+    chain.push(guardPath);
+  }
+
+  let removed = 0;
+  for (let index = chain.length - 1; index >= 0; index -= 1) {
+    if (await removeAbandonedLockFile(chain[index])) removed += 1;
+  }
+  return removed > 0;
 }
 
 function startLockHeartbeat(handle, heartbeatHandle) {
@@ -210,6 +271,7 @@ async function openLock(
     beforeReleaseUnlink = null,
     reclaimDepth = 0,
     serializeRelease = true,
+    sweptReclaimGuards = false,
   } = {},
 ) {
   try {
@@ -264,7 +326,22 @@ async function openLock(
           reclaimDepth: reclaimDepth + 1,
           serializeRelease: false,
         });
-        if (!reclaimGuard) return null;
+        if (!reclaimGuard) {
+          // Either a live reclaimer holds the guard (nothing to do) or the guard
+          // chain is clogged with abandoned guards. Sweeping the latter is the
+          // only escape, and it is attempted once per acquisition. beforeReclaim
+          // already ran, so the retry must not invoke it a second time.
+          if (!sweptReclaimGuards && (await sweepAbandonedReclaimGuards(lockPath))) {
+            return openLock(lockPath, {
+              quietIfLocked,
+              beforeReleaseUnlink,
+              reclaimDepth,
+              serializeRelease,
+              sweptReclaimGuards: true,
+            });
+          }
+          return null;
+        }
 
         let quarantinePath = null;
         try {
@@ -326,4 +403,5 @@ module.exports = {
   writeJson,
   chmod600IfPossible,
   openLock,
+  inspectLock,
 };

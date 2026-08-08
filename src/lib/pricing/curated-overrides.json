@@ -52,21 +52,21 @@
       "output": 30,
       "cache_read": 0.5,
       "cache_write": 6.25,
-      "note": "GPT-5.6 family (public 2026-07-09). Flagship tier. Not yet in LiteLLM. developers.openai.com/api/docs/pricing: $5/$30 per MTok, cached input 0.1x, cache write 1.25x. Codex emits gpt-5.6-sol (+ reasoning-effort variants like gpt-5.6-solhigh, caught by fuzzy). Remove once LiteLLM carries it."
+      "note": "GPT-5.6 family (public 2026-07-09). Flagship tier. Not yet in LiteLLM. developers.openai.com/api/docs/pricing short-context: $5/$30 per MTok, cached input 0.1x, cache write 1.25x. Codex emits gpt-5.6-sol (+ reasoning-effort variants like gpt-5.6-solhigh, caught by fuzzy). Remove once LiteLLM carries it."
     },
     "gpt-5.6-terra": {
-      "input": 2.5,
-      "output": 15,
-      "cache_read": 0.25,
-      "cache_write": 3.125,
-      "note": "GPT-5.6 balanced default tier. See gpt-5.6-sol."
+      "input": 2,
+      "output": 12,
+      "cache_read": 0.2,
+      "cache_write": 2.5,
+      "note": "GPT-5.6 balanced default tier. Official short-context rates: $2/$12 per MTok (not the earlier $2.5/$15 snapshot). See gpt-5.6-sol."
     },
     "gpt-5.6-luna": {
-      "input": 1,
-      "output": 6,
-      "cache_read": 0.1,
-      "cache_write": 1.25,
-      "note": "GPT-5.6 lightweight/cost-efficient tier. See gpt-5.6-sol."
+      "input": 0.2,
+      "output": 1.2,
+      "cache_read": 0.02,
+      "cache_write": 0.25,
+      "note": "GPT-5.6 lightweight tier. Official short-context rates: $0.20/$1.20 per MTok (previous curated values $1/$6 overcounted 5x). See gpt-5.6-sol."
     },
     "kiro-agent": {
       "input": 3,

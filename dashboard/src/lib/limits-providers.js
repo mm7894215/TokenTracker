@@ -14,6 +14,7 @@ export const LIMIT_PROVIDER_IDS = [
   "zcode",
   "opencodeGo",
   "qoder",
+  "qoderCn",
 ];
 
 /** Keys for ProviderIcon — mono logos use inline SVG; colored logos use /brand-logos/. */
@@ -32,6 +33,8 @@ export const LIMIT_PROVIDER_ICON_KEYS = {
   // (Go is a paid subscription tracked via dashboard scrape).
   opencodeGo: "OPENCODE",
   qoder: "QODER",
+  // Same Qoder brand mark — the CN edition is the same product family.
+  qoderCn: "QODER",
 };
 
 export function limitProviderIconKey(id) {
@@ -64,6 +67,8 @@ export function limitProviderName(id) {
       return copy("limits.provider.opencode_go");
     case "qoder":
       return copy("limits.provider.qoder");
+    case "qoderCn":
+      return copy("limits.provider.qoder_cn");
     default:
       return String(id || "");
   }

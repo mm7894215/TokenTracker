@@ -95,7 +95,7 @@ brew install xiufengsun/tokentracker/tokentracker
 - 📊 **漂亮的 Dashboard** —— 用量趋势、按模型的成本分解、GitHub 风格活跃度热力图、按项目归因
 - 🖥️ **原生桌面 App** —— macOS 菜单栏（含桌面小组件）与 Windows 系统托盘，各自内嵌服务 + 原生 WebView Dashboard
 - 🎨 **4 种桌面小组件** —— 用量 / 热力图 / 热门模型 / 使用限额 直接钉桌面
-- 📈 **实时限额追踪** —— Claude / Codex / Cursor / Gemini / Kimi / Kiro / Grok / Copilot / Antigravity / ZCode / OpenCode Go / Qoder 的配额窗口；本地 provider App 暂时退出时保留 last-good 缓存
+- 📈 **实时限额追踪** —— Claude / Codex / Cursor / Gemini / Kimi / Kiro / Grok / Copilot / Antigravity / ZCode / OpenCode Go / Qoder / Qoder CN 的配额窗口；本地 provider App 暂时退出时保留 last-good 缓存
 - 🟢 **服务状态页** —— 直接汇总 8 家 provider 官方状态页的实时运行与事故状态
 - 💰 **成本引擎** —— 内置 70+ 模型定价表，精确到 USD
 - 🌐 **可选排行榜** —— 与全球开发者对比；列可拖拽排序，聚焦你关心的 provider（需登录参与）
@@ -220,7 +220,7 @@ brew install xiufengsun/tokentracker/tokentracker
 | **本地优先，无需账号**   | ✅               | ✅           | ❌            |
 | **原生桌面 App**         | ✅ macOS + Windows | ❌          | ❌            |
 | **桌面小组件**           | ✅ 4 个小组件    | ❌           | ❌            |
-| **限额追踪**             | ✅ 12 家 provider | ❌           | 只支持 Cursor |
+| **限额追踪**             | ✅ 13 家 provider | ❌           | 只支持 Cursor |
 
 ---
 

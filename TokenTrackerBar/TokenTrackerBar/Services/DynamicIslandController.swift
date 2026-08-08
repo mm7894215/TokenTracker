@@ -88,6 +88,10 @@ struct DynamicIslandGeometry: Equatable {
 @MainActor
 final class DynamicIslandState: ObservableObject {
     @Published var isExpanded = false
+    /// 0 = hidden, 1 = fully revealed through a centered mask.
+    @Published var visibilityProgress: CGFloat = 0
+    /// Selects the center-point endpoint while closing.
+    @Published var isVisibilityDismissing = false
     @Published var geometry = DynamicIslandGeometry.simulated
     /// Actual rendered height of the expanded island, reported by the SwiftUI
     /// view's GeometryReader after layout. Drives the expanded hit-test rect so
@@ -129,6 +133,10 @@ final class DynamicIslandController: NSObject {
     /// hit-test wrapper).
     private var hostingController: NSHostingController<DynamicIslandView>?
     private var collapseWorkItem: DispatchWorkItem?
+    private var visibilityWorkItem: DispatchWorkItem?
+    private var visibilityTransitions = DynamicIslandVisibilityTransitionTracker()
+    /// Keeps the transparent panel click-through during transitions.
+    private var acceptsIslandInteraction = false
     private var observers: [NSObjectProtocol] = []
     /// While > 0 a tray menu spawned from the island is open; hover-out must
     /// not collapse the island under the menu.
@@ -155,6 +163,7 @@ final class DynamicIslandController: NSObject {
     }
 
     deinit {
+        visibilityWorkItem?.cancel()
         for observer in observers {
             NotificationCenter.default.removeObserver(observer)
         }
@@ -177,16 +186,109 @@ final class DynamicIslandController: NSObject {
     func show() {
         let panel = panel ?? makePanel()
         self.panel = panel
-        repositionPanel()
-        panel.orderFrontRegardless()
+        let wasVisible = state.isPanelVisible && panel.isVisible
+        let transition = beginVisibilityTransition()
+
+        // Always reveal from the compact, non-interactive state.
+        state.isVisibilityDismissing = false
+        state.isExpanded = false
         state.isPanelVisible = true
+        acceptsIslandInteraction = false
+        repositionPanel()
+
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            state.visibilityProgress = 1
+            panel.alphaValue = 1
+            panel.orderFrontRegardless()
+            acceptsIslandInteraction = true
+            panel.updateHitRegion()
+            return
+        }
+
+        if !wasVisible {
+            // Avoid a full-width flash before SwiftUI renders the start mask.
+            state.visibilityProgress = 0
+            panel.alphaValue = 0
+        }
+        panel.orderFrontRegardless()
+
+        // Commit the start mask before revealing a newly shown panel.
+        DispatchQueue.main.async { [weak self, weak panel] in
+            guard let self, let panel,
+                  self.visibilityTransitions.owns(transition),
+                  self.isEnabled
+            else { return }
+            panel.alphaValue = 1
+            withAnimation(.timingCurve(0.16, 1, 0.3, 1, duration: DynamicIslandVisibilityPolicy.showDuration)) {
+                self.state.visibilityProgress = 1
+            }
+            self.scheduleVisibilityCompletion(
+                after: DynamicIslandVisibilityPolicy.showDuration,
+                transition: transition
+            ) { controller in
+                guard controller.isEnabled else { return }
+                controller.acceptsIslandInteraction = true
+                controller.panel?.updateHitRegion()
+            }
+        }
     }
 
     func hide() {
         collapseWorkItem?.cancel()
-        state.isExpanded = false
-        state.isPanelVisible = false
-        panel?.orderOut(nil)
+        collapseWorkItem = nil
+        let transition = beginVisibilityTransition()
+        acceptsIslandInteraction = false
+        panel?.updateHitRegion()
+        state.isVisibilityDismissing = true
+
+        guard let panel, state.isPanelVisible, panel.isVisible else {
+            state.isExpanded = false
+            state.visibilityProgress = 0
+            state.isPanelVisible = false
+            panel?.orderOut(nil)
+            return
+        }
+
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            state.isExpanded = false
+            state.visibilityProgress = 0
+            state.isPanelVisible = false
+            panel.orderOut(nil)
+            return
+        }
+
+        withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: DynamicIslandVisibilityPolicy.hideDuration)) {
+            state.isExpanded = false
+            state.visibilityProgress = 0
+        }
+        scheduleVisibilityCompletion(
+            after: DynamicIslandVisibilityPolicy.hideCompletionDelay,
+            transition: transition
+        ) { controller in
+            guard !controller.isEnabled else { return }
+            controller.state.isPanelVisible = false
+            controller.panel?.orderOut(nil)
+        }
+    }
+
+    private func beginVisibilityTransition() -> Int {
+        visibilityWorkItem?.cancel()
+        visibilityWorkItem = nil
+        return visibilityTransitions.begin()
+    }
+
+    private func scheduleVisibilityCompletion(
+        after delay: TimeInterval,
+        transition: Int,
+        completion: @escaping @MainActor (DynamicIslandController) -> Void
+    ) {
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, self.visibilityTransitions.owns(transition) else { return }
+            self.visibilityWorkItem = nil
+            completion(self)
+        }
+        visibilityWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
     }
 
     // MARK: - Hover-driven expand / collapse
@@ -369,7 +471,7 @@ final class DynamicIslandController: NSObject {
     /// Interactive rect of the black shape, in panel contentView coordinates
     /// (AppKit: origin bottom-left). Used so transparent chrome click-throughs.
     fileprivate func hitRectInPanel() -> NSRect {
-        guard let panel else { return .zero }
+        guard acceptsIslandInteraction, let panel else { return .zero }
         let geo = state.geometry
         let panelW = panel.frame.width
         let panelH = panel.frame.height

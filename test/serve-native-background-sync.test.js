@@ -6,7 +6,7 @@ const {
   startNativeBackgroundSync,
 } = require("../src/commands/serve");
 
-test("native serve schedules a lightweight all-source fallback sync", async () => {
+test("native serve schedules a native-only lightweight all-source fallback sync", async () => {
   let intervalCallback = null;
   let intervalDelay = null;
   let clearedTimer = null;
@@ -36,6 +36,10 @@ test("native serve schedules a lightweight all-source fallback sync", async () =
     "--background",
     "--all-local-sources",
   ]);
+  assert.equal(
+    runSync.mock.calls[0].arguments[1].env.TOKENTRACKER_WSL_MODE,
+    "native-only",
+  );
   controller.stop();
   assert.equal(clearedTimer, timer);
 });

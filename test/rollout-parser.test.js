@@ -9481,6 +9481,30 @@ test("resolvePiSessionFiles returns empty when ~/.pi/agent/sessions missing", as
   assert.deepEqual(result, []);
 });
 
+test("resolvePiSessionFiles includes nested pi-subagents transcripts", async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "tt-pi-subagents-home-"));
+  try {
+    const cwdDir = path.join(home, ".pi", "agent", "sessions", "--myproject--");
+    const mainFile = path.join(cwdDir, "session.jsonl");
+    const nestedFile = path.join(
+      cwdDir,
+      "2026-08-07_session-uuid",
+      "subagent-hash",
+      "run-1",
+      "session.jsonl",
+    );
+    await fs.mkdir(path.dirname(nestedFile), { recursive: true });
+    await fs.writeFile(mainFile, buildOmpSessionHeader() + "\n", "utf8");
+    await fs.writeFile(nestedFile, buildOmpSessionHeader() + "\n", "utf8");
+    await fs.writeFile(path.join(path.dirname(nestedFile), "notes.txt"), "ignored", "utf8");
+
+    const result = resolvePiSessionFiles({ HOME: home });
+    assert.deepEqual(result, [mainFile, nestedFile].sort((a, b) => a.localeCompare(b)));
+  } finally {
+    await fs.rm(home, { recursive: true, force: true });
+  }
+});
+
 // PI_CODING_AGENT_DIR is documented by both pi-coding-agent and oh-my-pi.
 // Routing is decided by the install-signal disambiguator: ~/.pi present → pi,
 // otherwise omp (back-compat).

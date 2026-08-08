@@ -93,7 +93,7 @@ brew install xiufengsun/tokentracker/tokentracker
 - 📊 **아름다운 대시보드** — 사용 추세, 모델별 비용 분석, GitHub 스타일 활동 히트맵, 프로젝트 귀속 정보
 - 🖥️ **네이티브 데스크톱 앱** — macOS 메뉴바(위젯 포함)와 Windows 시스템 트레이. 각각 임베디드 서버와 네이티브 WebView 대시보드를 제공합니다
 - 🎨 **4종 데스크톱 위젯** — Pin Usage / Activity Heatmap / Top Models / Usage Limits를 데스크톱에 고정
-- 📈 **실시간 사용 한도** — Claude / Codex / Cursor / Gemini / Kimi / Kiro / Grok / Copilot / Antigravity / ZCode / OpenCode Go / Qoder 한도를 표시하고 로컬 provider 앱이 잠시 종료되어도 last-good 캐시 유지
+- 📈 **실시간 사용 한도** — Claude / Codex / Cursor / Gemini / Kimi / Kiro / Grok / Copilot / Antigravity / ZCode / OpenCode Go / Qoder / Qoder CN 한도를 표시하고 로컬 provider 앱이 잠시 종료되어도 last-good 캐시 유지
 - 🟢 **서비스 상태 페이지** — 8개 공식 provider 상태 페이지의 운영 및 장애 상태 표시
 - 💰 **비용 엔진** — [LiteLLM](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json)을 통해 2,200+개 모델 가격 책정 (매일 자동 갱신) + 틈새 도구 (Kiro, Cursor Composer, Kimi, CodeBuddy hy3)를 위한 수동 큐레이션 오버라이드; 24시간 디스크 캐시 + 번들된 오프라인 스냅샷으로 인터넷 없이도 정확한 USD 표시. 벤더가 공식 가격을 공개하지 않은 모델 (예: Tencent hy3-preview)은 토큰만 추적되며 벤더가 요율을 공개할 때까지 비용은 $0으로 표시됩니다.
 - 🌐 **옵션 리더보드** — 전 세계 개발자들과 비교; 컬럼을 드래그하여 관심 있는 프로바이더에 집중 (옵트인, 참여하려면 사인인 필요)
@@ -217,7 +217,7 @@ brew install xiufengsun/tokentracker/tokentracker
 | **로컬 우선, 계정 불필요** | ✅            | ✅           | ❌            |
 | **네이티브 데스크톱 앱** | ✅ macOS + Windows | ❌          | ❌            |
 | **데스크톱 위젯**        | ✅ 4종            | ❌           | ❌            |
-| **레이트 제한 추적**     | ✅ 12개 프로바이더 | ❌           | Cursor 전용  |
+| **레이트 제한 추적**     | ✅ 13개 프로바이더 | ❌           | Cursor 전용  |
 
 ---
 

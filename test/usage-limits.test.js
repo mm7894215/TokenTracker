@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const { describe, it } = require("node:test");
 const fs = require("node:fs");
+const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
 
@@ -19,6 +20,8 @@ const {
   resetUsageLimitsCache,
   normalizeAntigravityResponse,
   parseListeningPorts,
+  parseWindowsListeningPorts,
+  listAntigravityPorts,
   detectAntigravityProcess,
   fetchAntigravityLimits,
   fetchCopilotLimits,
@@ -2925,6 +2928,72 @@ lang      123 me    23u  IPv4 0x124                0t0  TCP 127.0.0.1:51235 (LIS
 `;
 
     assert.deepEqual(parseListeningPorts(output), [51234, 51235]);
+  });
+
+  it("parses localized Windows netstat listeners for only the requested PID", () => {
+    const output = `
+  Proto  Local Address          Foreign Address        State           PID
+  TCP    127.0.0.1:51234        0.0.0.0:0              LISTENING       654
+  TCP    [::1]:51235            [::]:0                 侦听            654
+  TCP    127.0.0.1:59999        0.0.0.0:0              LISTENING       777
+  TCP    127.0.0.1:51236        127.0.0.1:61000        ESTABLISHED     654
+`;
+    assert.deepEqual(parseWindowsListeningPorts(output, 654), [51234, 51235]);
+  });
+
+  it("discovers native Windows listening ports for the Antigravity PID", async () => {
+    const calls = [];
+    const commandRunner = (command, args) => {
+      calls.push({ command, args });
+      return {
+        stdout: "TCP  127.0.0.1:51235  0.0.0.0:0  LISTENING  654\nTCP  [::1]:51234  [::]:0  LISTENING  654",
+        status: 0,
+      };
+    };
+
+    const ports = await listAntigravityPorts(654, { commandRunner, platform: "win32" });
+
+    assert.equal(calls[0].command, "netstat.exe");
+    assert.deepEqual(calls[0].args, ["-ano", "-p", "tcp"]);
+    assert.deepEqual(ports, [51234, 51235]);
+  });
+
+  it("native Windows port discovery finds a live Node listener", { skip: process.platform !== "win32" }, async () => {
+    const server = net.createServer();
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    try {
+      const expectedPort = server.address().port;
+      const ports = await listAntigravityPorts(process.pid, { platform: "win32" });
+      assert.ok(ports.includes(expectedPort), `expected ${expectedPort} in ${ports.join(", ")}`);
+    } finally {
+      await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it("detects Antigravity from native Windows process enumeration", async () => {
+    const calls = [];
+    const commandRunner = (command, args) => {
+      calls.push({ command, args });
+      return {
+        stdout: JSON.stringify([
+          { ProcessId: 321, CommandLine: "C:\\Program Files\\Windsurf\\language_server_windows_x64.exe --app_data_dir windsurf" },
+          { ProcessId: 654, CommandLine: '"C:\\Program Files\\Antigravity\\language_server_windows_x64.exe" --app_data_dir antigravity --csrf_token win-token --extension_server_port 42427' },
+        ]),
+        status: 0,
+      };
+    };
+
+    const result = await detectAntigravityProcess({ commandRunner, platform: "win32" });
+
+    assert.equal(calls[0].command, "powershell.exe");
+    assert.deepEqual(calls[0].args.slice(0, 3), ["-NoProfile", "-NonInteractive", "-Command"]);
+    assert.equal(result.configured, true);
+    assert.equal(result.pid, 654);
+    assert.equal(result.csrfToken, "win-token");
+    assert.equal(result.extensionPort, 42427);
   });
 
   it("detects antigravity process info from ps output", async () => {

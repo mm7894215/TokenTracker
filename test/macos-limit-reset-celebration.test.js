@@ -115,6 +115,57 @@ test("limit-reset toast renders the triggering provider icon", () => {
   assert.doesNotMatch(source, /\.title2/);
 });
 
+test("each overlay view owns its particle system instead of Vortex's shared preset", () => {
+  const source = overlaySource();
+
+  assert.doesNotMatch(
+    source,
+    /VortexView\(\s*(VortexSystem)?\.fireworks/,
+    "VortexSystem.fireworks is a static let on a class, so sharing it leaks particles, live secondary systems and a stale lastUpdate between celebrations (issue #432).",
+  );
+  assert.match(source, /private func makeFireworksSystem\(\) -> VortexSystem/);
+  assert.match(
+    source,
+    /@State private var fireworks: VortexSystem = makeFireworksSystem\(\)/,
+    "The system must be created per view so multi-display panels do not drive one simulation object.",
+  );
+  assert.match(source, /VortexView\(fireworks\)/);
+});
+
+test("fireworks explosion birth rate stays bounded by its emission limit", () => {
+  const source = overlaySource();
+  const burst = Number(source.match(/fireworksExplosionEmissionLimit\s*=\s*(\d+)/)?.[1]);
+
+  assert.ok(Number.isFinite(burst), "The burst size should be an explicit testable constant.");
+  assert.match(
+    source,
+    /birthRate: Double\(fireworksExplosionEmissionLimit \* 60\)/,
+    "createParticles() loops birthRate * delta times regardless of emissionLimit, so the birth rate multiplies any long frame delta.",
+  );
+  assert.doesNotMatch(
+    source,
+    /birthRate:\s*100_000/,
+    "Vortex's preset birth rate turns a multi-hour delta into billions of main-thread loop iterations.",
+  );
+  assert.ok(
+    burst * 60 <= 60_000,
+    `Explosion birth rate should stay far below the 100_000 preset, got ${burst * 60}.`,
+  );
+});
+
+test("celebration tears itself down when the machine or displays sleep", () => {
+  const source = overlaySource();
+
+  assert.match(source, /registerSleepTeardownObservers\(\)/);
+  assert.match(source, /NSWorkspace\.willSleepNotification/);
+  assert.match(
+    source,
+    /NSWorkspace\.screensDidSleepNotification/,
+    "Sleep pauses TimelineView but not the wall clock, so the first frame after wake would advance the simulation by the whole sleep.",
+  );
+  assert.match(source, /self\?\.dismiss\(\)/);
+});
+
 test("limit-reset toast stays readable for most of the fireworks lifetime", () => {
   const source = overlaySource();
   const lifetime = Number(source.match(/lifetime:\s*TimeInterval\s*=\s*([\d.]+)/)?.[1]);

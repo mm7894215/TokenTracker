@@ -186,10 +186,11 @@ jobs:
           node-version: 24
           cache: npm
 
-      - name: Test OpenClaw parser on Windows
+      - name: Test Windows-specific Node paths
         run: |
           npm ci
           node --test test/openclaw-parser.test.js
+          node --test --test-name-pattern="native Windows" test/usage-limits.test.js
 
       - name: Test Windows updater
         run: dotnet test TokenTrackerWin.Tests/TokenTrackerWin.Tests.csproj --configuration Release

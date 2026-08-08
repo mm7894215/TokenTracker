@@ -282,11 +282,11 @@ function startNativeBackgroundSync({
   // would otherwise freeze this server's event loop (and every dashboard
   // endpoint) once a minute. sync.lock is file-based, so the child contends
   // with hook-fired syncs exactly like an in-process run did.
-  const sync = runSync || ((args) => new Promise((resolve, reject) => {
+  const sync = runSync || ((args, { env } = {}) => new Promise((resolve, reject) => {
     const child = cp.spawn(
       process.execPath,
       [path.join(__dirname, "..", "..", "bin", "tracker.js"), "sync", ...args],
-      { stdio: "ignore", windowsHide: true },
+      { stdio: "ignore", windowsHide: true, env },
     );
     child.unref();
     child.once("error", reject);
@@ -301,8 +301,16 @@ function startNativeBackgroundSync({
   let inFlight = null;
   const run = () => {
     if (inFlight) return inFlight;
+    // WSL UNC metadata probes can wake WSLg and create an invisible msrdc
+    // RemoteApp window that steals focus. This one-minute fallback owns native
+    // local freshness only; explicit/manual syncs and provider hooks retain the
+    // user's configured WSL mode.
+    const backgroundEnv = {
+      ...process.env,
+      TOKENTRACKER_WSL_MODE: "native-only",
+    };
     const pending = Promise.resolve()
-      .then(() => sync(["--auto", "--background", "--all-local-sources"]))
+      .then(() => sync(["--auto", "--background", "--all-local-sources"], { env: backgroundEnv }))
       .catch((error) => {
         try { onError(error); } catch (_e) {}
       })

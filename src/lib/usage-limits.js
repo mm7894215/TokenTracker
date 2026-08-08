@@ -27,7 +27,7 @@ const {
 const { fetchGrokLimits } = require("./grok-limits");
 const { fetchZcodeLimits } = require("./zcode-limits");
 const { fetchOpencodeGoLimits } = require("./opencode-go-limits");
-const { fetchQoderLimits } = require("./qoder-limits");
+const { fetchQoderLimits, fetchQoderCnLimits } = require("./qoder-limits");
 const { fetchProviderServiceStatus } = require("./provider-status");
 const { readSqliteJsonRows, readSqliteJsonRowsAsync } = require("./sqlite-reader");
 
@@ -2153,16 +2153,48 @@ function extractCommandFlag(command, flag) {
   return match?.[1] || null;
 }
 
-async function detectAntigravityProcess({ commandRunner } = {}) {
-  const result = await runCommand(commandRunner, "/bin/ps", ["-ax", "-o", "pid=,command="], {
-    timeout: 4000,
-  });
-  const lines = String(result?.stdout || "").split("\n");
+function parseWindowsProcesses(output) {
+  let parsed;
+  try {
+    parsed = JSON.parse(String(output || "").trim());
+  } catch (_error) {
+    return [];
+  }
+  return (Array.isArray(parsed) ? parsed : [parsed])
+    .map((entry) => ({
+      pid: Number(entry?.ProcessId),
+      command: typeof entry?.CommandLine === "string" ? entry.CommandLine : "",
+    }))
+    .filter((entry) => Number.isFinite(entry.pid) && entry.command);
+}
+
+async function detectAntigravityProcess({ commandRunner, platform = process.platform } = {}) {
+  let processes;
+  if (platform === "win32") {
+    const script = [
+      "$ErrorActionPreference = 'Stop'",
+      "$processes = Get-CimInstance Win32_Process | Select-Object ProcessId, CommandLine",
+      "ConvertTo-Json -Compress -InputObject @($processes)",
+    ].join("; ");
+    const result = await runCommand(
+      commandRunner,
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", script],
+      { timeout: 4000 },
+    );
+    processes = parseWindowsProcesses(result?.stdout);
+  } else {
+    const result = await runCommand(commandRunner, "/bin/ps", ["-ax", "-o", "pid=,command="], {
+      timeout: 4000,
+    });
+    processes = String(result?.stdout || "")
+      .split("\n")
+      .map(parseProcessLine)
+      .filter(Boolean);
+  }
 
   let sawProcess = false;
-  for (const line of lines) {
-    const parsed = parseProcessLine(line);
-    if (!parsed) continue;
+  for (const parsed of processes) {
     if (!isAntigravityCommandLine(parsed.command)) continue;
     sawProcess = true;
     const csrfToken = extractCommandFlag(parsed.command, "--csrf_token") || null;
@@ -2521,7 +2553,40 @@ function parseListeningPorts(output) {
   return Array.from(ports).sort((a, b) => a - b);
 }
 
-async function listAntigravityPorts(pid, { commandRunner } = {}) {
+function windowsEndpointPort(endpoint) {
+  const match = String(endpoint || "").match(/:(\d+)$/);
+  return match ? Number(match[1]) : null;
+}
+
+function parseWindowsListeningPorts(output, pid) {
+  const ports = new Set();
+  for (const line of String(output || "").split("\n")) {
+    const fields = line.trim().split(/\s+/);
+    if (fields.length < 5 || fields[0]?.toUpperCase() !== "TCP") continue;
+    if (Number(fields.at(-1)) !== Number(pid)) continue;
+    // netstat localizes its state label. A TCP listener's foreign endpoint is
+    // always the wildcard address with port 0, which stays language-neutral.
+    if (windowsEndpointPort(fields[2]) !== 0) continue;
+    const port = windowsEndpointPort(fields[1]);
+    if (Number.isInteger(port) && port > 0 && port <= 65535) ports.add(port);
+  }
+  return Array.from(ports).sort((a, b) => a - b);
+}
+
+async function listAntigravityPorts(pid, { commandRunner, platform = process.platform } = {}) {
+  if (platform === "win32") {
+    const result = await runCommand(
+      commandRunner,
+      "netstat.exe",
+      ["-ano", "-p", "tcp"],
+      { timeout: 4000 },
+    );
+    const ports = parseWindowsListeningPorts(result?.stdout, pid);
+    if (!ports.length) {
+      throw new Error("Antigravity is running but not exposing ports yet. Try again in a few seconds.");
+    }
+    return ports;
+  }
   const lsof = await resolveLsofBinary({ commandRunner });
   if (!lsof) {
     throw new Error("Antigravity port detection needs lsof. Install it, then retry.");
@@ -2827,7 +2892,7 @@ function hasAntigravityInstallEvidence({ home } = {}) {
     });
 }
 
-async function fetchAntigravityLimits({ home, commandRunner, requestFn, fetchImpl = fetch, timeoutMs = 8000, nowMs = Date.now() } = {}) {
+async function fetchAntigravityLimits({ home, commandRunner, requestFn, fetchImpl = fetch, timeoutMs = 8000, nowMs = Date.now(), platform = process.platform } = {}) {
   const finalize = (payload, normalizeOptions) => {
     const result = {
       configured: true,
@@ -2849,7 +2914,7 @@ async function fetchAntigravityLimits({ home, commandRunner, requestFn, fetchImp
   };
 
   try {
-    const processInfo = await detectAntigravityProcess({ commandRunner });
+    const processInfo = await detectAntigravityProcess({ commandRunner, platform });
     if (!processInfo.configured) {
       const cached = readAntigravityLimitsCache({ home, nowMs });
       if (cached) return cached;
@@ -2863,7 +2928,7 @@ async function fetchAntigravityLimits({ home, commandRunner, requestFn, fetchImp
     if (processInfo.error) {
       return { configured: true, error: processInfo.error };
     }
-    const ports = await listAntigravityPorts(processInfo.pid, { commandRunner });
+    const ports = await listAntigravityPorts(processInfo.pid, { commandRunner, platform });
     let workingPort = null;
     let workingScheme = "https";
     for (const port of ports) {
@@ -3100,7 +3165,7 @@ async function fetchUsageLimitsUncached({
     : null;
 
   const providerFetch = withFetchTimeout(fetchImpl, providerTimeoutMs);
-  const [claudeResult, codexResult, cursor, kimi, gemini, kiro, antigravity, copilot, grok, zcode, opencodeGo, qoder, claudeServiceStatus] = await Promise.all([
+  const [claudeResult, codexResult, cursor, kimi, gemini, kiro, antigravity, copilot, grok, zcode, opencodeGo, qoder, qoderCn, claudeServiceStatus] = await Promise.all([
     claudeToken && !freshClaudeCache && !claudeRetryAtMs
       ? withProviderTimeout(fetchClaudeUsageLimits(claudeToken, { fetchImpl: providerFetch, maxAttempts: 1 }), "Claude", providerTimeoutMs).then(
           (value) => ({ status: "fulfilled", value }),
@@ -3144,6 +3209,16 @@ async function fetchUsageLimitsUncached({
         fetchImpl: providerFetch,
       }),
       "Qoder",
+      providerTimeoutMs,
+    ).catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
+    withProviderTimeout(
+      fetchQoderCnLimits({
+        home,
+        env,
+        platform,
+        fetchImpl: providerFetch,
+      }),
+      "Qoder CN",
       providerTimeoutMs,
     ).catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
     // Public status-page probe (fail-soft, own 5-min cache in provider-status.js).
@@ -3295,6 +3370,7 @@ async function fetchUsageLimitsUncached({
     zcode: withPlanLabel(zcode, zcode.plan_label, "ZCode"),
     opencodeGo: withPlanLabel(opencodeGo, opencodeGo?.plan_label, "OpenCode Go"),
     qoder: withPlanLabel(qoder, qoder?.plan_label, "Qoder"),
+    qoderCn: withPlanLabel(qoderCn, qoderCn?.plan_label, "Qoder CN"),
   };
 
   for (const [providerName, provider] of Object.entries(data)) {
@@ -3342,6 +3418,8 @@ module.exports = {
   fetchKiroLimits,
   normalizeAntigravityResponse,
   parseListeningPorts,
+  parseWindowsListeningPorts,
+  listAntigravityPorts,
   detectAntigravityProcess,
   fetchAntigravityLimits,
   fetchCopilotLimits,
@@ -3355,4 +3433,5 @@ module.exports = {
   fetchZcodeLimits,
   fetchOpencodeGoLimits,
   fetchQoderLimits,
+  fetchQoderCnLimits,
 };

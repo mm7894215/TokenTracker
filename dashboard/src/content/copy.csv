@@ -1204,6 +1204,9 @@ limits.label.opencode_go_monthly,ui,LimitsPage,UsageLimitsPanel,opencode_go_mont
 limits.provider.qoder,ui,LimitsPage,UsageLimitsPanel,provider_qoder,"Qoder",,active
 limits.label.qoder_credits,ui,LimitsPage,UsageLimitsPanel,qoder_credits,"Credits",,active
 limits.label.qoder_ultimate,ui,LimitsPage,UsageLimitsPanel,qoder_ultimate,"Ultimate Free Calls",,active
+limits.provider.qoder_cn,ui,LimitsPage,UsageLimitsPanel,provider_qoder_cn,"Qoder CN",,active
+limits.label.qoder_cn_credits,ui,LimitsPage,UsageLimitsPanel,qoder_cn_credits,"Credits",,active
+limits.label.qoder_cn_ultimate,ui,LimitsPage,UsageLimitsPanel,qoder_cn_ultimate,"Ultimate Free Calls",,active
 limits.qoder_calls.detail,ui,LimitsPage,UsageLimitsPanel,qoder_calls_detail,"{{used}} / {{limit}} calls used · {{remaining}} left",,active
 limits.hover.expires_at,ui,LimitsPage,UsageLimitsPanel,hover_expires_at,"Expires {{time}}",,active
 limits.opencodeGo.setupHint.title,ui,LimitsPage,UsageLimitsPanel,opencode_go_hint_title,"Connect OpenCode Go",,active

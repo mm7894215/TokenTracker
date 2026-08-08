@@ -1195,6 +1195,7 @@ async function parseOpencodeIncremental({
   const publicRepoCache = projectEnabled ? new Map() : null;
   const opencodeState = normalizeOpencodeState(cursors?.opencode);
   const messageIndex = opencodeState.messages;
+  const fingerprintIndex = buildOpencodeFingerprintIndex(messageIndex);
   const touchedBuckets = new Set();
   const defaultSource = normalizeSourceInput(source) || "opencode";
 
@@ -1255,6 +1256,7 @@ async function parseOpencodeIncremental({
     const result = await parseOpencodeMessageFile({
       filePath,
       messageIndex,
+      fingerprintIndex,
       fallbackTotals,
       fallbackMessageKey,
       hourlyState,
@@ -1279,10 +1281,13 @@ async function parseOpencodeIncremental({
     eventsAggregated += result.eventsAggregated;
 
     if (result.messageKey && result.shouldUpdate) {
-      messageIndex[result.messageKey] = {
-        lastTotals: result.lastTotals,
-        updatedAt: new Date().toISOString(),
-      };
+      recordOpencodeMessage({
+        messageIndex,
+        fingerprintIndex,
+        messageKey: result.messageKey,
+        totals: result.lastTotals,
+        fingerprint: result.fingerprint || null,
+      });
     }
 
     if (cb) {
@@ -2554,6 +2559,7 @@ async function parseGeminiFile({
 async function parseOpencodeMessageFile({
   filePath,
   messageIndex,
+  fingerprintIndex,
   fallbackTotals,
   fallbackMessageKey,
   hourlyState,
@@ -2608,9 +2614,22 @@ async function parseOpencodeMessageFile({
     return { messageKey, lastTotals, eventsAggregated: 0, shouldUpdate: false };
   }
 
+  // `Session.fork` re-materialises the parent's prefix under new message ids in
+  // a new session — count it once (issue #426, see deriveOpencodeMessageFingerprint).
+  const fingerprint = deriveOpencodeMessageFingerprint({ msg, totals: currentTotals, source });
+  if (!lastTotals && isOpencodeForkCopy(fingerprintIndex, fingerprint, messageKey)) {
+    return { messageKey, lastTotals: null, fingerprint, eventsAggregated: 0, shouldUpdate: false };
+  }
+
   const delta = diffGeminiTotals(currentTotals, lastTotals);
   if (!delta || isAllZeroUsage(delta)) {
-    return { messageKey, lastTotals: currentTotals, eventsAggregated: 0, shouldUpdate: true };
+    return {
+      messageKey,
+      lastTotals: currentTotals,
+      fingerprint,
+      eventsAggregated: 0,
+      shouldUpdate: true,
+    };
   }
   delta.conversation_count = 1;
 
@@ -2650,7 +2669,13 @@ async function parseOpencodeMessageFile({
     addTotals(projectBucket.totals, delta);
     projectTouchedBuckets.add(projectBucketKey(projectKey, source, bucketStart));
   }
-  return { messageKey, lastTotals: currentTotals, eventsAggregated: 1, shouldUpdate: true };
+  return {
+    messageKey,
+    lastTotals: currentTotals,
+    fingerprint,
+    eventsAggregated: 1,
+    shouldUpdate: true,
+  };
 }
 
 async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets }) {
@@ -3191,6 +3216,110 @@ function deriveOpencodeMessageKey(msg, fallback) {
   const messageId = normalizeMessageKeyPart(msg?.id || msg?.messageID || msg?.messageId);
   if (sessionId && messageId) return `${sessionId}|${messageId}`;
   return fallback;
+}
+
+// ── OpenCode fork-copy dedup (issue #426) ──────────────────────────────────
+//
+// `Session.fork` copies every parent message up to the fork point into a BRAND
+// NEW session. Verified against the shipped opencode binary: the copy is
+// `{ ...parentMessage.info, sessionID: newSession.id, id: newMessageId }` — so
+// `time.created`, `time.completed`, `modelID`, `providerID` and the entire
+// `tokens` payload survive verbatim and only the two identity fields change.
+// The forked session is created WITHOUT a parentID (confirmed empirically:
+// POST /session/:id/fork returns parentID=null), so the copies cannot be linked
+// to their origin by ancestry — content is the only available discriminator.
+// Because our dedup key is `sessionID|messageID`, every copied prefix used to be
+// counted a second time (a real fork of a 170-message session re-added 20.3M
+// tokens; the reporter measured ~2.0B across ~20 forks).
+//
+// The fingerprint is deliberately narrow — issue #187 is the standing reminder
+// that a loose dedup predicate deletes real usage. A collision requires the SAME
+// millisecond for BOTH created and completed, byte-equal values in all five
+// token columns, the same model, the same provider AND the same source. On top
+// of that we only ever drop a match that lives in a DIFFERENT session, since
+// forking always mints a new one — two turns inside one session are never
+// treated as copies of each other.
+function deriveOpencodeMessageFingerprint({ msg, totals, source }) {
+  if (!totals || isAllZeroUsage(totals)) return null;
+  const created = coerceEpochMs(msg?.time?.created) || 0;
+  const completed = coerceEpochMs(msg?.time?.completed) || 0;
+  if (!created && !completed) return null;
+  const model = normalizeModelInput(msg?.modelID || msg?.model || msg?.modelId) || DEFAULT_MODEL;
+  const provider = normalizeMessageKeyPart(msg?.providerID || msg?.provider || msg?.providerId);
+  const raw = [
+    normalizeSourceInput(source) || "opencode",
+    created,
+    completed,
+    totals.input_tokens,
+    totals.output_tokens,
+    totals.cached_input_tokens,
+    totals.cache_creation_input_tokens,
+    totals.reasoning_output_tokens,
+    model,
+    provider,
+  ].join(" ");
+  // Hashed rather than stored raw: the fingerprint is persisted per message in
+  // cursors.json, and heavy OpenCode users carry tens of thousands of entries.
+  return crypto.createHash("sha256").update(raw).digest("base64url").slice(0, 22);
+}
+
+// `fingerprint -> messageKey` for the messages already counted in this cursor
+// namespace. Rebuilt per parse run; entries written before this version carry no
+// fingerprint and simply do not participate (no retroactive rewrite of history).
+function buildOpencodeFingerprintIndex(messageIndex) {
+  const byFingerprint = new Map();
+  if (!messageIndex || typeof messageIndex !== "object") return byFingerprint;
+  for (const [key, entry] of Object.entries(messageIndex)) {
+    const fingerprint = entry && typeof entry.fingerprint === "string" ? entry.fingerprint : null;
+    if (fingerprint && !byFingerprint.has(fingerprint)) byFingerprint.set(fingerprint, key);
+  }
+  return byFingerprint;
+}
+
+function opencodeMessageKeySession(messageKey) {
+  if (typeof messageKey !== "string") return null;
+  const idx = messageKey.indexOf("|");
+  return idx > 0 ? messageKey.slice(0, idx) : null;
+}
+
+// True only when an already-counted message in ANOTHER session carries the exact
+// same fingerprint — i.e. this row is a fork copy. Keys without a resolvable
+// session (the JSON reader's file-path fallback) never dedup: unproven identity
+// must not delete usage.
+function isOpencodeForkCopy(fingerprintIndex, fingerprint, messageKey) {
+  if (!fingerprint || !fingerprintIndex) return false;
+  const owner = fingerprintIndex.get(fingerprint);
+  if (!owner || owner === messageKey) return false;
+  const ownerSession = opencodeMessageKeySession(owner);
+  const session = opencodeMessageKeySession(messageKey);
+  if (!ownerSession || !session) return false;
+  return ownerSession !== session;
+}
+
+// Persist a message's snapshot + fingerprint and claim the fingerprint for it.
+// Writes only when something actually changed so a steady-state sync leaves the
+// cursor untouched. A falsy `fingerprint` means "unknown" and preserves whatever
+// the entry already carried; a new one releases the old claim so a stale
+// mid-stream snapshot cannot shadow an unrelated message later.
+function recordOpencodeMessage({ messageIndex, fingerprintIndex, messageKey, totals, fingerprint }) {
+  if (!messageIndex || !messageKey) return;
+  const prev = messageIndex[messageKey];
+  const prevTotals = prev && typeof prev.lastTotals === "object" ? prev.lastTotals : null;
+  const prevFingerprint = prev && typeof prev.fingerprint === "string" ? prev.fingerprint : null;
+  const nextFingerprint = fingerprint || prevFingerprint;
+  if (sameGeminiTotals(totals, prevTotals) && prevFingerprint === nextFingerprint) return;
+
+  if (fingerprintIndex && prevFingerprint && prevFingerprint !== nextFingerprint) {
+    if (fingerprintIndex.get(prevFingerprint) === messageKey) {
+      fingerprintIndex.delete(prevFingerprint);
+    }
+  }
+  const entry = { lastTotals: totals, updatedAt: new Date().toISOString() };
+  if (nextFingerprint) entry.fingerprint = nextFingerprint;
+  messageIndex[messageKey] = entry;
+  if (fingerprintIndex && nextFingerprint && !fingerprintIndex.has(nextFingerprint)) {
+    fingerprintIndex.set(nextFingerprint, messageKey);
+  }
 }
 
 function getHourlyBucket(state, source, model, hourStart) {
@@ -4219,6 +4348,7 @@ async function parseOpencodeDbIncremental({
   const cursorNamespace = typeof cursorKey === "string" && cursorKey.length > 0 ? cursorKey : "opencode";
   const opencodeState = normalizeOpencodeState(cursors?.[cursorNamespace]);
   const messageIndex = opencodeState.messages;
+  const fingerprintIndex = buildOpencodeFingerprintIndex(messageIndex);
   const touchedBuckets = new Set();
   const defaultSource = normalizeSourceInput(source) || "opencode";
 
@@ -4247,15 +4377,30 @@ async function parseOpencodeDbIncremental({
       continue;
     }
 
+    // A fork copy of an already-counted turn contributes nothing — skip it
+    // outright so it never claims an index entry of its own (issue #426).
+    const fingerprint = deriveOpencodeMessageFingerprint({
+      msg,
+      totals: currentTotals,
+      source: defaultSource,
+    });
+    if (!lastTotals && isOpencodeForkCopy(fingerprintIndex, fingerprint, messageKey)) {
+      messagesProcessed += 1;
+      continue;
+    }
+
     const delta = diffGeminiTotals(currentTotals, lastTotals);
     if (!delta || isAllZeroUsage(delta)) {
-      // Update index with current totals even if no delta (normalization may have changed)
-      if (!sameGeminiTotals(currentTotals, lastTotals)) {
-        messageIndex[messageKey] = {
-          lastTotals: currentTotals,
-          updatedAt: new Date().toISOString(),
-        };
-      }
+      // Refresh the index even without a delta: normalization may have changed,
+      // and pre-#426 entries need their fingerprint backfilled so a fork taken
+      // from an old session is still recognised.
+      recordOpencodeMessage({
+        messageIndex,
+        fingerprintIndex,
+        messageKey,
+        totals: currentTotals,
+        fingerprint,
+      });
       messagesProcessed += 1;
       if (cb) {
         cb({
@@ -4312,10 +4457,13 @@ async function parseOpencodeDbIncremental({
       }
     }
 
-    messageIndex[messageKey] = {
-      lastTotals: currentTotals,
-      updatedAt: new Date().toISOString(),
-    };
+    recordOpencodeMessage({
+      messageIndex,
+      fingerprintIndex,
+      messageKey,
+      totals: currentTotals,
+      fingerprint,
+    });
     messagesProcessed += 1;
     eventsAggregated += 1;
 
@@ -4372,22 +4520,26 @@ function resolveQoderDbPath({
   home = os.homedir(),
   env = process.env,
   platform = process.platform,
+  appDir = "Qoder",
+  envPrefix = "QODER",
 } = {}) {
-  if (typeof env.QODER_DB_PATH === "string" && env.QODER_DB_PATH.trim()) {
-    return path.resolve(env.QODER_DB_PATH.trim());
+  const dbPathKey = `${envPrefix}_DB_PATH`;
+  const homeKey = `${envPrefix}_HOME`;
+  if (typeof env[dbPathKey] === "string" && env[dbPathKey].trim()) {
+    return path.resolve(env[dbPathKey].trim());
   }
   let root;
-  if (typeof env.QODER_HOME === "string" && env.QODER_HOME.trim()) {
-    root = path.resolve(env.QODER_HOME.trim());
+  if (typeof env[homeKey] === "string" && env[homeKey].trim()) {
+    root = path.resolve(env[homeKey].trim());
   } else if (platform === "darwin") {
-    root = path.join(home, "Library", "Application Support", "Qoder");
+    root = path.join(home, "Library", "Application Support", appDir);
   } else if (platform === "win32") {
     root = path.join(
       env.APPDATA || path.join(home, "AppData", "Roaming"),
-      "Qoder",
+      appDir,
     );
   } else {
-    root = path.join(home, ".config", "Qoder");
+    root = path.join(home, ".config", appDir);
   }
   return path.join(root, "SharedClientCache", "cache", "db", "local.db");
 }
@@ -4396,17 +4548,21 @@ function resolveQoderDbPaths({
   home = os.homedir(),
   env = process.env,
   platform = process.platform,
+  appDir = "Qoder",
+  envPrefix = "QODER",
   deps = {},
 } = {}) {
-  const nativeValue = resolveQoderDbPath({ home, env, platform });
-  if (platform !== "win32" || env.QODER_DB_PATH || env.QODER_HOME) {
+  const dbPathKey = `${envPrefix}_DB_PATH`;
+  const homeKey = `${envPrefix}_HOME`;
+  const nativeValue = resolveQoderDbPath({ home, env, platform, appDir, envPrefix });
+  if (platform !== "win32" || env[dbPathKey] || env[homeKey]) {
     return { native: nativeValue, wsl: null };
   }
   const existsSync = deps.existsSync || fssync.existsSync;
   const native = wsl.shouldProbeNative(env) && existsSync(nativeValue) ? nativeValue : null;
   const discoverWslHome = deps.discoverWslHome || wsl.discoverWslHome;
   const wslRoot = wsl.shouldProbeWsl(env)
-    ? discoverWslHome(".config/Qoder", { ...deps, env })
+    ? discoverWslHome(`.config/${appDir}`, { ...deps, env })
     : null;
   const wslValue = wslRoot
     ? path.join(wslRoot, "SharedClientCache", "cache", "db", "local.db")
@@ -4418,6 +4574,23 @@ function resolveQoderDbPaths({
     env,
     platform: "win32",
   });
+}
+
+// Qoder CN keeps its own data directory (Application Support/QoderCN on macOS,
+// AppData/Roaming/QoderCN on Windows, .config/QoderCN on Linux), so it needs
+// its own path resolution. The token schema is identical to the international
+// edition — the same QODER_USAGE_SQL and parser are reused with a distinct
+// source/cursor namespace to avoid rowid collisions between the two DBs. CN
+// honors its own env overrides (QODER_CN_DB_PATH / QODER_CN_HOME) so that
+// QODER_HOME/QODER_DB_PATH, which point at the international install, never
+// redirect the CN resolver onto the same database (that would double-count).
+function resolveQoderCnDbPaths({
+  home = os.homedir(),
+  env = process.env,
+  platform = process.platform,
+  deps = {},
+} = {}) {
+  return resolveQoderDbPaths({ home, env, platform, appDir: "QoderCN", envPrefix: "QODER_CN", deps });
 }
 
 async function readQoderDbMessages(dbPath, sqliteOptions = {}) {
@@ -4517,11 +4690,13 @@ async function parseQoderDbIncremental({
   projectQueuePath,
   onProgress,
   publicRepoResolver,
+  sourceKey = "qoder",
+  cursorKey = "qoder",
 } = {}) {
   await ensureDir(path.dirname(queuePath));
   const rows = Array.isArray(dbMessages) ? dbMessages : [];
   const hourlyState = normalizeHourlyState(cursors?.hourly);
-  const qoderState = normalizeQoderState(cursors?.qoder);
+  const qoderState = normalizeQoderState(cursors?.[cursorKey]);
   const touchedBuckets = new Set();
   const projectEnabled = typeof projectQueuePath === "string" && projectQueuePath.length > 0;
   const projectState = projectEnabled ? normalizeProjectState(cursors?.projectHourly) : null;
@@ -4606,40 +4781,40 @@ async function parseQoderDbIncremental({
       if (previousTotals && previous.bucketStart && previous.model) {
         const oldBucket = getHourlyBucket(
           hourlyState,
-          "qoder",
+          sourceKey,
           previous.model,
           previous.bucketStart,
         );
         subtractTotals(oldBucket.totals, previousTotals);
-        touchedBuckets.add(bucketKey("qoder", previous.model, previous.bucketStart));
+        touchedBuckets.add(bucketKey(sourceKey, previous.model, previous.bucketStart));
         if (projectEnabled && previous.projectKey) {
           const oldProjectBucket = getProjectBucket(
             projectState,
             previous.projectKey,
-            "qoder",
+            sourceKey,
             previous.bucketStart,
             previous.projectRef || null,
           );
           subtractTotals(oldProjectBucket.totals, previousTotals);
           projectTouchedBuckets.add(
-            projectBucketKey(previous.projectKey, "qoder", previous.bucketStart),
+            projectBucketKey(previous.projectKey, sourceKey, previous.bucketStart),
           );
         }
       }
 
-      const bucket = getHourlyBucket(hourlyState, "qoder", model, bucketStart);
+      const bucket = getHourlyBucket(hourlyState, sourceKey, model, bucketStart);
       addTotals(bucket.totals, currentTotals);
-      touchedBuckets.add(bucketKey("qoder", model, bucketStart));
+      touchedBuckets.add(bucketKey(sourceKey, model, bucketStart));
       if (projectEnabled && projectKey) {
         const projectBucket = getProjectBucket(
           projectState,
           projectKey,
-          "qoder",
+          sourceKey,
           bucketStart,
           projectRef,
         );
         addTotals(projectBucket.totals, currentTotals);
-        projectTouchedBuckets.add(projectBucketKey(projectKey, "qoder", bucketStart));
+        projectTouchedBuckets.add(projectBucketKey(projectKey, sourceKey, bucketStart));
       }
       qoderState.messages[messageKey] = {
         totals: currentTotals,
@@ -4682,7 +4857,7 @@ async function parseQoderDbIncremental({
   hourlyState.updatedAt = updatedAt;
   qoderState.updatedAt = updatedAt;
   cursors.hourly = hourlyState;
-  cursors.qoder = qoderState;
+  cursors[cursorKey] = qoderState;
   if (projectState) {
     projectState.updatedAt = updatedAt;
     cursors.projectHourly = projectState;
@@ -12055,18 +12230,25 @@ function resolvePiSessionFiles(env = process.env) {
   const sessionsDir = path.join(agentDir, "sessions");
   if (!fssync.existsSync(sessionsDir)) return [];
   const files = [];
+  const walk = (dir) => {
+    let entries;
+    try { entries = fssync.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+      } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+        files.push(full);
+      }
+    }
+  };
   try {
     for (const cwdDir of fssync.readdirSync(sessionsDir)) {
       const cwdPath = path.join(sessionsDir, cwdDir);
       let stat;
       try { stat = fssync.statSync(cwdPath); } catch { continue; }
       if (!stat.isDirectory()) continue;
-      let entries;
-      try { entries = fssync.readdirSync(cwdPath); } catch { continue; }
-      for (const entry of entries) {
-        if (!entry.endsWith(".jsonl")) continue;
-        files.push(path.join(cwdPath, entry));
-      }
+      walk(cwdPath);
     }
   } catch {
     // ignore — return what we have
@@ -15816,6 +15998,7 @@ module.exports = {
   readZcodeDbMessages,
   resolveQoderDbPath,
   resolveQoderDbPaths,
+  resolveQoderCnDbPaths,
   readQoderDbMessages,
   resolveKiroBasePath,
   resolveKiroDbPath,

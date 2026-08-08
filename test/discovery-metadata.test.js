@@ -9,22 +9,22 @@ const ROOT = path.resolve(__dirname, "..");
 const read = (relativePath) => fs.readFileSync(path.join(ROOT, relativePath), "utf8");
 
 const README_EXPECTATIONS = [
-  ["README.md", /29 AI coding tools/, /\|\s+\*\*AI tools supported\*\*\s+\|\s+\*\*29\*\*/],
-  ["README.zh-CN.md", /29 款 AI 编码工具/, /\|\s+\*\*支持的 AI 工具数\*\*\s+\|\s+\*\*29\*\*/],
-  ["README.ja.md", /29 種類の AI コーディングツール/, /\|\s+\*\*対応 AI ツール数\*\*\s+\|\s+\*\*29\*\*/],
-  ["README.ko.md", /29개의 AI 코딩 도구/, /\|\s+\*\*지원 AI 도구\*\*\s+\|\s+\*\*29\*\*/],
-  ["README.de.md", /29 KI-Coding-Tools/, /\|\s+\*\*Unterstützte KI-Tools\*\*\s+\|\s+\*\*29\*\*/],
+  ["README.md", /29 AI coding tools/, /\|\s+\*\*AI tools supported\*\*\s+\|\s+\*\*29\*\*/, /Rate-limit tracking.*✅ 13 providers/],
+  ["README.zh-CN.md", /29 款 AI 编码工具/, /\|\s+\*\*支持的 AI 工具数\*\*\s+\|\s+\*\*29\*\*/, /限额追踪.*✅ 13 家 provider/],
+  ["README.ja.md", /29 種類の AI コーディングツール/, /\|\s+\*\*対応 AI ツール数\*\*\s+\|\s+\*\*29\*\*/, /レート制限トラッキング.*✅ 13 プロバイダー/],
+  ["README.ko.md", /29개의 AI 코딩 도구/, /\|\s+\*\*지원 AI 도구\*\*\s+\|\s+\*\*29\*\*/, /레이트 제한 추적.*✅ 13개 프로바이더/],
+  ["README.de.md", /29 KI-Coding-Tools/, /\|\s+\*\*Unterstützte KI-Tools\*\*\s+\|\s+\*\*29\*\*/, /Rate-Limit-Tracking.*✅ 13 Provider/],
 ];
 
 test("public discovery surfaces describe all 29 supported tools", () => {
-  for (const [file, countPattern, comparisonPattern] of README_EXPECTATIONS) {
+  for (const [file, countPattern, comparisonPattern, limitCountPattern] of README_EXPECTATIONS) {
     const source = read(file);
     assert.match(source, countPattern, `${file} has the current provider count`);
     assert.match(source, comparisonPattern, `${file} comparison table has the current provider count`);
     assert.match(source, /Droid/, `${file} lists Droid`);
     assert.match(source, /AnythingLLM Desktop/, `${file} lists AnythingLLM Desktop`);
     assert.match(source, /Qoder/, `${file} lists Qoder`);
-    assert.match(source, /12/, `${file} carries the current usage-limits provider count`);
+    assert.match(source, limitCountPattern, `${file} rate-limit row carries the current usage-limits provider count`);
   }
 
   const index = read("dashboard/index.html");
@@ -34,7 +34,7 @@ test("public discovery surfaces describe all 29 supported tools", () => {
   assert.match(index, /Four desktop widgets/);
   assert.match(index, /Achievements/);
   assert.match(index, /Service Status page/);
-  assert.match(index, /usage limits for 12 providers/i);
+  assert.match(index, /usage limits for 13 providers/i);
 
   const llms = read("dashboard/public/llms.txt");
   assert.match(llms, /Supported AI coding tools \(29\)/);

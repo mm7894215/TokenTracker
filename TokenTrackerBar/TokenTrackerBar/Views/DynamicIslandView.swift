@@ -68,6 +68,14 @@ struct DynamicIslandView: View {
             ? max(DynamicIslandGeometry.expandedWidth, geo.collapsedWidth)
             : geo.collapsedWidth
         let shoulderRadius = expanded ? CGFloat(8) : min(6, geo.collapsedHeight / 4)
+        let renderedWidth = islandWidth + shoulderRadius * 2
+        let revealWidth = DynamicIslandVisibilityPolicy.revealWidth(
+            progress: state.visibilityProgress,
+            fullWidth: renderedWidth,
+            centerGapWidth: geo.centerGapWidth,
+            hasNotch: geo.hasNotch,
+            isDismissing: state.isVisibilityDismissing
+        )
         let shape = IslandRoundedRectangle(
             topShoulderRadius: shoulderRadius,
             bottomRadius: expanded ? 22 : min(12, geo.collapsedHeight / 2.5)
@@ -127,6 +135,11 @@ struct DynamicIslandView: View {
         )
         .onPreferenceChange(IslandRenderedHeightKey.self) { h in
             onExpandedHeightChanged(h)
+        }
+        // Reveal from the center without scaling the contents.
+        .mask(alignment: .center) {
+            Rectangle()
+                .frame(width: revealWidth)
         }
         // Top-align inside the always-expanded panel so height/width springs
         // grow downward / outward instead of from the view's center (which

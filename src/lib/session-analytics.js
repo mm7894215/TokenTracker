@@ -31,6 +31,7 @@ const readline = require("node:readline");
 const { listClaudeProjectFiles, listRolloutFilesDeep, claudeMessageDedupKey } = require("./rollout");
 const { parseCodexRolloutFile } = require("./codex-rollout-parser");
 const { computeRowCost } = require("./pricing");
+const wsl = require("./wsl-probe");
 
 // Bump the sidecar when derived metrics change so cached rows are rebuilt
 // instead of leaving the dashboard on the previous (over-counted) heuristic.
@@ -761,14 +762,105 @@ async function scanGrokSession(filePath) {
   });
 }
 
-async function discoverSessionFiles(home) {
+// Multi-root discovery: on Windows a native install and a WSL one both count.
+// `sync` already walks both Claude homes (src/commands/sync.js), so without this
+// the WSL work lands in the token totals but is invisible in the session browser
+// and its project list. TOKENTRACKER_WSL_MODE gates which sides are probed;
+// duplicated files synced between environments collapse via the Codex session-id
+// pass below and claudeMessageDedupKey downstream.
+function providerRoots(home, providerDir, env, deps = {}) {
+  const platform = deps.platform || process.platform;
+  const homedir = deps.homedir || os.homedir;
+  const discoverWslHome = deps.discoverWslHome || wsl.discoverWslHome;
+  const roots = [];
+  if (platform !== "win32" || wsl.shouldProbeNative(env)) {
+    roots.push(path.join(home, providerDir));
+  }
+  // Only the machine's own home has a WSL sibling worth probing.
+  // discoverWslHome resolves \\wsl$ independently of `home`, so probing for an
+  // injected home (tests, a custom HOME) would splice the machine's live WSL
+  // sessions into what the caller expects to be an isolated tree.
+  //
+  // This defaults rather than hard-codes: the whole reason to thread a
+  // non-default home is to scan a tree that is not os.homedir(), and such a
+  // caller would otherwise lose WSL discovery silently, with nothing failing.
+  // `probeWsl` is the deliberate opt-in for that case.
+  const probeWsl = deps.probeWsl !== undefined
+    ? Boolean(deps.probeWsl)
+    : path.resolve(home) === path.resolve(homedir());
+  if (platform === "win32" && probeWsl && wsl.shouldProbeWsl(env)) {
+    const wslRoot = discoverWslHome(providerDir, { env });
+    if (wslRoot) roots.push(wslRoot);
+  }
+  return [...new Set(roots)];
+}
+
+// Collapse the same Claude session discovered under more than one root.
+//
+// Codex gets this from its session-id pass below; Claude only ever had per-file
+// message dedup (`claudeMessageDedupKey` inside `scanClaudeSession`), which
+// cannot see a second copy of the same file under a different path spelling.
+// Every discovered path becomes its own row keyed by the resolved file path, so
+// a WSL `$HOME` pointing at the Windows profile — the same files reachable as
+// both `C:\Users\dev\.claude\...` and `\\wsl$\Ubuntu\home\dev\.claude\...` —
+// duplicated sessions in the browser, the project list and the CSV export.
+//
+// Cross-root only, on purpose: a single root is passed through verbatim, so
+// single-install machines are unaffected, and two same-named files inside one
+// tree stay distinct (unproven identity must not delete a session). A basename
+// without a session UUID never participates either.
+function dedupeClaudeFilesAcrossRoots(groups) {
+  const rootGroups = (groups || []).filter((group) => Array.isArray(group) && group.length > 0);
+  if (rootGroups.length <= 1) return [...new Set(rootGroups[0] || [])];
+
+  const mtimeOf = (filePath) => {
+    try { return fs.statSync(filePath).mtimeMs; } catch { return -Infinity; }
+  };
+  // Preserve root order for everything kept, so native precedence is stable.
+  // Claims are compared only against EARLIER roots: two same-UUID files inside
+  // one tree are siblings, not copies, and must both survive.
+  const ordered = [];
+  const winnerBySession = new Map();
+  for (const group of rootGroups) {
+    const claimedHere = new Map();
+    for (const filePath of group) {
+      const id = path.basename(filePath).match(/^([0-9a-f-]{36})\.jsonl$/i)?.[1] || null;
+      if (!id || claimedHere.has(id)) {
+        // No session identity, or a sibling within this same root.
+        if (!ordered.includes(filePath)) ordered.push(filePath);
+        continue;
+      }
+      claimedHere.set(id, filePath);
+      const previous = winnerBySession.get(id);
+      if (previous === undefined) {
+        winnerBySession.set(id, filePath);
+        ordered.push(filePath);
+        continue;
+      }
+      if (previous === filePath) continue;
+      // Same session in an earlier root: keep the newer file, mirroring Codex.
+      if (mtimeOf(filePath) > mtimeOf(previous)) {
+        winnerBySession.set(id, filePath);
+        ordered[ordered.indexOf(previous)] = filePath;
+      }
+    }
+  }
+  return [...new Set(ordered)];
+}
+
+async function discoverSessionFiles(home, env = process.env, deps = {}) {
   const grokHome = resolveGrokHome(home);
-  const [allClaude, codex, archived, grok] = await Promise.all([
-    listClaudeProjectFiles(path.join(home, ".claude", "projects")),
-    listRolloutFilesDeep(path.join(home, ".codex", "sessions")),
-    listRolloutFilesDeep(path.join(home, ".codex", "archived_sessions")),
+  const claudeRoots = providerRoots(home, ".claude", env, deps);
+  const codexRoots = providerRoots(home, ".codex", env, deps);
+  const [claudeGroups, codexGroups, archivedGroups, grok] = await Promise.all([
+    Promise.all(claudeRoots.map((r) => listClaudeProjectFiles(path.join(r, "projects")))),
+    Promise.all(codexRoots.map((r) => listRolloutFilesDeep(path.join(r, "sessions")))),
+    Promise.all(codexRoots.map((r) => listRolloutFilesDeep(path.join(r, "archived_sessions")))),
     listGrokSessionFiles(path.join(grokHome, "sessions")),
   ]);
+  const allClaude = dedupeClaudeFilesAcrossRoots(claudeGroups);
+  const codex = [...new Set(codexGroups.flat())];
+  const archived = [...new Set(archivedGroups.flat())];
   // Claude Memory stores thousands of background observer transcripts beside
   // real Claude Code sessions. They contain <synthetic>/haiku bookkeeping and
   // no user coding outcome, so scanning them both slows the card dramatically
@@ -1262,4 +1354,6 @@ module.exports = {
   listSessionsForBrowser,
   resumeCommandFor,
   sessionsToCsv,
+  providerRoots,
+  dedupeClaudeFilesAcrossRoots,
 };

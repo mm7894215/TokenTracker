@@ -11,6 +11,12 @@ const dashboardWindowControllerPath = path.join(
   "Services",
   "DashboardWindowController.swift",
 );
+const appDelegatePath = path.join(
+  repoRoot,
+  "TokenTrackerBar",
+  "TokenTrackerBar",
+  "TokenTrackerBarApp.swift",
+);
 const desktopPetWindowControllerPath = path.join(
   repoRoot,
   "TokenTrackerBar",
@@ -53,4 +59,35 @@ test("macOS desktop pet keeps its intentional full-screen auxiliary behavior", (
   const behavior = behaviorMatch[1];
   assert.match(behavior, /\.canJoinAllSpaces\b/);
   assert.match(behavior, /\.fullScreenAuxiliary\b/);
+});
+
+test("reopening the macOS menu bar app always restores the dashboard", () => {
+  const source = read(appDelegatePath);
+  const reopenHandler = source.match(
+    /func applicationShouldHandleReopen\([\s\S]*?\n    }/,
+  )?.[0];
+
+  assert.ok(reopenHandler, "AppDelegate should handle Finder/Dock reopen events");
+  assert.match(reopenHandler, /DashboardWindowController\.shared\.showWindow\(\)/);
+  assert.match(
+    reopenHandler,
+    /return false/,
+    "The custom reopen handler should suppress AppKit's default untitled-window behavior",
+  );
+  assert.doesNotMatch(
+    reopenHandler,
+    /if\s+!?flag|guard\s+!?flag/,
+    "Other visible utility windows must not suppress dashboard restoration",
+  );
+});
+
+test("a normal macOS launch opens the dashboard but a login-item launch stays quiet", () => {
+  const source = read(appDelegatePath);
+  const launchHandler = source.match(
+    /func applicationDidFinishLaunching\([\s\S]*?\n    }\n\n    func applicationWillTerminate/,
+  )?.[0];
+
+  assert.ok(launchHandler, "AppDelegate should configure initial launch behavior");
+  assert.match(launchHandler, /keyAELaunchedAsLogInItem/);
+  assert.match(launchHandler, /DashboardWindowController\.shared\.showWindow\(\)/);
 });

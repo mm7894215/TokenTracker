@@ -79,6 +79,7 @@ async function collectTrackerDiagnostics({
   const throttlePath = path.join(trackerDir, "sync.throttle");
   const uploadThrottlePath = path.join(trackerDir, "upload.throttle.json");
   const autoRetryPath = path.join(trackerDir, "auto.retry.json");
+  const syncSkipPath = path.join(trackerDir, "sync.skip.json");
   const codexConfigPath = path.join(codexHome, "config.toml");
   const codeConfigPath = path.join(codeHome, "config.toml");
   const claudeConfigPath = path.join(home, ".claude", "settings.json");
@@ -96,6 +97,7 @@ async function collectTrackerDiagnostics({
   const queueState = (await readJson(queueStatePath)) || { offset: 0 };
   const uploadThrottle = normalizeUploadState(await readJson(uploadThrottlePath));
   const autoRetry = await readJson(autoRetryPath);
+  const syncSkip = await readJson(syncSkipPath);
 
   const queueSize = await safeStatSize(queuePath);
   const offsetBytes = Number(queueState.offset || 0);
@@ -271,6 +273,14 @@ async function collectTrackerDiagnostics({
           }
         : null,
     },
+    sync_skip: syncSkip?.at
+      ? {
+          at: syncSkip.at,
+          reason: typeof syncSkip.reason === "string" ? syncSkip.reason : null,
+          detail: typeof syncSkip.detail === "string" ? syncSkip.detail : null,
+          lock_path: redactValue(syncSkip.lockPath, home),
+        }
+      : null,
     auto_retry: autoRetryAt
       ? {
           next_retry_at: autoRetryAt,

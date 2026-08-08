@@ -20,6 +20,7 @@ const {
   readQoderLimitsCache,
   writeQoderLimitsCache,
   parseQoderQuotaLog,
+  fetchQoderCnLimits,
 } = require("../src/lib/qoder-limits");
 
 test("normalizeQoderUsageResponse merges camel-case base and shared quotas", () => {
@@ -630,4 +631,146 @@ test("Qoder limits source contains no browser credential-store access", () => {
     assert.match(example, pattern, `guard must detect ${capability}`);
     assert.doesNotMatch(normalizedSource, pattern, `Qoder limits must not contain ${capability}`);
   }
+});
+
+test("fetchQoderCnLimits falls back to the qoder.com.cn site and its own cache namespace", async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-qoder-cn-site-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  let capturedUrl = null;
+
+  const result = await fetchQoderCnLimits({
+    home,
+    platform: "darwin",
+    env: { QODER_CN_COOKIE: "session=manual-secret" },
+    rpcRequest: async () => {
+      throw new Error("Qoder local service is not running.");
+    },
+    fetchImpl: async (url) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            totalQuota: {
+              quotaSummary: {
+                usedValue: 25,
+                limitValue: 100,
+                remainingValue: 75,
+                usagePercentage: 25,
+              },
+            },
+          };
+        },
+      };
+    },
+  });
+
+  assert.equal(capturedUrl, "https://qoder.com.cn/api/v2/me/usages/big_model_credits");
+  assert.equal(result.primary_window.remaining_credits, 75);
+  assert.equal(result.site, "china");
+
+  // The CN cache lives under its own namespace — the international cache stays
+  // untouched, so the two editions never clobber each other.
+  const cnCache = readQoderLimitsCache({ home, nowMs: Date.now(), namespace: "cn" });
+  assert.equal(cnCache?.primary_window?.remaining_credits, 75);
+  assert.equal(readQoderLimitsCache({ home, nowMs: Date.now() }), null);
+});
+
+test("fetchQoderCnLimits targets the china activity host for Ultimate Free Calls", async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-qoder-cn-activity-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  let capturedUrl = null;
+  const rpcRequest = async (method) => {
+    if (method === "credit/usage") {
+      return {
+        userType: "personal_standard",
+        totalUsagePercentage: 25,
+        isQuotaExceeded: false,
+        userQuota: { used: 25, total: 100, remaining: 75, percentage: 25, unit: "credits" },
+        expiresAt: 253_402_214_400_000,
+      };
+    }
+    return { id: "user-1", name: "Test", userType: "personal_standard", token: "oauth-secret" };
+  };
+  const fetchImpl = async (url) => {
+    capturedUrl = url;
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return { code: 0, data: { activities: [] } };
+      },
+    };
+  };
+
+  const result = await fetchQoderCnLimits({ home, platform: "darwin", env: {}, rpcRequest, fetchImpl });
+  assert.equal(capturedUrl, "https://openapi.qoder.com.cn/algo/api/v2/activity");
+  assert.equal(result.primary_window.remaining_credits, 75);
+});
+
+test("fetchQoderCnLimits reads credentials via QODER_CN_HOME, not the international QODER_HOME", async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-qoder-cn-rpc-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const cnRoot = path.join(home, "cn-root");
+  fs.mkdirSync(path.join(cnRoot, "SharedClientCache"), { recursive: true });
+  fs.writeFileSync(
+    path.join(cnRoot, "SharedClientCache", ".info.json"),
+    JSON.stringify({ ipcServerPath: "/tmp/qodercn-test.sock" }),
+  );
+
+  const rpc = require("../src/lib/qoder-limits").qoderRpcRequest;
+  const message = await rpc(
+    "credit/usage",
+    {},
+    { home, env: { QODER_HOME: "/int-should-lose", QODER_CN_HOME: cnRoot }, platform: "darwin", appDir: "QoderCN", envPrefix: "QODER_CN" },
+  ).then(
+    () => "resolved",
+    (err) => err.message,
+  );
+  // If QODER_CN_HOME were ignored, the probe would fail before ever touching
+  // the socket ("Qoder local service is not running"). Reaching the socket
+  // means the QoderCN .info.json was found.
+  assert.ok(message !== "Qoder local service is not running.", "QODER_CN_HOME must locate the QoderCN .info.json");
+});
+
+test("fetchQoderCnLimits stays on the china site even when QODER_SITE points elsewhere", async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-qoder-cn-sitepin-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  let capturedUrl = null;
+
+  const result = await fetchQoderCnLimits({
+    home,
+    platform: "darwin",
+    env: { QODER_CN_COOKIE: "session=manual-secret", QODER_SITE: "qoder.com" },
+    rpcRequest: async () => {
+      throw new Error("Qoder local service is not running.");
+    },
+    fetchImpl: async (url) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            totalQuota: {
+              quotaSummary: {
+                usedValue: 25,
+                limitValue: 100,
+                remainingValue: 75,
+                usagePercentage: 25,
+              },
+            },
+          };
+        },
+      };
+    },
+  });
+
+  // QODER_SITE is an international-flow knob — the CN flow must stay pinned to
+  // qoder.com.cn even if a user set QODER_SITE=qoder.com for the international
+  // install.
+  assert.equal(capturedUrl, "https://qoder.com.cn/api/v2/me/usages/big_model_credits");
+  assert.equal(result.site, "china");
+  assert.equal(result.primary_window.remaining_credits, 75);
 });

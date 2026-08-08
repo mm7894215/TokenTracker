@@ -3,9 +3,8 @@ import SwiftUI
 import Vortex
 
 /// Full-screen celebration: a two-stage firework (rocket rises → bursts on death,
-/// with sparkle trails) using the Vortex particle library's `.fireworks` preset —
-/// the same engine CodexBar builds its celebration on. An optional text toast
-/// names what reset.
+/// with sparkle trails) built on the Vortex particle library — the same engine
+/// CodexBar builds its celebration on. An optional text toast names what reset.
 ///
 /// Each screen gets a borderless, click-through `NSPanel` floating at the
 /// status-bar level across all Spaces. Panels never take focus or mouse events,
@@ -16,7 +15,19 @@ final class ScreenConfettiOverlayController {
 
     private var panels: [NSPanel] = []
     private var dismissTask: Task<Void, Never>?
+    private var sleepObservers: [NSObjectProtocol] = []
     private let lifetime: TimeInterval = 9.0
+
+    init() {
+        registerSleepTeardownObservers()
+    }
+
+    deinit {
+        let notificationCenter = NSWorkspace.shared.notificationCenter
+        for observer in sleepObservers {
+            notificationCenter.removeObserver(observer)
+        }
+    }
 
     /// Present either part of the reset feedback independently. `message`, when
     /// present and enabled, is shown as a fading toast alongside the provider icon.
@@ -86,7 +97,109 @@ final class ScreenConfettiOverlayController {
         panel.setFrame(screen.frame, display: false)
         return panel
     }
+
+    /// A celebration is a ~9 second transient, so sleeping the machine or the
+    /// displays mid-show means nobody is watching it anyway — end it immediately.
+    /// This also keeps the particle simulation bounded: `TimelineView` stops
+    /// ticking while asleep, and Vortex derives its per-frame delta from the wall
+    /// clock, so the first frame after wake would advance the simulation by the
+    /// entire sleep duration. See `makeFireworksSystem()` for why a large delta
+    /// is expensive rather than merely wrong.
+    private func registerSleepTeardownObservers() {
+        let notificationCenter = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.willSleepNotification, NSWorkspace.screensDidSleepNotification] {
+            let observer = notificationCenter.addObserver(
+                forName: name,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in self?.dismiss() }
+            }
+            sleepObservers.append(observer)
+        }
+    }
 }
+
+/// Builds a **fresh, privately owned** fireworks system for a single overlay view.
+///
+/// Vortex ships this configuration as `VortexSystem.fireworks`, but that is a
+/// `static let` on a *class*, i.e. one mutable simulation object shared by the
+/// whole process. Handing it to `VortexView` caused issue #432:
+///
+/// * When a celebration ends the view is removed, but the singleton keeps its
+///   `particles`, its live `activeSecondarySystems`, and its `lastUpdate` stamp.
+/// * The next celebration re-mounts that same object, so its first `update()`
+///   resumes the leaked sub-systems with `delta` equal to the *entire gap*
+///   between the two celebrations.
+/// * `createParticles()` then loops `birthRate * delta` times — the emission
+///   limit is only checked inside the loop body, so it does not bound the loop.
+///   A leaked explosion system at 100_000 particles/second over a few hours is
+///   billions of iterations on the main thread inside `Canvas`, which is exactly
+///   the multi-second hang in the reported spindump.
+/// * As a bonus the shared `emissionCount` never reset, so once the cumulative
+///   1000-rocket emission limit was reached the fireworks stopped rendering
+///   entirely until the app was relaunched.
+///
+/// A per-view system keeps every celebration independent, and also stops the
+/// multi-display case (one `VortexView` per screen) from driving one simulation
+/// object several times per frame.
+private func makeFireworksSystem() -> VortexSystem {
+    let sparkles = VortexSystem(
+        tags: ["circle"],
+        spawnOccasion: .onUpdate,
+        emissionLimit: 1,
+        lifespan: 0.5,
+        speed: 0.05,
+        angleRange: .degrees(90),
+        size: 0.05
+    )
+
+    let explosion = VortexSystem(
+        tags: ["circle"],
+        spawnOccasion: .onDeath,
+        position: [0.5, 1],
+        // Vortex's preset uses 100_000 here purely to mean "instantly". Because
+        // `createParticles()` iterates `birthRate * delta` times regardless of
+        // `emissionLimit`, that number is also the multiplier on any long frame
+        // delta. One emission limit's worth per frame at the 60fps `VortexView`
+        // renders at is just as instant and bounds the worst case ~3 orders of
+        // magnitude lower.
+        birthRate: Double(fireworksExplosionEmissionLimit * 60),
+        emissionLimit: fireworksExplosionEmissionLimit,
+        speed: 0.5,
+        speedVariation: 1,
+        angleRange: .degrees(360),
+        acceleration: [0, 1.5],
+        dampingFactor: 4,
+        colors: .randomRamp(
+            [.white, .pink, .pink],
+            [.white, .blue, .blue],
+            [.white, .green, .green],
+            [.white, .orange, .orange],
+            [.white, .cyan, .cyan]
+        ),
+        size: 0.15,
+        sizeVariation: 0.1,
+        sizeMultiplierAtDeath: 0
+    )
+
+    return VortexSystem(
+        tags: ["circle"],
+        secondarySystems: [sparkles, explosion],
+        position: [0.5, 1],
+        birthRate: 2,
+        emissionLimit: 1000,
+        speed: 1.5,
+        speedVariation: 0.75,
+        angleRange: .degrees(60),
+        dampingFactor: 2,
+        size: 0.15,
+        stretchFactor: 4
+    )
+}
+
+/// Particles in a single rocket burst.
+private let fireworksExplosionEmissionLimit = 500
 
 /// Borderless panel that never steals focus or mouse — a transparent overlay.
 private final class ClickThroughPanel: NSPanel {
@@ -104,6 +217,8 @@ private struct FireworkOverlayView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var toastShown = false
     @State private var fireworksShown = true
+    /// Owned by this view, never shared: see `makeFireworksSystem()`.
+    @State private var fireworks: VortexSystem = makeFireworksSystem()
     private let fireworksDuration: TimeInterval = 5.0
     private let toastFadeDelay: TimeInterval = 8.0
 
@@ -111,7 +226,7 @@ private struct FireworkOverlayView: View {
         ZStack(alignment: .top) {
             Color.clear
             if showsConfetti && fireworksShown {
-                VortexView(.fireworks)
+                VortexView(fireworks)
                     .transition(.opacity)
                     .allowsHitTesting(false)
                     .onAppear {

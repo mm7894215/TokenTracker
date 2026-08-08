@@ -11,6 +11,7 @@ const {
   parseQoderDbIncremental,
   resolveQoderDbPath,
   resolveQoderDbPaths,
+  resolveQoderCnDbPaths,
 } = require("../src/lib/rollout");
 
 function tempQueue() {
@@ -227,5 +228,94 @@ test("resolveQoderDbPaths discovers native and WSL Qoder databases on Windows", 
   assert.equal(
     paths.wsl,
     path.join("\\\\wsl$\\Ubuntu\\home\\test\\.config\\Qoder", "SharedClientCache", "cache", "db", "local.db"),
+  );
+});
+
+test("resolveQoderCnDbPaths points at the QoderCN data directory", () => {
+  const paths = resolveQoderCnDbPaths({
+    home: "/Users/test",
+    env: {},
+    platform: "darwin",
+  });
+  assert.equal(
+    paths.native,
+    path.join("/Users/test", "Library", "Application Support", "QoderCN", "SharedClientCache", "cache", "db", "local.db"),
+  );
+  assert.equal(paths.wsl, null);
+});
+
+test("parseQoderDbIncremental with qoder-cn source keeps a separate cursor and bucket namespace", async (t) => {
+  const { dir, queuePath } = tempQueue();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const cursors = {};
+  const dbMessages = [
+    {
+      row_id: 1,
+      id: "cn-assistant-1",
+      session_id: "cn-session-1",
+      request_id: "cn-request-1",
+      gmt_create: 1_784_681_696_263,
+      token_info: JSON.stringify({
+        prompt_tokens: 56_880,
+        cached_tokens: 0,
+        completion_tokens: 773,
+      }),
+      model_info: JSON.stringify({ model_key: "quest-ultimate" }),
+    },
+  ];
+
+  const first = await parseQoderDbIncremental({
+    dbMessages,
+    cursors,
+    queuePath,
+    sourceKey: "qoder-cn",
+    cursorKey: "qoder-cn",
+  });
+  assert.equal(first.eventsAggregated, 1);
+  assert.equal(first.bucketsQueued, 1);
+
+  // Buckets land under the qoder-cn source, never the international one.
+  const cnRows = queueRows(queuePath).filter((row) => row.source === "qoder-cn");
+  assert.equal(cnRows.length, 1);
+  assert.equal(cnRows[0].input_tokens, 56_880);
+  assert.equal(cnRows[0].output_tokens, 773);
+  assert.ok(cursors["qoder-cn"], "qoder-cn cursor namespace is populated");
+  assert.equal(cursors.qoder, undefined, "international cursor stays untouched");
+
+  // A re-run is a no-op — the incremental cursor is namespaced, not shared.
+  const before = fs.readFileSync(queuePath, "utf8");
+  const second = await parseQoderDbIncremental({
+    dbMessages,
+    cursors,
+    queuePath,
+    sourceKey: "qoder-cn",
+    cursorKey: "qoder-cn",
+  });
+  assert.equal(second.eventsAggregated, 0);
+  assert.equal(second.bucketsQueued, 0);
+  assert.equal(fs.readFileSync(queuePath, "utf8"), before);
+});
+
+test("resolveQoderCnDbPaths ignores QODER_HOME and honors QODER_CN_HOME", () => {
+  // QODER_HOME points at the international install and must never redirect the
+  // CN resolver onto the same DB (that would double-count every message).
+  const withoutOverride = resolveQoderCnDbPaths({
+    home: "/Users/test",
+    env: { QODER_HOME: "/int-home" },
+    platform: "darwin",
+  });
+  assert.equal(
+    withoutOverride.native,
+    path.join("/Users/test", "Library", "Application Support", "QoderCN", "SharedClientCache", "cache", "db", "local.db"),
+  );
+
+  const withOverride = resolveQoderCnDbPaths({
+    home: "/Users/test",
+    env: { QODER_CN_HOME: "/cn-home" },
+    platform: "darwin",
+  });
+  assert.equal(
+    withOverride.native,
+    path.join("/cn-home", "SharedClientCache", "cache", "db", "local.db"),
   );
 });

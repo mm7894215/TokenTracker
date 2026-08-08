@@ -109,6 +109,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateCancel
     }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // TokenTracker normally lives as an LSUIElement menu bar app, so a
+        // Finder/Dock reopen must explicitly restore the dashboard window.
+        // Do not rely on `flag`: the desktop pet or Dynamic Island may count as
+        // visible even while the dashboard itself is closed.
+        DashboardWindowController.shared.showWindow()
+        return false
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         removeLegacyAppBundleIfNeeded()
 
@@ -133,6 +142,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             dynamicIslandController: dynamicIslandController
         )
         registerWakeCatchUpObservers()
+
+        // A normal Finder/Dock launch should behave like opening an app, while
+        // an SMAppService login launch should remain a quiet menu bar startup.
+        if NSAppleEventManager.shared().currentAppleEvent?
+            .attributeDescriptor(forKeyword: keyAELaunchedAsLogInItem) == nil {
+            DashboardWindowController.shared.showWindow()
+        }
 
         Task { @MainActor in
             await serverManager.ensureServerRunning()
