@@ -16,6 +16,10 @@ const READINESS_PATH: &str = "/functions/tokentracker-user-status";
 /// How often the health monitor probes the server.
 pub const HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(15);
 
+/// How long to wait for a freshly spawned server to answer its readiness probe,
+/// used for both the initial start and health-monitor restarts.
+pub const READY_TIMEOUT: Duration = Duration::from_secs(20);
+
 /// Consecutive failures before triggering a restart.
 pub const FAILURE_THRESHOLD: u32 = 3;
 
@@ -90,19 +94,17 @@ impl TokenTrackerServer {
         let port = pick_available_port()?;
         let url = dashboard_url(port);
 
-        let log_file = open_server_log();
         let args = serve_args(&paths.tracker, port);
         let mut child = Command::new(&paths.node)
             .args(&args)
             .stdout(Stdio::null())
-            .stderr(Stdio::from(log_file))
+            .stderr(server_log_stdio())
             .spawn()
             .map_err(|error| format!("failed to start TokenTracker server: {error}"))?;
 
-        wait_for_server_ready(port, Duration::from_secs(20)).map_err(|error| {
+        wait_for_server_ready(port, READY_TIMEOUT).inspect_err(|_| {
             let _ = child.kill();
             let _ = child.wait();
-            error
         })?;
 
         let background_sync = BackgroundSync::start(paths.clone());
@@ -124,17 +126,12 @@ impl TokenTrackerServer {
         self.port
     }
 
-    /// Returns `true` if the child process is still alive AND the HTTP
-    /// endpoint responds to a readiness probe.
-    pub fn check_health(&mut self) -> bool {
-        if !self.is_process_alive() {
-            return false;
-        }
-        probe_server_http(self.port).is_ok()
-    }
-
     /// Returns `true` if the child process has not exited yet.
-    fn is_process_alive(&mut self) -> bool {
+    ///
+    /// Deliberately separate from the HTTP readiness probe: the health monitor
+    /// calls this under the global server mutex but runs [`probe_server_http`]
+    /// after releasing it, so a hung socket never blocks app shutdown.
+    pub fn is_process_alive(&mut self) -> bool {
         match self.child.try_wait() {
             Ok(Some(_)) => false,
             Ok(None) => true,
@@ -154,14 +151,16 @@ impl TokenTrackerServer {
         // Brief pause for the OS to release the port.
         thread::sleep(Duration::from_millis(500));
 
-        let mut log_file = open_server_log();
-        let _ = writeln!(log_file, "\n--- server restart ---");
+        let log_file = open_server_log().map(|mut file| {
+            let _ = writeln!(file, "\n--- server restart ---");
+            file
+        });
 
         let args = serve_args(&self.paths.tracker, self.port);
         self.child = Command::new(&self.paths.node)
             .args(&args)
             .stdout(Stdio::null())
-            .stderr(Stdio::from(log_file))
+            .stderr(log_file.map_or_else(Stdio::null, Stdio::from))
             .spawn()
             .map_err(|error| format!("failed to restart server: {error}"))?;
 
@@ -180,31 +179,87 @@ impl Drop for TokenTrackerServer {
     }
 }
 
+/// Rotate the server log once it exceeds this size, keeping a single previous
+/// generation. The log is append-only otherwise, so without this it grows
+/// without bound for the lifetime of the install.
+pub const MAX_LOG_BYTES: u64 = 5 * 1024 * 1024;
+
+/// Candidate log paths in preference order: `$XDG_STATE_HOME/tokentracker/`,
+/// then `$HOME/.local/state/tokentracker/`, then `/tmp`.
+pub fn server_log_paths(xdg_state_home: Option<PathBuf>, home: Option<PathBuf>) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(state_home) = xdg_state_home {
+        paths.push(state_home.join("tokentracker").join("server.log"));
+    }
+    if let Some(home) = home {
+        let path = home
+            .join(".local")
+            .join("state")
+            .join("tokentracker")
+            .join("server.log");
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
+    paths.push(PathBuf::from("/tmp").join("tokentracker-server.log"));
+    paths
+}
+
+/// Move an oversized log aside so the live file restarts empty.
+///
+/// Returns `true` when rotation happened. Keeping one `.1` generation bounds
+/// total on-disk usage at roughly `2 * max_bytes`. If the rename fails (for
+/// example a read-only directory) the live file is truncated instead, so size
+/// stays bounded either way.
+pub fn rotate_log_if_oversized(path: &Path, max_bytes: u64) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    if metadata.len() <= max_bytes {
+        return false;
+    }
+
+    let rotated = path.with_extension("log.1");
+    if std::fs::rename(path, &rotated).is_ok() {
+        return true;
+    }
+
+    OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(path)
+        .is_ok()
+}
+
 /// Open (or create) a log file for the Node server's stderr output.
 ///
-/// Prefers `$XDG_STATE_HOME/tokentracker/server.log`; falls back to
-/// `$HOME/.local/state/tokentracker/server.log`; ultimate fallback `/tmp`.
-fn open_server_log() -> std::fs::File {
-    let log_dir = std::env::var("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-            PathBuf::from(home).join(".local").join("state")
-        })
-        .join("tokentracker");
-    let _ = std::fs::create_dir_all(&log_dir);
-    let log_path = log_dir.join("server.log");
-    OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
-        .or_else(|_| {
-            OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(PathBuf::from("/tmp").join("tokentracker-server.log"))
-        })
-        .expect("cannot open any server log file")
+/// Returns `None` when no candidate path is writable; callers fall back to
+/// discarding output rather than aborting the app, because losing diagnostics
+/// is not a reason to refuse to start.
+fn open_server_log() -> Option<std::fs::File> {
+    let xdg_state_home = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from);
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+
+    for path in server_log_paths(xdg_state_home, home) {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        rotate_log_if_oversized(&path, MAX_LOG_BYTES);
+        if let Ok(file) = OpenOptions::new().create(true).append(true).open(&path) {
+            return Some(file);
+        }
+    }
+
+    None
+}
+
+/// Stderr sink for spawned Node processes, degrading to `/dev/null` when no log
+/// file can be opened.
+fn server_log_stdio() -> Stdio {
+    match open_server_log() {
+        Some(file) => Stdio::from(file),
+        None => Stdio::null(),
+    }
 }
 
 pub fn dashboard_url(port: u16) -> String {
@@ -286,7 +341,7 @@ fn run_background_sync(paths: &RuntimePaths, child_slot: &Mutex<Option<Child>>) 
     match Command::new(&paths.node)
         .args(args)
         .stdout(Stdio::null())
-        .stderr(Stdio::from(open_server_log()))
+        .stderr(server_log_stdio())
         .spawn()
     {
         Ok(process) => *child = Some(process),
@@ -320,7 +375,9 @@ pub fn wait_for_server_ready(port: u16, timeout: Duration) -> Result<(), String>
     ))
 }
 
-fn probe_server_http(port: u16) -> Result<(), String> {
+/// Single-shot readiness probe. Public so the health monitor can run it
+/// *outside* the global server mutex.
+pub fn probe_server_http(port: u16) -> Result<(), String> {
     let mut stream = TcpStream::connect(("127.0.0.1", port))
         .map_err(|error| format!("connect failed: {error}"))?;
     stream

@@ -1,6 +1,6 @@
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::tray::TrayIconBuilder;
 use tauri::{App, AppHandle, Manager};
 
 const OPEN_ID: &str = "open-dashboard";
@@ -11,6 +11,18 @@ fn fallback_tray_icon() -> tauri::Result<Image<'static>> {
     Image::from_bytes(FALLBACK_TRAY_ICON)
 }
 
+/// Install the tray icon.
+///
+/// **Menu-only by design.** There is deliberately no `on_tray_icon_event`
+/// click handler: on Linux `tray-icon`'s GTK/libappindicator backend never
+/// calls `TrayIconEvent::send` (its `platform_impl/gtk/mod.rs` contains no
+/// event code at all), so `TrayIconEvent::Click` is never emitted. Both Tauri
+/// and `tray-icon` document this as "**Linux**: Unsupported. The event is not
+/// emitted even though the icon is shown". A left-click handler here would
+/// compile and look functional while never running.
+///
+/// The upside is that libappindicator opens the context menu on *left* click
+/// too, so "Open Dashboard" as the first item is the primary entry point.
 pub fn install(app: &App) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, OPEN_ID, "Open Dashboard", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit", true, None::<&str>)?;
@@ -29,16 +41,6 @@ pub fn install(app: &App) -> tauri::Result<()> {
             OPEN_ID => show_main_window(app),
             QUIT_ID => app.exit(0),
             _ => {}
-        })
-        .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = event
-            {
-                show_main_window(tray.app_handle());
-            }
         })
         .build(app)?;
 

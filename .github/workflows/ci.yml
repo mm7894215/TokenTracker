@@ -63,74 +63,48 @@ jobs:
           npm run validate:versions
           node --test test/architecture-guardrails.test.js
 
-  arch-package:
-    name: Arch Linux package
+  linux-client:
+    name: Linux client (Rust)
     runs-on: ubuntu-latest
-    container:
-      image: archlinux:base-devel
-    defaults:
-      run:
-        shell: bash
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - name: Install Arch build dependencies
+      # webkit2gtk + friends are needed to COMPILE the tauri crate, even though
+      # nothing here launches a webview. Bundling the AppImage is deliberately
+      # left to the release workflow: it needs the ~100MB embedded Node runtime
+      # and appimagetool, which would slow every PR down for no extra signal.
+      - name: Install Tauri build dependencies
         run: |
           set -euo pipefail
-          pacman -Syu --noconfirm --needed \
-            git \
-            nodejs npm \
-            rust cargo \
-            pkgconf \
-            webkit2gtk-4.1 gtk3 libayatana-appindicator librsvg \
-            xdg-utils \
-            desktop-file-utils \
-            curl file binutils
-          node -e '
-            const major = Number(process.versions.node.split(".")[0]);
-            if (major < 24) {
-              throw new Error(`Node 24+ is required; found ${process.version}`);
-            }
-          '
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            pkg-config
 
-      - name: Create package builder
-        run: |
-          set -euo pipefail
-          useradd --create-home --shell /bin/bash builder
-          chown -R builder:builder "$GITHUB_WORKSPACE" /home/builder
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
 
-      - name: Run Linux Rust tests
-        run: |
-          set -euo pipefail
-          runuser -u builder -- env HOME=/home/builder bash -lc '
-            set -euo pipefail
-            cd "$GITHUB_WORKSPACE"
-            npm run validate:versions
-            cargo test --locked --manifest-path TokenTrackerLinux/src-tauri/Cargo.toml
-          '
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: TokenTrackerLinux/src-tauri
 
-      - name: Build Arch package
-        run: |
-          set -euo pipefail
-          runuser -u builder -- env HOME=/home/builder bash -lc '
-            set -euo pipefail
-            cd "$GITHUB_WORKSPACE/TokenTrackerLinux/packaging/arch/tokentracker-linux"
-            makepkg --cleanbuild --force --noconfirm
-          '
+      - name: Check formatting
+        working-directory: TokenTrackerLinux/src-tauri
+        run: cargo fmt --check
 
-      - name: Validate packaged runtime
-        run: |
-          set -euo pipefail
-          runuser -u builder -- env HOME=/home/builder bash -lc '
-            set -euo pipefail
-            cd "$GITHUB_WORKSPACE"
-            shopt -s nullglob
-            packages=(TokenTrackerLinux/packaging/arch/tokentracker-linux/*.pkg.tar.zst)
-            test "${#packages[@]}" -eq 1
-            TokenTrackerLinux/scripts/validate-package.sh "${packages[0]}"
-          '
+      - name: Clippy
+        working-directory: TokenTrackerLinux/src-tauri
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test
+        working-directory: TokenTrackerLinux/src-tauri
+        run: cargo test --locked
 
   macos-tests:
     name: macOS unit tests

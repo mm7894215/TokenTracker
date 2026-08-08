@@ -1,12 +1,12 @@
 {
   "name": "tokentracker-linux",
-  "version": "0.87.12",
+  "version": "0.87.17",
   "private": true,
   "type": "module",
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
-    "build": "tauri build",
+    "build": "tauri build --config src-tauri/tauri.bundle.conf.json",
     "bundle:node": "bash scripts/bundle-node-linux.sh",
     "package:local": "bash scripts/build-local-package.sh",
     "sync:tauri-icon": "node scripts/sync-tauri-icon.mjs",
