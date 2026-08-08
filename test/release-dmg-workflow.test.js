@@ -111,7 +111,7 @@ test("workflow has correct step order: dashboard → bundle → xcode → dmg �
   }
 });
 
-test("release is created as a draft and only published after both builds", () => {
+test("release is created as a draft and only published after every platform build", () => {
   const content = loadWorkflow();
   // create-release makes a DRAFT so releases/latest never shows a partial
   // release while assets upload in parallel.
@@ -119,11 +119,11 @@ test("release is created as a draft and only published after both builds", () =>
     /gh release create[^\n]*--draft/.test(content),
     "create-release must create a --draft release"
   );
-  // A publish job flips it live, gated on BOTH platform builds.
+  // A publish job flips it live, gated on EVERY platform build.
   assert.ok(/^\s{2}publish:/m.test(content), "must have a publish job");
   assert.ok(
-    /publish:\s*\n\s*needs:\s*\[build,\s*windows\]/.test(content),
-    "publish must need both build and windows"
+    /publish:\s*\n\s*needs:\s*\[build,\s*windows,\s*linux\]/.test(content),
+    "publish must need build, windows and linux"
   );
   assert.ok(
     /gh release edit[^\n]*--draft=false/.test(content),

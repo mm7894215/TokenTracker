@@ -1,4 +1,4 @@
-name: release (macOS + Windows)
+name: release (macOS + Windows + Linux)
 
 on:
   workflow_dispatch:
@@ -52,12 +52,17 @@ jobs:
           const csproj = fs.readFileSync("TokenTrackerWin/TokenTrackerWin.csproj", "utf8");
           const marketingVersions = [...project.matchAll(/MARKETING_VERSION:\s*"([^"]+)"/g)]
             .map((match) => match[1]);
+          // The shared registry covers every managed file, including the Linux
+          // client's Cargo.toml / Cargo.lock / tauri.conf.json / PKGBUILD, so
+          // adding a platform never needs a new hand-written check here.
+          const { collectVersionEntries } = require("./scripts/version-files.cjs");
           const checks = [
             ["package.json", pkg.version],
             ["package-lock.json", lock.version],
             ["package-lock.json root package", lock.packages?.[""]?.version],
             ...marketingVersions.map((value, index) => [`MARKETING_VERSION #${index + 1}`, value]),
             ["TokenTrackerWin.csproj", csproj.match(/<Version>([^<]+)<\/Version>/)?.[1]],
+            ...collectVersionEntries(process.cwd()).map(({ label, version }) => [label, version]),
           ];
 
           if (marketingVersions.length === 0) {
@@ -361,7 +366,184 @@ jobs:
       version: ${{ inputs.version }}
       no_cache: ${{ inputs.no_cache }}
 
-  # Flip the draft live ONLY after BOTH platforms finished uploading, so the
+  # Build + attach the Linux AppImage to the SAME vX.Y.Z release, so one
+  # `gh workflow run "release (macOS + Windows + Linux)" -f version=X.Y.Z` ships
+  # all three platforms. `needs: create-release` (NOT `needs: build`) so Linux
+  # builds in PARALLEL with the macOS DMG and the Windows assets.
+  #
+  # Exactly ONE artifact is produced (bundle.targets is ["appimage"]): an
+  # AppImage runs on any reasonably current glibc distro without a package
+  # manager, so there is no .deb/.rpm matrix to maintain.
+  linux:
+    needs: create-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/v${{ inputs.version }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          # Node 20 matches the macOS release job; the Node runtime that ships
+          # INSIDE the app is pinned separately by bundle-node-linux.sh.
+          node-version: 20
+          cache: ${{ inputs.no_cache && '' || 'npm' }}
+          cache-dependency-path: |
+            package-lock.json
+            dashboard/package-lock.json
+            TokenTrackerLinux/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci --no-audit --no-fund
+
+      # Verifies package.json AND every managed version file, including
+      # TokenTrackerLinux's Cargo.toml / Cargo.lock / tauri.conf.json / PKGBUILD.
+      # A stale Cargo.toml would ship an AppImage whose embedded version
+      # disagrees with the tag.
+      - name: Verify version
+        run: |
+          set -euo pipefail
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [[ "$PKG_VERSION" != "${{ inputs.version }}" ]]; then
+            echo "::error::package.json version ($PKG_VERSION) does not match input (${{ inputs.version }})"
+            exit 1
+          fi
+          npm run validate:versions
+
+      # webkit2gtk + gtk3 + libayatana-appindicator are the runtime libraries
+      # the tauri crate links against; librsvg is needed for icon rasterization.
+      - name: Install Tauri build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            pkg-config \
+            desktop-file-utils \
+            fuse3
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        if: ${{ !inputs.no_cache }}
+        with:
+          workspaces: TokenTrackerLinux/src-tauri
+
+      - name: Install dashboard dependencies
+        run: npm ci --prefix dashboard --no-audit --no-fund
+
+      # Same public client-side values as the macOS job: absent at build time
+      # Vite inlines empty strings, breaking the leaderboard and cloud OAuth.
+      - name: Build dashboard
+        env:
+          VITE_INSFORGE_BASE_URL: https://srctyff5.us-east.insforge.app
+          VITE_INSFORGE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3OC0xMjM0LTU2NzgtOTBhYi1jZGVmMTIzNDU2NzgiLCJlbWFpbCI6ImFub25AaW5zZm9yZ2UuY29tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExNDU5NDd9.T0auta_IrVIh0uXW1bob5QSnzvsnJmN28r5XkSGEuQY
+        run: npm run dashboard:build
+
+      - name: Install Linux client dependencies
+        run: npm ci --prefix TokenTrackerLinux --no-audit --no-fund
+
+      # Downloads the pinned Node binary and stages bin/ + src/ + dashboard/dist
+      # into TokenTrackerLinux/EmbeddedServer. MUST run before `tauri build`:
+      # tauri.bundle.conf.json declares EmbeddedServer as a bundle resource and
+      # tauri-build hard-fails on a missing resource path.
+      - name: Bundle EmbeddedServer
+        run: npm --prefix TokenTrackerLinux run bundle:node
+
+      - name: Build AppImage
+        run: npm --prefix TokenTrackerLinux run build
+
+      # Rename to a stable, predictable asset name (Tauri emits
+      # TokenTracker_<version>_amd64.AppImage) and prove the bundle actually
+      # carries the embedded runtime. Without this check a broken resource
+      # mapping would ship an AppImage that starts and then fails to find
+      # tracker.js on every user's machine.
+      - name: Verify and stage the AppImage
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          bundle_dir="TokenTrackerLinux/src-tauri/target/release/bundle/appimage"
+          images=("$bundle_dir"/*.AppImage)
+          if [ "${#images[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly 1 AppImage, found ${#images[@]}: ${images[*]-none}"
+            exit 1
+          fi
+          image="${images[0]}"
+          echo "Built: $image"
+
+          # Inspect the payload without needing FUSE.
+          workdir="$(mktemp -d)"
+          cp "$image" "$workdir/app.AppImage"
+          chmod +x "$workdir/app.AppImage"
+          (cd "$workdir" && ./app.AppImage --appimage-extract >/dev/null)
+
+          root="$workdir/squashfs-root"
+          if [ ! -e "$root/usr/bin/tokentracker-linux" ]; then
+            echo "::error::AppImage is missing usr/bin/tokentracker-linux"
+            exit 1
+          fi
+
+          # Locate the embedded runtime by searching rather than hardcoding the
+          # resource directory name: Tauri derives it from productName, and
+          # paths.rs resolves it at runtime via resource_dir(). What matters here
+          # is that the runtime is present and complete.
+          node_bin="$(find "$root/usr/lib" -type f -name node -path '*/EmbeddedServer/*' -print -quit)"
+          if [ -z "$node_bin" ]; then
+            echo "::error::AppImage carries no EmbeddedServer/node -- the bundle.resources mapping did not apply"
+            echo "--- AppImage usr/lib contents ---"
+            find "$root/usr/lib" -maxdepth 3 | head -50
+            exit 1
+          fi
+          embedded_dir="$(dirname "$node_bin")"
+          echo "Embedded runtime: ${embedded_dir#"$root"}"
+
+          missing=0
+          for required in \
+            "tokentracker/bin/tracker.js" \
+            "tokentracker/package.json" \
+            "tokentracker/dashboard/dist/index.html"
+          do
+            if [ ! -e "$embedded_dir/$required" ]; then
+              echo "::error::AppImage is missing EmbeddedServer/$required"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            find "$embedded_dir" -maxdepth 3 | head -50
+            exit 1
+          fi
+
+          # The bundled Node must stay executable or `serve` can never start.
+          if [ ! -x "$node_bin" ]; then
+            echo "::error::Bundled Node is not executable"
+            exit 1
+          fi
+
+          mkdir -p dist-linux
+          cp "$image" "dist-linux/TokenTracker-linux-x86_64.AppImage"
+          rm -rf "$workdir"
+
+      - name: Upload AppImage to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v$VERSION"
+          if [ "$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')" != "true" ]; then
+            echo "::error::Refusing to overwrite assets on published release $tag."
+            exit 1
+          fi
+          gh release upload "$tag" \
+            dist-linux/TokenTracker-linux-x86_64.AppImage --clobber
+
+  # Flip the draft live ONLY after ALL THREE platforms finished uploading, so the
   # release appears complete and atomically — releases/latest stays on the
   # previous version until this instant, never a partial release. If either
   # build fails, the release stays a draft (invisible) instead of going public
@@ -369,7 +551,7 @@ jobs:
   # fetches a release that is both public and fully populated — fixing the race
   # where the tap saw vX.Y.Z before the DMG asset existed.
   publish:
-    needs: [build, windows]
+    needs: [build, windows, linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -386,7 +568,7 @@ jobs:
             exit 1
           fi
 
-          for asset in TokenTrackerBar.dmg TokenTracker-win-x64.zip TokenTracker-Setup.exe; do
+          for asset in TokenTrackerBar.dmg TokenTracker-win-x64.zip TokenTracker-Setup.exe TokenTracker-linux-x86_64.AppImage; do
             if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fxq "$asset"; then
               echo "::error::Draft $tag is missing required asset: $asset"
               exit 1

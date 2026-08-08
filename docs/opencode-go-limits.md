@@ -70,7 +70,7 @@ When implementing, send `Cookie: auth=<OPENCODE_GO_AUTH_COOKIE>` exactly as PR #
 
 ## Release impact (per `CLAUDE.md`)
 
-Touches `src/` + `dashboard/` → must bump `package.json` + `TokenTrackerBar/project.yml` `MARKETING_VERSION` (×2) + `TokenTrackerWin/TokenTrackerWin.csproj` `<Version>` in lockstep, then trigger `release (macOS + Windows)`.
+Touches `src/` + `dashboard/` → must bump `package.json` + `TokenTrackerBar/project.yml` `MARKETING_VERSION` (×2) + `TokenTrackerWin/TokenTrackerWin.csproj` `<Version>` in lockstep, then trigger `release (macOS + Windows + Linux)`.
 
 ## Reference (MIT-licensed reuse)
 

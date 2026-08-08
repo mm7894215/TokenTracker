@@ -1,0 +1,13 @@
+post_install() {
+  update-desktop-database -q || true
+  gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+}
+
+post_upgrade() {
+  post_install
+}
+
+post_remove() {
+  update-desktop-database -q || true
+  gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+}
