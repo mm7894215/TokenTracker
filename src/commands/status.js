@@ -72,6 +72,8 @@ const {
   resolveGooseDbPath,
   listDroidSettingsFiles,
   resolveDroidSessionsDir,
+  resolveTraeStoragePath,
+  readTraeEntitlementFromStorage,
   resolveGrokBuildSessions,
   resolveHermesPath,
   resolveHermesDbPath,
@@ -98,6 +100,32 @@ function formatResolvedPaths(paths, filename) {
     try { if (fssync.existsSync(file)) active.push(`WSL: ${file}`); } catch (_e) {}
   }
   return active;
+}
+
+// The Trae SOLO entitlement snapshot is read directly from the Trae Local
+// State storage.json via the shared parser (readTraeEntitlementFromStorage).
+// The queue.jsonl contract is token-count-only (CLAUDE.md privacy rule), so
+// plan/limits metadata is never persisted into queue rows — this is the read
+// side of that contract so users can actually see the advertised plan data.
+function formatTraeEntitlementLine(ent) {
+  const parts = [];
+  if (ent.identity) parts.push(`plan ${ent.identity}`);
+  if (ent.pro_period) parts.push(`${ent.pro_period} period`);
+  if (typeof ent.is_dollar_billing === "boolean") {
+    parts.push(ent.is_dollar_billing ? "dollar billing" : "package billing");
+  }
+  if (typeof ent.enable_solo_builder === "boolean") {
+    parts.push(`solo builder: ${ent.enable_solo_builder ? "yes" : "no"}`);
+  }
+  if (typeof ent.enable_solo_coder === "boolean") {
+    parts.push(`solo coder: ${ent.enable_solo_coder ? "yes" : "no"}`);
+  }
+  if (typeof ent.fast_request_per === "number") {
+    parts.push(`${ent.fast_request_per} fast requests/hr`);
+  }
+  if (ent.in_waitlist === true) parts.push("in waitlist");
+  if (ent.captured_at) parts.push(`snapshot ${ent.captured_at}`);
+  return parts.length ? parts.join(", ") : "unknown";
 }
 
 async function cmdStatus(argv = []) {
@@ -567,6 +595,17 @@ async function cmdStatus(argv = []) {
   const droidSettingsFiles = listDroidSettingsFiles(process.env);
   const droidInstalled = droidSettingsFiles.length > 0;
 
+  // Trae SOLO (ByteDance AI IDE) — passive entitlement snapshot reader.
+  const traeStoragePath = resolveTraeStoragePath(process.env);
+  const traeInstalled = Boolean(traeStoragePath);
+  // Render path for the entitlement snapshot: read it straight from the
+  // Trae Local State storage.json via the shared parser. The queue stays
+  // token-count-only, so the status read path never depends on queue rows
+  // carrying plan/limits metadata.
+  const traeEntitlement = traeInstalled
+    ? readTraeEntitlementFromStorage(traeStoragePath)
+    : null;
+
   // Grok Build (xAI TUI)
   const grokHookState = await probeGrokHookState({ home, trackerDir, env: process.env });
   const grokSessions = grokHookState.hasGrokInstall || grokHookState.sessionsDir
@@ -842,6 +881,13 @@ async function cmdStatus(argv = []) {
         droid: droidInstalled
           ? { installed: true, files: droidSettingsFiles.length, detail: droidSessionsDir }
           : { installed: false },
+        trae: traeInstalled
+          ? {
+              installed: true,
+              detail: traeStoragePath,
+              ...(traeEntitlement ? { entitlement: traeEntitlement } : {}),
+            }
+          : { installed: false },
         grok_build: grokInstalled
           ? {
               installed: true,
@@ -993,6 +1039,12 @@ async function cmdStatus(argv = []) {
         : null,
       droidInstalled
         ? `- Droid (Factory): passive reader (${droidSettingsFiles.length} session${droidSettingsFiles.length !== 1 ? "s" : ""} in ${droidSessionsDir}, cumulative-delta)`
+        : null,
+      traeInstalled
+        ? `- Trae SOLO: passive reader (entitlement snapshot from ${traeStoragePath})`
+        : null,
+      traeEntitlement
+        ? `- Trae SOLO plan: ${formatTraeEntitlementLine(traeEntitlement)}`
         : null,
       ...(() => {
         if (!hermesInstalled) return [];

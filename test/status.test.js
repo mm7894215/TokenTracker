@@ -375,3 +375,99 @@ test("status does not migrate legacy tracker directory", async () => {
     await fs.rm(tmp, { recursive: true, force: true });
   }
 });
+
+test("status renders the Trae SOLO entitlement snapshot from Local State", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-status-trae-"));
+  const prevHome = process.env.HOME;
+  const prevUserProfile = process.env.USERPROFILE;
+  const prevCodexHome = process.env.CODEX_HOME;
+  const prevTraeHome = process.env.TOKENTRACKER_TRAE_HOME;
+  const prevWrite = process.stdout.write;
+
+  try {
+    process.env.HOME = tmp;
+    process.env.USERPROFILE = tmp;
+    process.env.CODEX_HOME = path.join(tmp, ".codex");
+    const traeHome = path.join(tmp, "trae-solo");
+    process.env.TOKENTRACKER_TRAE_HOME = traeHome;
+
+    // Trae install so detection reports installed.
+    await fs.mkdir(path.join(traeHome, "User", "globalStorage"), { recursive: true });
+    await fs.writeFile(
+      path.join(traeHome, "User", "globalStorage", "storage.json"),
+      JSON.stringify({
+        "iCubeServerData://icube.cloudide": JSON.stringify({
+          entitlementInfo: {
+            identityStr: "Pro",
+            identity: 3,
+            hasPackage: true,
+            isDollarUsageBilling: false,
+            proPeriod: "year",
+            enableSoloBuilder: true,
+            enableSoloCoder: false,
+            detail: { fastRequestPer: 20, inWaitlist: false },
+          },
+        }),
+      }),
+      "utf8",
+    );
+
+    const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+    await fs.mkdir(trackerDir, { recursive: true });
+    await fs.writeFile(
+      path.join(trackerDir, "config.json"),
+      JSON.stringify({ baseUrl: "https://config.example", deviceToken: "t" }) + "\n",
+      "utf8",
+    );
+    // No source=trae queue row is needed: the entitlement render path reads
+    // the Trae Local State storage.json directly (queue is token-count-only).
+    await fs.writeFile(
+      path.join(trackerDir, "queue.state.json"),
+      JSON.stringify({ offset: 0 }) + "\n",
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(trackerDir, "cursors.json"),
+      JSON.stringify({ updatedAt: "2026-08-07T01:30:00.000Z" }) + "\n",
+      "utf8",
+    );
+
+    let out = "";
+    process.stdout.write = (chunk, enc, cb) => {
+      out += typeof chunk === "string" ? chunk : chunk.toString(enc || "utf8");
+      if (typeof cb === "function") cb();
+      return true;
+    };
+
+    // --json: the summary must expose the entitlement under providers.trae.
+    await cmdStatus(["--json"]);
+    const summary = JSON.parse(out);
+    assert.equal(summary.providers.trae.installed, true);
+    assert.ok(summary.providers.trae.detail.endsWith("storage.json"));
+    assert.equal(summary.providers.trae.entitlement.identity, "Pro");
+    assert.equal(summary.providers.trae.entitlement.pro_period, "year");
+    assert.equal(summary.providers.trae.entitlement.enable_solo_builder, true);
+    assert.equal(summary.providers.trae.entitlement.fast_request_per, 20);
+    // captured_at is the storage.json mtime, not a queue hour_start.
+    assert.match(summary.providers.trae.entitlement.captured_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+
+    // Text render: the plan line must describe the snapshot.
+    out = "";
+    await cmdStatus();
+    assert.match(out, /- Trae SOLO: passive reader \(entitlement snapshot from /);
+    assert.match(out, /- Trae SOLO plan: plan Pro, year period, package billing/);
+    assert.match(out, /20 fast requests\/hr/);
+    assert.match(out, /snapshot \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/);
+  } finally {
+    process.stdout.write = prevWrite;
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prevUserProfile;
+    if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = prevCodexHome;
+    if (prevTraeHome === undefined) delete process.env.TOKENTRACKER_TRAE_HOME;
+    else process.env.TOKENTRACKER_TRAE_HOME = prevTraeHome;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});

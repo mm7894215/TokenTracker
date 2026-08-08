@@ -66,6 +66,7 @@ const {
   resolvePiAgentDir,
   piAgentDirCollidesWithOmp,
   resolveAnythingllmDbPath,
+  resolveTraeStoragePath,
 } = require("../lib/rollout");
 const { resolveRuntimeConfig, DEFAULT_BASE_URL } = require("../lib/runtime-config");
 const {
@@ -713,6 +714,20 @@ async function applyIntegrationSetup({
     const craftConfigDir = process.env.CRAFT_CONFIG_DIR || path.join(home, ".craft-agent");
     if (fssync.existsSync(craftConfigDir)) {
       summary.push({ label: "Craft Agents", status: "detected", detail: "Passive reader (no hook needed)" });
+    }
+  }
+
+  // Trae SOLO (ByteDance AI IDE): passive entitlement reader — no hook
+  // installation needed. TokenTracker reads User/globalStorage/storage.json
+  // and surfaces the plan/limits snapshot.
+  {
+    const traeStoragePath = resolveTraeStoragePath(process.env);
+    if (traeStoragePath) {
+      summary.push({
+        label: "Trae SOLO",
+        status: "detected",
+        detail: "Passive reader (no hook needed)",
+      });
     }
   }
 

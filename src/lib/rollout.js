@@ -16151,4 +16151,130 @@ module.exports = {
   parseAntigravityIncremental,
   estimateAntigravityTokens,
   isCjkCodePoint,
+
+  // Trae SOLO (ByteDance AI IDE)
+  resolveTraePath,
+  resolveTraeStoragePath,
+  readTraeEntitlementFromStorage,
 };
+
+// ── Trae SOLO (ByteDance AI IDE) ─────────────────────────────────────────────
+// https://www.trae.ai
+//
+// Trae SOLO is scoped to detection (init) + entitlement display (status):
+//   - init: resolveTraeStoragePath() proves an install exists.
+//   - status: readTraeEntitlementFromStorage() serves the plan/limits snapshot.
+// Trae SOLO does NOT expose per-request token usage in a readable local format
+// (session transcripts are SQLCipher-encrypted; memory summaries carry no
+// token counts), so the token-count-only queue is intentionally never written
+// for this provider — the cloud hourly table stays clean.
+function resolveTraePath(env = process.env) {
+  const override = env.TOKENTRACKER_TRAE_HOME;
+  if (typeof override === "string" && override.trim().length > 0) {
+    return override.trim();
+  }
+  const home = require("node:os").homedir();
+  if (process.platform === "darwin") {
+    return path.join(home, "Library", "Application Support", "TRAE SOLO");
+  }
+  if (process.platform === "win32") {
+    const appData = typeof env.APPDATA === "string" ? env.APPDATA.trim() : "";
+    if (appData) return path.join(appData, "TRAE SOLO");
+  }
+  // Non-macOS/Windows (e.g. Linux): TRAE SOLO ships official builds for
+  // macOS/Windows only, so there is no verified app-data layout to default
+  // to. Fall back to a deterministic home-dir path (best-effort detection);
+  // TOKENTRACKER_TRAE_HOME always wins for unusual installs.
+  return path.join(home, ".trae-solo");
+}
+
+function resolveTraeStoragePath(env = process.env) {
+  const traHome = resolveTraePath(env);
+  if (!traHome) return null;
+  const p = path.join(traHome, "User", "globalStorage", "storage.json");
+  return fssync.existsSync(p) ? p : null;
+}
+
+/**
+ * Extract the Trae SOLO entitlement snapshot from parsed storage.json
+ * serverData (the value under iCubeServerData://icube.cloudide).
+ * Returns a normalized entitlement object, or null when the serverData
+ * carries no valid entitlementInfo. Shared by the status read path
+ * (readTraeEntitlementFromStorage).
+ */
+function normalizeTraeEntitlement(serverData) {
+  let ent;
+  try {
+    ent = typeof serverData === "string" ? JSON.parse(serverData) : serverData;
+  } catch {
+    return null;
+  }
+  // The parsed serverData may legitimately be JSON `null` (e.g. the string
+  // "null") or another non-object — treat it as no valid snapshot.
+  if (!ent || typeof ent !== "object" || Array.isArray(ent)) return null;
+  const entitlementInfo = ent.entitlementInfo;
+  if (!entitlementInfo || typeof entitlementInfo !== "object") return null;
+  const detail = entitlementInfo.detail || {};
+  return {
+    identity: entitlementInfo.identityStr,
+    identity_code: entitlementInfo.identity,
+    has_package: entitlementInfo.hasPackage,
+    is_dollar_billing: entitlementInfo.isDollarUsageBilling,
+    pro_period: entitlementInfo.proPeriod,
+    enable_solo_builder: entitlementInfo.enableSoloBuilder,
+    enable_solo_coder: entitlementInfo.enableSoloCoder,
+    fast_request_per: detail.fastRequestPer,
+    in_waitlist: detail.inWaitlist,
+  };
+}
+
+/**
+ * Read the current Trae SOLO entitlement snapshot straight from the Trae
+ * Local State storage.json, without touching the token-count-only queue
+ * (CLAUDE.md privacy contract). Returns a normalized entitlement object
+ * with a captured_at timestamp, or null when storage.json is missing,
+ * unparseable, or carries no valid entitlement snapshot.
+ */
+function readTraeEntitlementFromStorage(storagePath) {
+  if (!storagePath) return null;
+  let fd;
+  try {
+    fd = fssync.openSync(storagePath, "r");
+  } catch {
+    return null;
+  }
+  let stat = null;
+  let raw;
+  try {
+    stat = fssync.fstatSync(fd);
+    raw = fssync.readFileSync(fd, "utf8");
+  } catch {
+    return null;
+  } finally {
+    try {
+      fssync.closeSync(fd);
+    } catch {
+      // fd already closed; nothing to do.
+    }
+  }
+  let storage;
+  try {
+    storage = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!storage || typeof storage !== "object" || Array.isArray(storage)) {
+    return null;
+  }
+  const serverKey = "iCubeServerData://icube.cloudide";
+  const serverData = storage[serverKey];
+  if (!serverData) return null;
+  const entitlement = normalizeTraeEntitlement(serverData);
+  if (!entitlement) return null;
+  return {
+    ...entitlement,
+    captured_at: stat ? new Date(stat.mtimeMs).toISOString() : null,
+  };
+}
+
+
